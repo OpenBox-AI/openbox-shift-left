@@ -135,6 +135,17 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 		t.Errorf("the response body did not reach activity_output: %s", completed.ActivityOutput)
 	}
 
+	// And NOT under reply_text. Core judges an assistant turn on that key's
+	// presence, one judge call per row, with no fallback to `content`. A relayed
+	// model call is a model call, not a turn -- this lane carries ~137 rows to
+	// the hook lane's 2 in a live session, so a reply_text here multiplies the
+	// judge load by roughly 70 against a fleet doing ~7 judgements a minute.
+	// Asserted on the posted bytes, in the lane that would pay the cost.
+	if strings.Contains(string(completed.ActivityOutput), "reply_text") {
+		t.Errorf("a relayed call carries reply_text, so core will judge every model call "+
+			"instead of every turn: %s", completed.ActivityOutput)
+	}
+
 	// The measured call, which the relay used to compute and throw away.
 	if completed.DurationMs == nil {
 		t.Fatal("duration_ms is null on the completed half; the relay measured the call")

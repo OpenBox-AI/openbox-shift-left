@@ -9,6 +9,7 @@
   "activity_output": {
     "content": "I refactored the spool; all 11 modules are green.",
     "model": "claude-opus-4-8",
+    "reply_text": "I refactored the spool; all 11 modules are green.",
     "thinking": "The spool writer is called from two hooks, so the lock has to be held across the rename.",
     "usage": {
       "cache_creation_input_tokens": 4096,

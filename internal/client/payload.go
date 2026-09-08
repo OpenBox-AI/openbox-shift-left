@@ -326,6 +326,11 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 		m[modelCallContentKey] = capModelCallBody(ev.Span.ResponseBody)
 	case ev.Content != nil && ev.Content.Output != "":
 		m[modelCallContentKey] = capModelCallBody(ev.Content.Output)
+		// Inside this arm, never after the switch. See modelCallReplyKey: the
+		// arm IS the lane discriminator, and a condition placed after the
+		// switch is one a later refactor can drop without failing anything
+		// visible.
+		m[modelCallReplyKey] = capModelCallBody(ev.Content.Output)
 	}
 	if len(m) == 0 {
 		return nil
@@ -764,6 +769,31 @@ func rfc3339Nanos(ts string) int64 {
 // modelCallContentKey is load-bearing: Goal Alignment's cap emits a fixed
 // priority list, then unlisted keys, then breaks. `content` is in the list.
 const modelCallContentKey = "content"
+
+// modelCallReplyKey is what makes an assistant turn judgeable at all.
+//
+// Core's replyTextFromActivityOutput (openbox-core
+// internal/services/goal_alignment.go:449) reads this exact top-level string
+// off activity_output, and judgeModelTurn (:384) keys the whole branch on its
+// PRESENCE with deliberately NO fallback to `content` (:379-383): old producers
+// keep sending SSE frames there indefinitely, and a fallback would feed the
+// judge exactly what the branch exists to remove. So the key must be distinct,
+// and it must be absent rather than empty on a lane that has only SSE.
+//
+// Which is why it is set inside turnActivityOutput's Content.Output arm alone.
+// That arm is the hook lane — Content.Output for a turn is set at exactly one
+// site, internal/adapters/claude-code/mapper.go:526, from the Stop hook's
+// LastAssistantMessage — and the presence test means every row carrying this
+// key costs a judge call. A live session ran 137 span-sourced model calls
+// against 2 hook-sourced turns; sourcing this from Span.ResponseBody as well
+// would multiply the cost by roughly 70 on a judge fleet doing ~7 judgements a
+// minute.
+//
+// `content` stays alongside it. OPA reads activity_output ungated by event
+// type, so `content` is the surface policy sees today; removing it would be a
+// non-additive wire change. The duplicated bytes are the price, on 2 rows a
+// session, both capped by capModelCallBody.
+const modelCallReplyKey = "reply_text"
 
 // maxModelCallBodyBytes bounds a relayed body in BYTES, and the unit is the decision:
 // capBody tests bytes then cuts runes, so a 64Ki-rune CJK body reaches 192 KB, while

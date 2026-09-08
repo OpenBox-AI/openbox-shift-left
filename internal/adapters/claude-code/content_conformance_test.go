@@ -354,6 +354,57 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 	})
 
+	// C53: the hook lane's turn carries reply_text, and only the hook lane does.
+	//
+	// Core judges an assistant turn from activity_output.reply_text and refuses
+	// any fallback to `content`, so a turn without the key is a turn that is
+	// never judged — which every turn this client ever emitted was. The key's
+	// PRESENCE is also what costs a judge call, so the negative half is the cost
+	// bound, not a tidiness check: a live session ran 137 span-sourced model
+	// calls to 2 hook-sourced turns.
+	t.Run("C53 the hook lane's turn carries reply_text, gated, and the span lane does not", func(t *testing.T) {
+		const answer = "REPLY-TEXT-SENTINEL: the spool lock now outlives the rename"
+		t.Setenv(envFinops, "1") // turn events are finops-gated; the pair is the carrier
+
+		stopWithReply := func(t *testing.T, session, reply string) string {
+			t.Helper()
+			path := filepath.Join(t.TempDir(), "transcript.jsonl")
+			line := `{"type":"assistant","isSidechain":false,"timestamp":"2026-09-08T09:00:01.000Z",` +
+				`"message":{"model":"claude-opus-5","content":[{"type":"text","text":"` + reply + `"}],` +
+				`"usage":{"input_tokens":100,"output_tokens":10}}}` + "\n"
+			if err := os.WriteFile(path, []byte(line), 0o600); err != nil {
+				t.Fatalf("write transcript: %v", err)
+			}
+			return `{"hook_event_name":"Stop","session_id":"` + session + `","cwd":"/tmp",` +
+				`"transcript_path":"` + path + `","last_assistant_message":"` + reply + `"}`
+		}
+
+		on := observeThenFlush(t, "cc-reply-on", "1", "Stop", stopWithReply(t, "cc-reply-on", answer))
+		out, found := activityOutput(t, on)
+		if !found {
+			t.Fatalf("no ActivityCompleted reached /evaluate at all; bodies=%v", on)
+		}
+		got, _ := out["reply_text"].(string)
+		if !strings.Contains(got, answer) {
+			t.Errorf("activity_output.reply_text = %q, want the reassembled reply; without it "+
+				"core never judges an assistant turn", got)
+		}
+		// Additive: `content` is the surface OPA reads on an activity_output today.
+		if c, _ := out["content"].(string); !strings.Contains(c, answer) {
+			t.Errorf("activity_output.content = %q, want the reply unchanged alongside reply_text", c)
+		}
+
+		off := observeThenFlush(t, "cc-reply-off", "0", "Stop", stopWithReply(t, "cc-reply-off", answer))
+		for i, b := range off {
+			if strings.Contains(b, answer) {
+				t.Errorf("the reply egressed with capture OFF in body #%d: %s", i, b)
+			}
+			if strings.Contains(b, "reply_text") {
+				t.Errorf("the reply_text key survived the content gate in body #%d: %s", i, b)
+			}
+		}
+	})
+
 	t.Run("C41 content_capture:false carries no thinking, but the turn still ships", func(t *testing.T) {
 		const canary = "CANARY-THINKING-must-not-egress"
 		t.Setenv(envFinops, "1")
