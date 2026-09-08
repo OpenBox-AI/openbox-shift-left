@@ -72,6 +72,14 @@ func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.Dev
 	if res.Reason != "" {
 		md["attribution_reason"] = string(res.Reason)
 	}
+	// Deliberately NOT a contentMetadataKeys entry, and not an oversight: every
+	// note is a sentence this repo wrote (resolve.go's appendNote call sites),
+	// with only counts interpolated. No commit body, no file text, nothing the
+	// developer typed. Derived evidence, like credential_fingerprint -- gating
+	// it would drop the explanation of an unattributed deploy exactly when an
+	// operator needs it. Keep it that way: never append user-supplied text here.
+	// As of v1.9 the note also rides signal_args, so it is displayed, not merely
+	// stored.
 	if res.Note != "" {
 		md["attribution_note"] = res.Note
 	}
