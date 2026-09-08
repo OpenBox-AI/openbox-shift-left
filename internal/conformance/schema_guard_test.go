@@ -10,7 +10,8 @@ import (
 
 // contractEventTypes is this package's declaration of the developer-runtime
 // vocabulary, used for coverage bookkeeping in conformance_test.go. v1.8 adds
-// 21 observe-only lifecycle signals (client.AllEventTypes' own comment names
+// 21 lifecycle signals -- observe-only when added, and policy-visible since
+// v1.9, which projects each one's payload into signal_args (client.AllEventTypes' own comment names
 // the table; this list must move in lockstep with it, acceptancetest's
 // devEventTypes, and the schema's event_type.enum, or the pairwise-equality
 // tests below/in acceptancetest red).

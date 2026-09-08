@@ -273,8 +273,11 @@ checks, in the order their failures matter: `status` on the completed row (Tool
 Health can compute at all); a failed call stored `failed` (success% means
 something); ONE span, `llm_completion` (Goal Alignment has text to score);
 capture off ⇒ **no** span rows (the gate is real server-side, not just on the
-wire); `signal_args` null on the new signals (the alignment goal is not
-overwritten); and capture off ⇒ **no `thinking` key** on any row, while the
+wire); `signal_args` **populated** on the new signals and the session goal still
+equal to the last `prompt_submitted` afterwards (v1.9: the payload is now the
+policy input, and core's goal gate is what stops ~140 signals a session
+overwriting the goal — an ungated core fails this check, which is the point of
+running it); and capture off ⇒ **no `thinking` key** on any row, while the
 turn's token numbers survive (otherwise "no content" would pass
 for a client that stopped emitting turns). The single list a live run must
 confirm is [`mapping.md`](../mapping.md) §7 items 15–24; the script is

@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.8",
+  "schema_version": "1.9",
   "event_id": "evt-0103",
   "event_type": "MessageDisplay",
   "openbox_session_id": "sess-abc123",

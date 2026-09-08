@@ -240,6 +240,8 @@ value and where it came from.
 
 > **An elicitation form is the one place where content capture can collect a credential you typed deliberately.** When an MCP server asks you for a value and you answer, your answer is sent under `content_capture` like every other body: redacted locally first, then capped. **Local secret detection is keyword-driven.** It finds values that look like or are labelled as known credential shapes. A password, an API key or a token typed into a form field whose name it does not recognise is not labelled, may not match a known shape, and is then **invisible to the redactor** — it egresses as ordinary text. Turning `content_capture` off is the only control that removes it.
 >
+> **Measured, 2026-09-08.** A 630-event live session had 107 stored values flagged "Secret-like value detected" by a control-plane template AFTER client redaction ran (690 `${OPENBOX_REDACTED_*}` markers are present in the same bodies, so redaction demonstrably ran). 82 of the 107 are in model-call request bodies — a system prompt plus tool schemas plus conversation, dense in long high-entropy tokens that are not secrets. The flag is a monitor rule, not a denial: all 630 rows recorded verdict `allow`. **Those 107 have not yet been classified** into real misses versus false positives, so this is a measured rate and not yet a verdict on the detector. No detector change was made, because narrowing on an unclassified rate would risk corrupting the developer files the redactor rewrites.
+>
 > The asymmetry that used to live here; every content class scanned except the
 > prompt; **is closed on Claude Code.** Prompt text now passes through the same
 > local redactor as the assistant's reply, thinking, tool input and output, the
@@ -377,7 +379,7 @@ asked to do and what it produced:
 Both go through the same three steps as an enforced body, in the same order:
 **local secret detection first, attachment second, 64KB cap third.** The
 ordering is the control, and it is asserted on the bytes actually sent
-(conformance cases C32–C38), not on the code path.
+(conformance cases C32–C38, C40–C49 and C51–C56), not on the code path.
 
 Three consequences worth knowing rather than discovering:
 
@@ -398,6 +400,62 @@ prompt text only under `content_capture`, redacted locally first on Claude Code
 and not on Codex, which has no redactor on the content it sends. What changed
 is only the timing and that the verdict is applied: HALT/BLOCK refuses the
 prompt, and a HALT ends the session.
+
+## Signal payload is now displayed, not just stored (v1.9)
+
+A lifecycle signal's payload — a config change's file path, a notification's
+text, a task's subject, an MCP elicitation's submitted form values — used to ride
+`metadata` only. `metadata` is stored and queryable in SQL, and **no UI renders
+it**. As of v1.9 the same keys also ride `signal_args`, and **the Verify tab
+renders `signal_args`**. Nothing new leaves your machine that did not leave it
+before, and the content gate is unchanged — but what was effectively
+forensics-only is now on a screen, in front of anyone who can read the session.
+
+If your organization decided `content_capture` on the old understanding, this is
+the sentence that changes it.
+
+**Why it changed.** `metadata` has no reader in any governance engine: OPA
+matches `signal_name` + `signal_args`, and Guardrails read `signal_args` alone.
+So a policy could match *that* a `config_change` happened but never *that it
+touched `.env`* — 21 of 27 signal classes were write-only telemetry. Making them
+enforceable means putting their payload where the engines look, and that is the
+same field the UI shows.
+
+**Which keys become visible**, all of them still gated behind `content_capture`:
+
+| Key | Class | What it is |
+|---|---|---|
+| `requested_tool_input` | PermissionRequest | the tool input you were asked to approve |
+| `notification_message` | Notification | the notification text |
+| `notification_title` | Notification | its title — **newly bound in v1.9** |
+| `task_subject` | TaskCreated / TaskCompleted | the task's subject line |
+| `task_description` | TaskCreated / TaskCompleted | its body — **newly bound in v1.9** |
+| `compact_instructions` | PreCompact | your custom compaction instructions |
+| `compact_summary` | PostCompact | the compaction summary |
+| `elicitation_message` | Elicitation | the MCP server's prompt |
+| `elicitation_response` | ElicitationResult | **your submitted form values** |
+
+`elicitation_response` is the most sensitive of the nine, and the keyword blind
+spot below applies to it in full: a value typed into a field name the redactor
+does not recognize is invisible to it and egresses as ordinary text.
+
+Structural keys are projected too — file paths, tool names, ids, counts. A file
+path is deliberately the *same* key a file tool's `activity_input` uses, so
+existing path policies fire on both with no rule authoring; the accepted cost is
+that a `Write` and the `file_changed` signal it triggers both carry the path, and
+naive counting double-counts one edit.
+
+**What did not change.** Redaction still runs at the mapper, before a body is
+attached — that ordering is the only in-transit control there is, and the
+projection reads what the mapper already redacted, so nothing is redacted later
+or less. No signal gains an `activity_id`. `metadata` keeps every key it had.
+With `content_capture: false`, none of the nine appears in either destination,
+asserted on the outbound bytes. `permission_suggestions[].rules[].ruleContent`
+remains deliberately unbound: it can embed literal command text, and the v1.9
+review deferred it again rather than binding it because the array now fits.
+
+One bound tightened rather than loosened: a content key riding `metadata` had no
+cap at all, and is now cut at 65,536 characters like every other content field.
 
 ## Account attribution
 

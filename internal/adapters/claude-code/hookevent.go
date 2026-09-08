@@ -201,8 +201,8 @@ type HookEvent struct {
 
 	// InstructionsLoaded. Fires many times per session -- volume, not a
 	// correctness concern.
-	MemoryType      string   `json:"memory_type"`      // User|Project|Local|Managed
-	LoadReason      string   `json:"load_reason"`      // session_start|nested_traversal|path_glob_match|include|compact
+	MemoryType      string   `json:"memory_type"` // User|Project|Local|Managed
+	LoadReason      string   `json:"load_reason"` // session_start|nested_traversal|path_glob_match|include|compact
 	TriggerFilePath string   `json:"trigger_file_path"`
 	ParentFilePath  string   `json:"parent_file_path"`
 	Globs           []string `json:"globs"`
@@ -288,7 +288,7 @@ type HookEvent struct {
 	// Elicitation / ElicitationResult. requested_schema is deliberately
 	// unbound (R3): it can embed a caller-supplied schema shape.
 	MCPServerName string `json:"mcp_server_name"`
-	Mode          string `json:"mode"`   // form|url
+	Mode          string `json:"mode"` // form|url
 	URL           string `json:"url"`
 	ElicitationID string `json:"elicitation_id"`
 	Action        string `json:"action"` // accept|decline|cancel

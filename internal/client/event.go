@@ -11,7 +11,7 @@
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
-const SchemaVersion = "1.8"
+const SchemaVersion = "1.9"
 
 // EventType is a developer-runtime lifecycle event type.
 type EventType string
@@ -44,9 +44,10 @@ const (
 	EventAPIError EventType = "APIError"
 
 	// v1.8 observe-only lifecycle signals (21 classes, table B of the phase-04
-	// plan). Each rides stock SignalReceived with a unique signal_name and
-	// never signal_args, is never paired as an Activity, and never sets
-	// ev.Tokens. Naming rule, no exceptions: EventType is the Claude Code hook
+	// plan). Each rides stock SignalReceived with a unique signal_name, is
+	// never paired as an Activity, and never sets ev.Tokens. Since v1.9 each
+	// DOES carry signal_args -- its metadata projected into the one field a
+	// policy engine reads on a signal; only prompt_submitted's is the goal. Naming rule, no exceptions: EventType is the Claude Code hook
 	// name verbatim; signal_name is its snake_case (see payload.go
 	// wireTypeFor). No EventSessionSuspended: every SessionEnd seals its run,
 	// and a session is never suspended. What follows a `/clear` is a NEW

@@ -70,7 +70,7 @@ body) and the base contract
 | `continued_from_run_id` (v1.8) | `continued_from_run_id` | **v1.8.** The sealed run this one continues from, set ONLY on the `WorkflowStarted` of a generation ≥ 1 run. May name a run this machine never itself sent (a session resumed elsewhere). |
 |; (constant) | `workflow_type` = `"developer-session"` | **Required** by the base contract on `Workflow*` and `SignalReceived` events (`event_rules.py` `_REQUIRED_WORKFLOW_FIELDS`; core reads it into a dedicated column, `storage_event.go`). The *constant* value keeps a session's whole tree on one `(workflow_id, run_id, workflow_type)` identity so core resolves it to **one** session row. Now present on **tool events too**; the old hook envelope omitted it, diverging from the base SDK's `ActivityContext.to_payload_fields`; routing tool events through the same struct fixed that at no cost. |
 |; (per signal) | `signal_name` | Set **only** on `SignalReceived` (`prompt_submitted`/`commit_created`/`deploy`/`subagent_started`/`permission_denied`/`api_error`); required there (`event_rules.py` raises `ENVELOPE_MISSING_FIELDS` otherwise). |
-|; (activity events) | `activity_id` | Set on **both** halves of a tool call and of a turn. Pairs them onto one row; for a tool call it is additionally the approval key; see §2 "Operation vs invocation identity" and "The turn pair". |
+|; (activity events) | `activity_id` | Set on **both** halves of a tool call and of a turn. Pairs them onto one row; for a tool call it is additionally the approval key; see §2 "Operation vs invocation identity" and "The turn pair". **A pairing check must tolerate a missing Completed half** — see the interrupt note below. |
 | `gateway_request_id` |; (feeds `activity_id` and the span id) | **v1.5.** A gateway-observed turn's discriminator: the provider's own `Request-Id`, or a locally minted `gw-` id. Its ONLY job is to keep the turn producers in disjoint `activity_id` namespaces: they describe the same turn, and a shared namespace would let core's dedupe absorb one as a duplicate of the other, losing half the evidence with no error anywhere. Bounded and charset-checked by `gatewayemit.usableRequestID` because it originates upstream and reaches a stored key verbatim; and, since v1.6, declared in the schema too, so all three producer ids sit at one depth. The retrofit was initially declined as a contract break and that reasoning was wrong: this field has ONE production assignment path, already gated at the identical rule, so declaring the bound rejects nothing. `gatewayemit.TestGatewayIDBoundMatchesTheContract` holds the two statements of the rule together. |
 | `session_rollup` |; (feeds `activity_id`) | **v1.1 on the wire, DECLARED in v1.6.** Marks a turn activity covering a whole session; Codex's granularity, since its per-turn hook is deliberately unwired. Between v1.1 and v1.6 the client emitted this field and the schema did not declare it, so with `additionalProperties:false` every Codex rollup pair failed its own contract; nothing noticed because no fixture carried one. |
 | `otel_request_id` |; (feeds `activity_id`) | **v1.6.** A TELEMETRY-observed turn's discriminator (`:otel:`), from the local OTLP receiver. Bound is **declared in the schema** (128 chars, printable ASCII) rather than left to the producer, so a lane added later inherits it. Structural identifier ([INV-2](dev-event-contract.md#invariants)), never derived from prompt or body text. |
@@ -91,7 +91,7 @@ body) and the base contract
 | `content.tool_input` | `activity_input.command` / `.arguments` / `.content` **only when content-capture enabled**, capped | Key named per tool class (`contentKeyFor`), so a reader is never shown a file body labelled `command`. **v1.3: also on the OBSERVE path**, not gated calls only; the "never the observe path" half of an owner decision is retired. The gated copy overwrites the observe extract with the bytes the tool rewrite produced, so the server judges exactly what the tool was rewritten to. **v1.8 (C-03):** `arguments` gained a second producer — an `Agent`/`ToolSearch` spawn is `kind:shell` for local-enforce purposes but semantically `llm_tool_call`, so `contentKeyFor(kind, sem)` special-cases it to `arguments` **before** the shell branch, deliberately never `command`, because `command` is an enforcement key 71 of the seeded control pack's 104 conditions match on. |
 | `content.tool_output` | `activity_output.output` **only when content-capture enabled**, capped | **v1.3.** `ToolResult` only. What the tool produced; or, on a failed call, its own free-text error; `status` says which. Core stores it as the row's `output` and runs Guardrails stage "1" over it. Secret-redacted **before** attachment (conformance C34). |
 | `content.thinking` (turn) | `activity_output.thinking` **only when content-capture enabled**, capped | **v1.4.** `TurnCompleted` only. The turn's extended-thinking blocks, concatenated in file order from the transcript window; the only source, since no hook carries thinking and the provider's own OTel export redacts it unconditionally. Deliberately **not** merged into `activity_output.content`, which carries the assistant's REPLY: chain-of-thought there would score every later turn's drift against the model's reasoning. (It used to say "not the span in the row above"; that span is gone, the separation is not.) Secret-redacted **before** attachment, `capBody`-capped, absent with capture off (conformance C40/C41, sentinel `TestFinops_NoContentOnWire`). This is the field that AMENDS v1.1's transcript allowlist; the first free-form content string that projection binds. |
-| `content.signal_detail` | `metadata.denial_reason` / `metadata.error_details` **only when content-capture enabled**, capped | **v1.3.** Per event type (`signalDetailKeyFor`); dropped on every other type. Deliberately **not** `signal_args`; core reads a `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`age.go:112-137`). Conformance C38 asserts both halves. **No reader renders these yet**; the Verify tab reads `signal_args`, which this deliberately avoids; so they are stored-and-queryable rather than displayed. Same posture as `metadata.event_id`. |
+| `content.signal_detail` | `metadata.<per-class key>` **and** `signal_args.<same key>` **only when content-capture enabled**, capped | **v1.3; both destinations since v1.9.** Per event type (`signalDetailKeyFor`); dropped on every other type. It used to be deliberately **not** `signal_args`, because core read a `SignalReceived` with non-empty `signal_args` as a NEW USER GOAL (`HandleSessionLifecycle`, `goal_alignment.go`); core's goal gate now scopes that to `prompt_submitted`. Conformance C38 asserts both halves. **These are now DISPLAYED**: the Verify tab renders `signal_args`, so what was stored-and-queryable is visible to anyone who can read the session — see [data-and-privacy.md](data-and-privacy.md). |
 | `span.request_body` (adapter-facing) | `activity_input.content` on the **opening** half, **only when content-capture enabled**, capped | **In-path lanes only.** Not an egress channel for any HOOK adapter, and that is asserted rather than assumed: neither mapper populates it and both pin it empty (`internal/adapters/claude-code/mapper_test.go:169`, `internal/adapters/codex/mapper_test.go:207`). The key is `content` because Goal Alignment's per-operation cap orders keys by a fixed priority list and drops unlisted ones first, so `request_body` would have been the first casualty (§2). Capped keeping the **TAIL**: a `/v1/messages` body is a conversation whose newest turn is at the end. Content-gated; `stripContent` clears it. |
 | `span.response_body` (adapter-facing) | `activity_output.content` on the **closing** half, **only when content-capture enabled**, capped | **In-path lanes only**, same gate. The relay's observed response, verbatim, SSE frames and all: what a relay saw is what an auditor wants, and reassembling it is a semantic transform belonging with the consumer. Capped keeping the **HEAD**, because a reply starts at its beginning. A content-encoded body is decompressed in the capture path first (§ below); before that, every response body OpenBox had ever captured was an 88-byte placeholder. |
 | `span.request_headers` / `.response_headers` (adapter-facing) |; | **No longer emitted by any producer.** They reached core only inside `spans[]`, which is discarded, so nothing ever read them; and they were the highest-risk class this client carried, because the developer's live provider credential is on every model request. Still declared in the contract, and still redacted by key name at capture; they simply do not leave the machine. |
@@ -126,7 +126,7 @@ feeding one serializer.
 | `TurnStarted` | `ActivityStarted` |; | `activity_id`, `activity_type` (`llm_completion`) | `turn_index`, `agent_id`?, `agent_type`? | one row opening the turn. A HOOK turn carries no `activity_input`: its input is the prompt, which rides the `prompt_submitted` signal under the content gate. An IN-PATH lane's turn carries `activity_input.content`, the observed request body (§3) |
 | `TurnCompleted` | `ActivityCompleted` |; | `activity_id`, `activity_type`, `activity_output`, `duration_ms` | `tokens`, `model`, `turn_index`, `agent_id`?, `agent_type`? | its **own** row, sharing the `activity_id`; carries the turn's model + four token counts, and under content capture the model's reply in `activity_output.content` (§"The turn pair"). **No `spans`, no `span_count`** |
 | `SubagentStarted` | `SignalReceived` | `subagent_started` |; | `agent_id`, `agent_type` | mid-session signal; a subagent that spawns and does nothing is now visible |
-| `PermissionDenied` | `SignalReceived` | `permission_denied` |; | `tool_name`, `tool_use_id`, `permission_mode`?, `denial_reason`? | mid-session signal: THAT a call was refused, which tool it was about, and; **v1.3, content-gated**; why. The provider's `reason` is free text, so it rides `content.signal_detail` → `metadata.denial_reason` and never `signal_args` |
+| `PermissionDenied` | `SignalReceived` | `permission_denied` |; | `tool_name`, `tool_use_id`, `permission_mode`?, `denial_reason`? | mid-session signal: THAT a call was refused, which tool it was about, and; **v1.3, content-gated**; why. The provider's `reason` is free text, so it rides `content.signal_detail` → `metadata.denial_reason`, and since v1.9 into `signal_args.denial_reason` as well, where a policy can actually match it |
 | `APIError` | `SignalReceived` | `api_error` |; | `error_type` (closed provider enum), `error_details`? | mid-session signal; a turn that ended in a provider error rather than an answer. `error_details` is the provider's free-text elaboration; **v1.3, content-gated**, beside the enum |
 | `Setup` *(v1.8)* | `SignalReceived` | `setup` |; | `trigger` | mid-session signal; session bootstrap fired |
 | `InstructionsLoaded` *(v1.8)* | `SignalReceived` | `instructions_loaded` |; | `file_path`, `memory_type`, `load_reason`, `trigger_file_path`, `parent_file_path`, `globs[]`? | mid-session signal; which memory file loaded and why |
@@ -153,20 +153,48 @@ feeding one serializer.
 Two POSTs per tool call, as before; the count did not change, only the shape.
 Two more per model turn, when usage capture is on.
 
-**The v1.2 and v1.8 signals carry no `signal_args`, and that is a
-correctness constraint: 24 of 27 signal classes must carry none.** Core's
-alignment engine treats *any* `SignalReceived`
-with non-empty `signal_args` as a new user goal: it scores the assistant
-messages accumulated so far against the previous goal and then overwrites the
-session's goal with the stringified args (`openbox-core
-internal/services/age.go:112-137`). Putting the denied tool's name there, the
-field the Verify tab renders as "Input", so an obvious next step, would replace
-the developer's actual prompt as the thing every later turn is scored against.
-`prompt_submitted` is the one signal that must keep its args (with
-`commit_created` and `deploy`, the three exceptions), because it is what
-creates that session. `client/lifecycle_signals_test.go`, the signal golden
-fixtures, and `internal/client/signalvocabulary_test.go`'s
-`TestNoSignalCarriesSignalArgs` (asserting the count is exactly 24) hold this.
+**Every signal but `prompt_submitted` carries its payload in `signal_args`
+(v1.9), and `prompt_submitted`'s `signal_args` is the goal. Core's gate is what
+keeps the two apart.**
+
+This reverses the rule v1.8 documented here, so it is worth stating what the old
+constraint was and what actually removed it rather than quietly swapping the
+sentence.
+
+*The constraint.* Core's alignment engine treated *any* `SignalReceived` with
+non-empty `signal_args` as a new user goal: it scored the assistant messages
+accumulated so far against the previous goal, then overwrote the session's goal
+with the stringified args. Two pieces of core made that unconditional —
+`HandleSessionLifecycle` branched on `EventType` alone and never read
+`signal_name` (`openbox-core internal/services/goal_alignment.go`), and
+`stringifySignalArgs` (`goal_alignment_session.go`) turned any non-empty object
+into text, falling back to the raw JSON. So a `post_tool_batch` signal would
+have set the goal to `{"batch_size":1,…}`, and a live session carried ~140 such
+signals in under 17 minutes. Under that core, the rule here was correct.
+
+*What removed it.* Not a change of mind about the hazard — a change to core. Its
+goal gate now suppresses goal creation for a signal whose `source` is
+`developer-runtime` and whose `signal_name` is not `prompt_submitted`. Both keys
+are checked, so every non-developer source behaves exactly as before. **That gate
+is a precondition, not a footnote:** a client speaking 1.9 against an ungated
+core reproduces the original defect in full. See the ordered rollout in the plan
+that landed this.
+
+*What the rule is now.* `signal_args` is the only field a governance engine reads
+on a signal — OPA matches `signal_name` + `signal_args`, Guardrails read
+`signal_args` and nothing else — so a class that carries none is unenforceable,
+which is what the 21 v1.8 classes were. The projection is uniform and has no
+per-class knowledge: `commit_created` and `deploy` lost their hand-written
+lineage allowlists too, because a deploy's lineage is exactly what a deploy
+policy matches on. `prompt_submitted`'s branch is untouched and byte-identical.
+
+*What holds it.* `internal/client/signalvocabulary_test.go`'s
+`TestEverySignalProjectsItsPayload` (count exactly 26),
+`TestSignalArgsProjectionCoversEveryClass` over the whole vocabulary, the signal
+golden fixtures, and conformance C38/C52. `TestSignalArgsProjectionDoesNotUseCoreGoalKeys`
+pins the residual hazard: core's `stringifySignalArgs` prefers
+`prompt`/`message`/`input`/`text`/`content` in that order, so a future mapper key
+with one of those names would be read as a goal by any ungated core.
 
 Availability note: these four hooks, and the 21 v1.8 classes above with them,
 are registered by the installer, so an
@@ -174,6 +202,26 @@ are registered by the installer, so an
 dark-install window, D8; nothing schedules that re-run automatically). A Claude
 Code version that does not know the hook keys never invokes them (verified); the
 events are simply absent, fail-open.
+
+> **An interrupted tool legitimately leaves one row.** A 630-event live session
+> paired 242 of 244 `activity_id`s. The two exceptions were both `Bash`, both in
+> auto permission mode, each with an `ActivityStarted` and a goal-alignment
+> verdict and no `ActivityCompleted`. This is not an adapter gap:
+> `PostToolUseFailure` **is** registered by the installer
+> (`internal/adapters/claude-code/localhooks.go`, matcher `*`), and when it fires
+> the two halves share the operation identity the `activity_id` is derived from
+> (`TestAnInterruptedToolStillPairs`). The cause appears to be upstream — Claude
+> Code 2.1.263 dispatches that hook under the same abort signal Esc trips and
+> cancels it, so on an interrupt nothing reaches the spool. That mechanism was
+> **read from the provider binary, not reproduced by a deliberate replay**, and a
+> single lost delivery would produce the same shape; treat the cause as the
+> leading explanation rather than a settled one.
+>
+> The practical rule is the same under either explanation, and it is a rule about
+> how you *check*: count per `activity_id` and tolerate a Started with no
+> Completed. **Never synthesize the missing Completed** — it would need an end
+> time nobody observed and a status nobody reported, and it would make a real
+> delivery drop indistinguishable from a user pressing Esc.
 
 ### Correlation metadata keys
 
@@ -185,7 +233,10 @@ glossary](dev-event-contract.md#invariants) for INV-1/INV-2) and all
 are optional; a provider that does not expose one simply omits it.
 
 > **`metadata` has no reader in core or in the backend.** Verified across both:
-> not OPA policy input, not guardrails, not goal alignment. It is merged into the
+> not OPA policy input, not guardrails, not goal alignment. Still true of
+> `metadata` as a field — and since v1.9 the keys below also ride `signal_args`
+> on a signal row, which OPA and Guardrails do read. The duplication is
+> deliberate: a move would have broken the SQL correlation these keys exist for. It is merged into the
 > stored row and is therefore queryable in SQL, which is exactly what
 > `credential_fingerprint` and `http_status` were rehomed here for -- forensics a
 > reviewer can run after the fact. That was the stated purpose and it is met.
@@ -197,7 +248,9 @@ are optional; a provider that does not expose one simply omits it.
 > key added here in the expectation that something will evaluate it will simply
 > sit unread.
 >
-> **Why a v1.8 signal's own fields still belong in `metadata` (insight 6).** A `SignalReceived` row has no `activity_input`/`activity_output` of its own — those columns exist only on the Activity carrier a tool call or a turn uses — so `metadata` is the only home a signal's fields can have. "Stop growing `metadata`" above is advice about *activity* rows, where a dedicated column exists; this landing's ~40 new keys are signal fields with nowhere else to go, not an instance of the thing the warning is against.
+> **Why a signal's own fields ride `metadata` — and, since v1.9, `signal_args` too (insight 6).** A `SignalReceived` row still has no `activity_input`/`activity_output` of its own; those columns exist only on the Activity carrier a tool call or a turn uses. That half of the original claim is not merely still true, it is enforced structurally: `internal/client/payload.go`'s activity guard nils both fields whenever `activity_id` is empty, and no signal sets one. Giving a signal an `activity_id` to reach those columns would break "every `activity_id` carries exactly two rows", which is what makes `SignalReceived` legitimately unpaired — so that route is closed, not merely unattractive.
+>
+> What changed is "the only home". `signal_args` is a **second** home, and the better one, because it has readers and `metadata` has none. Signal fields now ride both: `metadata` for the SQL forensics path, `signal_args` for enforcement. "Stop growing `metadata`" above stands as written — a key added to `metadata` *alone* still sits unread.
 
 | Key | Providers | Meaning |
 |---|---|---|
@@ -661,7 +714,7 @@ cross-repo Explore):
 | Row fields (`storage_event.go:258-294`) | `activity_id`/`activity_type`/`attempt`/`activity_input`→`input`/`activity_output`→`output`/`duration_ms` are set **event-type-agnostically**, so the completed half's duration and output land with no core change. Note `payload.Error` is read **only** for `WorkflowFailed`, which is why the client sends none; see §3. |
 | `signal_name` / `workflow_type` | Stored in dedicated columns; commit/deploy lineage rides `metadata` (core has no `commit_sha`/`deploy_id` columns) and **survives** the Signal mapping. |
 | Spans table | **One row per content-capturing model turn, and nothing else**. Tool and lifecycle events remain span-less; the trade-off (no span-level Merkle leaves, no `semantic_type`) still holds for them. For the turn span, span-level Merkle leaves and server-side classification come back, and the assistant's text is stored server-side: a real retention increase, outside this repo's control. With `content_capture:false` there are no span rows at all. |
-| Goal alignment (`age.go`, `goal_alignment_session.go`) | `prompt_submitted`'s `signal_args` CREATE the session's goal; any *other* `SignalReceived` with non-empty `signal_args` OVERWRITES it (`age.go:112-137`), which is why the v1.2 and v1.8 signals carry none. Assistant text is appended from `payload.Spans` only. Requires `LlamaFirewallHost` set (`llama_firewall.go:31-34`) and Redis up; **without either, both widgets stay empty with a perfect client**. |
+| Goal alignment (`goal_alignment.go`, `goal_alignment_session.go`) | `prompt_submitted`'s `signal_args` CREATE the session's goal (`HandleSessionLifecycle`). Any *other* `SignalReceived` with non-empty `signal_args` used to OVERWRITE it — `stringifySignalArgs` stringifies anything and `CreateSession` was unconditional — which is why every signal but `prompt_submitted` carried none before v1.9. Core's goal gate now suppresses that for `source == developer-runtime` with a non-`prompt_submitted` name, and only then is the v1.9 projection safe. **The predecessor path `internal/services/age.go` no longer exists; do not cite it.** Assistant text is appended from `payload.Spans` only. Requires `LlamaFirewallHost` set (`llama_firewall.go:31-34`) and Redis up; **without either, both widgets stay empty with a perfect client**. |
 | Tool metrics (`observability/errors.go:301-333`) | `status == "completed"` on an `ActivityCompleted` is the only input to `IsSuccess`; `.total` increments on the started half. `llm_completion` is excluded from tool metrics (`IsLLMCompletionActivity`), so turn events do not pollute them. |
 | Dashboard activity timeline (`run.provider.ts`) | Pairs `ActivityStarted`/`ActivityCompleted`, which is now literally what a tool call emits. §7 records whether that renders as expected; **not yet run live**. |
 

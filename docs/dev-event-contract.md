@@ -110,7 +110,7 @@ below wins.
 | INV | Statement | Pinned by |
 |---|---|---|
 | **INV-1** | A credential value never egresses and never appears in a local decision request, a log line, or an argv; only the file path or a one-way fingerprint is ever shown or sent. | `internal/cli/devinit/devinit.go` (the credential-write path prints the file path, never a value); `internal/provider/provider.go`'s `CredentialRef` (never carries a credential value); `MaxCommandLen` bounds a local decision request, never egress. |
-| **INV-2** | Content is gated at one choke point (`content_capture`); with it off, no content-bearing field reaches the wire — including content-bearing keys inside `metadata` — and only structural identifiers (paths, tool names, ids) always flow. Local secret detection is keyword-driven, so an unlabelled high-entropy value below the floor is invisible to it. | `internal/conformance`'s content-gate harness (a gated field is asserted absent with capture off, present/redacted/capped with it on); `contentMetadataKeys` in `internal/client/payload.go` (every content key must be listed there or an adapter routes around the gate). |
+| **INV-2** | Content is gated at one choke point (`content_capture`); with it off, no content-bearing field reaches the wire — including content-bearing keys inside `metadata`, and, since v1.9, inside `signal_args`, which carries the same keys — and only structural identifiers (paths, tool names, ids) always flow. Local secret detection is keyword-driven, so an unlabelled high-entropy value below the floor is invisible to it. | `internal/conformance`'s content-gate harness (a gated field is asserted absent with capture off, present/redacted/capped with it on); `contentMetadataKeys` in `internal/client/payload.go` (every content key must be listed there or an adapter routes around the gate). Both destinations are filtered by ONE function, `eventMetadataForEgress`, so `metadata` and `signal_args` cannot disagree about a key; `TestContentBearingMetadataIsGatedInSignalArgs` and `TestEveryContentKeyIsGatedInSignalArgs` assert the second destination on the outbound bytes. |
 | **INV-3** | Observe mode treats every verdict as advisory (fail-open): a verdict from `/evaluate` never blocks a call by itself. Enforcement, a separate local decision, is tighten-only — it never turns a provider's own deny into an allow. | `internal/adapters/claude-code/hookrun.go`'s observe path; `internal/cli/gatewayemit/emitter_test.go`'s `TestEmitSurvivesAnUnwritableSpool`. |
 
 ## Privacy (INV-2)
@@ -125,7 +125,11 @@ What INV-2 still guarantees:
 - Content lives **only** under the `content` object. With capture off, all of it
   is stripped before egress; including content-bearing keys in the `metadata`
   blob, which the client drops at the same gate (RF-S7; before that, metadata
-  was a hole INV-2 rested on adapter convention to keep closed).
+  was a hole INV-2 rested on adapter convention to keep closed). Since v1.9 a
+  signal's `metadata` keys are also projected into `signal_args`, through that
+  same drop — and content keys arriving that way are capped by `capBody` on
+  egress, which they were not before, because a free-text key riding `metadata`
+  had no bound at all.
 - `span.request_body`/`response_body` remain in the schema but are **no longer
   read by the client**, so nothing an adapter puts there can egress. No adapter
   ever set them; both adapters have tests asserting they stay empty. The
@@ -137,8 +141,10 @@ What INV-2 still guarantees:
   `content_capture` gate that covers a gated call's body; redacted before they
   are attached and capped at 64KB. The guarantee is a posture now, not a
   structural property, which is why the ordering and the gate are asserted on
-  the outbound bytes (conformance C18, C26, C32–C38) rather than inferred from
-  the absence of a field.
+  the outbound bytes (conformance C18, C26, C32–C38, C40–C49 and C51–C56) rather
+  than inferred from the absence of a field. C50 is deliberately unused, retired
+  when `UserPromptExpansion` became structural-only; C39 belongs to the
+  credential-coverage suite, not this range.
 - The conformance harness rejects any event carrying content while
   content-capture is disabled.
 

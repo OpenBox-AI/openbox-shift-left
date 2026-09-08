@@ -932,7 +932,7 @@ func TestPromptIDRidesEveryEvent(t *testing.T) {
 	// golden byte string kept HERE, not a second live build of the same
 	// event -- captured once, with testMapper()'s fixed clock/NewID, against
 	// SessionStart(source=startup).
-	const golden = `{"schema_version":"1.8","event_id":"evt-fixed","event_type":"SessionStarted",` +
+	const golden = `{"schema_version":"1.9","event_id":"evt-fixed","event_type":"SessionStarted",` +
 		`"openbox_session_id":"s1","developer_did":"did:aip:7f3c9b2e-0000-5000-a000-000000000001",` +
 		`"timestamp":"2026-07-08T12:00:00Z","tool":{"name":"claude-code","kind":"shell"},` +
 		`"metadata":{"cwd":"/repo","provider":"claude-code","source":"startup"}}`

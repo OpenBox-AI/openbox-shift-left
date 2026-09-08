@@ -14,9 +14,9 @@ import (
 // 10 owns the cross-cutting vocabulary suite (signalvocabulary_test.go,
 // schema_guard_test.go, acceptancetest); this file does not duplicate it.
 
-func TestSchemaVersionIsV18(t *testing.T) {
-	if SchemaVersion != "1.8" {
-		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.8")
+func TestSchemaVersionIsV19(t *testing.T) {
+	if SchemaVersion != "1.9" {
+		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.9")
 	}
 }
 
@@ -338,13 +338,13 @@ func TestSchemaEnumAndOneOfHave33Entries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load schema: %v", err)
 	}
-	if v := schema["x-schema-version"]; v != "1.8" {
-		t.Errorf("x-schema-version = %v, want 1.8", v)
+	if v := schema["x-schema-version"]; v != "1.9" {
+		t.Errorf("x-schema-version = %v, want 1.9", v)
 	}
 	props, _ := schema["properties"].(map[string]any)
 	sv, _ := props["schema_version"].(map[string]any)
-	if sv["const"] != "1.8" {
-		t.Errorf("properties.schema_version.const = %v, want 1.8", sv["const"])
+	if sv["const"] != "1.9" {
+		t.Errorf("properties.schema_version.const = %v, want 1.9", sv["const"])
 	}
 	et, _ := props["event_type"].(map[string]any)
 	enum, _ := et["enum"].([]any)

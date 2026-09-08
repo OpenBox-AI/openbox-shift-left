@@ -89,8 +89,11 @@ plane *parses* it and then **discards** it (persistence is gated on
 `hook_trigger`, which this client never sets, because that routes a model turn
 onto the approval-bypass path), and alignment feeds from `activity_input` on the
 `ActivityStarted` half instead. So a span is neither stored nor needed, and for a
-model call `llm_completion` *is* the activity. **Signals carry no `signal_args`**,
-read as a new user goal, and **thinking keeps its own `activity_output` key**.
+model call `llm_completion` *is* the activity. **`prompt_submitted`'s
+`signal_args` is the goal; every other signal's `signal_args` is its payload**,
+and core's source-and-name gate is the only thing keeping the two apart -- so a
+build carrying the projection must not reach a developer before that gate is
+running. And **thinking keeps its own `activity_output` key**.
 And **every `activity_id` carries exactly two rows** (`Workflow*` one each;
 `SignalReceived` alone is unpaired): every in-path row was single-sided for the
 life of the feature, because the live pairing check filters to *tool* types. Check

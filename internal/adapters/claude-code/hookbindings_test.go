@@ -164,13 +164,17 @@ func TestFieldBindings_OneEventPerNewGroup(t *testing.T) {
 			func(e *HookEvent) (any, any) { return []string{e.Directory, e.Source}, []string{"/d", "slash_command"} }},
 		{"FileChanged", `{"hook_event_name":"FileChanged","session_id":"s","cwd":"/r",` +
 			`"file_path":".env","event":"change"}`,
-			func(e *HookEvent) (any, any) { return []string{e.FilePath, e.FileChangeEvent}, []string{".env", "change"} }},
+			func(e *HookEvent) (any, any) {
+				return []string{e.FilePath, e.FileChangeEvent}, []string{".env", "change"}
+			}},
 		{"WorktreeRemove", `{"hook_event_name":"WorktreeRemove","session_id":"s","cwd":"/r",` +
 			`"worktree_path":"/wt"}`,
 			func(e *HookEvent) (any, any) { return e.WorktreePath, "/wt" }},
 		{"PreCompact", `{"hook_event_name":"PreCompact","session_id":"s","cwd":"/r",` +
 			`"trigger":"manual","custom_instructions":"keep tests"}`,
-			func(e *HookEvent) (any, any) { return []string{e.Trigger, e.CustomInstructions}, []string{"manual", "keep tests"} }},
+			func(e *HookEvent) (any, any) {
+				return []string{e.Trigger, e.CustomInstructions}, []string{"manual", "keep tests"}
+			}},
 		{"PreCompact custom_instructions null", `{"hook_event_name":"PreCompact","session_id":"s","cwd":"/r",` +
 			`"trigger":"auto","custom_instructions":null}`,
 			func(e *HookEvent) (any, any) { return e.CustomInstructions, "" }},

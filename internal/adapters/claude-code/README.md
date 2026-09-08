@@ -103,7 +103,8 @@ identifiers, file paths, and lifecycle enums (`source`, `reason`,
 observe events" — is retired.** It was an unconditional, structural guarantee.
 What replaces it is a gate plus a redaction plus a cap: none of them structural,
 and each one able to be got wrong. That is why they are asserted on the
-**outbound bytes** (conformance C32–C38, plus C18/C26 for the ordering) rather
+**outbound bytes** (conformance C32–C38, C40–C49 and C51–C56, plus C18/C26 for
+the ordering) rather
 than on the mapper's return. `TestMap_NoContentLeak` still holds the
 capture-OFF half.
 

@@ -150,10 +150,13 @@ func goldenCases() []goldenCase {
 	}
 	mcpResult := completed(mcpCall, "ev-9", "2026-07-31T09:00:00.75Z")
 
-	// Core reads a SignalReceived carrying signal_args as a new user goal and
-	// overwrites the alignment session's goal with it (age.go:112-137), so a
-	// well-meaning "let's show the denied tool in the Verify tab's Input" would
-	// silently destroy goal alignment.
+	// Core used to read ANY SignalReceived carrying signal_args as a new user
+	// goal and overwrite the alignment session's goal with it, which is why
+	// these goldens carried none through v1.8. Core's source-and-name gate
+	// scopes that to prompt_submitted, so since v1.9 they carry the signal's
+	// projected metadata -- the field OPA and Guardrails actually read.
+	// Regenerating these against an ungated core would still destroy goal
+	// alignment in the field; the ordering is the protection, not the golden.
 	subagentStarted := base(EventSubagentStarted, "ev-17")
 	subagentStarted.Tool = Tool{Name: "claude-code", Kind: ToolShell}
 	subagentStarted.AgentID = "agt-code-reviewer-01"
