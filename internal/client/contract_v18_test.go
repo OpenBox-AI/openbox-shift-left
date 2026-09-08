@@ -106,11 +106,18 @@ func TestNoSessionSuspended(t *testing.T) {
 	}
 }
 
-// TestNewClassesNeverCarrySignalArgs is the goal-overwrite guard: core reads
-// any SignalReceived with non-empty signal_args as a new user goal.
-// buildSignalArgs must return nil for all 21, even with content and metadata
-// populated that might tempt a case to be added.
-func TestNewClassesNeverCarrySignalArgs(t *testing.T) {
+// TestNewClassesProjectSignalArgs is the enforcement-surface requirement, and
+// it is the exact inverse of what v1.8 asserted here. metadata has no reader in
+// any governance engine: OPA matches signal_name + signal_args, Guardrails read
+// signal_args and nothing else. So every one of the 21 projects its structural
+// keys, and its one gated content key, into signal_args.
+//
+// What made the old assertion necessary was core reading ANY non-empty
+// signal_args as a new user goal. Core's source-and-name gate now suppresses
+// that for a developer-runtime signal whose name is not prompt_submitted, which
+// is why this inverts. A build carrying this projection must not reach a
+// developer before that gate is running -- see the plan's ordered rollout.
+func TestNewClassesProjectSignalArgs(t *testing.T) {
 	for _, tc := range newLifecycleSignals {
 		ev := DevEvent{
 			EventID: "ev-1", EventType: tc.et, SessionID: "s", DeveloperDID: "did:aip:x",
@@ -118,9 +125,21 @@ func TestNewClassesNeverCarrySignalArgs(t *testing.T) {
 			Content:  &Content{SignalDetail: "some free text"},
 			Metadata: map[string]any{"commit_sha": "abc", "repo": "r", "deploy_id": "d", "environment": "prod"},
 		}
-		raw := decodeRaw(t, ev)
-		if _, present := raw["signal_args"]; present {
-			t.Errorf("%s: signal_args present on the wire: %v", tc.et, raw["signal_args"])
+		args := signalArgs(t, ev)
+		if args == nil {
+			t.Errorf("%s: signal_args absent; the class is invisible to every policy engine", tc.et)
+			continue
+		}
+		for k, want := range map[string]string{
+			"commit_sha": "abc", "repo": "r", "deploy_id": "d", "environment": "prod",
+		} {
+			if args[k] != want {
+				t.Errorf("%s: signal_args[%q] = %v, want %q", tc.et, k, args[k], want)
+			}
+		}
+		// The content key only exists for the classes signalDetailKeyFor names.
+		if k := signalDetailKeyFor(tc.et); k != "" && args[k] != "some free text" {
+			t.Errorf("%s: signal_args[%q] = %v, want the free text", tc.et, k, args[k])
 		}
 	}
 }

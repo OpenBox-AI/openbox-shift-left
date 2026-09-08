@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -158,6 +159,41 @@ func TestContentBearingMetadataIsGated(t *testing.T) {
 			assertAbsent(t, got, canaryPrompt)
 			if !bytes.Contains(got, []byte("abc123")) {
 				t.Errorf("structural metadata was dropped along with the content: %s", got)
+			}
+		})
+	}
+}
+
+// TestContentBearingMetadataIsGatedInSignalArgs is the twin of the test above
+// for signal_args, the second destination the same metadata map now reaches.
+// The gate has one implementation (eventMetadataForEgress) precisely so these
+// two can never disagree — this test is what proves that claim on the outbound
+// bytes rather than on the struct.
+func TestContentBearingMetadataIsGatedInSignalArgs(t *testing.T) {
+	for _, key := range []string{"message", "prompt", "output", "diff", "command", "stdout"} {
+		t.Run(key, func(t *testing.T) {
+			ev := DevEvent{
+				SchemaVersion: SchemaVersion, EventID: "ev-5a", EventType: EventConfigChange,
+				SessionID: "sess-leak", DeveloperDID: "did:aip:x", Timestamp: "2026-07-31T09:00:00Z",
+				Metadata: map[string]any{key: canaryPrompt, "file_path": "/tmp/.env"},
+			}
+			got, err := buildPayload(stripContent(ev))
+			if err != nil {
+				t.Fatalf("buildPayload: %v", err)
+			}
+			assertAbsent(t, got, canaryPrompt)
+
+			var p struct {
+				SignalArgs map[string]any `json:"signal_args"`
+			}
+			if err := json.Unmarshal(got, &p); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if v, present := p.SignalArgs[key]; present {
+				t.Errorf("gated key %q reached signal_args as %v", key, v)
+			}
+			if p.SignalArgs["file_path"] != "/tmp/.env" {
+				t.Errorf("structural metadata was dropped from signal_args along with the content: %s", got)
 			}
 		})
 	}

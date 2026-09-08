@@ -444,8 +444,10 @@ func signalDetailKeyFor(t EventType) string {
 		return "denial_reason"
 	case EventAPIError:
 		return "error_details"
-	// v1.8: 8 cases, 7 distinct keys. No case for EventUserPromptExpansion —
-	// it is structural-only (D1).
+	// v1.8: 8 cases, 7 distinct keys — the count is of the v1.8 block below, not
+	// of the whole switch, which is 10 cases and 9 distinct keys with the two
+	// above. Counted twice already; leave the scoping explicit. No case for
+	// EventUserPromptExpansion — it is structural-only (D1).
 	case EventPermissionRequest:
 		return "requested_tool_input"
 	case EventNotification:
@@ -466,7 +468,17 @@ func signalDetailKeyFor(t EventType) string {
 	return ""
 }
 
-func buildMetadata(ev DevEvent) (json.RawMessage, error) {
+// eventMetadataForEgress copies the adapter's metadata map, applying the two
+// rules that hold wherever those keys egress: INV-2's content gate and the
+// http_status row rule.
+//
+// buildMetadata and buildSignalArgs both call it, and that is the point. The
+// same map now reaches two wire fields, so a gate implemented twice is a gate
+// that drifts: the copy that forgets the skip lets an adapter writing a content
+// key into metadata route straight around content_capture. One implementation
+// makes contentMetadataKeys' completeness rule checkable rather than
+// aspirational — see TestContentBearingMetadataIsGatedInSignalArgs.
+func eventMetadataForEgress(ev DevEvent) map[string]any {
 	m := make(map[string]any, len(ev.Metadata)+4)
 	for k, v := range ev.Metadata {
 		if ev.contentStripped && contentMetadataKeys[k] {
@@ -477,6 +489,11 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 		}
 		m[k] = v
 	}
+	return m
+}
+
+func buildMetadata(ev DevEvent) (json.RawMessage, error) {
+	m := eventMetadataForEgress(ev)
 	if ev.Content != nil && ev.Content.SignalDetail != "" {
 		if k := signalDetailKeyFor(ev.EventType); k != "" {
 			m[k] = capBody(ev.Content.SignalDetail)
@@ -643,17 +660,50 @@ func durationMs(ev DevEvent) *float64 {
 	return &ms
 }
 
+// buildSignalArgs fills the one field a governance engine reads on a
+// SignalReceived. OPA matches signal_name + signal_args; Guardrails read
+// signal_args and nothing else. metadata has no reader in either, so a signal
+// class whose payload lives only there is write-only telemetry: the engine can
+// match THAT a config_change happened, never that it touched `.env`.
+//
+// Two arms, and the split is the whole safety argument:
+//
+//   - prompt_submitted's signal_args IS the goal. Core's stringifySignalArgs
+//     turns it into the text every later action is scored against. Its shape is
+//     a shipped contract; the arm stays verbatim and takes nothing from the
+//     projection.
+//   - Every other signal projects. Uniform, with no per-class knowledge, because
+//     a switch drifts on the first class someone adds to the mapper and forgets
+//     here — which is exactly how 21 classes shipped invisible. See
+//     TestSignalArgsProjectionCoversEveryClass.
+//
+// Projected, never moved: metadata keeps every key, because docs/mapping.md's
+// correlation keys and the SQL forensics path read metadata. The cost is a few
+// hundred duplicated bytes on ~140 rows a session, and it is accepted.
+//
+// ORDERING HAZARD, recorded at the site that causes it: a core without the
+// source-and-name goal gate reads any non-empty signal_args as a new user goal,
+// via stringifySignalArgs' ["prompt","message","input","text","content"]
+// preference order. No mapper emits one of those five names structurally today
+// (TestSignalArgsProjectionDoesNotUseCoreGoalKeys pins that), but `message` is a
+// legitimate content key on a commit — so a build carrying this projection must
+// not reach a developer before that gate is running in prod.
 func buildSignalArgs(ev DevEvent) json.RawMessage {
-	m := map[string]any{}
-	switch ev.EventType {
-	case EventPromptSubmitted:
+	var m map[string]any
+	if ev.EventType == EventPromptSubmitted {
+		m = map[string]any{}
 		if ev.Content != nil && ev.Content.Prompt != "" {
 			m["prompt"] = capBody(ev.Content.Prompt)
 		}
-	case EventCommitCreated:
-		copyMetaKeys(m, ev.Metadata, "commit_sha", "repo", "branch")
-	case EventDeploy:
-		copyMetaKeys(m, ev.Metadata, "deploy_id", "commit_sha", "repo", "environment", "deploy_did")
+	} else {
+		// The same gate buildMetadata applies, from the same function, so a
+		// content key cannot be gated in one destination and not the other.
+		m = eventMetadataForEgress(ev)
+		if ev.Content != nil && ev.Content.SignalDetail != "" {
+			if k := signalDetailKeyFor(ev.EventType); k != "" {
+				m[k] = capBody(ev.Content.SignalDetail)
+			}
+		}
 	}
 	if len(m) == 0 {
 		return nil
@@ -663,14 +713,6 @@ func buildSignalArgs(ev DevEvent) json.RawMessage {
 		return nil
 	}
 	return b
-}
-
-func copyMetaKeys(dst, src map[string]any, keys ...string) {
-	for _, k := range keys {
-		if v, ok := src[k]; ok {
-			dst[k] = v
-		}
-	}
 }
 
 // stripContent the caller's event is never mutated.

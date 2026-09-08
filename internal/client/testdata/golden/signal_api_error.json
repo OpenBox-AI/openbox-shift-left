@@ -6,6 +6,10 @@
   "run_id": "sess-golden-0001",
   "workflow_type": "developer-session",
   "signal_name": "api_error",
+  "signal_args": {
+    "error_type": "rate_limit",
+    "provider": "claude-code"
+  },
   "timestamp": "2026-07-31T09:00:00Z",
   "metadata": {
     "error_type": "rate_limit",

@@ -64,18 +64,15 @@ func TestEveryContentKeyIsGated(t *testing.T) {
 	}
 }
 
-// TestNoSignalCarriesSignalArgs is a governance test, not a shape test: a
-// SignalReceived with non-empty signal_args re-anchors the session goal in
-// core. 24 of 27 signal classes must carry none — only PromptSubmitted,
-// CommitCreated and Deploy populate buildSignalArgs by design. Each case
-// builds a payload with Content and Metadata populated, so a case that
-// passes only because nothing was ever set proves nothing.
-func TestNoSignalCarriesSignalArgs(t *testing.T) {
-	exempt := map[EventType]bool{
-		EventPromptSubmitted: true,
-		EventCommitCreated:   true,
-		EventDeploy:          true,
-	}
+// TestEverySignalProjectsItsPayload is a governance test, not a shape test:
+// signal_args is the only field a policy engine reads on a SignalReceived, so a
+// class that carries none is unenforceable. 26 of 27 project their metadata
+// there; prompt_submitted is the one exception, because its signal_args IS the
+// goal and its shape is a shipped contract (see TestSignalArgs_Prompt_Verbatim).
+// Each case builds a payload with Content and Metadata populated, so a case
+// that passes only because nothing was ever set proves nothing.
+func TestEverySignalProjectsItsPayload(t *testing.T) {
+	exempt := map[EventType]bool{EventPromptSubmitted: true}
 	checked := 0
 	for _, et := range AllEventTypes {
 		wire, _, err := wireTypeFor(et)
@@ -96,12 +93,57 @@ func TestNoSignalCarriesSignalArgs(t *testing.T) {
 				"deploy_id": "d", "environment": "prod", "deploy_did": "did:aip:y",
 			},
 		}
-		raw := decodeRaw(t, ev)
-		if v, present := raw["signal_args"]; present {
-			t.Errorf("%s: signal_args present on the wire: %v", et, v)
+		args := signalArgs(t, ev)
+		if args == nil {
+			t.Errorf("%s: signal_args absent on the wire; no policy engine can match this class", et)
+			continue
+		}
+		if args["commit_sha"] != "abc" || args["repo"] != "r" || args["branch"] != "main" {
+			t.Errorf("%s: signal_args did not carry the structural metadata: %v", et, args)
+		}
+		// Content.Prompt is prompt_submitted's carrier alone; no other class may
+		// pick it up, or core's stringifySignalArgs reads it as a goal.
+		if _, leaked := args["prompt"]; leaked {
+			t.Errorf("%s: signal_args carries a `prompt` key; core reads that as goal text: %v", et, args)
 		}
 	}
-	if checked != 24 {
-		t.Errorf("checked %d non-exempt signal classes, want 24 (27 signal classes minus the 3 exempt)", checked)
+	if checked != 26 {
+		t.Errorf("checked %d non-exempt signal classes, want 26 (27 signal classes minus prompt_submitted)", checked)
+	}
+}
+
+// TestEveryContentKeyIsGatedInSignalArgs is TestEveryContentKeyIsGated's twin
+// for the second destination. Once signal_args carries content, INV-2's
+// completeness rule has two surfaces to hold on, and a key gated in one but not
+// the other is a gate with a hole in it.
+func TestEveryContentKeyIsGatedInSignalArgs(t *testing.T) {
+	const canary = "CONTENT-KEY-CANARY"
+	checked := 0
+	for _, et := range AllEventTypes {
+		k := signalDetailKeyFor(et)
+		if k == "" {
+			continue
+		}
+		if wire, _, err := wireTypeFor(et); err != nil || wire != wireSignalReceived {
+			continue
+		}
+		checked++
+		ev := DevEvent{
+			EventID: "ev-gate-" + string(et), EventType: et, SessionID: "s", DeveloperDID: "did:aip:x",
+			Timestamp: "2026-09-07T00:00:00Z", Tool: Tool{Name: "claude-code", Kind: ToolShell},
+			Content:  &Content{SignalDetail: canary},
+			Metadata: map[string]any{"tool_name": "Bash"},
+		}
+		if args := signalArgs(t, ev); args[k] != canary {
+			t.Errorf("%s: signal_args[%q] = %v with capture on, want the free text", et, k, args[k])
+		}
+		if args := signalArgs(t, stripContent(ev)); args != nil {
+			if v, present := args[k]; present {
+				t.Errorf("%s: signal_args[%q] = %v survived the content gate", et, k, v)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no signal class had a signalDetailKeyFor key; the test would pass vacuously")
 	}
 }

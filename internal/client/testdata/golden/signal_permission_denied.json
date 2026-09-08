@@ -6,6 +6,10 @@
   "run_id": "sess-golden-0001",
   "workflow_type": "developer-session",
   "signal_name": "permission_denied",
+  "signal_args": {
+    "provider": "claude-code",
+    "tool_use_id": "toolu_denied01"
+  },
   "timestamp": "2026-07-31T09:00:00Z",
   "metadata": {
     "event_id": "ev-18",

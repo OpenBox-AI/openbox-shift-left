@@ -360,11 +360,19 @@ func TestEnforcementConformance(t *testing.T) {
 				t.Errorf("missing structural detail %s: %s", want, joined)
 			}
 		}
-		for _, b := range bodies {
-			for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
+		// Inverted at v1.9: signal_args is the only field OPA and Guardrails read
+		// on a signal, so its ABSENCE is now the defect. The free-text check above
+		// still holds — the projection carries the structural keys through the
+		// same content gate, so a gated reason reaches neither destination.
+		for _, name := range []string{"subagent_started", "permission_denied", "api_error"} {
+			var carried bool
+			for _, b := range bodies {
 				if strings.Contains(b, `"signal_name":"`+name+`"`) && strings.Contains(b, `"signal_args"`) {
-					t.Errorf("%s carries signal_args; core would overwrite the alignment goal with it: %s", name, b)
+					carried = true
 				}
+			}
+			if !carried {
+				t.Errorf("%s carries no signal_args; no policy engine can match it: %s", name, joined)
 			}
 		}
 	})

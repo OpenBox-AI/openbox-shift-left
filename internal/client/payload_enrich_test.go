@@ -178,7 +178,16 @@ func TestSignalArgs_Prompt_ContentGated(t *testing.T) {
 	}
 }
 
-func TestSignalArgs_Commit_LineageOnly(t *testing.T) {
+// TestSignalArgs_Commit_RidesTheUniformProjection replaces v1.8's
+// lineage-allowlist case. commit_created and deploy used to name their keys in
+// a hand-written list; they now ride the same projection as the other 25,
+// because a deploy's lineage is exactly what a deploy policy matches on and an
+// allowlist drifts on the first key a producer adds.
+//
+// The commit message is content, so it rides only when capture is on — that is
+// the gate doing its job, not a leak. With capture off it must be gone from
+// BOTH destinations.
+func TestSignalArgs_Commit_RidesTheUniformProjection(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventCommitCreated, SessionID: "s", DeveloperDID: "did:aip:x",
 		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "git", Kind: ToolShell},
@@ -188,8 +197,61 @@ func TestSignalArgs_Commit_LineageOnly(t *testing.T) {
 	if args["commit_sha"] != "abc123" || args["repo"] != "acme/app" || args["branch"] != "main" {
 		t.Fatalf("commit signal_args should carry lineage: %v", args)
 	}
-	if _, leaked := args["message"]; leaked {
-		t.Fatalf("INV-2: commit message content leaked into signal_args: %v", args)
+	if args["message"] != "SECRET commit message body" {
+		t.Fatalf("with capture on the projection is uniform; message should ride: %v", args)
+	}
+
+	off := signalArgs(t, stripContent(ev))
+	if _, leaked := off["message"]; leaked {
+		t.Fatalf("INV-2: commit message content survived the gate in signal_args: %v", off)
+	}
+	if off["commit_sha"] != "abc123" {
+		t.Fatalf("the gate took the structural lineage with it: %v", off)
+	}
+}
+
+// TestSignalArgs_DeployLineageProjects is the one live producer of a lineage
+// signal (internal/actions/openbox-git-action/deploy.go). commit_created has no
+// producer at all, so this is the case that actually ships.
+func TestSignalArgs_DeployLineageProjects(t *testing.T) {
+	ev := DevEvent{
+		EventID: "e1", EventType: EventDeploy, SessionID: "s", DeveloperDID: "did:aip:x",
+		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "git", Kind: ToolShell},
+		Metadata: map[string]any{
+			"deploy_id": "dpl-1", "commit_sha": "abc123", "repo": "acme/app",
+			"environment": "prod", "deploy_did": "did:aip:y",
+		},
+	}
+	args := signalArgs(t, ev)
+	for k, want := range map[string]string{
+		"deploy_id": "dpl-1", "commit_sha": "abc123", "repo": "acme/app",
+		"environment": "prod", "deploy_did": "did:aip:y",
+	} {
+		if args[k] != want {
+			t.Errorf("deploy signal_args[%q] = %v, want %q", k, args[k], want)
+		}
+	}
+}
+
+// TestSignalArgs_Prompt_Verbatim is R2: prompt_submitted's signal_args is a
+// shipped goal-creating contract and the projection must not touch it. Core's
+// stringifySignalArgs tries ["prompt","message","input","text","content"] in
+// order, so a second key added here could silently become the goal text.
+func TestSignalArgs_Prompt_Verbatim(t *testing.T) {
+	ev := DevEvent{
+		EventID: "e1", EventType: EventPromptSubmitted, SessionID: "s", DeveloperDID: "did:aip:x",
+		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "claude-code", Kind: ToolShell},
+		Content: &Content{Prompt: "refactor the spool"},
+		Metadata: map[string]any{
+			"prompt_id": "p-1", "commit_sha": "abc123", "message": "SECRET",
+		},
+	}
+	args := signalArgs(t, ev)
+	if len(args) != 1 {
+		t.Fatalf("prompt_submitted signal_args must carry exactly the prompt key, got %v", args)
+	}
+	if args["prompt"] != "refactor the spool" {
+		t.Fatalf("prompt_submitted signal_args = %v, want the prompt verbatim", args)
 	}
 }
 

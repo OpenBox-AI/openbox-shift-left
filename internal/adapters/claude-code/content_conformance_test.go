@@ -242,10 +242,15 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 	})
 
-	t.Run("C38 signal free text egresses as metadata, never as signal_args", func(t *testing.T) {
-		// Routing a denial reason there would silently replace the developer's
-		// prompt as the thing every later turn is scored against; the failure would
-		// look like drift, not like a bug.
+	t.Run("C38 signal free text egresses as both metadata and signal_args, gated", func(t *testing.T) {
+		// Inverted at v1.9. It used to assert signal_args stayed empty, because
+		// core read any non-empty signal_args as a new user goal and a denial
+		// reason landing there would silently replace the developer's prompt as
+		// the thing every later turn is scored against. Core's source-and-name
+		// gate now stops that, and signal_args is the only field OPA and
+		// Guardrails read on a signal — so the free text must reach BOTH
+		// destinations, under the same content gate. The capture-OFF half below
+		// is unchanged and is the INV-2 assertion.
 		for _, tc := range []struct {
 			name, hook, session, payload, metaKey, sentinel string
 		}{
@@ -266,27 +271,30 @@ func TestContentCaptureConformance(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				on := observeThenFlush(t, tc.session, "1", tc.hook, tc.payload)
 
-				var found bool
+				var inMeta, inArgs bool
 				for _, b := range on {
 					var p struct {
-						SignalName string          `json:"signal_name"`
-						SignalArgs json.RawMessage `json:"signal_args"`
-						Metadata   map[string]any  `json:"metadata"`
+						SignalName string         `json:"signal_name"`
+						SignalArgs map[string]any `json:"signal_args"`
+						Metadata   map[string]any `json:"metadata"`
 					}
 					if err := json.Unmarshal([]byte(b), &p); err != nil || p.SignalName == "" {
 						continue
 					}
-					if len(p.SignalArgs) > 0 {
-						t.Errorf("signal %q carries signal_args %s; core would overwrite the "+
-							"alignment goal with it", p.SignalName, p.SignalArgs)
-					}
 					if v, ok := p.Metadata[tc.metaKey].(string); ok && strings.Contains(v, tc.sentinel) {
-						found = true
+						inMeta = true
+					}
+					if v, ok := p.SignalArgs[tc.metaKey].(string); ok && strings.Contains(v, tc.sentinel) {
+						inArgs = true
 					}
 				}
-				if !found {
+				if !inMeta {
 					t.Errorf("metadata.%s did not carry the free text with capture on; bodies=%v",
 						tc.metaKey, on)
+				}
+				if !inArgs {
+					t.Errorf("signal_args.%s did not carry the free text with capture on, so no "+
+						"policy engine can match it; bodies=%v", tc.metaKey, on)
 				}
 
 				off := observeThenFlush(t, tc.session+"-off", "0", tc.hook,
@@ -595,10 +603,19 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 	})
 
-	// C52: no new class carries signal_args or activity_id, asserted on the
-	// actual bytes that reach /evaluate (CLAUDE.md: asserting a struct is not
-	// asserting the wire) -- all 21 v1.8 classes, driven through RunHook.
-	t.Run("C52 no new class carries signal_args or activity_id", func(t *testing.T) {
+	// C52: every new class carries signal_args and still carries NO activity_id,
+	// asserted on the actual bytes that reach /evaluate (CLAUDE.md: asserting a
+	// struct is not asserting the wire) -- all 21 v1.8 classes, driven through
+	// RunHook.
+	//
+	// Half of this case inverted at v1.9 and half did not, and the split is the
+	// point. signal_args is now required: it is the only field a policy engine
+	// reads on a signal, and a class carrying none is unenforceable. activity_id
+	// is still forbidden: a signal that acquired one would break "every
+	// activity_id carries exactly two rows", which is what makes SignalReceived
+	// legitimately unpaired. The alternative of putting the payload in
+	// activity_input was rejected for exactly that reason.
+	t.Run("C52 every new class carries signal_args and no activity_id", func(t *testing.T) {
 		for _, sc := range signalCases() {
 			t.Run(sc.name, func(t *testing.T) {
 				session := "cc-c52-" + sc.name
@@ -611,19 +628,28 @@ func TestContentCaptureConformance(t *testing.T) {
 				var found bool
 				for _, b := range bodies {
 					var p struct {
-						SignalName string          `json:"signal_name"`
-						SignalArgs json.RawMessage `json:"signal_args"`
-						ActivityID string          `json:"activity_id"`
+						SignalName string         `json:"signal_name"`
+						SignalArgs map[string]any `json:"signal_args"`
+						ActivityID string         `json:"activity_id"`
+						Metadata   map[string]any `json:"metadata"`
 					}
 					if err := json.Unmarshal([]byte(b), &p); err != nil || p.SignalName == "" {
 						continue
 					}
 					found = true
-					if len(p.SignalArgs) > 0 {
-						t.Errorf("signal_args present: %s", p.SignalArgs)
+					if len(p.SignalArgs) == 0 {
+						t.Errorf("signal_args absent: %s is invisible to every policy engine", p.SignalName)
+					}
+					// Projected, not moved: metadata keeps every projected key,
+					// because the SQL forensics path reads metadata.
+					for k := range p.SignalArgs {
+						if _, kept := p.Metadata[k]; !kept {
+							t.Errorf("signal_args[%q] is not in metadata; the projection moved a key "+
+								"instead of copying it", k)
+						}
 					}
 					if p.ActivityID != "" {
-						t.Errorf("activity_id present: %q", p.ActivityID)
+						t.Errorf("activity_id present: %q; a signal must stay unpaired", p.ActivityID)
 					}
 				}
 				if !found {

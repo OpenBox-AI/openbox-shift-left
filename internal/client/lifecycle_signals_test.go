@@ -38,19 +38,36 @@ func TestNewSignalsMapToStockWireTypes(t *testing.T) {
 	}
 }
 
-// TestNewSignalsCarryNoSignalArgs tHE load-bearing case for these three
-// events.
-func TestNewSignalsCarryNoSignalArgs(t *testing.T) {
+// TestNewSignalsProjectSignalArgs tHE load-bearing case for these three
+// events, inverted from v1.8. Their structural detail must reach signal_args,
+// which is the only field OPA and Guardrails read on a SignalReceived, AND stay
+// in metadata, which the SQL forensics path keys off. The projection duplicates;
+// it does not move.
+func TestNewSignalsProjectSignalArgs(t *testing.T) {
 	for _, et := range []EventType{EventSubagentStarted, EventPermissionDenied, EventAPIError} {
 		m := decodeRaw(t, signalEvent(et))
-		if v, present := m["signal_args"]; present {
-			t.Errorf("%s carries signal_args = %v; core would read that as a NEW USER GOAL "+
-				"and overwrite the alignment session's goal with it (age.go:112-137). "+
-				"Structural detail belongs in metadata", et, v)
+		args, _ := m["signal_args"].(map[string]any)
+		if len(args) == 0 {
+			t.Errorf("%s carries no signal_args; the class is invisible to every policy engine", et)
+			continue
 		}
 		meta, _ := m["metadata"].(map[string]any)
 		if len(meta) == 0 {
 			t.Errorf("%s carries no metadata either; the event reports nothing", et)
+			continue
+		}
+		// Projected, not moved: every key the projection emitted is still in
+		// metadata, where docs/mapping.md's correlation keys live.
+		for k := range args {
+			if _, kept := meta[k]; !kept {
+				t.Errorf("%s: signal_args[%q] is not in metadata; the projection moved a key "+
+					"instead of copying it, and the forensics path reads metadata", et, k)
+			}
+		}
+		for _, k := range []string{"agent_id", "tool_use_id", "error_type"} {
+			if _, ok := args[k]; !ok {
+				t.Errorf("%s: signal_args is missing structural key %q: %v", et, k, args)
+			}
 		}
 	}
 }
