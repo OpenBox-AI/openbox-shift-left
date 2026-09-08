@@ -703,13 +703,19 @@ func durationMs(ev DevEvent) *float64 {
 // correlation keys and the SQL forensics path read metadata. The cost is a few
 // hundred duplicated bytes on ~140 rows a session, and it is accepted.
 //
-// ORDERING HAZARD, recorded at the site that causes it: a core without the
-// source-and-name goal gate reads any non-empty signal_args as a new user goal,
-// via stringifySignalArgs' ["prompt","message","input","text","content"]
-// preference order. No mapper emits one of those five names structurally today
-// (TestSignalArgsProjectionDoesNotUseCoreGoalKeys pins that), but `message` is a
-// legitimate content key on a commit — so a build carrying this projection must
-// not reach a developer before that gate is running in prod.
+// ORDERING HAZARD, recorded at the site that causes it. A core without the
+// source-and-name goal gate reads ANY non-empty signal_args as a new user goal.
+// Be precise about what that does and does not depend on: stringifySignalArgs
+// prefers ["prompt","message","input","text","content"] and then falls back to
+// the RAW JSON of the whole object, so on an ungated core every projected signal
+// overwrites the goal whatever its keys are called. The five names only decide
+// whether the resulting goal reads as prose or as `{"batch_size":1,...}`.
+//
+// They are still worth pinning, because a prose-shaped wrong goal is the harder
+// one to notice — TestSignalArgsProjectionDoesNotUseCoreGoalKeys and its two
+// adapter-side twins do that. But the GATE is what makes this safe, not the
+// naming: a build carrying this projection must not reach a developer before
+// that gate is running in prod.
 func buildSignalArgs(ev DevEvent) json.RawMessage {
 	var m map[string]any
 	if ev.EventType == EventPromptSubmitted {
@@ -790,17 +796,20 @@ const modelCallContentKey = "content"
 // modelCallReplyKey is what makes an assistant turn judgeable at all.
 //
 // Core's replyTextFromActivityOutput (openbox-core
-// internal/services/goal_alignment.go:449) reads this exact top-level string
-// off activity_output, and judgeModelTurn (:384) keys the whole branch on its
-// PRESENCE with deliberately NO fallback to `content` (:379-383): old producers
-// keep sending SSE frames there indefinitely, and a fallback would feed the
-// judge exactly what the branch exists to remove. So the key must be distinct,
-// and it must be absent rather than empty on a lane that has only SSE.
+// internal/services/goal_alignment.go) reads this exact top-level string off
+// activity_output, and its model-turn judge keys the whole branch on the key's
+// PRESENCE with deliberately NO fallback to `content`: old producers keep
+// sending SSE frames there indefinitely, and a fallback would feed the judge
+// exactly what the branch exists to remove. So the key must be distinct, and it
+// must be absent rather than empty on a lane that has only SSE.
+//
+// Symbols, not line numbers, on purpose: the core side moves independently of
+// this repo, and a citation pointing at the wrong line is worse than none.
 //
 // Which is why it is set inside turnActivityOutput's Content.Output arm alone.
 // That arm is the hook lane — Content.Output for a turn is set at exactly one
-// site, internal/adapters/claude-code/mapper.go:526, from the Stop hook's
-// LastAssistantMessage — and the presence test means every row carrying this
+// site — internal/adapters/claude-code/mapper.go's MapTurn, from the Stop
+// hook's LastAssistantMessage — and the presence test means every row carrying this
 // key costs a judge call. A live session ran 137 span-sourced model calls
 // against 2 hook-sourced turns; sourcing this from Span.ResponseBody as well
 // would multiply the cost by roughly 70 on a judge fleet doing ~7 judgements a

@@ -183,8 +183,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Metadata = subagentMetadata(e)
 
 	case HookPermissionDenied:
-		// It must never reach signal_args; see Content.SignalDetail for what core
-		// would do with it.
+		// The provider's free-text `reason` rides Content.SignalDetail, which the
+		// client keys as metadata.denial_reason -- and, since v1.9, projects into
+		// signal_args too, where a policy can actually match it. It used to be
+		// barred from signal_args entirely; core's goal gate is what changed that,
+		// not a change of mind. See conformance C38.
 		ev.EventType = client.EventPermissionDenied
 		ev.Tool, ev.Span = mapTool(e, "completed")
 		ev.Metadata = toolMetadata(e)

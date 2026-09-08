@@ -405,14 +405,25 @@ prompt, and a HALT ends the session.
 
 A lifecycle signal's payload — a config change's file path, a notification's
 text, a task's subject, an MCP elicitation's submitted form values — used to ride
-`metadata` only. `metadata` is stored and queryable in SQL, and **no UI renders
-it**. As of v1.9 the same keys also ride `signal_args`, and **the Verify tab
-renders `signal_args`**. Nothing new leaves your machine that did not leave it
-before, and the content gate is unchanged — but what was effectively
-forensics-only is now on a screen, in front of anyone who can read the session.
+`metadata` only. As of v1.9 the same keys also ride `signal_args`.
 
-If your organization decided `content_capture` on the old understanding, this is
-the sentence that changes it.
+**What that changes is reach, not first exposure.** The Verify tab already
+renders `metadata` (openbox-fe `workflow-tree-view.tsx` renders a Metadata JSON
+block per node; the detail modal's overview tab renders "Event Metadata" for
+every event type), so these values were already on a screen. `signal_args` is
+rendered in *more* places: the session-replay event stream, event details, the
+`signal_received` overview, the monitor's issue detail, guardrail violation
+records, and compliance source evidence. So a value that appeared in one JSON
+block behind a node expansion now also appears as first-class text in several
+views, and in stored violation and evidence records.
+
+Two of the nine keys **are** new egress: `notification_title` and
+`task_description` were decoded but never sent before v1.9. The other seven
+already left the machine under `content_capture`; what changed for them is where
+they are shown.
+
+If your organization decided `content_capture` on the understanding that signal
+payload was effectively forensics-only, that is the understanding this changes.
 
 **Why it changed.** `metadata` has no reader in any governance engine: OPA
 matches `signal_name` + `signal_args`, and Guardrails read `signal_args` alone.
@@ -444,6 +455,24 @@ path is deliberately the *same* key a file tool's `activity_input` uses, so
 existing path policies fire on both with no rule authoring; the accepted cost is
 that a `Write` and the `file_changed` signal it triggers both carry the path, and
 naive counting double-counts one edit.
+
+Some keys classified as structural are free-form in practice and are **not**
+gated or redacted, because they were never treated as content: `teammate_name`,
+`team_name`, `command_name`, `globs`, and — the one worth naming — an MCP
+elicitation's `url`. In URL mode that is a server-supplied URL, and a URL can
+carry query parameters (an OAuth `state` or `code`, say). It is capped, never
+redacted, and it ships with `content_capture` off like every other structural
+key. If that is not acceptable for your MCP servers, the control is not to be
+found here — it is which servers you install.
+
+A deploy is a signal too, so the git action's whole attribution record is
+projected: status, reason, the derived note, scope counts, and the per-session
+claim objects, which carry attestation material. None of it is content and none
+of it is gated — it never was, it simply rode `metadata` before. The consequence
+worth knowing is downstream: core's guardrails extract every string leaf under
+the policy input, so whatever guards your org has configured now scan a deploy
+row's attestation blobs. A secrets or PII guard is likely to have opinions about
+base64.
 
 **What did not change.** Redaction still runs at the mapper, before a body is
 attached — that ordering is the only in-transit control there is, and the

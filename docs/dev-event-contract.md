@@ -143,8 +143,9 @@ What INV-2 still guarantees:
   structural property, which is why the ordering and the gate are asserted on
   the outbound bytes (conformance C18, C26, C32–C38, C40–C49 and C51–C56) rather
   than inferred from the absence of a field. C50 is deliberately unused, retired
-  when `UserPromptExpansion` became structural-only; C39 belongs to the
-  credential-coverage suite, not this range.
+  when `UserPromptExpansion` became structural-only, and C39 was never assigned a
+  case at all — the gaps are left rather than renumbered, so a reader does not
+  "fix" the sequence and lose that history.
 - The conformance harness rejects any event carrying content while
   content-capture is disabled.
 

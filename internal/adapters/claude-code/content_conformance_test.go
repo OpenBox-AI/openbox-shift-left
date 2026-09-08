@@ -799,6 +799,18 @@ func TestContentCaptureConformance(t *testing.T) {
 					if p.ActivityID != "" {
 						t.Errorf("activity_id present: %q; a signal must stay unpaired", p.ActivityID)
 					}
+					// On an UNGATED core, stringifySignalArgs prefers these five
+					// key names and falls back to raw JSON otherwise -- so any
+					// projected signal overwrites the goal there, but one of
+					// these makes the wrong goal read as prose, which is the
+					// version nobody notices. Asserted on the wire, where the
+					// mapper-level twin cannot see the projection.
+					for _, gk := range coreGoalKeys {
+						if v, present := p.SignalArgs[gk]; present {
+							t.Errorf("signal_args carries %q = %v; rename it to something structural",
+								gk, v)
+						}
+					}
 				}
 				if !found {
 					t.Fatalf("no SignalReceived event reached /evaluate; bodies=%v", bodies)
