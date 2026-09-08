@@ -1,6 +1,10 @@
 package client
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 // This file is phase 10's cross-cutting signal-vocabulary suite: it iterates
 // the FULL AllEventTypes (33, all 27 signal classes included — the 6
@@ -61,6 +65,51 @@ func TestEveryContentKeyIsGated(t *testing.T) {
 	}
 	if len(keys) == 0 {
 		t.Fatal("signalDetailKeyFor returned no keys at all across AllEventTypes; the test would pass vacuously")
+	}
+}
+
+// TestMetadataNativeContentKeysAreGated covers the content keys that live in
+// metadata natively rather than arriving through signalDetailKeyFor.
+//
+// TestEveryContentKeyIsGated iterates signalDetailKeyFor, so it cannot see
+// these: Content.SignalDetail is a single string and each of their classes
+// already claims it for a different field, which is why they ride metadata at
+// all. contentMetadataKeys is their only gate, and a key missing from it routes
+// straight around content_capture.
+func TestMetadataNativeContentKeysAreGated(t *testing.T) {
+	for _, k := range []string{
+		"notification_title", // Notification.title, alongside notification_message
+		"task_description",   // Task{Created,Completed}.task_description, alongside task_subject
+	} {
+		if !contentMetadataKeys[k] {
+			t.Errorf("%q is not in contentMetadataKeys; an adapter writing it egresses free "+
+				"text with content capture off", k)
+		}
+	}
+}
+
+// TestContentMetadataKeysAreCappedOnEgress. Content that rides Content.* is
+// capped where it is attached; the same text arriving through metadata had no
+// bound at all until eventMetadataForEgress applied one. Bounds have owners,
+// and capBody owns content egress — so it applies wherever content egresses,
+// not only on the carrier it was first written for.
+func TestContentMetadataKeysAreCappedOnEgress(t *testing.T) {
+	// Multi-byte, so a byte-cap and a rune-cap give visibly different answers.
+	long := strings.Repeat("日", maxBodySize+10)
+	ev := DevEvent{
+		EventID: "ev-cap", EventType: EventConfigChange, SessionID: "s", DeveloperDID: "did:aip:x",
+		Timestamp: "2026-09-08T00:00:00Z", Tool: Tool{Name: "claude-code", Kind: ToolShell},
+		Metadata: map[string]any{"command": long, "file_path": "/tmp/.env"},
+	}
+	got, _ := eventMetadataForEgress(ev)["command"].(string)
+	if n := utf8.RuneCountInString(got); n != maxBodySize {
+		t.Errorf("a content metadata key egressed at %d runes, want the %d-rune content cap", n, maxBodySize)
+	}
+	if !utf8.ValidString(got) {
+		t.Error("the cap cut a rune in half")
+	}
+	if p, _ := eventMetadataForEgress(ev)["file_path"].(string); p != "/tmp/.env" {
+		t.Errorf("a structural key was capped too: %q", p)
 	}
 }
 

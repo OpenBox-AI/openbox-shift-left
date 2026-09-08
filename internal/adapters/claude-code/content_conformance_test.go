@@ -354,6 +354,72 @@ func TestContentCaptureConformance(t *testing.T) {
 		}
 	})
 
+	// C56: a v1.9 metadata-native content key sits BESIDE its signal_detail
+	// sibling, and both reach signal_args.
+	//
+	// The two live on one class each and could plausibly have been implemented
+	// by reusing content.signal_detail, which holds one string — so the failure
+	// this rules out is the new key silently replacing the old one. Both halves
+	// asserted on the outbound bytes; a mapper-level check would not see the
+	// projection.
+	t.Run("C56 a v1.9 content key sits beside its sibling and both reach signal_args", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, hook, signalName, session, payload string
+			pairs                                    map[string]string // metadata key -> expected text
+		}{
+			{
+				name: "Notification", hook: "Notification", signalName: "notification",
+				session: "cc-c56-notif",
+				payload: `{"hook_event_name":"Notification","session_id":"cc-c56-notif","cwd":"/tmp",` +
+					`"notification_type":"idle_prompt","message":"C56-MESSAGE","title":"C56-TITLE"}`,
+				pairs: map[string]string{
+					"notification_message": "C56-MESSAGE",
+					"notification_title":   "C56-TITLE",
+				},
+			},
+			{
+				name: "TaskCreated", hook: "TaskCreated", signalName: "task_created",
+				session: "cc-c56-task",
+				payload: `{"hook_event_name":"TaskCreated","session_id":"cc-c56-task","cwd":"/tmp",` +
+					`"task_id":"tid1","task_subject":"C56-SUBJECT","task_description":"C56-DESCRIPTION"}`,
+				pairs: map[string]string{
+					"task_subject":     "C56-SUBJECT",
+					"task_description": "C56-DESCRIPTION",
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				bodies := observeThenFlush(t, tc.session, "1", tc.hook, tc.payload)
+
+				var seen bool
+				for _, b := range bodies {
+					var p struct {
+						SignalName string         `json:"signal_name"`
+						Metadata   map[string]any `json:"metadata"`
+						SignalArgs map[string]any `json:"signal_args"`
+					}
+					if err := json.Unmarshal([]byte(b), &p); err != nil || p.SignalName != tc.signalName {
+						continue
+					}
+					seen = true
+					for k, want := range tc.pairs {
+						if got, _ := p.Metadata[k].(string); got != want {
+							t.Errorf("metadata[%q] = %q, want %q; the two content fields did not coexist",
+								k, got, want)
+						}
+						if got, _ := p.SignalArgs[k].(string); got != want {
+							t.Errorf("signal_args[%q] = %q, want %q; a policy cannot match this field",
+								k, got, want)
+						}
+					}
+				}
+				if !seen {
+					t.Fatalf("no %s signal reached /evaluate; bodies=%v", tc.signalName, bodies)
+				}
+			})
+		}
+	})
+
 	// C53: the hook lane's turn carries reply_text, and only the hook lane does.
 	//
 	// Core judges an assistant turn from activity_output.reply_text and refuses
@@ -529,6 +595,37 @@ func TestContentCaptureConformance(t *testing.T) {
 	if len(newContentKeyCases) != 7 {
 		t.Fatalf("newContentKeyCases has %d entries, want 7 (C43-C49)", len(newContentKeyCases))
 	}
+
+	// C54-C55: the two v1.9 metadata-native content keys. Same four properties
+	// as C43-C49, so they ride the same driver; kept in their own table so the
+	// count above stays a statement about v1.8 rather than a running total.
+	//
+	// What makes them a different KIND of key: each shares its class with a
+	// signalDetailKeyFor sibling that already owns content.signal_detail, so
+	// these have no signalDetailKeyFor entry at all and contentMetadataKeys is
+	// their only gate.
+	v19ContentKeyCases := []newContentKeyCase{
+		{
+			label: "C54 notification_title", hook: "Notification", signalName: "notification",
+			metaKey: "notification_title",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"Notification","session_id":"` + session + `","cwd":"/tmp",` +
+					`"notification_type":"idle_prompt","message":"please respond","title":` + jsonQuote(text) + `}`
+			},
+		},
+		{
+			label: "C55 task_description", hook: "TaskCreated", signalName: "task_created",
+			metaKey: "task_description",
+			buildPayload: func(session, text string) string {
+				return `{"hook_event_name":"TaskCreated","session_id":"` + session + `","cwd":"/tmp",` +
+					`"task_id":"tid1","task_subject":"investigate the flake","task_description":` + jsonQuote(text) + `}`
+			},
+		},
+	}
+	if len(v19ContentKeyCases) != 2 {
+		t.Fatalf("v19ContentKeyCases has %d entries, want 2 (C54-C55)", len(v19ContentKeyCases))
+	}
+	newContentKeyCases = append(newContentKeyCases, v19ContentKeyCases...)
 
 	signalMetadata := func(t *testing.T, bodies []string, signalName string) (map[string]any, bool) {
 		t.Helper()

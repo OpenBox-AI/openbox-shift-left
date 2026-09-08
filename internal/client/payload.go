@@ -415,6 +415,13 @@ var contentMetadataKeys = map[string]bool{
 	"compact_summary":      true,
 	"elicitation_message":  true,
 	"elicitation_response": true,
+
+	// v1.9: metadata-native content, with no signalDetailKeyFor entry. Their
+	// classes already spend Content.SignalDetail on the sibling key above
+	// (notification_message, task_subject), and that carrier holds one string —
+	// so these ride metadata, and this list is their only gate.
+	"notification_title": true, // Notification.title
+	"task_description":   true, // Task{Created,Completed}.task_description
 }
 
 // observesAResponse is which half of an activity may assert an HTTP status.
@@ -486,8 +493,18 @@ func signalDetailKeyFor(t EventType) string {
 func eventMetadataForEgress(ev DevEvent) map[string]any {
 	m := make(map[string]any, len(ev.Metadata)+4)
 	for k, v := range ev.Metadata {
-		if ev.contentStripped && contentMetadataKeys[k] {
-			continue // INV-2: gated content never rides the metadata blob either
+		if contentMetadataKeys[k] {
+			if ev.contentStripped {
+				continue // INV-2: gated content never rides the metadata blob either
+			}
+			// Content gets the content bound wherever it rides. Text on
+			// Content.* is capped by capBody at the point it is attached; the
+			// same text arriving through metadata had none, so an unbounded
+			// free-text key was an unbounded body on the wire. Bounds have
+			// owners, and capBody owns content egress -- not one carrier of it.
+			if s, ok := v.(string); ok {
+				v = capBody(s)
+			}
 		}
 		if k == "http_status" && !observesAResponse(ev.EventType) {
 			continue // see observesAResponse; the key is barred by the ROW's meaning

@@ -232,16 +232,18 @@ type HookEvent struct {
 	// carries spans[].
 	ToolCalls json.RawMessage `json:"tool_calls"`
 
-	// Notification. Message is shared with Elicitation; title is deliberately
-	// unbound.
+	// Notification. Message is shared with Elicitation. Title is bound as of
+	// v1.9, as gated content in metadata.notification_title -- Message already
+	// spends this class's content.signal_detail, and that carrier is one string.
 	Message          string `json:"message"`
 	Title            string `json:"title"`
 	NotificationType string `json:"notification_type"`
 
 	// TaskCreated / TaskCompleted / TeammateIdle. Two signals, never an
-	// Activity pair. task_description is deliberately unbound. teammate_name
-	// and team_name are free-form and are capped by capStr in the mapper (R2),
-	// not here; team_name is deprecated.
+	// Activity pair. TaskDescription is bound as of v1.9, as gated content in
+	// metadata.task_description -- TaskSubject already spends this class's
+	// content.signal_detail. teammate_name and team_name are free-form and are
+	// capped by capStr in the mapper (R2), not here; team_name is deprecated.
 	TaskID          string `json:"task_id"`
 	TaskSubject     string `json:"task_subject"`
 	TaskDescription string `json:"task_description"`

@@ -293,28 +293,30 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		m.signalEvent(&ev, client.EventPostToolBatch, meta)
 
 	case HookNotification:
-		// title deliberately unbound.
-		m.signalEvent(&ev, client.EventNotification, compact(map[string]any{
+		notif := compact(map[string]any{
 			"notification_type": enumOr(e.NotificationType, notificationTypes),
-		}))
+		})
+		m.gatedContentMeta(notif, "notification_title", e.Title)
+		m.signalEvent(&ev, client.EventNotification, notif)
 		ev.Content = m.gatedSignalDetail(e.Message)
 
 	case HookTaskCreated, HookTaskCompleted:
 		// Two signals, never an Activity pair: a task can be abandoned or
 		// complete in another session, and core increments `total` on
 		// Started and success/fail only on Completed, so an orphan pair
-		// would depress success rates. task_description deliberately
-		// unbound. R2: teammate_name/team_name are structural, same
-		// capStr treatment as agent_type.
+		// would depress success rates. R2: teammate_name/team_name are
+		// structural, same capStr treatment as agent_type.
 		et := client.EventTaskCreated
 		if hook == HookTaskCompleted {
 			et = client.EventTaskCompleted
 		}
-		m.signalEvent(&ev, et, compact(map[string]any{
+		task := compact(map[string]any{
 			"task_id":       capStr(e.TaskID),
 			"teammate_name": capStr(e.TeammateName),
 			"team_name":     capStr(e.TeamName),
-		}))
+		})
+		m.gatedContentMeta(task, "task_description", e.TaskDescription)
+		m.signalEvent(&ev, et, task)
 		ev.Content = m.gatedSignalDetail(e.TaskSubject)
 
 	case HookTeammateIdle:
@@ -818,6 +820,32 @@ func (m Mapper) gatedToolOutput(text string) *client.Content {
 		return nil
 	}
 	return &client.Content{ToolOutput: out}
+}
+
+// gatedContentMeta writes free text into a signal's metadata under the same two
+// rules gatedSignalDetail applies to Content: capture must be on, and the text
+// is redacted before it is attached, never after.
+//
+// It exists because Content.SignalDetail is ONE string and these classes have
+// already spent it — notification_message on Notification, task_subject on the
+// two Task classes. A second free-text field per class therefore needs another
+// carrier, and metadata is the supported one: INV-2 names content-bearing
+// metadata keys as an expected case with contentMetadataKeys as the backstop.
+// The client caps the value on egress, where the content bound is owned.
+//
+// The backstop is a second line, not the gate. It only fires once an event is
+// content-stripped, so a key written here without the capture check would still
+// egress on a capture-on org that had opted this field out. Both are required.
+//
+// Empty text writes no key at all: an empty string in signal_args is a value a
+// policy can match on, and "" is not a fact anyone asserted.
+func (m Mapper) gatedContentMeta(meta map[string]any, key, text string) {
+	if !m.CaptureContent || text == "" {
+		return
+	}
+	if out := m.redact(text); out != "" {
+		meta[key] = out
+	}
 }
 
 func (m Mapper) gatedSignalDetail(text string) *client.Content {
