@@ -85,6 +85,13 @@ func TestSignalArgsProjectionCoversEveryClass(t *testing.T) {
 // It does not assert those names are absent from the whole payload — `message`
 // is a legitimate metadata key on a commit — only that no signal class emits
 // one structurally, unprompted.
+//
+// This half can only see signalDetailKeyFor's outputs. The larger surface is the
+// adapters' metadata keys, which this package cannot enumerate (they import it,
+// not the reverse), so the guard is a pair: see
+// claude-code's TestNoSignalMetadataKeyIsACoreGoalKey and the git action's
+// TestDeployMetadataCarriesNoCoreGoalKey, which cover every live signal
+// producer. Codex emits no signals today; when it does, it needs its own.
 func TestSignalArgsProjectionDoesNotUseCoreGoalKeys(t *testing.T) {
 	goalKeys := []string{"prompt", "message", "input", "text", "content"}
 

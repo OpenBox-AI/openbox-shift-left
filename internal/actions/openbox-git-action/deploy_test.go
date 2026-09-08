@@ -112,3 +112,32 @@ func TestDeployDID_MatchesContractSample(t *testing.T) {
 func itoaUnix(t time.Time) string {
 	return strconv.FormatInt(t.Unix(), 10)
 }
+
+// TestDeployMetadataCarriesNoCoreGoalKey. `deploy` is a SignalReceived, so
+// since v1.9 its whole metadata map is projected into signal_args. Core's
+// stringifySignalArgs takes the first of prompt/message/input/text/content it
+// finds there and treats the value as the session's goal — so on a core without
+// the source-and-name goal gate, a metadata key with one of those names would
+// silently become the goal every later action is judged against.
+//
+// This is the git-action half of that guard; the Claude Code adapter has its own
+// (TestNoSignalMetadataKeyIsACoreGoalKey), and between them they cover every
+// live signal producer. `attribution_note` deliberately carries free text and is
+// deliberately NOT named `message` — that is the distinction this pins.
+func TestDeployMetadataCarriesNoCoreGoalKey(t *testing.T) {
+	ev := BuildDeployEvent(fixedResolution(), DeployMeta{
+		Repo:         "openbox-ai/openbox-shift-left",
+		Environment:  "production",
+		DeveloperDID: "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+	}, time.Date(2026, 7, 7, 12, 35, 0, 0, time.UTC))
+
+	if len(ev.Metadata) == 0 {
+		t.Fatal("the deploy event carries no metadata; the case would prove nothing")
+	}
+	for _, k := range []string{"prompt", "message", "input", "text", "content"} {
+		if v, present := ev.Metadata[k]; present {
+			t.Errorf("deploy metadata carries %q = %v; projected into signal_args, an ungated "+
+				"core reads it as the session's goal text", k, v)
+		}
+	}
+}
