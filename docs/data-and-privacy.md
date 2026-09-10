@@ -209,6 +209,16 @@ An org can pin the setting so a developer cannot change it, via the managed
 config (`deployments/managed/`). `openbox doctor` always reports the effective
 value and where it came from.
 
+> **`openbox init --provider claude-code` widens what capture can see.** It
+> sets `showThinkingSummaries: true` in your user-scope Claude Code settings
+> (reversed by `openbox uninstall`, which restores whatever was there before;
+> see [Getting started](getting-started.md#4-govern-this-machine)), because
+> Claude Code only sends a non-empty reasoning summary when that key is true --
+> otherwise `activity_output.thinking` is legitimately absent. There is no new
+> gate: a summary that reaches the transcript egresses exactly like the
+> assistant's reply, under this same `content_capture` key, through the same
+> local redactor.
+
 > **Turning content capture off also turns off command-matching enforcement.**
 > This is a real trade-off rather than a footnote, so it is stated here instead of
 > being discovered from an audit log.
@@ -311,6 +321,7 @@ Two consequences worth knowing rather than discovering:
   thinking; it is now true of the reply and, on a relayed call, of the provider's
   raw response too.
 - **`secret_detection: false` with capture on sends replies unredacted**, the
+- **A stored response now says whether it is whole.** `activity_output.openbox_capture` reports `{truncated, original_bytes}` beside the reply, with `truncated: false` sent explicitly rather than omitted, so a reader can tell a complete reply from a cut one instead of trusting every stored body as finished. It carries no part of the response -- a bool and a byte count only -- and is absent exactly when there is no stored body to describe, including under `content_capture: false`.
   same way it does for enforced-call bodies.
 
 ## What an enforced call sends

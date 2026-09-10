@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -124,6 +125,9 @@ func TestActivityInput_EscalationContextIsTruncated(t *testing.T) {
 	if len([]rune(cmd)) != maxBodySize {
 		t.Errorf("activity_input.command = %d runes, want capped to %d", len([]rune(cmd)), maxBodySize)
 	}
+	if got, want := truncated(t, ev), []string{"activity_input.command"}; !slices.Equal(got, want) {
+		t.Errorf("truncated = %v, want %v", got, want)
+	}
 }
 
 // TestSignalArgs_PromptIsTruncated pins the same cap on the other surviving
@@ -138,6 +142,9 @@ func TestSignalArgs_PromptIsTruncated(t *testing.T) {
 	prompt, _ := signalArgs(t, ev)["prompt"].(string)
 	if len([]rune(prompt)) != maxBodySize {
 		t.Errorf("signal_args.prompt = %d runes, want capped to %d", len([]rune(prompt)), maxBodySize)
+	}
+	if got, want := truncated(t, ev), []string{"signal_args.prompt"}; !slices.Equal(got, want) {
+		t.Errorf("truncated = %v, want %v", got, want)
 	}
 }
 

@@ -71,6 +71,12 @@ type Gateway struct {
 
 	capturesBody func(*http.Request) bool
 
+	// attribution reads provider-specific correlation identifiers out of the
+	// RAW request bytes. Injected as a closure because this package stays
+	// provider-neutral: it carries the result, it does not know what the keys
+	// mean. See WithRequestAttribution.
+	attribution func(raw []byte) map[string]string
+
 	logf func(format string, args ...any)
 }
 
@@ -95,6 +101,16 @@ func (g *Gateway) WithGate(ev Evaluator, gated func(*http.Request) bool) *Gatewa
 // ~40% of relayed POSTs and are scanned only to be dropped.
 func (g *Gateway) WithBodyCapture(capturesBody func(*http.Request) bool) *Gateway {
 	g.capturesBody = capturesBody
+	return g
+}
+
+// WithRequestAttribution injects a provider-specific read of the RAW request
+// bytes, run once per capturing call, independent of WithBodyCapture: the
+// result is structural evidence and must not depend on whether this path
+// keeps a body. The relay stays provider-neutral: it carries the result on
+// RequestCapture.Attribution, it does not know what the keys mean.
+func (g *Gateway) WithRequestAttribution(parse func(raw []byte) map[string]string) *Gateway {
+	g.attribution = parse
 	return g
 }
 
@@ -165,6 +181,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			captured = capturableRequestBody(body, r.Header)
 		}
 		reqCapture = CaptureRequest(r.Method, g.upstream+r.RequestURI, r.Header, captured, start)
+		// Independent of keepBodies, deliberately: this reads the RAW bytes
+		// already in hand, never the selected/bounded capture above, so it
+		// keeps working under a posture that keeps no body at all.
+		if g.attribution != nil {
+			reqCapture.Attribution = g.attribution(body)
+		}
 	}
 
 	if gatedCall {
@@ -248,7 +270,16 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if keepBodies {
 			respBody = capturableBody(sink.Bytes(), resp.Header)
 		}
-		g.emitter.Emit(r.Context(), reqCapture.Complete(resp.StatusCode, resp.Header, respBody, end))
+		captured := reqCapture.Complete(resp.StatusCode, resp.Header, respBody, end)
+		// Set on the returned value rather than threaded through Complete's own
+		// signature: both are response-side facts Complete never had (it only
+		// ever saw the already-computed respBody string), and capture_test.go
+		// already calls Complete directly, so widening its signature would
+		// touch a file this phase does not own for a fact this call site is
+		// the only place that has.
+		captured.ResponseBytesSeen = sink.Seen()
+		captured.ResponseTruncated = responseTruncated(sink, captured.ResponseBody, streamErr)
+		g.emitter.Emit(r.Context(), captured)
 	}
 
 	// After the emit, deliberately: the evidence of a failed call is exactly the
@@ -313,12 +344,44 @@ func contentEncoding(h http.Header) string {
 
 type captureSink struct {
 	buf []byte
+	// seen is every byte OFFERED to Write, including whatever the bound and
+	// clamp below then dropped. It is the only honest pre-cut count: buf itself
+	// stops at exactly maxCaptureSinkBytes and can never say more than that
+	// about itself. Incremented before the bound check, deliberately -- a
+	// clamped or wholly-dropped chunk still arrived.
+	seen int
+	// incomplete is set when the relay gave up copying response bytes before
+	// the upstream body was exhausted, for a reason Cut cannot see: the
+	// downstream write to the CLIENT failed (streamTo's write-failure branch),
+	// not the sink's own bound. seen and len(buf) agree exactly in that case --
+	// the chunk that failed to write was never offered to Write at all -- so
+	// nothing about the sink's own byte bookkeeping can detect it. streamTo
+	// sets this directly at the one place that knows.
+	incomplete bool
+}
+
+// MarkIncomplete records that the relay is abandoning this stream before EOF
+// for a reason Cut's own byte bookkeeping cannot see. Nil-safe, like Write.
+func (s *captureSink) MarkIncomplete() {
+	if s == nil {
+		return
+	}
+	s.incomplete = true
+}
+
+// Incomplete reports whether MarkIncomplete was called. Nil-safe, like Cut.
+func (s *captureSink) Incomplete() bool {
+	return s != nil && s.incomplete
 }
 
 const maxCaptureSinkBytes = maxCaptureInputBytes
 
 func (s *captureSink) Write(p []byte) {
-	if s == nil || len(s.buf) >= maxCaptureSinkBytes {
+	if s == nil {
+		return
+	}
+	s.seen += len(p)
+	if len(s.buf) >= maxCaptureSinkBytes {
 		return
 	}
 	room := maxCaptureSinkBytes - len(s.buf)
@@ -342,6 +405,55 @@ func (s *captureSink) Bytes() []byte {
 	return s.buf
 }
 
+// Seen is the total bytes this sink was ever offered, nil-safe like Bytes.
+// It can exceed len(Bytes()) -- that gap IS the cut -- and rides the wire as
+// Captured/Span.ResponseBytesSeen. It counts bytes as they arrive OFF THE
+// WIRE, still compressed when the response was: internal/client's
+// original_bytes note deliberately does NOT source from this value (a
+// compressed count is not comparable to the decoded body it would be
+// claiming to bound), so treat it as evidence about the TRANSPORT, not as a
+// decoded-content byte count.
+func (s *captureSink) Seen() int {
+	if s == nil {
+		return 0
+	}
+	return s.seen
+}
+
+// Cut reports that this sink dropped bytes past its bound. It is the only
+// component that can know: Write clamps buf to exactly maxCaptureSinkBytes, the
+// same number capturableBody compares against with `>`, so buf's own length can
+// never exceed it and that comparison can never fire through this path. seen
+// has no such ceiling, so seen > len(buf) is the one comparison that can.
+func (s *captureSink) Cut() bool {
+	return s != nil && s.seen > len(s.buf)
+}
+
+// responseTruncated is true when the emitted ResponseBody is not the whole
+// reply. Four independent things can make that so, and each is a distinct
+// input because none of the others can observe it:
+//   - streamErr != nil: streamTo's own READ from upstream failed before EOF
+//     (the connection to the PROVIDER broke). This is g.streamTo's return
+//     value, computed at the call site and otherwise consulted only to decide
+//     whether to panic(http.ErrAbortHandler) -- it must ALSO reach this note,
+//     or the exact call an auditor most needs marked complete-or-not reports
+//     complete by default.
+//   - sink.Incomplete(): streamTo's own WRITE to the CLIENT failed (the
+//     developer's tool disconnected). streamTo deliberately returns nil for
+//     this -- turning it into an error would incorrectly trip the panic path
+//     above -- so streamErr is nil here and cannot report it; the sink carries
+//     it instead, set at the one place that knows (see MarkIncomplete).
+//   - sink.Cut(): the sink dropped bytes past its own bound.
+//   - stored ends in bodyCutNote: noteCut (capture.go, the capRunes path) and
+//     decodeCapturable (decode.go, the compressed-body path) each append
+//     independently of the sink, and can fire without it ever reaching its
+//     bound. `stored` must be the value AFTER Complete (RequestCapture.Complete),
+//     because capRunes' own cut happens inside captureBody, which Complete
+//     calls; checking the pre-Complete value would miss that half of the OR.
+func responseTruncated(sink *captureSink, stored string, streamErr error) bool {
+	return streamErr != nil || sink.Incomplete() || sink.Cut() || strings.HasSuffix(stored, bodyCutNote)
+}
+
 // streamTo the relay is unchanged by the tee: the write to the client happens
 // first and its error is what ends the loop, so a capture problem can never
 // abort a stream.
@@ -354,6 +466,13 @@ func (g *Gateway) streamTo(w http.ResponseWriter, src io.Reader, sink *captureSi
 		if n > 0 {
 			_ = ctl.SetWriteDeadline(time.Now().Add(writeIdleTimeout))
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				// The client is gone: relaying is done trying, and this chunk
+				// was never offered to sink either, so seen and len(buf) will
+				// agree and Cut alone would miss the cut. Mark it as data on
+				// the sink -- not by returning writeErr, which would flip the
+				// panic(http.ErrAbortHandler) path below into firing for a
+				// client that already left.
+				sink.MarkIncomplete()
 				return nil
 			}
 			sink.Write(buf[:n])

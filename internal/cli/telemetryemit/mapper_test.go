@@ -357,6 +357,97 @@ func TestAnUnsetElectionGateSuppresses(t *testing.T) {
 	}
 }
 
+// TestAttributionMetadataBindsBothKeysOnBothHalves proves query_source and
+// prompt_id land in metadata, verbatim, on BOTH the Started and Completed
+// half -- not just the completed half most tests in this file exercise.
+func TestAttributionMetadataBindsBothKeysOnBothHalves(t *testing.T) {
+	rec := apiRequest(map[string]string{
+		"query_source": "prompt_suggestion",
+		"prompt.id":    "b3f1c2d4-1111-4000-8000-000000000099",
+	})
+	events, out := elected().EventsFor(rec)
+	if out != Emitted {
+		t.Fatal("no events")
+	}
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2 (Started + Completed)", len(events))
+	}
+	for _, ev := range events {
+		if got := ev.Metadata["query_source"]; got != "prompt_suggestion" {
+			t.Errorf("%s: metadata.query_source = %v, want prompt_suggestion", ev.EventType, got)
+		}
+		if got := ev.Metadata["prompt_id"]; got != "b3f1c2d4-1111-4000-8000-000000000099" {
+			t.Errorf("%s: metadata.prompt_id = %v, want the verbatim prompt.id attribute", ev.EventType, got)
+		}
+	}
+}
+
+// TestUnknownQuerySourceSurvivesVerbatim is the anti-enumOr guard: a
+// query_source value never seen in the corpus or the provider binary must
+// still reach metadata unchanged, because that vocabulary is vendor-owned
+// and this lane does not allowlist it.
+func TestUnknownQuerySourceSurvivesVerbatim(t *testing.T) {
+	rec := apiRequest(map[string]string{"query_source": "some_future_source"})
+	ev, out := completedHalf(elected().EventsFor(rec))
+	if out != Emitted {
+		t.Fatal("no event")
+	}
+	if got := ev.Metadata["query_source"]; got != "some_future_source" {
+		t.Errorf("metadata.query_source = %v, want the unrecognized value verbatim (no allowlist)", got)
+	}
+}
+
+// TestAbsentAttributionAttrsYieldNilMetadata: neither attr present must leave
+// Metadata nil, not {"query_source":""}. An empty-string value would be
+// indistinguishable from a disallowed default.
+func TestAbsentAttributionAttrsYieldNilMetadata(t *testing.T) {
+	events, out := elected().EventsFor(apiRequest(nil))
+	if out != Emitted {
+		t.Fatal("no events")
+	}
+	for _, ev := range events {
+		if ev.Metadata != nil {
+			t.Errorf("%s: metadata = %v, want nil when query_source and prompt.id are both absent", ev.EventType, ev.Metadata)
+		}
+	}
+}
+
+// TestPromptIDAloneBindsWithoutQuerySource: the two keys are independent
+// binds. Either may be present without the other, and the absent one must
+// not receive a substituted default.
+func TestPromptIDAloneBindsWithoutQuerySource(t *testing.T) {
+	rec := apiRequest(map[string]string{"prompt.id": "only-prompt-id"})
+	ev, out := completedHalf(elected().EventsFor(rec))
+	if out != Emitted {
+		t.Fatal("no event")
+	}
+	if _, present := ev.Metadata["query_source"]; present {
+		t.Errorf("metadata.query_source present (%v), want absent: no default may be substituted", ev.Metadata["query_source"])
+	}
+	if got := ev.Metadata["prompt_id"]; got != "only-prompt-id" {
+		t.Errorf("metadata.prompt_id = %v, want only-prompt-id", got)
+	}
+}
+
+// TestAttributionMetadataCapsAHostileQuerySource proves the bind itself
+// applies the identifier bound, not just the helper in isolation: a 300 KB
+// query_source attribute must not reach metadata uncapped.
+func TestAttributionMetadataCapsAHostileQuerySource(t *testing.T) {
+	hostile := strings.Repeat("a", 300000)
+	rec := apiRequest(map[string]string{"query_source": hostile})
+	ev, out := completedHalf(elected().EventsFor(rec))
+	if out != Emitted {
+		t.Fatal("no event")
+	}
+	got, _ := ev.Metadata["query_source"].(string)
+	if len(got) == 0 {
+		t.Fatal("metadata.query_source was capped to nothing; the bound should truncate, not erase")
+	}
+	if len(got) > 256 {
+		t.Errorf("metadata.query_source is %d bytes, want <= 256", len(got))
+	}
+}
+
 // completedHalf adapts the pair to a test that means "the event": the closing
 // half, which is the one carrying the usage and the duration.
 func completedHalf(events []client.DevEvent, outcome Outcome) (client.DevEvent, Outcome) {

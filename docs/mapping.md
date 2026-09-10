@@ -232,30 +232,55 @@ structural identifiers (see [the Invariants
 glossary](dev-event-contract.md#invariants) for INV-1/INV-2) and all
 are optional; a provider that does not expose one simply omits it.
 
-> **`metadata` has no reader in core or in the backend.** Verified across both:
-> not OPA policy input, not guardrails, not goal alignment. Still true of
-> `metadata` as a field — and since v1.9 the keys below also ride `signal_args`
-> on a signal row, which OPA and Guardrails do read. The duplication is
-> deliberate: a move would have broken the SQL correlation these keys exist for. It is merged into the
-> stored row and is therefore queryable in SQL, which is exactly what
-> `credential_fingerprint` and `http_status` were rehomed here for -- forensics a
-> reviewer can run after the fact. That was the stated purpose and it is met.
+> **No governance engine evaluates `metadata`.** Verified: not OPA policy input
+> (`opa.go` never reads it), not Guardrails (`BuildGuardrailInput` forwards
+> `activity_input` / `signal_args` / `activity_output` only), not the alignment
+> judge. Since v1.9 the keys below also ride `signal_args` on a signal row,
+> which OPA and Guardrails *do* read. The duplication is deliberate: a move
+> would have broken the SQL correlation these keys exist for. It is merged into
+> the stored row and is therefore queryable in SQL, which is exactly what
+> `credential_fingerprint` and `http_status` were rehomed here for -- forensics
+> a reviewer can run after the fact. That was the stated purpose and it is met.
 >
-> The reason to write it down is the corollary: **`metadata` cannot be a product
-> surface, and it cannot be an enforcement surface.** Anything that needs a
-> consumer belongs on `activity_input` / `activity_output`, which map to dedicated
-> columns and which OPA and the judge actually read. Stop growing `metadata`; a
-> key added here in the expectation that something will evaluate it will simply
+> **It is read outside the engines, and the earlier claim that it had no reader
+> at all was false.** Core materialises `deploy_session_links` from
+> `metadata.sessions[]` and reads `metadata.source` during goal alignment; the
+> backend's lineage dashboard filters on `metadata->>'repo'` / `'commit_sha'`
+> and builds the deploy DTO from those keys; the Verify tab renders the whole
+> object; and compliance evidence exports list `governance_events.metadata` as
+> a source. A reader after the fact is exactly what this field is for.
+>
+> The reason to write it down is the corollary: **`metadata` cannot be an
+> enforcement surface.** A key a policy, a guardrail or the judge must
+> *evaluate* belongs on `activity_input` / `activity_output` (or `signal_args`
+> on a signal), which map to dedicated columns and which the engines actually
+> read. A key a reviewer, a dashboard or a transcript view reads *after the
+> fact* — a correlation id, a status code, a truncation note — belongs here:
+> `credential_fingerprint`, `http_status`, the correlation keys below and the
+> deploy lineage keys are all that class. Stop growing `metadata` *for
+> enforcement*; a key added here expecting a policy to evaluate it will simply
 > sit unread.
+>
+> **Reserved key names.** Core seeds its own verdict metadata — `event_type`,
+> `workflow_id`, `trust_tier`, `post_attestation`, `policy_fallback_used`, plus
+> `profile_id` and `source` — and then merges the client's keys skip-if-exists.
+> But storage merges the client blob **first and unconditionally**, so a client
+> key carrying one of those names *wins* in the stored row: a client-written
+> `trust_tier` silently poisons the backend's tier filter. Never emit one of
+> those names from an adapter or from `payload.go`.
 >
 > **Why a signal's own fields ride `metadata` — and, since v1.9, `signal_args` too (insight 6).** A `SignalReceived` row still has no `activity_input`/`activity_output` of its own; those columns exist only on the Activity carrier a tool call or a turn uses. That half of the original claim is not merely still true, it is enforced structurally: `internal/client/payload.go`'s activity guard nils both fields whenever `activity_id` is empty, and no signal sets one. Giving a signal an `activity_id` to reach those columns would break "every `activity_id` carries exactly two rows", which is what makes `SignalReceived` legitimately unpaired — so that route is closed, not merely unattractive.
 >
-> What changed is "the only home". `signal_args` is a **second** home, and the better one, because it has readers and `metadata` has none. Signal fields now ride both: `metadata` for the SQL forensics path, `signal_args` for enforcement. "Stop growing `metadata`" above stands as written — a key added to `metadata` *alone* still sits unread.
+> What changed is "the only home". `signal_args` is a **second** home, and the better one, because the engines read it and never read `metadata`. Signal fields now ride both: `metadata` for the SQL forensics path, `signal_args` for enforcement. "Stop growing `metadata`" above stands as written — a key added to `metadata` *alone* still reaches no engine.
 
 | Key | Providers | Meaning |
 |---|---|---|
 | `tool_use_id` | Claude Code, Codex | Per-invocation id for a `ToolCall`/`ToolResult` pair. It rides `span.invocation_id`, a *local* field (spooled, never emitted) that keys the cross-process duration stash. The wire pairing itself is `activity_id`. `span.function` is the MCP function name only. |
-| `prompt_id` (v1.8) | Claude Code | The UUID of the prompt being processed, threaded onto **every** event via `commonMetadata` (not just `PromptSubmitted`). Absent until the first user input, and absent entirely on Claude Code versions before 2.1.196. |
+| `prompt_id` (v1.8) | Claude Code | The UUID of the prompt being processed, threaded onto **every** event via `commonMetadata` (not just `PromptSubmitted`). Absent until the first user input, and absent entirely on Claude Code versions before 2.1.196. The `:otel:` lane sources the same key independently, from the record's `prompt.id` attribute, bounded to 256 bytes, on both halves of a model-call pair -- so its presence no longer implies the hook lane produced the event. The vendor documents the two as the same id, which is what makes the cross-lane join sound. **Since v1.9 the `:gateway:`/`:proxy:` lanes source it too** (`span.prompt_id`), parsed from the request's `x-anthropic-billing-header` system-block text (`cc_prompt_id`) rather than from a header despite the name -- a third independent producer of the same well-known key. |
+| `previous_request_id` (v1.9) | Claude Code (`:gateway:`/`:proxy:` lanes) | The prior call's upstream `Request-Id`, from the same attribution block's `cc_prev_req`. Equals this lane's own `activity_id` suffix, so an ordering chain resolves to activity ids with no new correlation scheme. |
+| `is_subagent` (v1.9) | Claude Code (`:gateway:`/`:proxy:` lanes) | From the same block's `cc_is_subagent`. **Absent, never `false`,** when the token is missing: set only when present and exactly `true`, because a UI would read `false` as "confirmed not a subagent". Pairs with `agent_id` (already promoted from `X-Claude-Code-Agent-Id`) so a consumer can label a subagent's turns; these ship flat, not nested. |
+| `entrypoint` (v1.9) | Claude Code (`:gateway:`/`:proxy:` lanes) | From the same block's `cc_entrypoint` (cli / sdk / desktop; vendor-owned, not enumerated here). |
+| `query_source` | Claude Code (`:otel:` lane) | The provider's own call-type discriminator on an OTel `api_request` record (`sdk`, `repl_main_thread`, `agent:custom`, `prompt_suggestion`, ...). Vendor-owned vocabulary with no fixed table: never allowlisted, an unrecognized value rides verbatim, bounded to 256 bytes. **Absence means unclassified** -- never inferred as conversation, never as sidecar, never defaulted. A consumer that reads a missing `query_source` as "background" would render a real message as a chore, which is the defect this key exists to prevent. |
 | `task_id` (v1.8) | Claude Code | Correlates a `TaskCreated`/`TaskCompleted` pair; never an Activity pair (see §2's note on why an orphan would depress success rates). |
 | `elicitation_id` (v1.8) | Claude Code | Correlates an `Elicitation`/`ElicitationResult` pair. |
 | `turn_id`, `message_id` (v1.8) | Claude Code | `MessageDisplay`'s own correlation pair, streamed-line-batch scoped. Distinct from Codex's `turn_id` below: this one is **not** the API's `msg_…` transcript id, so it cannot join back to a specific stored assistant message. |
@@ -568,6 +593,8 @@ than useless.
 | `span.request_body` | `activity_input.content` | started | **In-path lanes only.** No hook adapter sets it, and none may; that is what §1's "span-less" means. The observed model REQUEST, content-gated by `stripContent`. **SELECTED, not truncated** -- see the note below; `capModelCallRequest` (which keeps the TAIL) remains the net but the wired path no longer reaches its cut. The key is `content` and not `request_body` because the alignment judge's per-operation cap orders by a fixed priority list and drops unlisted keys first |
 | `span.response_body` | `activity_output.content` | completed | **In-path lanes only.** The observed model RESPONSE, verbatim SSE frames and all, content-gated and capped by `capModelCallBody` |
 | `span.http_status` | `metadata.http_status` | completed | structural, ungated, **absent when no response was observed at all** -- a relayed call whose transport failed before one existed. Rehomed alongside `credential_fingerprint` for the same reason: without it a 5xx stores identically to a success whose reply was not captured. "completed" here is now enforced rather than described: it shipped on **both** halves until v1.8, and 116 of 116 live `ActivityStarted` rows asserted `200` on a request nothing had answered yet. `observesAResponse` bounds it, and it bounds the metadata KEY as well as the span field, so an adapter cannot reinstate the assertion by writing `http_status` itself |
+| *(none -- client-synthesized from every wire value this payload knows to be incomplete on egress)* | `metadata.openbox_capture.truncated_paths` | every event | Sorted array of destination-qualified wire paths (e.g. `activity_output.output`, `metadata.denial_reason`, `signal_args.prompt`) naming every value known-incomplete on egress: every `capBodyInto` cut, plus -- since v1.9 -- every `capModelCallBody` cut on a model-call row's `content`/`reply_text` keys, which previously bypassed this summary entirely and left it silent about the single largest thing a relayed call's row cut. **Omitted entirely when nothing was cut** -- absence means "nothing truncated", never an empty array. The same value cut into two wire objects (the `eventMetadataForEgress` backstop runs once for `metadata` and once for `signal_args`) yields **two** entries; no dedupe. Structural: deliberately **not** in `contentMetadataKeys`, so the content gate never drops it and the dynamic backstop can never re-cap it (the object is appended after that loop has returned). The field is `truncated_paths`, not `truncated`, because `activity_output.openbox_capture.truncated` is a **bool** about one response body's completeness -- a different, now-answered question; see the row below |
+| `span.response_truncated` | `activity_output.openbox_capture` | completed | v1.9. `{truncated, original_bytes}`, the response-side twin of `openbox_selection` (below): **`truncated: false` is emitted, never omitted** -- that is the "this reply is complete" signal a UI needs. `truncated` ORs the gateway's own signal with this client's `capModelCallBody` cut (`len(span.response_body) > 65,536` bytes), so it is true if either side observed loss; `original_bytes` is `len(span.response_body)` -- the decoded body's own length. **Never** `span.response_bytes_seen`: that counter is the gateway sink's own, measured off the wire *before* decoding, and ~98% of real replies are brotli/gzip (`internal/gateway/decode.go`), so it is a compressed byte count and is not comparable to the decoded `response_body` it would claim to bound -- it is routinely SMALLER than the content beside it. `len(span.response_body)` is exact for a complete reply and an honest lower bound for one the gateway or this client's `capModelCallBody` cut, including a compressed body that failed to decode into a marker, where the marker's own length is reported because the true original size is unknowable. Present only alongside `activity_output.content` (the `span.response_body` arm) -- absent under `content_capture:false` along with the body it describes, and on a hook-sourced turn, which has no gateway sink to report from. Rides `activity_output`, so Guardrails stage 1 reads it and the alignment judge's per-operation cap drops it first (an unlisted key, same as `bytes_read`/`bytes_written` above) -- harmless, a bool and an int, but a reason NOT to "harmonise" it into `metadata` beside the sibling `truncated_paths` summary, or vice versa. See the in-path-lane-only table below for what feeds each Span field |
 
 #### The request window is a SELECTION, and what it contains
 
@@ -645,6 +672,12 @@ ones worth keeping onto fields that persist and dropped the rest.
 | `span.http_url` | `activity_input.http_url` | no | structural, **query dropped**, and gated on a body for the same reason as `http_method` |
 | `span.http_status` | `metadata.http_status` | no | see the row above; ungated because a status code is not content, and **completed-half only** |
 | `span.credential_fingerprint` | `metadata.credential_fingerprint` | no | Rehomed in v1.7. Core has no span field for it and never stored the span anyway, so account binding has in fact never had anything to match on; `metadata` is merged into the stored row. Ungated because a privacy switch must not let an org opt out of being identified |
+| `span.prompt_id` | `metadata.prompt_id` | no | v1.9. Parsed from the request's `x-anthropic-billing-header` system-block text (`cc_prompt_id`) -- a `system[]` TEXT ELEMENT, not a header despite the name (`internal/cli/gatewayemit/attribution.go`). Same wire key as the `:otel:` lane's `prompt.id` promotion, so both producers group a session under one name. Absent when the source token is absent -- unclassified, never inferred |
+| `span.previous_request_id` | `metadata.previous_request_id` | no | v1.9. From the same block's `cc_prev_req`, which equals the prior call's upstream `Request-Id` -- this lane's own `activity_id` suffix -- so the chain resolves to activity ids with no new correlation scheme |
+| `span.is_subagent` | `metadata.is_subagent` | no | v1.9. From the same block's `cc_is_subagent`. **Absent, never `false`,** when the token is missing. Ships flat, not nested: pairs with `metadata.agent_id` so a consumer can label a subagent's turns without the producer binding parent/child nesting |
+| `span.entrypoint` | `metadata.entrypoint` | no | v1.9. From the same block's `cc_entrypoint` (cli / sdk / desktop; vendor-owned, not enumerated) |
+| `span.response_bytes_seen` |; |; | v1.9. **Not projected to any wire field.** The gateway capture sink's own byte counter, incremented on every `Write` before its bound and clamp -- but counted off the wire *before* decoding, so for ~98% of real replies it is a compressed byte count and is not comparable to the decoded `response_body` that `original_bytes` describes (see the note row above). Retained because it is a true fact about the relay that a length check on the stored body cannot recover |
+| `span.response_truncated` | `activity_output.openbox_capture.truncated` | no | v1.9. `true` when **any** of: the upstream connection broke before the reply finished (a read error on the relayed stream); the connection to the developer's own tool broke before the relay finished writing (a downstream write failure, carried as a flag on the capture sink rather than as an error, so it cannot be mistaken for a relay failure); the sink dropped bytes past its own bound; or the stored body already carries the capture path's cut mark (`decodeCapturable`'s compressed-body bound, or `capRunes`' rune bound) -- either means the gateway's own copy was incomplete before this client ever saw it. ORed with this client's own `capModelCallBody` cut before it reaches the wire. **`false` is emitted, never omitted** |
 
 Retired with the span layer: `parent_span_id`, `hook_type`, `duration_ns`,
 `events`, the family root tuples (`file_mode`, `shell_command`,

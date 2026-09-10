@@ -2,9 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
 // This file carries the invariants that outlived the span carrier.
@@ -208,6 +211,12 @@ func TestNoPayloadCarriesHookTrigger(t *testing.T) {
 // TestContentCaptureOffLeavesNoBodyInEitherNewHome is the gate, on the outbound
 // bytes, against BOTH new homes. A carrier change that forgot the gate would be
 // a content leak with no test failing.
+//
+// Extended for acceptance criterion 5: activity_output.openbox_capture is
+// attached inside the SAME Span.ResponseBody arm that content lives in
+// (turnActivityOutput), so stripContent emptying ResponseBody must remove the
+// note along with the body it describes -- not just the body, leaving a
+// truncated:false note claiming a complete reply that was never stored.
 func TestContentCaptureOffLeavesNoBodyInEitherNewHome(t *testing.T) {
 	const requestMarker = "MARKER_REQUEST_BODY"
 	const responseMarker = "MARKER_RESPONSE_BODY"
@@ -226,6 +235,19 @@ func TestContentCaptureOffLeavesNoBodyInEitherNewHome(t *testing.T) {
 			t.Errorf("%s: the credential fingerprint disappeared under the content gate. It is "+
 				"one-way derived evidence, not content, and a privacy setting must not let an "+
 				"org opt out of being identified", et)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatalf("%s: payload is not JSON: %v", et, err)
+		}
+		if ao, ok := payload["activity_output"].(map[string]any); ok {
+			if _, present := ao["content"]; present {
+				t.Errorf("%s: activity_output.content present with content capture off", et)
+			}
+			if _, present := ao["openbox_capture"]; present {
+				t.Errorf("%s: activity_output.openbox_capture present with content capture off; "+
+					"the note must disappear along with the body it describes, not outlive it", et)
+			}
 		}
 	}
 }
@@ -254,6 +276,90 @@ func TestTheFingerprintIsNotAContentMetadataKey(t *testing.T) {
 	if contentMetadataKeys["credential_fingerprint"] {
 		t.Error("credential_fingerprint is in contentMetadataKeys, so the content gate now " +
 			"strips derived governance evidence")
+	}
+}
+
+// TestTheAttributionFourKeysRideMetadataUngated is the rehoming for the four
+// correlation fields the in-path lanes parse out of Claude Code's own
+// attribution block: like the fingerprint, they are derived evidence rather
+// than content, so they must survive content_capture:false.
+func TestTheAttributionFourKeysRideMetadataUngated(t *testing.T) {
+	for _, contentOn := range []bool{true, false} {
+		ev := modelCallEvent(EventTurnCompleted, "{}", "{}")
+		ev.Span.PromptID = "018f1a2b-0000-7000-8000-000000000002"
+		ev.Span.PreviousRequestID = "req_prior"
+		ev.Span.IsSubagent = true
+		ev.Span.Entrypoint = "cli"
+		if !contentOn {
+			ev = stripContent(ev)
+		}
+		m := wireOf(t, ev)
+		meta, ok := m["metadata"].(map[string]any)
+		if !ok {
+			t.Fatalf("content capture %v: no metadata on a completed relayed call", contentOn)
+		}
+		if got := meta["prompt_id"]; got != "018f1a2b-0000-7000-8000-000000000002" {
+			t.Errorf("content capture %v: metadata.prompt_id = %v", contentOn, got)
+		}
+		if got := meta["previous_request_id"]; got != "req_prior" {
+			t.Errorf("content capture %v: metadata.previous_request_id = %v", contentOn, got)
+		}
+		if got, _ := meta["is_subagent"].(bool); !got {
+			t.Errorf("content capture %v: metadata.is_subagent = %v, want true",
+				contentOn, meta["is_subagent"])
+		}
+		if got := meta["entrypoint"]; got != "cli" {
+			t.Errorf("content capture %v: metadata.entrypoint = %v", contentOn, got)
+		}
+	}
+}
+
+// TestTheAttributionKeysAreNotContentMetadataKeys is the structural half:
+// contentMetadataKeys is what strips a metadata key under the gate, so
+// membership there would silently re-gate derived governance evidence.
+func TestTheAttributionKeysAreNotContentMetadataKeys(t *testing.T) {
+	for _, k := range []string{"prompt_id", "previous_request_id", "is_subagent", "entrypoint"} {
+		if contentMetadataKeys[k] {
+			t.Errorf("%s is in contentMetadataKeys, so the content gate would strip it", k)
+		}
+	}
+}
+
+// TestIsSubagentNeverRidesMetadataAsFalse is acceptance criterion 2 at the
+// wire boundary: a call whose source carried no cc_is_subagent entry (which
+// collapses to Span.IsSubagent's zero value, false) must ship NO
+// metadata.is_subagent key at all. A stored `false` would read to a consumer
+// as "confirmed not a subagent", which is a claim this lane never has grounds
+// to make.
+func TestIsSubagentNeverRidesMetadataAsFalse(t *testing.T) {
+	ev := modelCallEvent(EventTurnCompleted, "{}", "{}") // Span.IsSubagent left at its zero value
+	m := wireOf(t, ev)
+	meta, ok := m["metadata"].(map[string]any)
+	if !ok {
+		t.Fatal("no metadata on a completed relayed call")
+	}
+	if v, present := meta["is_subagent"]; present {
+		t.Errorf("metadata.is_subagent = %v present with no source entry; want the key absent", v)
+	}
+}
+
+// TestSchemaAcceptsTheAttributionFields is acceptance criterion 5, mirroring
+// TestSchemaAcceptsRunIdentityFields (contract_v18_test.go): a client.Span
+// carrying all four new fields must pass conformance.ValidateDevEvent, or
+// $defs/span's additionalProperties:false rejects every in-path event.
+func TestSchemaAcceptsTheAttributionFields(t *testing.T) {
+	ev := baseValidEvent()
+	ev.EventType = EventToolResult
+	ev.Span = &Span{
+		SemanticType:      "internal",
+		Stage:             "completed",
+		PromptID:          "018f1a2b-0000-7000-8000-000000000003",
+		PreviousRequestID: "req_prior",
+		IsSubagent:        true,
+		Entrypoint:        "cli",
+	}
+	if err := conformance.ValidateDevEvent(devEventJSON(t, ev), false); err != nil {
+		t.Errorf("a valid attribution fixture failed schema validation: %v", err)
 	}
 }
 
@@ -594,6 +700,262 @@ func TestTheRelayedStatusReachesTheWire(t *testing.T) {
 	}
 	if _, present := stripped["http_status"]; !present {
 		t.Error("http_status vanished with content capture off; it is a status code, not content")
+	}
+}
+
+// --- Phase 04: response completeness (activity_output.openbox_capture) ---
+
+// openboxCapture reads activity_output.openbox_capture off the wire payload,
+// or nil when the key is absent. A local helper rather than nestedString
+// above: the note is an OBJECT ({truncated, original_bytes}), not a string.
+func openboxCapture(t *testing.T, m map[string]any) map[string]any {
+	t.Helper()
+	ao, ok := m["activity_output"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	oc, ok := ao["openbox_capture"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return oc
+}
+
+// TestTheResponseCompletenessNoteRidesActivityOutput is acceptance criterion
+// 2: a short, whole response reports truncated:false -- emitted, not omitted,
+// because that IS the "this reply is complete" signal -- and original_bytes
+// equal to the body's own length.
+func TestTheResponseCompletenessNoteRidesActivityOutput(t *testing.T) {
+	const reply = `{"type":"message","role":"assistant","content":[{"type":"text","text":"hi"}]}`
+	m := wireOf(t, modelCallEvent(EventTurnCompleted, "{}", reply))
+
+	oc := openboxCapture(t, m)
+	if oc == nil {
+		t.Fatal("activity_output.openbox_capture is absent for a completed call carrying a response body")
+	}
+	if got, ok := oc["truncated"].(bool); !ok || got {
+		t.Errorf("truncated = %v, want false present (not omitted)", oc["truncated"])
+	}
+	if got, ok := oc["original_bytes"].(float64); !ok || int(got) != len(reply) {
+		t.Errorf("original_bytes = %v, want %d", oc["original_bytes"], len(reply))
+	}
+}
+
+// TestTheResponseCompletenessNoteUsesTheDecodedBodyNotTheGatewaysRawByteCount
+// pins the fix for the defect this note exists to prevent. Span.ResponseBytesSeen
+// counts bytes as the gateway's capture sink saw them off the wire, still
+// compressed -- DisableCompression means the gateway decodes capture itself,
+// and a corpus measurement puts brotli+gzip at ~98% of real replies
+// (internal/gateway/decode.go) -- while ResponseBody is already decoded. A
+// compressed reply's wire count is smaller than the text it decodes to, so
+// taking ResponseBytesSeen at face value reported original_bytes SMALLER than
+// the content it was supposed to describe: exactly backwards for a field a UI
+// reads as "how much of the reply is this". original_bytes must track the
+// decoded body instead, regardless of what the gateway's raw wire counter says.
+func TestTheResponseCompletenessNoteUsesTheDecodedBodyNotTheGatewaysRawByteCount(t *testing.T) {
+	const reply = `{"type":"message","role":"assistant","content":[{"type":"text",` +
+		`"text":"a realistic decoded reply, larger than its compressed wire form"}]}`
+	ev := modelCallEvent(EventTurnCompleted, "{}", reply)
+	// The realistic shape for ~98% of real responses: a compressed wire count
+	// smaller than the decoded text it expands to, not the exception.
+	ev.Span.ResponseBytesSeen = len(reply) / 4
+	ev.Span.ResponseTruncated = true
+
+	oc := openboxCapture(t, wireOf(t, ev))
+	if oc == nil {
+		t.Fatal("activity_output.openbox_capture is absent")
+	}
+	if got, ok := oc["truncated"].(bool); !ok || !got {
+		t.Errorf("truncated = %v, want true (the gateway's own sink reported a cut)", oc["truncated"])
+	}
+	if got, ok := oc["original_bytes"].(float64); !ok || int(got) != len(reply) {
+		t.Errorf("original_bytes = %v, want the DECODED body's own length %d, not the gateway's "+
+			"smaller wire-compressed count %d", oc["original_bytes"], len(reply), ev.Span.ResponseBytesSeen)
+	}
+}
+
+// TestOriginalBytesIsNeverSmallerThanTheContentItDescribes is the general
+// invariant the gateway's-raw-count bug violated: whatever produced
+// original_bytes, it must never claim the reply was SMALLER than the content
+// stored beside it -- a consumer computing "we stored X of Y bytes" cannot
+// make sense of Y < X.
+func TestOriginalBytesIsNeverSmallerThanTheContentItDescribes(t *testing.T) {
+	long := strings.Repeat("y", maxModelCallBodyBytes+10)
+	cases := []struct {
+		name string
+		ev   DevEvent
+	}{
+		{"short and uncut", modelCallEvent(EventTurnCompleted, "{}", `{"ok":true}`)},
+		{"cut by this client's own cap", modelCallEvent(EventTurnCompleted, "{}", long)},
+		{"gateway reports a smaller compressed wire count", func() DevEvent {
+			ev := modelCallEvent(EventTurnCompleted, "{}", `{"type":"message","content":"decoded text"}`)
+			ev.Span.ResponseBytesSeen = 3 // far smaller than the decoded body
+			return ev
+		}()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := wireOf(t, tc.ev)
+			content := nestedString(t, m, "activity_output", "content")
+			oc := openboxCapture(t, m)
+			if oc == nil {
+				t.Fatal("activity_output.openbox_capture is absent")
+			}
+			originalBytes, ok := oc["original_bytes"].(float64)
+			if !ok {
+				t.Fatalf("original_bytes is not a number: %v", oc["original_bytes"])
+			}
+			if int(originalBytes) < len(content) {
+				t.Errorf("original_bytes = %d, smaller than the %d bytes of content it describes",
+					int(originalBytes), len(content))
+			}
+		})
+	}
+}
+
+// TestOriginalBytesForAnUndecodableMarkerIsItsOwnHonestLength documents the
+// choice for the case the gateway cannot recover a decoded byte count for at
+// all: when a compressed stream failed to decode (corrupt, or cut mid-stream
+// by the sink's own bound before decoding ever ran), gateway/decode.go stores
+// a marker string in place of the reply, and the true original size is
+// genuinely unknowable -- this layer must not invent one. The marker's own
+// length is a trivially honest lower bound (it can never be smaller than the
+// content it describes, because it always IS that content), and no fabricated
+// estimate -- such as the gateway's raw, wrong-unit wire count -- is reported
+// instead.
+func TestOriginalBytesForAnUndecodableMarkerIsItsOwnHonestLength(t *testing.T) {
+	const marker = `[openbox: not captured; the br body could not be decoded ` +
+		`(truncated or corrupt), so redaction could not inspect it]`
+	ev := modelCallEvent(EventTurnCompleted, "{}", marker)
+	ev.Span.ResponseTruncated = true   // the sink hit its own bound receiving the compressed stream
+	ev.Span.ResponseBytesSeen = 900000 // a large compressed wire count -- must not be reported
+
+	oc := openboxCapture(t, wireOf(t, ev))
+	if oc == nil {
+		t.Fatal("activity_output.openbox_capture is absent")
+	}
+	if got, ok := oc["truncated"].(bool); !ok || !got {
+		t.Errorf("truncated = %v, want true", oc["truncated"])
+	}
+	if got, ok := oc["original_bytes"].(float64); !ok || int(got) != len(marker) {
+		t.Errorf("original_bytes = %v, want the marker's own honest length %d, not a fabricated "+
+			"figure like the gateway's raw wire count %d", oc["original_bytes"], len(marker), ev.Span.ResponseBytesSeen)
+	}
+}
+
+// TestTheResponseCompletenessNoteORsInTheClientsOwnCut is acceptance
+// criterion 4: a response over maxModelCallBodyBytes is cut by capModelCallBody
+// at the client, independent of anything the gateway reported, and that cut
+// alone must still flip truncated to true.
+func TestTheResponseCompletenessNoteORsInTheClientsOwnCut(t *testing.T) {
+	long := strings.Repeat("y", maxModelCallBodyBytes+10)
+	ev := modelCallEvent(EventTurnCompleted, "{}", long)
+	// Gateway-side signal left at zero value: the client's own cap must be
+	// sufficient on its own.
+
+	oc := openboxCapture(t, wireOf(t, ev))
+	if oc == nil {
+		t.Fatal("activity_output.openbox_capture is absent")
+	}
+	if got, ok := oc["truncated"].(bool); !ok || !got {
+		t.Errorf("truncated = %v, want true: capModelCallBody cut this body regardless of the gateway", oc["truncated"])
+	}
+	if got, ok := oc["original_bytes"].(float64); !ok || int(got) != len(long) {
+		t.Errorf("original_bytes = %v, want the pre-cut length %d (the gateway reported no count)",
+			oc["original_bytes"], len(long))
+	}
+	// TestATruncatedBodyIsMarkedAsTruncated pins that the in-band truncationMark
+	// itself is unaffected; this test only asserts the note is additive to it.
+}
+
+// TestNoResponseBodyMeansNoCompletenessNote is acceptance criterion 5's other
+// half: a completed call that carries no response body at all (never
+// observed one, or content capture stripped it) must not carry the note
+// either -- there is no stored body for it to describe.
+func TestNoResponseBodyMeansNoCompletenessNote(t *testing.T) {
+	ev := modelCallEvent(EventTurnCompleted, "{}", "")
+	ev.Model = "claude-opus-5" // forces activity_output non-nil via the model key
+
+	m := wireOf(t, ev)
+	ao, ok := m["activity_output"].(map[string]any)
+	if !ok {
+		t.Fatal("activity_output absent; fixture precondition failed")
+	}
+	if _, present := ao["content"]; present {
+		t.Error("activity_output.content present with no response body")
+	}
+	if _, present := ao["openbox_capture"]; present {
+		t.Error("activity_output.openbox_capture present with no response body to describe")
+	}
+}
+
+// TestSchemaAcceptsTheResponseCompletenessFields is acceptance criterion 7,
+// mirroring TestSchemaAcceptsTheAttributionFields: a Span carrying the two new
+// fields must still pass conformance.ValidateDevEvent, or $defs/span's
+// additionalProperties:false rejects every in-path event.
+func TestSchemaAcceptsTheResponseCompletenessFields(t *testing.T) {
+	ev := baseValidEvent()
+	ev.EventType = EventToolResult
+	ev.Span = &Span{
+		SemanticType:      "internal",
+		Stage:             "completed",
+		ResponseBytesSeen: 128,
+		ResponseTruncated: true,
+	}
+	if err := conformance.ValidateDevEvent(devEventJSON(t, ev), false); err != nil {
+		t.Errorf("a valid response-completeness fixture failed schema validation: %v", err)
+	}
+}
+
+// TestModelCallResponseCutRecordsItselfInTheCaptureSummary closes the gap an
+// advisory pass found: capModelCallBody's own cut used to bypass cutLog
+// entirely, so metadata.openbox_capture.truncated_paths stayed silent about
+// exactly the largest thing a model-call row cut. This is the relayed-call
+// (Span.ResponseBody) arm, which writes only the `content` key.
+func TestModelCallResponseCutRecordsItselfInTheCaptureSummary(t *testing.T) {
+	long := strings.Repeat("y", maxModelCallBodyBytes+10)
+	ev := modelCallEvent(EventTurnCompleted, "{}", long)
+
+	got := truncated(t, ev)
+	want := []string{"activity_output.content"}
+	if !slices.Equal(got, want) {
+		t.Errorf("truncated_paths = %v, want %v", got, want)
+	}
+}
+
+// TestHookTurnReplyCutRecordsBothKeysInTheCaptureSummary is the hook-lane
+// twin: Content.Output writes BOTH `content` and `reply_text` from the same
+// source string, so a cut there must record both paths.
+func TestHookTurnReplyCutRecordsBothKeysInTheCaptureSummary(t *testing.T) {
+	long := strings.Repeat("y", maxModelCallBodyBytes+10)
+	idx := 3
+	hook := DevEvent{
+		SchemaVersion: SchemaVersion,
+		EventID:       "ev-hook-long",
+		EventType:     EventTurnCompleted,
+		SessionID:     "sess-hook",
+		DeveloperDID:  "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		Timestamp:     "2026-08-13T10:00:12Z",
+		Tool:          Tool{Name: "claude-code", Kind: ToolShell},
+		TurnIndex:     &idx,
+		Model:         "claude-opus-4-8",
+		Content:       &Content{Output: long},
+	}
+
+	got := truncated(t, hook)
+	want := []string{"activity_output.content", "activity_output.reply_text"}
+	if !slices.Equal(got, want) {
+		t.Errorf("truncated_paths = %v, want %v", got, want)
+	}
+}
+
+// TestUncutModelCallResponseRecordsNothing is the negative control: a body
+// under the cap must not appear in truncated_paths, or every relayed call
+// would look cut.
+func TestUncutModelCallResponseRecordsNothing(t *testing.T) {
+	ev := modelCallEvent(EventTurnCompleted, "{}", `{"type":"message"}`)
+	if got := truncated(t, ev); got != nil {
+		t.Errorf("truncated_paths = %v, want nil (nothing was cut)", got)
 	}
 }
 

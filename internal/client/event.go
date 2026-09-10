@@ -220,6 +220,34 @@ type Span struct {
 	// CredentialFingerprint identifies which registered credential made the call,
 	// without carrying it. Deliberately NOT gated.
 	CredentialFingerprint string `json:"credential_fingerprint,omitempty"`
+
+	// PromptID/PreviousRequestID/IsSubagent/Entrypoint are Claude Code's own
+	// per-call correlation identifiers (v1.9), parsed by
+	// gatewayemit.ParseRequestAttribution from the request's
+	// x-anthropic-billing-header system-block text -- a system[] TEXT ELEMENT
+	// despite the header-like name -- and copied here once per half, exactly
+	// like CredentialFingerprint above. Rehomed into metadata ungated: derived
+	// evidence, not content. IsSubagent is set true only when its source entry
+	// was present and exactly "true"; it must read as absent (false), never a
+	// confirmed "not a subagent", when the whole block is missing.
+	PromptID          string `json:"prompt_id,omitempty"`
+	PreviousRequestID string `json:"previous_request_id,omitempty"`
+	IsSubagent        bool   `json:"is_subagent,omitempty"`
+	Entrypoint        string `json:"entrypoint,omitempty"`
+
+	// ResponseBytesSeen and ResponseTruncated are the local gateway's own view
+	// of response completeness (v1.9), populated only by the in-path lanes
+	// (gatewayemit's span(), from gateway.Captured) exactly like
+	// CredentialFingerprint above -- a hook-sourced turn leaves both at their
+	// zero value. turnActivityOutput combines them with its own
+	// capModelCallBody cut into activity_output.openbox_capture, and only
+	// inside the arm that also attaches ResponseBody: there is no stored body
+	// for the note to describe without it. ResponseBytesSeen is every byte the
+	// gateway's capture sink was OFFERED, including what its own bound then
+	// dropped, so it can exceed len(ResponseBody); zero means "this lane
+	// reported no count," not "zero bytes observed."
+	ResponseBytesSeen int  `json:"response_bytes_seen,omitempty"`
+	ResponseTruncated bool `json:"response_truncated,omitempty"`
 }
 
 // Content is the only structured location for raw prompt/output/file content.

@@ -243,6 +243,12 @@ func (a *app) runDevInit(args []string) int {
 	fmt.Fprintf(a.stdout, "        the repo it runs in, so a commit is attributed to the session that made it.\n")
 	fmt.Fprintf(a.stdout, "        A hook somebody else wrote is never overwritten. OPENBOX_INSTALL_GIT_HOOK=false\n")
 	fmt.Fprintf(a.stdout, "        turns it off.\n")
+	if o.Provider == "claude-code" {
+		fmt.Fprintf(a.stdout, "  reasoning summaries: ON. showThinkingSummaries is now true in your Claude Code\n")
+		fmt.Fprintf(a.stdout, "        settings, so a governed transcript gets the model's own summary of its\n")
+		fmt.Fprintf(a.stdout, "        reasoning instead of an empty thinking block. There is no per-key opt-out;\n")
+		fmt.Fprintf(a.stdout, "        `openbox uninstall` restores whatever that key held before this run.\n")
+	}
 	a.printGovernedScope(o)
 	laneReport.print(a)
 	return exitOK

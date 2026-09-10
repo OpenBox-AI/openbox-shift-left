@@ -193,10 +193,28 @@ type Captured struct {
 	ResponseHeaders       map[string]string
 	RequestBody           string
 	ResponseBody          string
+
+	// ResponseBytesSeen and ResponseTruncated are the response-side twin of
+	// selectionNote (requestselect.go): the gateway's own view of whether the
+	// stored ResponseBody is the whole reply. Set by the emit site (proxy.go),
+	// after Complete returns -- not by Complete itself, which only ever sees
+	// the already-computed ResponseBody string and the request half's fields,
+	// never the sink that observed the cut. Both stay at their zero value on
+	// a path that never ran a response through a sink (a refusal or an
+	// unreachable upstream, neither of which carries a ResponseBody either).
+	ResponseBytesSeen int
+	ResponseTruncated bool
+
 	CredentialFingerprint string
 	HTTPMethod            string
 	HTTPURL               string
 	HTTPStatus            int
+
+	// Attribution is a provider-specific read of the RAW request bytes (an
+	// injected closure; see Gateway.WithRequestAttribution), carried without
+	// this package knowing what the keys mean. Nil when no such reader is
+	// configured, or when the configured one found nothing.
+	Attribution map[string]string
 
 	// StartedAt and EndedAt bound the RELAYED call, request capture to end-of-stream.
 	StartedAt time.Time
@@ -222,6 +240,12 @@ type RequestCapture struct {
 	// At is when the request half was taken; a side channel would be a second place
 	// for the two ends to disagree.
 	At time.Time
+
+	// Attribution is assigned AFTER construction by the caller (proxy.go),
+	// never through CaptureRequest's signature: that constructor is exported
+	// and already called from tests, and adding a parameter here would break
+	// every one of them for a feature most callers do not need.
+	Attribution map[string]string
 }
 
 // CaptureRequest does the request half, in the one order that works.
@@ -251,6 +275,7 @@ func (r RequestCapture) Complete(status int, respHeaders http.Header, respBody s
 		HTTPMethod:            r.Method,
 		HTTPURL:               r.URL,
 		HTTPStatus:            status,
+		Attribution:           r.Attribution,
 		StartedAt:             r.At,
 		EndedAt:               at,
 	}
@@ -274,6 +299,7 @@ func (r RequestCapture) ForGate() Captured {
 		RequestBody:           r.Body,
 		HTTPMethod:            r.Method,
 		HTTPURL:               r.URL,
+		Attribution:           r.Attribution,
 		StartedAt:             r.At,
 	}
 }

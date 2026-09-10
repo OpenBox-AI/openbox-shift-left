@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 
@@ -298,5 +300,448 @@ func TestOddRequestTargetsPassThrough(t *testing.T) {
 
 	if got.target != raw {
 		t.Errorf("request target changed in transit: got %q want %q", got.target, raw)
+	}
+}
+
+// TestRequestAttributionOptionReceivesRawBytes is the seam this phase adds:
+// WithRequestAttribution's closure runs on the RAW bytes read off the wire --
+// byte-identical to what the client sent, before any selection or
+// truncation -- and its result rides Captured.Attribution.
+func TestRequestAttributionOptionReceivesRawBytes(t *testing.T) {
+	upstream := upstreamRecorder(t, &recorded{}, nil)
+	g, err := New(Config{Upstream: upstream.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	em := &recordingEmitter{}
+	var calls int
+	var gotRaw []byte
+	g = g.WithCapture(em).WithRequestAttribution(func(raw []byte) map[string]string {
+		calls++
+		gotRaw = append([]byte(nil), raw...)
+		return map[string]string{"prompt_id": "attr-1"}
+	})
+	srv := serveGateway(t, g)
+
+	const body = `{"model":"claude-opus-4","messages":[]}`
+	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if calls != 1 {
+		t.Fatalf("attribution closure called %d times, want 1", calls)
+	}
+	if string(gotRaw) != body {
+		t.Errorf("attribution closure saw %q, want the raw body %q", gotRaw, body)
+	}
+	got := em.await(t, 1)
+	if got[0].Attribution["prompt_id"] != "attr-1" {
+		t.Errorf("Captured.Attribution[prompt_id] = %q, want it carried from the closure's result",
+			got[0].Attribution["prompt_id"])
+	}
+}
+
+// TestRequestAttributionNotCalledWithoutCapturing: with no emitter and no
+// evaluator, nothing reads the evidence attribution would produce, so the
+// closure must not run at all.
+func TestRequestAttributionNotCalledWithoutCapturing(t *testing.T) {
+	upstream := upstreamRecorder(t, &recorded{}, nil)
+	g, err := New(Config{Upstream: upstream.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var calls int
+	g = g.WithRequestAttribution(func([]byte) map[string]string {
+		calls++
+		return nil
+	})
+	srv := serveGateway(t, g)
+
+	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if calls != 0 {
+		t.Errorf("attribution closure ran %d times with no emitter and no evaluator; "+
+			"it must run only while capturing", calls)
+	}
+}
+
+// TestRequestAttributionRunsIndependentOfKeepBodies: attribution is
+// structural evidence and must not depend on whether this path keeps a body.
+func TestRequestAttributionRunsIndependentOfKeepBodies(t *testing.T) {
+	upstream := upstreamRecorder(t, &recorded{}, nil)
+	g, err := New(Config{Upstream: upstream.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	em := &recordingEmitter{}
+	var calls int
+	g = g.WithCapture(em).
+		WithBodyCapture(func(*http.Request) bool { return false }). // never keep a body
+		WithRequestAttribution(func([]byte) map[string]string {
+			calls++
+			return map[string]string{"entrypoint": "cli"}
+		})
+	srv := serveGateway(t, g)
+
+	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader(`{"model":"x"}`))
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if calls != 1 {
+		t.Fatalf("attribution closure ran %d times, want 1 -- it must run even when "+
+			"the path does not keep bodies", calls)
+	}
+	got := em.await(t, 1)
+	if got[0].RequestBody != "" {
+		t.Fatalf("fixture is not exercising keepBodies=false: RequestBody = %q", got[0].RequestBody)
+	}
+	if got[0].Attribution["entrypoint"] != "cli" {
+		t.Errorf("Attribution did not ride Captured despite keepBodies=false: %v", got[0].Attribution)
+	}
+}
+
+// --- Phase 04: response completeness (activity_output.openbox_capture) ---
+
+// TestCaptureSinkCutIsTrueWhenMoreArrivedThanTheBufferKept is acceptance
+// criterion 1, and the whole reason this phase does not length-compare.
+// Write clamps buf to exactly maxCaptureSinkBytes, so len(Bytes()) can never
+// exceed that number and capturableBody's own `len(body) > maxCaptureInputBytes`
+// check can therefore never fire through the sink. seen counts every byte
+// OFFERED, including what the clamp then dropped, so seen > len(Bytes()) can
+// report the cut that the `>` check structurally cannot.
+func TestCaptureSinkCutIsTrueWhenMoreArrivedThanTheBufferKept(t *testing.T) {
+	sink := &captureSink{}
+	sink.Write(bytes.Repeat([]byte("a"), maxCaptureSinkBytes+1))
+
+	if got := len(sink.Bytes()); got != maxCaptureSinkBytes {
+		t.Fatalf("fixture precondition: sink kept %d bytes, want exactly the bound %d", got, maxCaptureSinkBytes)
+	}
+	if got := sink.Seen(); got != maxCaptureSinkBytes+1 {
+		t.Errorf("Seen() = %d, want %d (every byte offered, including the one the clamp dropped)",
+			got, maxCaptureSinkBytes+1)
+	}
+	if !sink.Cut() {
+		t.Error("Cut() = false at exactly the bound; len(Bytes()) can never exceed maxCaptureSinkBytes, " +
+			"so a length comparison can never observe this and Cut() is the only thing that can")
+	}
+}
+
+// TestCaptureSinkCutIsFalseWhenNothingWasDropped is the negative control: a
+// body well under the bound must not be reported as cut.
+func TestCaptureSinkCutIsFalseWhenNothingWasDropped(t *testing.T) {
+	sink := &captureSink{}
+	sink.Write([]byte("short reply"))
+
+	if sink.Cut() {
+		t.Error("Cut() = true for a response well under the bound")
+	}
+	if got, want := sink.Seen(), len("short reply"); got != want {
+		t.Errorf("Seen() = %d, want %d", got, want)
+	}
+}
+
+// TestCaptureSinkSeenAccumulatesAcrossManyWritesPastTheBound is acceptance
+// criterion 6's arithmetic in isolation: streamTo offers the sink one
+// relayBufferSize chunk at a time, so seen must keep counting every chunk
+// offered, across every call, long after buf itself has stopped growing.
+func TestCaptureSinkSeenAccumulatesAcrossManyWritesPastTheBound(t *testing.T) {
+	sink := &captureSink{}
+	const chunk = relayBufferSize
+	chunks := maxCaptureSinkBytes/chunk + 3 // past the bound by 3 whole chunks
+	for range chunks {
+		sink.Write(bytes.Repeat([]byte("x"), chunk))
+	}
+
+	if got, want := sink.Seen(), chunks*chunk; got != want {
+		t.Errorf("Seen() = %d, want %d (every chunk offered, across every Write call)", got, want)
+	}
+	if got := len(sink.Bytes()); got != maxCaptureSinkBytes {
+		t.Errorf("Bytes() length = %d, want exactly the bound %d", got, maxCaptureSinkBytes)
+	}
+	if !sink.Cut() {
+		t.Error("Cut() = false despite seen exceeding the kept buffer by three whole chunks")
+	}
+}
+
+// TestCaptureSinkNilIsSafe: an emitter-less relay never allocates a sink, and
+// every accessor has to tolerate that nil rather than the caller branching on
+// it everywhere sink is read.
+func TestCaptureSinkNilIsSafe(t *testing.T) {
+	var sink *captureSink
+	if sink.Cut() {
+		t.Error("Cut() on a nil sink must be false")
+	}
+	if sink.Seen() != 0 {
+		t.Error("Seen() on a nil sink must be 0")
+	}
+	if sink.Bytes() != nil {
+		t.Error("Bytes() on a nil sink must be nil")
+	}
+	sink.Write([]byte("must not panic")) // no-op on a nil receiver
+}
+
+// TestResponseTruncatedIsTrueWhenStoredEndsInBodyCutNoteEvenIfTheSinkDidNot is
+// acceptance criterion 3: capRunes and decodeCapturable can each append
+// bodyCutNote to the STORED form without the sink itself ever reaching its own
+// bound (a small compressed body decoding to a huge plaintext, or redaction
+// growth pushing an already-under-bound body over captureBodyRunes). The OR
+// has to read the stored string, not stop at asking the sink.
+func TestResponseTruncatedIsTrueWhenStoredEndsInBodyCutNoteEvenIfTheSinkDidNot(t *testing.T) {
+	sink := &captureSink{}
+	sink.Write([]byte("short"))
+	if sink.Cut() {
+		t.Fatal("fixture precondition: the sink must not have cut anything")
+	}
+
+	stored := "whatever survived the cut" + bodyCutNote
+	if !responseTruncated(sink, stored, nil) {
+		t.Error("responseTruncated = false for a stored body ending in bodyCutNote")
+	}
+}
+
+// TestResponseTruncatedIsFalseForAWholeShortBody is the negative control for
+// the OR above: neither input observed a loss, so the report must not claim
+// one either.
+func TestResponseTruncatedIsFalseForAWholeShortBody(t *testing.T) {
+	sink := &captureSink{}
+	sink.Write([]byte("{}"))
+	if responseTruncated(sink, "{}", nil) {
+		t.Error("responseTruncated = true for an untruncated body under every bound")
+	}
+}
+
+// TestShortResponseReportsCompleteWithExactByteCount is acceptance criterion 2,
+// end to end: a short reply must carry truncated:false and original_bytes
+// equal to its own length, not merely leave the sink able to say so.
+func TestShortResponseReportsCompleteWithExactByteCount(t *testing.T) {
+	const body = `{"type":"message","role":"assistant","content":[{"type":"text","text":"hi"}]}`
+	upstream := upstreamRecorder(t, &recorded{}, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, body)
+	})
+	em := &recordingEmitter{}
+	g, err := New(Config{Upstream: upstream.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	g = g.WithCapture(em)
+	srv := serveGateway(t, g)
+
+	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	got := em.await(t, 1)[0]
+	if got.ResponseTruncated {
+		t.Error("ResponseTruncated = true for a short, whole response")
+	}
+	if got.ResponseBytesSeen != len(body) {
+		t.Errorf("ResponseBytesSeen = %d, want %d", got.ResponseBytesSeen, len(body))
+	}
+}
+
+// TestResponseOverTheSinkBoundReportsTruncatedWithFullByteCountSeen is
+// acceptance criteria 1 and 6, wired end to end: a 300 KB identity-encoded
+// response is exactly the shape whose sink-kept length lands on the bound
+// (invisible to a `>` check) while original_bytes must still equal the FULL
+// pre-cut count the relay actually read off the wire, which requires seen to
+// increment before the sink's own bound check and clamp.
+func TestResponseOverTheSinkBoundReportsTruncatedWithFullByteCountSeen(t *testing.T) {
+	const fullSize = 300 * 1024
+	body := strings.Repeat("r", fullSize)
+	if fullSize <= maxCaptureSinkBytes {
+		t.Fatalf("fixture precondition: %d must exceed the sink bound %d", fullSize, maxCaptureSinkBytes)
+	}
+	upstream := upstreamRecorder(t, &recorded{}, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, body)
+	})
+	em := &recordingEmitter{}
+	g, err := New(Config{Upstream: upstream.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	g = g.WithCapture(em)
+	srv := serveGateway(t, g)
+
+	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	got := em.await(t, 1)[0]
+	if got.ResponseBytesSeen != fullSize {
+		t.Errorf("ResponseBytesSeen = %d, want the full %d bytes offered, not the stored length",
+			got.ResponseBytesSeen, fullSize)
+	}
+	if !got.ResponseTruncated {
+		t.Error("ResponseTruncated = false for a response well over the sink's bound")
+	}
+}
+
+// TestCompressedResponseOverItsOwnBoundIsTruncatedEvenThoughTheSinkNeverFilled
+// is acceptance criterion 3's realistic case: a small compressed body that
+// decodes to a huge plaintext never fills the sink (the sink only ever sees
+// the COMPRESSED bytes), yet decodeCapturable's own bound cuts the decoded
+// text and marks it -- so the report must still say truncated:true.
+func TestCompressedResponseOverItsOwnBoundIsTruncatedEvenThoughTheSinkNeverFilled(t *testing.T) {
+	plain := strings.Repeat("z", maxCaptureInputBytes+1024)
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte(plain)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	if gz.Len() >= maxCaptureSinkBytes {
+		t.Fatalf("fixture does not exercise the gap: compressed size %d is not below the sink bound %d",
+			gz.Len(), maxCaptureSinkBytes)
+	}
+
+	upstream := upstreamRecorder(t, &recorded{}, func(w http.ResponseWriter) {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusOK)
+		w.Write(gz.Bytes())
+	})
+	em := &recordingEmitter{}
+	g, err := New(Config{Upstream: upstream.URL})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	g = g.WithCapture(em)
+	srv := serveGateway(t, g)
+
+	resp, err := probeClient().Post(srv.URL+"/v1/messages", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	got := em.await(t, 1)[0]
+	if !strings.HasSuffix(got.ResponseBody, bodyCutNote) {
+		t.Fatalf("fixture precondition: stored body does not end in bodyCutNote (%d bytes stored)",
+			len(got.ResponseBody))
+	}
+	if !got.ResponseTruncated {
+		t.Error("ResponseTruncated = false for a body the compressed-decode path itself cut, even " +
+			"though the sink's own bound (measured on the COMPRESSED bytes) never fired")
+	}
+}
+
+// --- Two more abort paths responseTruncated must catch, neither of which is
+// the sink hitting its own bound or a downstream cut-note: the connection can
+// break on either SIDE of the relay, and each side leaves a different trace.
+
+// TestResponseTruncatedIsTrueWhenTheUpstreamConnectionBreaksMidStream: the
+// connection to the UPSTREAM breaks mid-body, so streamTo's own read fails
+// (streamErr != nil) before EOF. The body captured so far is short, so
+// neither the sink's bound nor a bodyCutNote suffix would ever have caught
+// this on their own -- streamErr itself has to be consulted.
+func TestResponseTruncatedIsTrueWhenTheUpstreamConnectionBreaksMidStream(t *testing.T) {
+	upstream := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: message_start\n\n"))
+		http.NewResponseController(w).Flush()
+		panic(http.ErrAbortHandler) // kill the connection mid-body
+	}))
+	t.Cleanup(upstream.Close)
+
+	em := &recordingEmitter{}
+	srv := serveGateway(t, wire(t, upstream.URL, em, nil, nil))
+
+	resp, err := probeClient().Get(srv.URL + "/v1/messages")
+	if err != nil {
+		t.Fatalf("request through gateway: %v", err)
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	got := em.await(t, 1)[0]
+	if !got.ResponseTruncated {
+		t.Error("ResponseTruncated = false for a response the connection to the UPSTREAM broke mid-body " +
+			"(streamTo's own read error was never consulted)")
+	}
+}
+
+// abortingResponseWriter fails Write after failAfter successful calls,
+// modelling the developer's own tool disconnecting mid-stream: the relay's
+// write TO THE CLIENT fails, which is a different fact than an upstream read
+// error and arrives through a different return path (see streamTo).
+type abortingResponseWriter struct {
+	header    http.Header
+	failAfter int
+	writes    int
+}
+
+func (w *abortingResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *abortingResponseWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes > w.failAfter {
+		return 0, errors.New("simulated broken pipe: the client disconnected mid-stream")
+	}
+	return len(p), nil
+}
+
+func (w *abortingResponseWriter) WriteHeader(int) {}
+
+// TestResponseTruncatedIsTrueWhenTheClientDisconnectsMidStream is the other
+// abort path: the developer's own tool hangs up mid-generation (Ctrl-C), so
+// streamTo's write TO THE CLIENT fails instead of its read from upstream.
+// streamTo returns nil for this deliberately -- relaying is done trying, and
+// turning it into an error here would incorrectly trip the relay's own
+// panic(http.ErrAbortHandler) path -- so streamErr is nil and cannot be what
+// reports this cut.
+func TestResponseTruncatedIsTrueWhenTheClientDisconnectsMidStream(t *testing.T) {
+	sink := &captureSink{}
+	// Two full relayBufferSize chunks: the first write succeeds and is
+	// captured, the second fails -- proving the cut is detected after at
+	// least one chunk was already relayed, not only at stream start.
+	src := strings.NewReader(strings.Repeat("a", relayBufferSize) + strings.Repeat("b", relayBufferSize))
+	w := &abortingResponseWriter{failAfter: 1}
+	g := &Gateway{}
+
+	streamErr := g.streamTo(w, src, sink)
+	if streamErr != nil {
+		t.Fatalf("streamTo returned %v, want nil: a downstream write failure must not surface as a "+
+			"stream error, or it would flip the relay's own panic path", streamErr)
+	}
+	if got := len(sink.Bytes()); got != relayBufferSize {
+		t.Fatalf("fixture precondition: sink kept %d bytes, want exactly one chunk (%d) -- the "+
+			"second chunk's write failed before it could ever reach the sink", got, relayBufferSize)
+	}
+	if !sink.Incomplete() {
+		t.Error("sink.Incomplete() = false after a downstream write failed mid-stream; streamTo's " +
+			"write-failure branch must mark it, since seen and len(Bytes()) agree exactly here and " +
+			"Cut() cannot see this case")
+	}
+
+	if !responseTruncated(sink, sink.String(), streamErr) {
+		t.Error("responseTruncated = false for a stream that stopped because the client disconnected; " +
+			"streamErr is nil here by design, so sink.Incomplete() must be what reports this cut")
 	}
 }

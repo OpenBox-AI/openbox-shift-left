@@ -165,7 +165,14 @@ That command:
   *same* path is collapsed. It also sweeps a superseded OpenBox entry out of the
   current directory's own settings file, so nothing registers the same gate
   twice. Either way the command prints what it removed;
-- Writes your posture to `~/.openbox/dev.json`.
+- Writes your posture to `~/.openbox/dev.json`;
+- **Claude Code only:** sets `showThinkingSummaries: true` in that same user
+  settings file, so a thinking block arrives with the model's own reasoning
+  summary instead of an empty one. Whatever was there before -- absent,
+  `false`, or anything else -- is recorded once, in
+  `~/.openbox/claude-code-prior-settings.json`, and put back verbatim by
+  `openbox uninstall`. There is no per-key opt-out; undoing it means
+  uninstalling.
 
 It never reads, writes or prompts for a credential. If none is present it stops
 and points you back at `auth`, installing nothing.
@@ -427,6 +434,7 @@ session on the machine, and enforcement is on by default.
 | Replace credentials | `openbox auth`; blank keeps what is already there |
 | Stop sending prompt text | `"content_capture": false` (see [Data and privacy](data-and-privacy.md)) |
 | Stop sending token counts | `"finops": false` |
+| Stop forcing `showThinkingSummaries` (Claude Code) | `openbox uninstall`; it restores whatever that key held before `init` -- there is no narrower opt-out |
 | Govern model calls too | already done on Claude Code: `init` installs the lanes (see [above](#governing-the-model-call-itself)) |
 | Stop governing model calls | `openbox uninstall`; it is all or nothing, because a machine with hooks and no lane records tool calls while its model calls go unseen |
 | Uninstall | `openbox uninstall`; it detects what is installed, prints the inventory, and removes hooks, lanes, the CA, posture, the spool and your credentials. It needs no credential to run |

@@ -74,6 +74,8 @@ func (a *app) runTransport(args []string) int {
 		transport.WithBodyCapture(func(r *http.Request) bool {
 			return gatewayemit.CapturesBody(r.URL.Path)
 		}),
+		// Same reason: the attribution parser lives in gatewayemit too.
+		transport.WithRequestAttribution(gatewayemit.ParseRequestAttribution),
 	}
 	if *verbose {
 		opts = append(opts, transport.WithVerbose(logger.Printf))

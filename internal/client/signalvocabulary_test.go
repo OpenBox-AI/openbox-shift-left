@@ -1,6 +1,7 @@
 package client
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -101,15 +102,20 @@ func TestContentMetadataKeysAreCappedOnEgress(t *testing.T) {
 		Timestamp: "2026-09-08T00:00:00Z", Tool: Tool{Name: "claude-code", Kind: ToolShell},
 		Metadata: map[string]any{"command": long, "file_path": "/tmp/.env"},
 	}
-	got, _ := eventMetadataForEgress(ev)["command"].(string)
+	cut := &cutLog{}
+	m := eventMetadataForEgress(ev, cut, "metadata")
+	got, _ := m["command"].(string)
 	if n := utf8.RuneCountInString(got); n != maxBodySize {
 		t.Errorf("a content metadata key egressed at %d runes, want the %d-rune content cap", n, maxBodySize)
 	}
 	if !utf8.ValidString(got) {
 		t.Error("the cap cut a rune in half")
 	}
-	if p, _ := eventMetadataForEgress(ev)["file_path"].(string); p != "/tmp/.env" {
+	if p, _ := m["file_path"].(string); p != "/tmp/.env" {
 		t.Errorf("a structural key was capped too: %q", p)
+	}
+	if want := []string{"metadata.command"}; !slices.Equal(cut.sorted(), want) {
+		t.Errorf("cut.sorted() = %v, want %v; the structural file_path key must contribute no path", cut.sorted(), want)
 	}
 }
 

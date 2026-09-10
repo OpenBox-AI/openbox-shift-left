@@ -45,6 +45,17 @@ type uninstallState struct {
 	laneFailed bool          // a lane whose deactivate conflicted: still routed, still running
 	kept       []string      // org-owned files, reported and left
 	backlog    int           // events in the spool that no flush could deliver
+	// keepPriorRecord is true when the showThinkingSummaries restore did not
+	// run to completion this pass -- the settings file would not parse, so
+	// removeHookSurfaces never reached the restore call, or the restore
+	// itself errored. removeArtifacts must not purge the prior-value record
+	// in that case: it is the only thing a later `uninstall`, once the
+	// blocker is fixed, can restore the developer's original value from. A
+	// restore that ran and found drift is not this case -- see
+	// restoreProviderSettings. keepPriorRecordPath names the settings surface
+	// involved, for the report.
+	keepPriorRecord     bool
+	keepPriorRecordPath string
 }
 
 func (a *app) runUninstall(args []string) int {
@@ -123,12 +134,29 @@ func laneResidue(home string) bool {
 type hookFailure struct {
 	path       string
 	unparsable bool
+	// restoreFailure marks a failure from restoreProviderSettings rather than
+	// from removing a hook registration. It needs its own consequence text:
+	// by the time that restore runs, this surface's hooks are already gone
+	// (RemoveProviderHooks above it succeeded), so "applies NO hooks" would be
+	// false here even when path names a file that failed to parse. path can
+	// be this surface's own settings file or the internal prior-settings
+	// record RestoreProviderSettings reads first -- whichever one actually
+	// blocked the restore -- and settingsPath is always the settings surface
+	// the restore targeted, for a message that can name both.
+	restoreFailure bool
+	settingsPath   string
 }
 
 type hookSurface struct {
 	provider string
 	path     string
 	present  bool
+	// restoreSettings marks the one surface where `openbox init` also forces
+	// a bare settings key (Claude Code's showThinkingSummaries): the
+	// user-scope file. The project-scope file and Codex's hooks file never
+	// had it, so restoring against either would look for a key that was
+	// never forced there.
+	restoreSettings bool
 }
 
 type spoolState struct {
@@ -154,7 +182,7 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	// provider: a surface skipped because "this machine looks like Codex" is a
 	// hook that keeps firing after the command reports success.
 	for _, s := range []hookSurface{
-		{provider: string(provider.ClaudeCode), path: gatewayservice.SettingsPath(home)},
+		{provider: string(provider.ClaudeCode), path: gatewayservice.SettingsPath(home), restoreSettings: true},
 		{provider: string(provider.ClaudeCode), path: filepath.Join(".claude", "settings.local.json")},
 		{provider: string(provider.Codex), path: providers.CodexHooksPath()},
 	} {
@@ -185,6 +213,13 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 		if path != "" && fileExists(path) {
 			inv.posture = appendUnique(inv.posture, path)
 		}
+	}
+	// The showThinkingSummaries prior-value record: `~/.openbox` is never
+	// removed recursively (safeToRemoveAll below refuses it), so this has to
+	// be swept by name like the rest of posture, and only after
+	// removeHookSurfaces has had a chance to restore from it.
+	if p := providers.ClaudePriorSettingsPath(home); fileExists(p) {
+		inv.posture = appendUnique(inv.posture, p)
 	}
 	for _, dir := range append(providers.OwnedSpoolDirs(),
 		obgit.DefaultSessionDir(), hookflow.PendingApprovalDir(), hookflow.DefaultHaltDir()) {
@@ -339,11 +374,22 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 				unparsable: strings.Contains(err.Error(), "not valid JSON"),
 			})
 			st.failed = true
+			// This surface never reaches the restore call below: the
+			// prior-value record it would have restored from must survive
+			// this run, or the developer's original value is unrecoverable
+			// once this file is deleted unconditionally further down.
+			if s.restoreSettings {
+				st.keepPriorRecord = true
+				st.keepPriorRecordPath = s.path
+			}
 			continue
 		}
 		for _, r := range removed {
 			fmt.Fprintf(a.stdout, "  removed        %s from %s\n", r, s.path)
 			st.deleted++
+		}
+		if s.restoreSettings {
+			a.restoreProviderSettings(st, inv.home, s)
 		}
 	}
 	if inv.pluginDir != "" {
@@ -359,6 +405,55 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 			fmt.Fprintf(a.stdout, "  deleted        %s\n", inv.pluginDir)
 			st.deleted++
 		}
+	}
+}
+
+// restoreProviderSettings puts a bare settings key (Claude Code's
+// showThinkingSummaries) back to whatever it held before `openbox init`
+// forced it. A restore failure is recorded the same way a hook-removal
+// failure is, immediately above: reported, not fatal, so the remaining
+// uninstall steps still run. Drift -- the developer changed the value after
+// `init` -- is reported too, but is not a failure: it is not this command's
+// place to overwrite a value someone deliberately changed.
+func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSurface) {
+	res, err := providers.RestoreProviderSettings(s.provider, s.path, home)
+	if err != nil {
+		// The failure can be s.path itself, or the internal prior-settings
+		// record RestoreProviderSettings reads before ever touching s.path --
+		// a file the developer never opens. Blaming s.path unconditionally
+		// would send them to inspect a file that is perfectly fine while the
+		// actual blocker, a different file, goes unnamed. Both adapter errors
+		// name the file they came from in their own text, so pick whichever
+		// one the message actually mentions rather than assuming s.path.
+		failedPath := s.path
+		if recPath := providers.ClaudePriorSettingsPath(home); recPath != "" && strings.Contains(err.Error(), recPath) {
+			failedPath = recPath
+		}
+		fmt.Fprintf(a.stderr, "warning: %s: could not restore %s: %v\n", failedPath, providers.ClaudeThinkingSummariesKey, err)
+		st.hookFailed = append(st.hookFailed, hookFailure{
+			path:           failedPath,
+			unparsable:     strings.Contains(err.Error(), "not valid JSON"),
+			restoreFailure: true,
+			settingsPath:   s.path,
+		})
+		st.failed = true
+		// The restore did not complete -- e.g. the prior-value record itself
+		// is corrupt -- so it must survive this run for a later `uninstall`
+		// to finish the job. Unlike drift below, nothing here is finished.
+		st.keepPriorRecord = true
+		st.keepPriorRecordPath = s.path
+		return
+	}
+	switch {
+	case !res.Recorded:
+		return // the ordinary case: never installed here, or already uninstalled
+	case res.Drifted:
+		fmt.Fprintf(a.stdout, "  left alone     %s in %s (now %s; changed since `init` set it to true)\n",
+			providers.ClaudeThinkingSummariesKey, s.path, res.Current)
+	case res.Present:
+		fmt.Fprintf(a.stdout, "  restored       %s in %s to %s\n", providers.ClaudeThinkingSummariesKey, s.path, res.Value)
+	default:
+		fmt.Fprintf(a.stdout, "  removed        %s from %s\n", providers.ClaudeThinkingSummariesKey, s.path)
 	}
 }
 
@@ -388,7 +483,26 @@ func (a *app) removeArtifacts(st *uninstallState, inv uninstallInventory) {
 	fmt.Fprintf(a.stdout, "\nRemoving posture and owned directories\n")
 	// Posture after hooks: a hook without posture fails open, so posture must not
 	// outlive the hooks that read it.
+	//
+	// One exception: the showThinkingSummaries prior-value record. When
+	// removeHookSurfaces set keepPriorRecord, the restore above did not run
+	// to completion, and purging this file anyway would strand the
+	// developer's original value forever -- a later `uninstall`, once the
+	// blocker named above is fixed, is the only way it is ever recovered.
+	// Drift (the developer changed the value after `init`) does NOT set this
+	// flag: there the restore ran, found the current value authoritative,
+	// and is genuinely finished, so the record purges as normal.
+	recPath := providers.ClaudePriorSettingsPath(inv.home)
 	for _, p := range inv.posture {
+		if st.keepPriorRecord && p == recPath {
+			fmt.Fprintf(a.stdout, "  kept           %s\n", p)
+			fmt.Fprintf(a.stdout, "                 the showThinkingSummaries restore against %s did not complete;\n",
+				st.keepPriorRecordPath)
+			fmt.Fprintf(a.stdout, "                 see the warning above for what to fix. Fix it, then run `openbox\n")
+			fmt.Fprintf(a.stdout, "                 uninstall` again to finish the restore and remove this record.\n")
+			st.kept = appendUnique(st.kept, p)
+			continue
+		}
 		a.deletePath(st, p, os.Remove)
 	}
 	for _, dir := range inv.ownedDirs {
@@ -512,6 +626,20 @@ func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 	}
 	fmt.Fprintf(a.stdout, "\nCONSEQUENCES; this machine is NOT clean\n")
 	for _, f := range st.hookFailed {
+		if f.restoreFailure {
+			// Not the unparsable-hooks case below: this surface's hooks were
+			// already removed (RemoveProviderHooks succeeded) before the
+			// restore ran, so "applies NO hooks" would be false here even
+			// when f.path is itself unparsable. f.path names whichever file
+			// actually blocked the restore -- f.settingsPath, or the internal
+			// prior-settings record.
+			fmt.Fprintf(a.stdout, "  %s could not be read, so %s could not be restored in %s.\n",
+				f.path, providers.ClaudeThinkingSummariesKey, f.settingsPath)
+			fmt.Fprintf(a.stdout, "    %s is unchanged there. Fix or remove %s, then run `openbox uninstall`\n",
+				providers.ClaudeThinkingSummariesKey, f.path)
+			fmt.Fprintf(a.stdout, "    again to finish the restore.\n")
+			continue
+		}
 		if f.unparsable {
 			// Not "still firing": a tool applies no hooks at all from a file it
 			// cannot parse, including the developer's own.

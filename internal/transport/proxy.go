@@ -40,6 +40,12 @@ type Proxy struct {
 
 	capturesBody func(*http.Request) bool
 
+	// attribution forwards to gateway.WithRequestAttribution on every per-host
+	// relay newRelay builds. Provider-specific; injected because this
+	// package's import guard excludes the package that would otherwise supply
+	// it directly (see cmd/openbox/transport.go).
+	attribution func(raw []byte) map[string]string
+
 	clearedEnv []string
 
 	// handlerFor production must never get a stub, so
@@ -86,6 +92,12 @@ type Option func(*Proxy)
 // WithBodyCapture forwards gateway.WithBodyCapture to every per-host relay.
 func WithBodyCapture(capturesBody func(*http.Request) bool) Option {
 	return func(p *Proxy) { p.capturesBody = capturesBody }
+}
+
+// WithRequestAttribution forwards gateway.WithRequestAttribution to every
+// per-host relay newRelay builds.
+func WithRequestAttribution(parse func(raw []byte) map[string]string) Option {
+	return func(p *Proxy) { p.attribution = parse }
 }
 
 // WithVerbose turns on per-connection commentary.
@@ -220,6 +232,9 @@ func (p *Proxy) newRelay(host string) (http.Handler, error) {
 	g = g.WithCapture(p.emitter)
 	if p.capturesBody != nil {
 		g = g.WithBodyCapture(p.capturesBody)
+	}
+	if p.attribution != nil {
+		g = g.WithRequestAttribution(p.attribution)
 	}
 	if p.logf != nil {
 		g = g.WithVerbose(p.logf)

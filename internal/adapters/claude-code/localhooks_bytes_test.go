@@ -113,6 +113,79 @@ func TestWriteLocalHooksKeepsTheDevelopersOtherSettings(t *testing.T) {
 	}
 }
 
+// TestWriteThinkingSummariesKeepsTheDevelopersOtherSettings is
+// TestWriteLocalHooksKeepsTheDevelopersOtherSettings' sibling for the other
+// writer of this same file: writeThinkingSummaries only ever touches
+// showThinkingSummaries, so everything else -- key order, indentation,
+// permissions, a developer's own hooks -- must survive exactly as writeHooks
+// itself already has to preserve it.
+func TestWriteThinkingSummariesKeepsTheDevelopersOtherSettings(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir() // deliberately not project: the record must not assume the two coincide
+	settingsPath := filepath.Join(project, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const existing = `{
+  "zzz_written_last": true,
+  "permissions": {
+    "allow": [
+        "Bash(git*)"
+    ]
+  },
+  "hooks": {
+    "WorktreeCreate": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "notify-send hi"}]}
+    ]
+  },
+  "aaa_written_first": 1
+}
+`
+	if err := os.WriteFile(settingsPath, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeThinkingSummaries(settingsPath, home); err != nil {
+		t.Fatalf("writeThinkingSummaries: %v", err)
+	}
+
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+
+	if i, j := strings.Index(got, "zzz_written_last"), strings.Index(got, "aaa_written_first"); i < 0 || j < 0 || i > j {
+		t.Errorf("the developer's top-level keys were dropped or alphabetised:\n%s", got)
+	}
+	if !strings.Contains(got, `"Bash(git*)"`) {
+		t.Errorf("a permissions entry was lost:\n%s", got)
+	}
+	if !strings.Contains(got, "notify-send hi") {
+		t.Errorf("a foreign hook event was lost:\n%s", got)
+	}
+	if !strings.Contains(got, "Bash(git*)\"\n") && !strings.Contains(got, "        \"Bash(git*)\"") {
+		t.Errorf("the developer's four-space indentation inside permissions was reformatted:\n%s", got)
+	}
+	if !strings.Contains(got, "showThinkingSummaries") {
+		t.Errorf("showThinkingSummaries was not written at all:\n%s", got)
+	}
+
+	var doc struct {
+		ShowThinkingSummaries bool           `json:"showThinkingSummaries"`
+		Hooks                 map[string]any `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("the written file does not parse: %v\n%s", err, got)
+	}
+	if !doc.ShowThinkingSummaries {
+		t.Errorf("showThinkingSummaries did not parse as true:\n%s", got)
+	}
+	if _, ok := doc.Hooks["WorktreeCreate"]; !ok {
+		t.Errorf("the foreign WorktreeCreate hook event is gone:\n%s", got)
+	}
+}
+
 // TestWriteLocalHooksIsIdempotentByteForByte. `openbox init` is re-run
 // routinely, and a second run that rewrites the file gives the developer a
 // spurious diff every time.

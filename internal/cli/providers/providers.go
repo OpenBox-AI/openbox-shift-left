@@ -92,6 +92,62 @@ func RemoveProviderHooks(name, settingsPath string) ([]string, error) {
 	}
 }
 
+// ClaudeThinkingSummariesKey names the Claude Code settings key
+// RestoreProviderSettings restores, so command output can name it without
+// importing the adapter and without risking a print label that drifts from
+// the key the adapter actually writes.
+const ClaudeThinkingSummariesKey = claudecode.ThinkingSummariesKey
+
+// SettingsRestoreResult is the provider-neutral shape of what
+// RestoreProviderSettings did, re-declared here (like LocalHookAudit above)
+// so command code can read it without importing an adapter.
+type SettingsRestoreResult struct {
+	// Recorded is false when the provider holds no restore record: `init`
+	// never forced anything here, or an earlier `uninstall` already cleaned
+	// up. The ordinary case, and not a failure.
+	Recorded bool
+	// Drifted is true when the value changed since `init` set it; Current is
+	// its raw JSON form now ("<absent>" if the key itself is gone). Nothing
+	// was touched.
+	Drifted bool
+	Current string
+	// Present is the recorded prior value's own shape: true means the key was
+	// restored to Value; false means it was absent before `init` and is now
+	// deleted.
+	Present bool
+	Value   string
+}
+
+// RestoreProviderSettings puts back whatever a bare settings key held before
+// `openbox init` forced it -- Claude Code's showThinkingSummaries today.
+// Codex has no equivalent key, so it is a no-op, not an error: uninstall
+// walks every surface unconditionally rather than branching on a detected
+// provider. An unknown provider name still errors, mirroring
+// RemoveProviderHooks's contract: a typo must not read as "nothing was
+// installed for it".
+func RestoreProviderSettings(name, settingsPath, homeDir string) (SettingsRestoreResult, error) {
+	switch provider.Name(name) {
+	case provider.ClaudeCode:
+		r, err := claudecode.RestoreThinkingSummaries(settingsPath, homeDir)
+		return SettingsRestoreResult{
+			Recorded: r.Recorded,
+			Drifted:  r.Drifted,
+			Current:  r.Current,
+			Present:  r.Present,
+			Value:    r.Value,
+		}, err
+	case provider.Codex:
+		return SettingsRestoreResult{}, nil
+	default:
+		return SettingsRestoreResult{}, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
+	}
+}
+
+// ClaudePriorSettingsPath is where the Claude Code adapter records a
+// settings key's value from before `openbox init` forced it, so uninstall
+// can find and purge it (after restoring) without importing the adapter.
+func ClaudePriorSettingsPath(homeDir string) string { return claudecode.PriorSettingsPath(homeDir) }
+
 // CodexHooksPath is where the Codex adapter keeps its hook file, so an
 // uninstall can look where the install wrote without importing the adapter.
 func CodexHooksPath() string { return codex.DefaultHooksPath() }

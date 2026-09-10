@@ -78,6 +78,11 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		return nil, err
 	}
 
+	// cut accumulates every capBodyInto cut across every builder below, so
+	// buildMetadata -- called last -- can serialize one combined summary.
+	// One per event: see cutLog's doc comment.
+	cut := &cutLog{}
+
 	p := governanceEventPayload{
 		Source:             source,
 		EventType:          wireType,
@@ -91,16 +96,16 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		Timestamp:          ev.Timestamp,
 	}
 	if signalName != "" {
-		p.SignalArgs = buildSignalArgs(ev) // nil (omitted) when there is nothing to show
+		p.SignalArgs = buildSignalArgs(ev, cut) // nil (omitted) when there is nothing to show
 	}
 
 	switch ev.EventType {
 	case EventToolCall:
 		p.ActivityID = activityIDFor(ev)
-		p.ActivityInput = structuralActivityInput(ev)
+		p.ActivityInput = structuralActivityInput(ev, cut)
 	case EventToolResult:
 		p.ActivityID = activityIDFor(ev)
-		p.ActivityOutput = structuralActivityOutput(ev)
+		p.ActivityOutput = structuralActivityOutput(ev, cut)
 		p.DurationMs = durationMs(ev)
 		p.Status = statusFor(ev)
 	case EventTurnStarted:
@@ -108,7 +113,7 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityInput = turnActivityInput(ev)
 	case EventTurnCompleted:
 		p.ActivityID = turnActivityIDFor(ev)
-		p.ActivityOutput = turnActivityOutput(ev)
+		p.ActivityOutput = turnActivityOutput(ev, cut)
 		p.DurationMs = durationMs(ev)
 		// Deliberately NOT set: hook_trigger, which would route a model turn onto
 		// core's approval-bypass path.
@@ -121,7 +126,7 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.ActivityInput, p.ActivityOutput = nil, nil
 	}
 
-	meta, err := buildMetadata(ev)
+	meta, err := buildMetadata(ev, cut)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +298,7 @@ func turnActivityIDFor(ev DevEvent) string {
 }
 
 // turnActivityOutput cost is deliberately absent.
-func turnActivityOutput(ev DevEvent) json.RawMessage {
+func turnActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 	m := map[string]any{}
 	if ev.Model != "" {
 		m["model"] = ev.Model
@@ -317,14 +322,61 @@ func turnActivityOutput(ev DevEvent) json.RawMessage {
 		}
 	}
 	if ev.Content != nil && ev.Content.Thinking != "" {
-		m["thinking"] = capBody(ev.Content.Thinking)
+		m["thinking"] = capBodyInto(cut, "activity_output", "thinking", ev.Content.Thinking)
 	}
 	// What the model said; the two sources are mutually exclusive.
 	switch {
 	case ev.Span != nil && ev.Span.ResponseBody != "":
 		// Verbatim, SSE frames and all: reassembly belongs with the consumer.
-		m[modelCallContentKey] = capModelCallBody(ev.Span.ResponseBody)
+		body := ev.Span.ResponseBody
+		// capModelCallBody's own cut used to bypass cutLog entirely, so
+		// truncated_paths stayed silent about the single largest thing a
+		// model-call row cut. Exact byte compare, deliberately: capModelCallBody
+		// itself compares bytes (see its doc comment), so a rune-based check
+		// here would fire on a different body than the one actually cut.
+		clientCut := len(body) > maxModelCallBodyBytes
+		if clientCut {
+			cut.note("activity_output", modelCallContentKey)
+		}
+		m[modelCallContentKey] = capModelCallBody(body)
+		// Inside this arm and nowhere else: this is the note's ONLY attachment
+		// point (see captureNote's doc comment). It disappears under
+		// content_capture:false along with ResponseBody itself, which is
+		// correct -- there is no stored body left for it to describe.
+		//
+		// len(body), not ev.Span.ResponseBytesSeen: that counter is the
+		// gateway sink's own, incremented as bytes arrive OFF THE WIRE --
+		// still compressed, since DisableCompression means the gateway decodes
+		// capture itself rather than letting the transport do it silently
+		// (gateway/proxy.go). gatewayemit's span() deliberately never copies
+		// response headers onto the wire Span (see its own doc comment), so
+		// this layer cannot ask "was this compressed" and must not guess -- and
+		// a corpus measurement puts brotli+gzip at ~98% of real replies
+		// (internal/gateway/decode.go), so treating that raw wire count as if
+		// it were decoded-content bytes made original_bytes routinely SMALLER
+		// than the content it was supposed to describe: backwards for a field
+		// a UI reads as "how much of the reply is this".
+		//
+		// body is already decoded here -- capturableBody/decodeCapturable ran
+		// before this ever reached the wire -- or is a documented marker
+		// string when decoding itself failed, so its own length is always the
+		// same post-decode unit as content: exact for a complete reply, and a
+		// true (if not maximally tight) lower bound for one the gateway or
+		// this client's own capModelCallBody cut. That includes the marker
+		// case: the true original size is genuinely unknowable there, and the
+		// marker's own length is the honest answer rather than a fabricated
+		// one.
+		m[captureSummaryKey] = captureNote{
+			Truncated:     ev.Span.ResponseTruncated || clientCut,
+			OriginalBytes: len(body),
+		}
 	case ev.Content != nil && ev.Content.Output != "":
+		// Same bypass, same fix, on the hook lane's two keys: both are cut from
+		// the same source string, so a cut records both paths.
+		if len(ev.Content.Output) > maxModelCallBodyBytes {
+			cut.note("activity_output", modelCallContentKey)
+			cut.note("activity_output", modelCallReplyKey)
+		}
 		m[modelCallContentKey] = capModelCallBody(ev.Content.Output)
 		// Inside this arm, never after the switch. See modelCallReplyKey: the
 		// arm IS the lane discriminator, and a condition placed after the
@@ -490,7 +542,7 @@ func signalDetailKeyFor(t EventType) string {
 // key into metadata route straight around content_capture. One implementation
 // makes contentMetadataKeys' completeness rule checkable rather than
 // aspirational — see TestContentBearingMetadataIsGatedInSignalArgs.
-func eventMetadataForEgress(ev DevEvent) map[string]any {
+func eventMetadataForEgress(ev DevEvent, cut *cutLog, dest string) map[string]any {
 	m := make(map[string]any, len(ev.Metadata)+4)
 	for k, v := range ev.Metadata {
 		if contentMetadataKeys[k] {
@@ -503,22 +555,34 @@ func eventMetadataForEgress(ev DevEvent) map[string]any {
 			// free-text key was an unbounded body on the wire. Bounds have
 			// owners, and capBody owns content egress -- not one carrier of it.
 			if s, ok := v.(string); ok {
-				v = capBody(s)
+				v = capBodyInto(cut, dest, k, s)
 			}
 		}
 		if k == "http_status" && !observesAResponse(ev.EventType) {
 			continue // see observesAResponse; the key is barred by the ROW's meaning
+		}
+		if k == captureSummaryKey {
+			// Client-reserved: this key is SYNTHESIZED below from cutLog, never
+			// carried. Barring it here closes two holes at once. First, an
+			// adapter-written value would ride signal_args, which OPA and
+			// Guardrails read -- unlike metadata, which no governance engine
+			// evaluates. Second, buildMetadata only overwrites the key when
+			// something was actually cut, so on an uncut event a caller-supplied
+			// value would pass through as a FORGED truncation summary. Barred at
+			// the one door both destinations come through, so the summary's
+			// correctness stops depending on builder call order.
+			continue
 		}
 		m[k] = v
 	}
 	return m
 }
 
-func buildMetadata(ev DevEvent) (json.RawMessage, error) {
-	m := eventMetadataForEgress(ev)
+func buildMetadata(ev DevEvent, cut *cutLog) (json.RawMessage, error) {
+	m := eventMetadataForEgress(ev, cut, "metadata")
 	if ev.Content != nil && ev.Content.SignalDetail != "" {
 		if k := signalDetailKeyFor(ev.EventType); k != "" {
-			m[k] = capBody(ev.Content.SignalDetail)
+			m[k] = capBodyInto(cut, "metadata", k, ev.Content.SignalDetail)
 		}
 	}
 	m["event_id"] = ev.EventID
@@ -571,6 +635,43 @@ func buildMetadata(ev DevEvent) (json.RawMessage, error) {
 				m["http_url"] = s.HTTPURL
 			}
 		}
+		// Claude Code's own per-call correlation block (v1.9), parsed from the
+		// raw request body. Same treatment as CredentialFingerprint above: NOT
+		// in contentMetadataKeys, ungated, derived evidence rather than
+		// content. IsSubagent is the one boolean, and it is promoted only when
+		// true -- its zero value means "the source entry was absent", and a
+		// stored `false` would read as a confirmed non-subagent, which this
+		// lane never has grounds to claim.
+		if s.PromptID != "" {
+			if _, exists := m["prompt_id"]; !exists {
+				m["prompt_id"] = s.PromptID
+			}
+		}
+		if s.PreviousRequestID != "" {
+			if _, exists := m["previous_request_id"]; !exists {
+				m["previous_request_id"] = s.PreviousRequestID
+			}
+		}
+		if s.IsSubagent {
+			if _, exists := m["is_subagent"]; !exists {
+				m["is_subagent"] = true
+			}
+		}
+		if s.Entrypoint != "" {
+			if _, exists := m["entrypoint"]; !exists {
+				m["entrypoint"] = s.Entrypoint
+			}
+		}
+	}
+	// One combined summary of every capBodyInto cut across this event's wire
+	// objects (metadata + signal_args), keyed by destination-qualified path so
+	// the same value cut into both is two entries, not one (see cutLog).
+	// Placed last and omitted when nil: absence means nothing was truncated.
+	// NOT in contentMetadataKeys -- derived evidence, not content -- and safe
+	// from the :506 backstop above, which only ever sees ev.Metadata's own
+	// keys and has already returned by the time this line runs.
+	if paths := cut.sorted(); paths != nil {
+		m[captureSummaryKey] = map[string]any{"truncated_paths": paths}
 	}
 	return json.Marshal(m)
 }
@@ -599,7 +700,7 @@ func contentKeyFor(kind ToolKind, sem string) string {
 // structuralActivityInput builds the INV-2-safe `activity_input` for an
 // ActivityStarted: the identifiers the Verify tab's "Input" detail renders, and
 // what the control plane runs its first Guardrails stage over.
-func structuralActivityInput(ev DevEvent) json.RawMessage {
+func structuralActivityInput(ev DevEvent, cut *cutLog) json.RawMessage {
 	m := map[string]any{}
 	if ev.Tool.Name != "" {
 		m["tool_name"] = ev.Tool.Name
@@ -628,7 +729,8 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 		if ev.Span != nil {
 			sem = ev.Span.SemanticType
 		}
-		m[contentKeyFor(ev.Tool.Kind, sem)] = capBody(ev.Content.ToolInput)
+		key := contentKeyFor(ev.Tool.Kind, sem)
+		m[key] = capBodyInto(cut, "activity_input", key, ev.Content.ToolInput)
 	}
 	if len(m) == 0 {
 		return nil
@@ -643,7 +745,7 @@ func structuralActivityInput(ev DevEvent) json.RawMessage {
 // structuralActivityOutput returns nil (field omitted) when nothing is known;
 // which is the honest state for a shell call, whose counts the providers do
 // not expose.
-func structuralActivityOutput(ev DevEvent) json.RawMessage {
+func structuralActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 	m := map[string]any{}
 	if s := ev.Span; s != nil {
 		if s.BytesRead != nil {
@@ -660,7 +762,7 @@ func structuralActivityOutput(ev DevEvent) json.RawMessage {
 		m["exit_code"] = v
 	}
 	if ev.Content != nil && ev.Content.ToolOutput != "" {
-		m["output"] = capBody(ev.Content.ToolOutput)
+		m["output"] = capBodyInto(cut, "activity_output", "output", ev.Content.ToolOutput)
 	}
 	if len(m) == 0 {
 		return nil
@@ -716,20 +818,20 @@ func durationMs(ev DevEvent) *float64 {
 // adapter-side twins do that. But the GATE is what makes this safe, not the
 // naming: a build carrying this projection must not reach a developer before
 // that gate is running in prod.
-func buildSignalArgs(ev DevEvent) json.RawMessage {
+func buildSignalArgs(ev DevEvent, cut *cutLog) json.RawMessage {
 	var m map[string]any
 	if ev.EventType == EventPromptSubmitted {
 		m = map[string]any{}
 		if ev.Content != nil && ev.Content.Prompt != "" {
-			m["prompt"] = capBody(ev.Content.Prompt)
+			m["prompt"] = capBodyInto(cut, "signal_args", "prompt", ev.Content.Prompt)
 		}
 	} else {
 		// The same gate buildMetadata applies, from the same function, so a
 		// content key cannot be gated in one destination and not the other.
-		m = eventMetadataForEgress(ev)
+		m = eventMetadataForEgress(ev, cut, "signal_args")
 		if ev.Content != nil && ev.Content.SignalDetail != "" {
 			if k := signalDetailKeyFor(ev.EventType); k != "" {
-				m[k] = capBody(ev.Content.SignalDetail)
+				m[k] = capBodyInto(cut, "signal_args", k, ev.Content.SignalDetail)
 			}
 		}
 	}
@@ -760,7 +862,36 @@ func stripContent(ev DevEvent) DevEvent {
 
 const maxBodySize = 65536
 
-func capBody(s string) string {
+// cutLog accumulates the wire paths capBody shortened while one payload is
+// built. Not safe for concurrent use and does not need to be: buildPayload
+// owns exactly one per event.
+type cutLog struct{ paths []string }
+
+// note records a cut at dest+"."+key. Called only when the cap actually
+// fired. Nil-safe: capBodyInto's nil *cutLog callers (capBody, and any test
+// that does not care about the summary) need no branch of their own.
+func (c *cutLog) note(dest, key string) {
+	if c == nil {
+		return
+	}
+	c.paths = append(c.paths, dest+"."+key)
+}
+
+// sorted returns the paths lexicographically, or nil when nothing was cut, so
+// the caller can omit the key.
+func (c *cutLog) sorted() []string {
+	if c == nil || len(c.paths) == 0 {
+		return nil
+	}
+	out := slices.Clone(c.paths)
+	slices.Sort(out)
+	return out
+}
+
+// capBodyInto caps s, recording a cut at dest+"."+key when the cap fired.
+// One writer, so the dynamic backstop (eventMetadataForEgress) cannot drift
+// from the static sites.
+func capBodyInto(c *cutLog, dest, key, s string) string {
 	if len(s) <= maxBodySize { // fast path: byte len ≤ cap ⇒ rune count ≤ cap
 		return s
 	}
@@ -768,7 +899,15 @@ func capBody(s string) string {
 	if len(r) <= maxBodySize {
 		return s
 	}
+	c.note(dest, key)
 	return string(r[:maxBodySize])
+}
+
+// capBody is capBodyInto with no accumulator: a cut still happens, nothing
+// records it. Kept so direct callers (and TestCapBodyStillCutsRunesForEvery
+// OtherField's CJK control, which never triggers a cut anyway) stay untouched.
+func capBody(s string) string {
+	return capBodyInto(nil, "", "", s)
 }
 
 func firstNonEmpty(a, b string) string {
@@ -847,6 +986,32 @@ func capModelCallBody(s string) string {
 
 // truncationMark makes a shortened body distinguishable from a complete one: a
 // clipped reply otherwise reaches OPA and an auditor looking finished.
+//
+// captureSummaryKey names TWO sibling objects that share the one key name at
+// two different destinations, and never collide because the destinations
+// never do:
+//   - `metadata.openbox_capture` is buildMetadata's cutLog summary,
+//     {truncated_paths}, client-reserved and barred from inbound metadata by
+//     eventMetadataForEgress so it can only ever be synthesized from cutLog
+//     (see truncationsummary_test.go).
+//   - `activity_output.openbox_capture` is turnActivityOutput's captureNote,
+//     {truncated, original_bytes} -- the response-side twin of gateway's
+//     selectionNote (openbox_selection). No bar applies here: it is assembled
+//     directly from ev.Span and a local cut check, never copied from caller
+//     metadata, so there is nothing for eventMetadataForEgress to guard.
+const captureSummaryKey = "openbox_capture"
+
+// captureNote is activity_output's response-completeness note: whether the
+// model-call reply the row stores is the whole thing. Truncated has no
+// omitempty -- false IS the wire value that says "this reply is complete,"
+// and dropping it on the zero case would silently turn "unknown" and
+// "complete" into the same absence, the exact defect this note exists to
+// remove. OriginalBytes has none either, matching selectionNote's own field.
+type captureNote struct {
+	Truncated     bool `json:"truncated"`
+	OriginalBytes int  `json:"original_bytes"`
+}
+
 const truncationMark = "…[openbox: truncated]"
 
 func trimTrailingPartialRune(s string) string {

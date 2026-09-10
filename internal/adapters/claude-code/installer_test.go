@@ -19,6 +19,8 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 		ConfigPath: cfgPath,
 		// Pinned so the install cannot reach the real home's settings file.
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+		// Pinned so the prior-settings record cannot reach the real home either.
+		HomeDir: t.TempDir(),
 	}
 
 	if inst.Name() != "claude-code" {
@@ -85,6 +87,8 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 		ConfigPath: cfgPath,
 		// Pinned so the install cannot reach the real home's settings file.
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+		// Pinned so the prior-settings record cannot reach the real home either.
+		HomeDir: t.TempDir(),
 	}
 
 	tru := true
@@ -148,6 +152,8 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 		ConfigPath: cfgPath,
 		// Pinned so the install cannot reach the real home's settings file.
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+		// Pinned so the prior-settings record cannot reach the real home either.
+		HomeDir: t.TempDir(),
 	}
 	ref := CredentialRef{DID: testDID}
 
@@ -178,6 +184,54 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 	}
 }
 
+// TestInstaller_SetsThinkingSummariesAndRecordsThePriorValue is the
+// installer-level wiring check for writeThinkingSummaries: Install must call
+// it inside the same lock as writeHooks, against the same settings file and
+// the same (test-pinned) home, and a fresh machine's prior value is "absent".
+func TestInstaller_SetsThinkingSummariesAndRecordsThePriorValue(t *testing.T) {
+	home := t.TempDir()
+	inst := Installer{
+		PluginDir:    t.TempDir(),
+		ConfigPath:   filepath.Join(t.TempDir(), "dev.json"),
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+		HomeDir:      home,
+	}
+	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	raw, err := os.ReadFile(inst.SettingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	var doc struct {
+		ShowThinkingSummaries *bool `json:"showThinkingSummaries"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse settings: %v\n%s", err, raw)
+	}
+	if doc.ShowThinkingSummaries == nil || !*doc.ShowThinkingSummaries {
+		t.Errorf("showThinkingSummaries = %v, want true", doc.ShowThinkingSummaries)
+	}
+
+	recPath := PriorSettingsPath(home)
+	recRaw, err := os.ReadFile(recPath)
+	if err != nil {
+		t.Fatalf("Install did not create the prior-settings record at %s: %v", recPath, err)
+	}
+	var rec priorSettings
+	if err := json.Unmarshal(recRaw, &rec); err != nil {
+		t.Fatalf("parse record: %v\n%s", err, recRaw)
+	}
+	pv, ok := rec.Keys[ThinkingSummariesKey]
+	if !ok {
+		t.Fatalf("record holds no entry for %s: %+v", ThinkingSummariesKey, rec)
+	}
+	if pv.Present {
+		t.Errorf("recorded prior value: %+v, want Present=false (a fresh settings file has no such key)", pv)
+	}
+}
+
 // TestInstaller_PlacesEngineBinary story-SL4-wire-2: when EngineBinary is set,
 // Install copies the unified engine into the bundle's bin/openbox
 // (executable), idempotently.
@@ -192,6 +246,7 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 		PluginDir:    pluginDir,
 		ConfigPath:   filepath.Join(t.TempDir(), "dev.json"),
 		EngineBinary: engine,
+		HomeDir:      t.TempDir(),
 	}
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
 		t.Fatalf("install: %v", err)
@@ -215,7 +270,8 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
 	pluginDir := t.TempDir()
 	inst := Installer{
-		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json"),
+		HomeDir: t.TempDir()}
 	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -226,7 +282,8 @@ func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
 
 func TestInstaller_RequiresDID(t *testing.T) {
 	inst := Installer{
-		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json")}
+		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json"),
+		HomeDir: t.TempDir()}
 	if err := inst.Install(CredentialRef{}); err == nil {
 		t.Error("install without a DID should error")
 	}
@@ -242,6 +299,8 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 		ConfigPath: cfgPath,
 		// Pinned so the install cannot reach the real home's settings file.
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
+		// Pinned so the prior-settings record cannot reach the real home either.
+		HomeDir: t.TempDir(),
 	}
 	tru := true
 

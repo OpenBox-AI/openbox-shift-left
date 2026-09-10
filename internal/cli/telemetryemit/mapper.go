@@ -157,6 +157,7 @@ func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 			ActivityType:  client.ActivityTypeLLMCompletion,
 			Model:         rec.Attrs["model"],
 			OtelRequestID: reqID,
+			Metadata:      attributionMetadata(rec.Attrs),
 			Span: &client.Span{
 				SemanticType: client.ActivityTypeLLMCompletion,
 				Stage:        stage,
@@ -272,4 +273,60 @@ func parseInt(s string) (int, bool) {
 func eventID(session, reqID, eventType, ts string) string {
 	sum := sha256.Sum256([]byte("otelemit\x1f" + session + "\x1f" + reqID + "\x1f" + eventType + "\x1f" + ts))
 	return "otel-" + hex.EncodeToString(sum[:16])
+}
+
+// maxIdentifierBytes bounds capIdentifier's output. 256 bytes is far above any
+// real vendor identifier (prompt.id is a UUID, 36 bytes) and far below
+// anything that could crowd metadata, mirroring modelBudget's reasoning
+// (internal/gateway/requestselect.go:56). telemetry.MaxAttrValueBytes, the
+// collection-layer bound, is four orders of magnitude too loose for an
+// identifier on its own.
+const maxIdentifierBytes = 256
+
+// capIdentifier bounds a vendor identifier to maxIdentifierBytes, backing off
+// to the nearest rune boundary instead of splitting a multi-byte UTF-8
+// sequence in half.
+//
+// Deliberately NOT enumOr: query_source's vocabulary is vendor-owned and
+// grows (34 literals observed in the provider binary, 6 in the corpus), and
+// the repo already states the reason at
+// internal/adapters/claude-code/mapper.go:257-259 -- an unconfirmed
+// allowlist silently discards real data. capStr there is unreachable from
+// this package (telemetryemit imports no adapter) and counts RUNES rather
+// than bytes, so it would not serve as this bound either.
+func capIdentifier(s string) string {
+	if len(s) <= maxIdentifierBytes {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxIdentifierBytes], "")
+}
+
+// attributionMetadata is the classifier a renderer needs to tell a
+// conversation turn from a background chore: which query produced this call,
+// and which prompt it belongs to. It reads exactly these two keys out of the
+// merged attribute map and no others -- the lane's content sentinel
+// (TestNoContentOnWireAtEitherPosture in sentinel_test.go) is the backstop
+// that would catch this ever widening into a copy of more than two keys.
+//
+// Absence of query_source means unclassified: neither "background" nor
+// "conversation". There is no default and no "sdk" fallback -- a producer
+// that cannot tell must say nothing rather than guess, because a wrong guess
+// would let a background call render as a message the user never sent.
+//
+// Returns nil, not an empty map, when both keys are absent, so
+// DevEvent.Metadata stays nil exactly as it did before this bind existed.
+func attributionMetadata(attrs map[string]string) map[string]any {
+	m := make(map[string]any, 2)
+	if v := attrs["query_source"]; v != "" {
+		m["query_source"] = capIdentifier(v)
+	}
+	// Wire key is prompt_id -- the well-known correlation key docs/mapping.md
+	// already documents -- not the OTel attribute name prompt.id.
+	if v := attrs["prompt.id"]; v != "" {
+		m["prompt_id"] = capIdentifier(v)
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }

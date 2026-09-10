@@ -30,6 +30,10 @@ type Installer struct {
 	// into the bundle's bin/openbox (the hooks invoke
 	// ${CLAUDE_PLUGIN_ROOT}/bin/openbox).
 	EngineBinary string
+	// HomeDir overrides the home directory the showThinkingSummaries
+	// prior-value restore record resolves under (default: homeDir(), the
+	// real OS home). A test seam, like the three paths above.
+	HomeDir string
 }
 
 // Name is the provider this installer serves.
@@ -63,6 +67,14 @@ func (i Installer) Install(ref CredentialRef) error {
 	// file to write. Both of the following stay inside the install lock.
 	engine := filepath.Join(i.pluginDir(), "bin", "openbox")
 	if err := writeHooks(i.settingsPath(), engine); err != nil {
+		return err
+	}
+	// Claude Code only sends a non-empty reasoning summary when this is true;
+	// otherwise a governed transcript's thinking blocks arrive empty. Forced
+	// unconditionally (no opt-out), with the prior value recorded so
+	// `openbox uninstall` can put it back. A failure here is an install
+	// failure, like writeHooks above, and stays inside the same lock.
+	if err := writeThinkingSummaries(i.settingsPath(), i.homeDir()); err != nil {
 		return err
 	}
 	// And an entry left in the current project's own file is now a second
@@ -107,6 +119,24 @@ func (i Installer) settingsPath() string {
 		return i.SettingsPath
 	}
 	return UserSettingsPath()
+}
+
+// homeDir is where this install resolves the showThinkingSummaries
+// prior-value restore record under. When HomeDir is unset it falls back to
+// SettingsPath's own grandparent -- UserSettingsPath is
+// homeDir()/.claude/settings.json by construction (userhooks.go), so a test
+// that pins SettingsPath without also pinning HomeDir still gets an isolated
+// directory instead of silently resolving against the real OS home. Only
+// when neither is set (the real installer, via internal/cli/providers) does
+// this fall through to the real home.
+func (i Installer) homeDir() string {
+	if i.HomeDir != "" {
+		return i.HomeDir
+	}
+	if i.SettingsPath != "" {
+		return filepath.Dir(filepath.Dir(i.SettingsPath))
+	}
+	return homeDir()
 }
 
 func (i Installer) reportSweep(projectDir string, removed []string) {

@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"sync"
@@ -35,6 +36,12 @@ func (e *stubEmitter) count() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return len(e.c)
+}
+
+func (e *stubEmitter) last() gateway.Captured {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.c[len(e.c)-1]
 }
 
 // readConnectResponse consumes the CONNECT 200 the way a real client does.
@@ -390,5 +397,87 @@ func TestNonAllowlistedHostIsNeverCaptured(t *testing.T) {
 	}
 	if em.count() != 0 {
 		t.Errorf("%d captures exist for a host that was never intercepted", em.count())
+	}
+}
+
+// TestRequestAttributionOptionReachesThePerHostRelay is the highest-risk
+// criterion this lane adds: the sample session that motivated attribution
+// classification ran on THIS lane, so an option that only reaches
+// internal/gateway's own tests -- and never the per-host relay newRelay
+// builds -- would deliver nothing for the case that mattered. This drives an
+// actual request through the PRODUCTION handler (p.handlerFor, never a
+// stubbed one) and asserts the closure's result lands on the emitted
+// Captured, exactly the path a real CONNECT would take.
+func TestRequestAttributionOptionReachesThePerHostRelay(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	em := &stubEmitter{}
+	var calls int
+	var gotRaw []byte
+	parse := func(raw []byte) map[string]string {
+		calls++
+		gotRaw = append([]byte(nil), raw...)
+		return map[string]string{"prompt_id": "attribution-reached-transport"}
+	}
+	p, err := New(Config{Upstream: upstream.URL}, testCA(t), em, WithRequestAttribution(parse))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+	if _, ok := h.(*gateway.Gateway); !ok {
+		t.Fatalf("handlerFor returned %T, want *gateway.Gateway -- this test must exercise the "+
+			"production relay, not a stub", h)
+	}
+
+	const body = `{"model":"claude-opus-4","messages":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("relay status = %d, want 200", rec.Code)
+	}
+	if calls != 1 {
+		t.Fatalf("attribution closure ran %d times through the transport-built relay, want 1", calls)
+	}
+	if string(gotRaw) != body {
+		t.Errorf("attribution closure saw %q, want the raw request body %q", gotRaw, body)
+	}
+	if got := em.last().Attribution["prompt_id"]; got != "attribution-reached-transport" {
+		t.Errorf("Captured.Attribution[prompt_id] = %q; the option built via transport.New did not "+
+			"reach the per-host gateway", got)
+	}
+}
+
+// TestWithRequestAttributionIsOptional: the option is not required, and a
+// Proxy built without it must not panic when a call is relayed.
+func TestWithRequestAttributionIsOptional(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	p, err := New(Config{Upstream: upstream.URL}, testCA(t), &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("relay status = %d, want 200", rec.Code)
 	}
 }

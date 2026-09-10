@@ -90,6 +90,12 @@ func EventsFor(lane Lane, id Identity, requestID string, at time.Time, c gateway
 
 	// Note what is NOT here: the HEADERS. Nothing read them, and they were the
 	// highest-risk class this client carried.
+	//
+	// The four Attribution reads are unconditional -- not gated on class -- so
+	// a ClassUnknown (provider_request) row gets them too, same as
+	// CredentialFingerprint above: CarriesContent() is true for ClassUnknown as
+	// well as ClassCompletion, and reading a missing map key is always "",
+	// false for a nil c.Attribution.
 	span := func(stage string) *client.Span {
 		return &client.Span{
 			SemanticType:          semanticTypeFor(class),
@@ -98,6 +104,16 @@ func EventsFor(lane Lane, id Identity, requestID string, at time.Time, c gateway
 			HTTPURL:               c.HTTPURL,
 			HTTPStatus:            c.HTTPStatus,
 			CredentialFingerprint: c.CredentialFingerprint,
+			PromptID:              c.Attribution["prompt_id"],
+			PreviousRequestID:     c.Attribution["previous_request_id"],
+			IsSubagent:            c.Attribution["is_subagent"] == "true",
+			Entrypoint:            c.Attribution["entrypoint"],
+			// Unconditional, like the fields above: harmless on the Started
+			// half, which carries no ResponseBody for turnActivityOutput's
+			// note to attach to, and on a ClassUnknown row, exactly like
+			// CredentialFingerprint's own reasoning above.
+			ResponseBytesSeen: c.ResponseBytesSeen,
+			ResponseTruncated: c.ResponseTruncated,
 		}
 	}
 	half := func(eventType client.EventType, stage string, ts time.Time) client.DevEvent {

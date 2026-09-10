@@ -79,6 +79,10 @@ func (a *app) runGateway(args []string) int {
 		g = g.WithBodyCapture(func(r *http.Request) bool {
 			return gatewayemit.CapturesBody(r.URL.Path)
 		})
+		// The parser lives in gatewayemit, which the gateway's import guard
+		// excludes; injected as a closure for the same reason as the path
+		// taxonomy above.
+		g = g.WithRequestAttribution(gatewayemit.ParseRequestAttribution)
 	}
 	if *verbose {
 		g = g.WithVerbose(logger.Printf)

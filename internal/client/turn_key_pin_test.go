@@ -125,7 +125,7 @@ func TestTurnActivityIDAbsentWithoutIndex(t *testing.T) {
 // spend and model content now share it deliberately rather than by accident.
 // See modelcallcontent_test.go for the in-path shape.
 func TestAHookTurnActivityOutputCarriesNumbersAndOneString(t *testing.T) {
-	raw := turnActivityOutput(pinTurnEvent())
+	raw := turnActivityOutput(pinTurnEvent(), nil)
 	if raw == nil {
 		t.Fatal("turnActivityOutput returned nil for an event carrying model and usage")
 	}
@@ -178,12 +178,12 @@ func TestTurnActivityOutputOmitsWhatIsUnknown(t *testing.T) {
 	ev := pinTurnEvent()
 	ev.Model = ""
 	ev.Tokens = nil
-	if raw := turnActivityOutput(ev); raw != nil {
+	if raw := turnActivityOutput(ev, nil); raw != nil {
 		t.Errorf("activity_output = %s, want omitted", raw)
 	}
 
 	ev.Tokens = &Tokens{Input: intp(7)}
-	raw := turnActivityOutput(ev)
+	raw := turnActivityOutput(ev, nil)
 	if raw == nil {
 		t.Fatal("activity_output omitted for a turn with usage but no model")
 	}
