@@ -40,10 +40,22 @@ func loadFixtureHookEvent(t *testing.T, name string) *HookEvent {
 
 const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
 
+// testSentinel is a marker string no fixture in this package contains (a
+// full-package run before/after this constant's introduction showed zero
+// test-count/result change). testMapper wires it as the default RedactContent
+// so every test -- present and future -- can see whether a code path routes
+// content through redaction, without hand-wiring an inline redactor per call
+// site: identity on any string that does not contain it, so the ~65
+// pre-existing testMapper() call sites are unaffected. A test modelling
+// secret_detection:false must set RedactContent = nil explicitly rather than
+// rely on testMapper()'s zero value, which is no longer "no redactor wired".
+const testSentinel = "OPENBOX-TEST-SENTINEL-b17f2c94"
+
 func testMapper() Mapper {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.Now = func() time.Time { return time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC) }
 	m.NewID = func() string { return "evt-fixed" }
+	m.RedactContent = func(s string) string { return strings.ReplaceAll(s, testSentinel, "[REDACTED]") }
 	return m
 }
 
@@ -405,6 +417,7 @@ func TestMapTurn_RedactionIsStructural(t *testing.T) {
 
 	off := testMapper()
 	off.CaptureContent = true
+	off.RedactContent = nil // models secret_detection:false explicitly; testMapper's sentinel default is no longer nil by itself
 	_, plain, _ := off.MapTurn(&HookEvent{SessionID: "s", LastAssistantMessage: "your key is " + secret}, window, 0)
 	if !strings.Contains(plain.Content.Output, secret) {
 		t.Error("with no redactor wired the text must pass through unchanged; a silent " +

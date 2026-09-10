@@ -245,6 +245,54 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
+	// Never weaken this to a substring check on a decision; see C18 above.
+	t.Run("C57 an Agent subagent prompt's secret never reaches /evaluate; a Bash command's still does", func(t *testing.T) {
+		serveVerdict(t, `{"verdict":"allow"}`)
+		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		t.Setenv(envEnforce, "1")
+		t.Setenv(envFailClosed, "0")
+		t.Setenv(envContentCapture, "1") // content ON: the body is attached
+		os.Unsetenv(envSecretDetection)  // detection default ON
+
+		// Combined shape borrowed from internal/decision/secrets_test.go's own
+		// corpus: an AWS key beside a generic keyword-style credential value,
+		// not invented here.
+		const corpusCredentialText = "supersecretvalue123"
+		agentPayload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Agent","tool_input":{"description":"fetch logs","subagent_type":"code-reviewer","prompt":"use key ` +
+			awsSecret + ` and password=\"` + corpusCredentialText + `\" to fetch the deploy logs"}}`
+		run(t, agentPayload)
+		agentCalls := len(*bodies)
+		if agentCalls == 0 {
+			t.Fatal("no /evaluate call for the Agent spawn; a gated Agent call must be evaluated")
+		}
+		agentBodies := strings.Join((*bodies)[:agentCalls], "")
+		if strings.Contains(agentBodies, awsSecret) || strings.Contains(agentBodies, corpusCredentialText) {
+			t.Errorf("the subagent prompt's secret reached /evaluate; redaction must run BEFORE "+
+				"attachment, same as any other gated class (docs/data-and-privacy.md:37 "+
+				"'redacted then capped'): %s", agentBodies)
+		}
+		if !strings.Contains(agentBodies, "OPENBOX_REDACTED") {
+			t.Errorf("no redaction placeholder attached for the Agent spawn; the case proves "+
+				"nothing if content never egressed at all: %s", agentBodies)
+		}
+
+		// Bash control: the shell carve-out is deliberate (docs/data-and-privacy.md:362,
+		// "a gated shell or MCP call sends its command verbatim, unredacted"). Do NOT
+		// "fix" this half to redact -- it pins a documented decision this same case
+		// would otherwise leave unguarded in the other direction.
+		bashPayload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"export AWS_ACCESS_KEY_ID=` +
+			awsSecret + `"}}`
+		run(t, bashPayload)
+		bashBodies := strings.Join((*bodies)[agentCalls:], "")
+		if bashBodies == "" {
+			t.Fatal("no /evaluate call for the Bash control")
+		}
+		if !strings.Contains(bashBodies, awsSecret) {
+			t.Errorf("Bash control: the raw command must reach /evaluate verbatim, unredacted "+
+				"(docs/data-and-privacy.md:362's documented carve-out); got %s", bashBodies)
+		}
+	})
+
 	observeThenFlush := func(t *testing.T, hook, payload string) []string {
 		t.Helper()
 		bodies := serveCapturing(t, `{"verdict":"allow"}`)
