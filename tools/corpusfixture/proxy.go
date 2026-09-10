@@ -26,9 +26,6 @@ func extractProxy(corpus, out string) error {
 	}
 	defer f.Close()
 
-	type exchange struct {
-		req, resp *event
-	}
 	pending := map[string]*event{}
 	var jsonPick, ssePick exchange
 	var rewritten int
@@ -37,7 +34,7 @@ func extractProxy(corpus, out string) error {
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
 		line := sc.Bytes()
-		if !strings.Contains(string(line), "/v1/messages") && !strings.Contains(string(line), "proxy.response") {
+		if !bytes.Contains(line, []byte("/v1/messages")) && !bytes.Contains(line, []byte("proxy.response")) {
 			continue
 		}
 		var ev event
@@ -67,12 +64,13 @@ func extractProxy(corpus, out string) error {
 				continue
 			}
 			cp.decoded = body
-			if strings.Contains(strings.ToLower(ev.Headers["content-type"]), "event-stream") {
+			ctype := strings.ToLower(ev.Headers["content-type"])
+			if strings.Contains(ctype, "event-stream") {
 				if strings.Count(body, "\n\n") < minSSEFrames-1 {
 					continue
 				}
 				ssePick = smaller(ssePick, ex)
-			} else if strings.Contains(strings.ToLower(ev.Headers["content-type"]), "json") {
+			} else if strings.Contains(ctype, "json") {
 				jsonPick = smaller(jsonPick, ex)
 			}
 		}
@@ -92,22 +90,19 @@ func extractProxy(corpus, out string) error {
 		if ex.req == nil || ex.resp == nil {
 			return fmt.Errorf("no %s exchange found under %s", name, corpus)
 		}
-		doc, err := fixtureFor(ex.req, ex.resp)
-		if err != nil {
-			return err
-		}
-		if err := write(filepath.Join(out, "transport", "testdata", "corpus", name), doc); err != nil {
+		if err := write(filepath.Join(out, "transport", "testdata", "corpus", name), fixtureFor(ex.req, ex.resp)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func smaller(cur, next struct {
+// exchange is one request/response pair the extractor is choosing between.
+type exchange struct {
 	req, resp *event
-}) struct {
-	req, resp *event
-} {
+}
+
+func smaller(cur, next exchange) exchange {
 	if cur.req == nil {
 		return next
 	}
@@ -191,7 +186,7 @@ func withoutContentEncoding(h map[string]string) map[string]string {
 	return out
 }
 
-func fixtureFor(req, resp *event) (any, error) {
+func fixtureFor(req, resp *event) any {
 	return map[string]any{
 		"note": "Sanitized from an openbox-logger desktop-observation run. " +
 			"Every free-text field is synthetic filler of the recorded rune length: the request's " +
@@ -213,5 +208,5 @@ func fixtureFor(req, resp *event) (any, error) {
 			"headers": withoutContentEncoding(resp.Headers),
 			"body":    resp.decoded,
 		},
-	}, nil
+	}
 }

@@ -6,9 +6,11 @@
 package corpusfixture
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -119,7 +121,7 @@ func tokenPlaceholder(n int) string {
 // every field a consumer parses keeps its shape.
 func Sanitize(raw []byte) ([]byte, error) {
 	var doc any
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(&doc); err != nil {
 		return nil, fmt.Errorf("corpusfixture: decode: %w", err)
@@ -143,8 +145,8 @@ type sanitizer struct {
 	next     map[string]int
 }
 
-func (s *sanitizer) pseudonym(class, real string, mint func(int) string, shaped *regexp.Regexp) string {
-	if shaped.MatchString(real) {
+func (s *sanitizer) pseudonym(class, real string, mint func(int) string, sanitized func(string) bool) string {
+	if sanitized(real) {
 		return real // already sanitized; consume no counter
 	}
 	if s.assigned[class] == nil {
@@ -208,9 +210,9 @@ func (s *sanitizer) rewrite(key, val string) string {
 	lk := strings.ToLower(key)
 	switch {
 	case uuidKeys[lk]:
-		return s.pseudonym("uuid", val, uuidPlaceholder, uuidPlaceholderRe)
+		return s.pseudonym("uuid", val, uuidPlaceholder, uuidPlaceholderRe.MatchString)
 	case tokenKeys[lk]:
-		return s.pseudonym("token", val, tokenPlaceholder, tokenPlaceholderRe)
+		return s.pseudonym("token", val, tokenPlaceholder, tokenPlaceholderRe.MatchString)
 	case hexShapeKeys[lk] && val != "":
 		return s.sameLengthDigits(val)
 	case contentKeys[lk]:
@@ -227,19 +229,9 @@ func (s *sanitizer) rewrite(key, val string) string {
 
 // sameLengthDigits order is load-bearing in two places.
 func (s *sanitizer) sameLengthDigits(real string) string {
-	if allDigits(real) {
-		return real // already a pseudonym; consume no counter
-	}
-	if s.assigned["hexshape"] == nil {
-		s.assigned["hexshape"] = map[string]string{}
-	}
-	if p, ok := s.assigned["hexshape"][real]; ok {
-		return p
-	}
-	s.next["hexshape"]++
-	p := fmt.Sprintf("%0*d", len(real), s.next["hexshape"])
-	s.assigned["hexshape"][real] = p
-	return p
+	return s.pseudonym("hexshape", real,
+		func(n int) string { return fmt.Sprintf("%0*d", len(real), n) },
+		allDigits)
 }
 
 func allDigits(s string) bool {
@@ -260,16 +252,16 @@ func (s *sanitizer) scrubText(v string) string {
 		prefix := m[:strings.Index(m, "_")]
 		return prefix + "_" + s.pseudonym("opaque:"+prefix, m,
 			func(n int) string { return fmt.Sprintf("fixture%06d", n) },
-			opaquePlaceholderRe)
+			opaquePlaceholderRe.MatchString)
 	})
 	v = uuidValueRe.ReplaceAllStringFunc(v, func(m string) string {
-		return s.pseudonym("uuid", m, uuidPlaceholder, uuidPlaceholderRe)
+		return s.pseudonym("uuid", m, uuidPlaceholder, uuidPlaceholderRe.MatchString)
 	})
 	v = hexIDRe.ReplaceAllStringFunc(v, func(m string) string {
 		if len(m) < hexIDMin {
 			return m
 		}
-		return s.pseudonym("hex", m, hexPlaceholder, hexPlaceholderRe)
+		return s.pseudonym("hex", m, hexPlaceholder, hexPlaceholderRe.MatchString)
 	})
 	return v
 }
@@ -290,7 +282,7 @@ func (v Violation) String() string { return v.Kind + " at " + v.Path }
 // after sanitization, or produced by an older sanitizer, is still caught.
 func Scan(raw []byte) []Violation {
 	var doc any
-	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(&doc); err != nil {
 		return []Violation{{Path: "$", Kind: "unparseable JSON"}}
@@ -374,22 +366,9 @@ func scanString(val, path, key string, out *[]Violation) {
 	for _, m := range redactedMarkerRe.FindAllString(val, -1) {
 		*out = append(*out, Violation{Path: path, Kind: "redaction marker " + m + " (fixture was rewritten on write)"})
 	}
-	for _, c := range []struct {
-		kind string
-		re   *regexp.Regexp
-		ok   string
-	}{
-		{"api key", apiKeyRe, apiKeyPlaceholder},
-		{"bearer token", bearerRe, bearerPlaceholder},
-		{"email address", emailRe, emailPlaceholder},
-		{"home path", homePathRe, ""},
-	} {
+	for _, c := range scrubSentinels {
 		for _, m := range c.re.FindAllString(val, -1) {
-			if c.kind == "home path" {
-				if m == "/Users/fixture/project" || m == "/home/fixture/project" {
-					continue
-				}
-			} else if m == c.ok {
+			if slices.Contains(c.ok, m) {
 				continue
 			}
 			*out = append(*out, Violation{Path: path, Kind: c.kind})
@@ -411,4 +390,17 @@ func scanString(val, path, key string, out *[]Violation) {
 			*out = append(*out, Violation{Path: path, Kind: "unsanitized hex identifier"})
 		}
 	}
+}
+
+// scrubSentinels are the value patterns a clean fixture may only contain in
+// placeholder form; ok lists every accepted rendering of that pattern.
+var scrubSentinels = []struct {
+	kind string
+	re   *regexp.Regexp
+	ok   []string
+}{
+	{"api key", apiKeyRe, []string{apiKeyPlaceholder}},
+	{"bearer token", bearerRe, []string{bearerPlaceholder}},
+	{"email address", emailRe, []string{emailPlaceholder}},
+	{"home path", homePathRe, []string{"/Users/fixture/project", "/home/fixture/project"}},
 }
