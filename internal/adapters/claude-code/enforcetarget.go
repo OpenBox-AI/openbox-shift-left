@@ -26,7 +26,7 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 // DevEvent maps the call for the inline evaluation and attaches the content
 // the server needs to judge it. Redacted is the default for every class;
 // verbatim is the exception, only where a recorded decision says so -- see
-// the shell-and-MCP carve-out in docs/data-and-privacy.md (§What a gated tool
+// the shell-and-MCP carve-out in docs/data-and-privacy.md (§What an enforced
 // call sends; deliberately no line number, the bullet moves):
 //   - A shell-KINDED call carries only its `command` field, verbatim: a policy
 //     deciding whether a command is dangerous has to see the command that will
@@ -50,13 +50,12 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 // Whether that content then LEAVES the machine is decided once, at the client:
 // Emit strips Content when capture is off (client.go's stripContent; C19).
 //
-// That strip is honoured for the user-file and env sources ONLY. A *locked*
-// managed `content_capture:false` is honoured by ResolveContentCapture (so the
-// observe copy carries nothing) and ignored by ResolveCredentials, which reads
-// the user file and env but never the managed layer -- so under an org lock
-// this content still egresses. Pre-existing and not this function's to fix
-// (devconfig.ResolveCredentials owns it); recorded here so the paragraph above
-// is not read as a guarantee it does not give.
+// That strip covers every source of the setting, the managed layer included.
+// It did not always: ResolveCredentials resolved the posture by hand from the
+// user file plus the environment and never consulted the managed layer, so a
+// *locked* `content_capture:false` stopped the observe copy (via
+// ResolveContentCapture) and let this one through. Both now resolve through
+// ResolveContentCapture, so the two cannot disagree about a lock.
 func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool) {
 	m := t.mapper
 	m.CaptureContent = true
@@ -68,7 +67,7 @@ func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool
 	kind, sem, _, _, _ := classifyTool(t.ev.ToolName)
 	switch {
 	case kind == client.ToolShell && sem != "llm_tool_call":
-		// Verbatim by decision (data-and-privacy.md:362). A subagent spawn
+		// Verbatim by decision (the section named above). A subagent spawn
 		// (Agent/ToolSearch) is shell-KINDED but "llm_tool_call"-semantic, so
 		// it is excluded here and falls through to the redacted default.
 		if in := bounded(commandOf(t.ev.ToolInput, t.ev)); in != "" {

@@ -1,16 +1,10 @@
 # `api/`; normalized developer-runtime event contract
 
 **Story:**  event contract · **Version:** the `schema_version` `const` in [the
-schema](../api/dev-event.schema.json) is the authority; v1.1 added the turn
-pair, v1.2 tool `status`, the subagent/denial/error types and the turn span,
-v1.3 tool content and the signals' free text, v1.4 the turn's thinking, v1.5 the
-gateway's span fields, v1.6 the `:otel:`/`:proxy:` producers, v1.7 `activity_type`
-and the removal of the span carrier, **v1.8 the 21 observe-only lifecycle
-classes (setup, instructions, prompt expansion, message display, permission
-requests, tool batches, notifications, tasks, teammates, config/cwd/directory/
-file/worktree changes, compaction, model switching, elicitation), plus three
-additive run-identity fields (`run_id` newly declared, `run_generation`,
-`continued_from_run_id`) ·**
+schema](../api/dev-event.schema.json) is the authority, and its `x-changelog`
+records what every bump added and why — one entry per version, in the file that
+defines them. A ledger here is a second copy of that list, and the one that used
+to be here fell a version behind. ·
 **Status:** built + validated (v1.0 carried G1_READY + G3_REVIEW, 2026-07-07;
 the later bumps are additive)
 
@@ -151,11 +145,17 @@ What INV-2 still guarantees:
 
 What it does **not** guarantee today: captured content is meant to be
 Guardrail-redacted at source, but that layer is inert
-(`[EXT-guardrail-redaction]`), so with capture on, the default, prompt content
-egresses **unredacted**. Local secret detection, the tier model is retired, so
-this is the vocabulary; it is one of three independently named things now,
-redacts Write/Edit bodies in enforce mode only, and only while
-`secret_detection` is on.
+(`[EXT-guardrail-redaction]`), so nothing on the receiving side redacts what
+arrives. Local secret detection is the only in-transit control, it runs only
+while `secret_detection` is on, and how much it covers is **the adapter's
+property rather than this contract's**: the Claude Code mapper runs it over
+every content class it attaches — prompt, tool input, tool output, the
+assistant's reply, thinking — while the Codex mapper has no redactor at all and
+redacts only the enforce path's file body, so a Codex prompt egresses unscanned
+with `secret_detection` on. The gated copy of a shell or MCP call is verbatim on
+both, by decision; see
+[data-and-privacy.md](data-and-privacy.md#what-an-enforced-call-sends) for that
+carve-out and for what the detector reaches.
 
 ## Verdict vocabulary
 

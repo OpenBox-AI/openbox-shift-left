@@ -338,9 +338,12 @@ An enforced call sends, in this order:
    setting.
 2. **Secret detection runs locally, on the whole body.** Anything it recognizes
    is replaced with a placeholder before the payload is built.
-3. **The content, only if `content_capture` is on**; and it is the **redacted**
-   body, the same bytes your tool call is rewritten to. The command for a shell
-   call, the arguments for an MCP call, the file body for a write.
+3. **The content, only if `content_capture` is on**; and on Claude Code it is
+   the **redacted** body by default, byte-identical to the observe copy of the
+   same call. Three classes override that default, each because a recorded
+   decision says so: a shell-kinded call's `command`, an MCP call's whole
+   `tool_input`, and a file write's body, rebuilt through the same redactor so
+   the enforce copy is the bytes the rewrite put on disk.
 
 Three limits, stated rather than implied:
 
@@ -360,14 +363,29 @@ Three limits, stated rather than implied:
   off the local detector removes the only in-transit protection there is;
   guardrail redaction at source is still not wired.
 - **A gated shell or MCP call sends its command verbatim, unredacted**; even
-  with secret detection on. Only a file body is scanned and rewritten before it
-  is sent for a decision. So `curl -H "Authorization: Bearer …"` reaches the
+  with secret detection on. So `curl -H "Authorization: Bearer …"` reaches the
   control plane with the token intact if that call is gated. This is deliberate,
   not an oversight: a policy that decides whether a command is dangerous has to
   see the command that will actually run, and unlike a file body nothing here is
   written back to your machine. It is the one place where the *ordinary
   telemetry* copy of a call is better protected than the copy sent for
-  enforcement; the observe copy of that same command IS redacted.
+  enforcement; the observe copy of that same command IS redacted. Two edges of
+  the carve-out are worth knowing: the shell arm is **wider than `Bash`**, since
+  a tool name the adapter does not recognize classifies as shell and lands here
+  if its input carries a `command` key; and a **subagent spawn is outside it**,
+  because `Agent` and `ToolSearch` are shell-kinded but semantically an LLM
+  call, so their prompt takes the redacted default.
+- **Every other class is redacted on Claude Code, and verbatim on Codex.** A
+  subagent prompt, a read's arguments, a glob or grep pattern: on Claude Code
+  these leave exactly as their observe copy does. **This changed.** They used to
+  be sent as a raw extract while this document promised redaction; one measured
+  session shipped 71,051 bytes of verbatim subagent prompt to the control plane
+  across 10 spawn rows. Which builtin sends what is now pinned per tool
+  (`internal/adapters/claude-code/enforcetarget_census_test.go`, which fails an
+  unclassified one) and on the outbound bytes (conformance C57). Codex has not
+  had the same inversion: it still sends the whole `tool_input` verbatim for any
+  class it does not classify as shell, and redacts only a file body; its mapper
+  carries no redactor at all, the same asymmetry as its prompt.
 
 The observe copy of the same call used to be the reassurance here: mapped
 separately, carrying no content, so ordinary telemetry was unaffected either
@@ -548,6 +566,7 @@ Both are readable only by you.
 | `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` an older gateway install displaced, so retiring or removing it restores your org's own relay instead of deleting it. A URL, no credential |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
 | `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
+| `claude-code-prior-settings.json` | `~/.openbox/` | `0600`. What Claude Code's `showThinkingSummaries` held before `init` forced it: whether the key was there at all, and its raw JSON value, so a removal puts back exactly those bytes rather than a boolean OpenBox reinterpreted. One key, no credential. It is a settings key rather than an environment key, which is why it is not in `activation.json` |
 | `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted, and name-constrained at generation to the single intercepted host; so a leaked key cannot mint a usable certificate for anything else. It has no more at-rest protection than `.env` does: anything running as you can read it, and with it impersonate that one host to this machine. `openbox uninstall` deletes it rather than leaving it behind a relay that is gone |
 
 | File | What it holds |
@@ -671,6 +690,16 @@ settings is put back to the value it displaced, key by key from
 is removed rather than blanked. A key whose value *changed* after OpenBox set it
 belongs to whoever changed it: the removal refuses it, names it, and stops —
 because a corporate proxy value silently reverted is an outage.
+
+`showThinkingSummaries` comes back the same way, but from
+`claude-code-prior-settings.json` rather than `activation.json`; it is a
+settings key, not an environment one. The command reports which of four things
+it did: nothing was recorded, the recorded value was put back, the key was
+deleted because it was absent before `init`, or it was left alone because you
+changed it yourself afterwards. The record is then deleted with the other
+posture files — unless the restore could not complete, in which case it is
+**kept** and named, because it is the only way that original value is ever
+recovered.
 
 **The spool is flushed first, then destroyed.** The command tries to deliver
 what is queued before deleting it, prints how many events were queued and how
