@@ -8,7 +8,6 @@
 package devconfig
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,11 +215,7 @@ func SpoolDir(subdir string) string {
 	if p := os.Getenv(EnvSpoolDir); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox", subdir)
+	return filepath.Join(userConfigDir(), "openbox", subdir)
 }
 
 // ResolveInstallGitHook reports whether the adapter should install the
@@ -275,15 +270,11 @@ func ResolveFindingsCursor(provider string) string {
 	if p := os.Getenv(EnvFindingsCursor); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
 	name := "findings.cursor"
 	if p := sanitizeProvider(provider); p != "" {
 		name = "findings-" + p + ".cursor"
 	}
-	return filepath.Join(dir, "openbox", name)
+	return filepath.Join(userConfigDir(), "openbox", name)
 }
 
 func sanitizeProvider(p string) string {
@@ -519,25 +510,6 @@ func missingCredentialError(what, envName, envPath string) error {
 func resolveBool(fieldName string, field func(DevConfig) *bool, def bool, envKey string) bool {
 	v, _ := resolveBoolWithSource(fieldName, field, def, envKey)
 	return v
-}
-
-func unmarshalStrict(raw []byte, v any) error {
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &all); err != nil {
-		return err
-	}
-	for k := range all {
-		if strings.HasPrefix(k, "//") {
-			delete(all, k)
-		}
-	}
-	stripped, err := json.Marshal(all)
-	if err != nil {
-		return err
-	}
-	dec := json.NewDecoder(bytes.NewReader(stripped))
-	dec.DisallowUnknownFields()
-	return dec.Decode(v)
 }
 
 // FirstNonEmpty returns the first non-empty string.

@@ -77,38 +77,38 @@ func (p Posture) Flags() map[string]bool {
 	return m
 }
 
-func postureFields() []struct {
+// postureField is one posture flag: where it comes from in the config, its
+// default, its env override, and where it lands on a Posture.
+type postureField struct {
 	name  string
 	field func(DevConfig) *bool
 	def   bool
 	env   string
 	into  func(*Posture) *bool
-} {
-	return []struct {
-		name  string
-		field func(DevConfig) *bool
-		def   bool
-		env   string
-		into  func(*Posture) *bool
-	}{
-		{"enforce", func(c DevConfig) *bool { return c.Enforce }, true, EnvEnforce,
-			func(p *Posture) *bool { return &p.Enforce }},
-		{"fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed,
-			func(p *Posture) *bool { return &p.FailClosed }},
-		{"secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection,
-			func(p *Posture) *bool { return &p.SecretDetection }},
-		{"content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture,
-			func(p *Posture) *bool { return &p.ContentCapture }},
-		{"findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings,
-			func(p *Posture) *bool { return &p.Findings }},
-		{"telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry,
-			func(p *Posture) *bool { return &p.Telemetry }},
-		{"finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops,
-			func(p *Posture) *bool { return &p.Finops }},
-		{"realtime_flush", func(c DevConfig) *bool { return c.RealtimeFlush }, true, EnvRealtime,
-			func(p *Posture) *bool { return &p.RealtimeFlush }},
-	}
 }
+
+// postureFieldTable is a compile-time property of DevConfig, so it is built
+// once. Every accessor below only reads it.
+var postureFieldTable = []postureField{
+	{"enforce", func(c DevConfig) *bool { return c.Enforce }, true, EnvEnforce,
+		func(p *Posture) *bool { return &p.Enforce }},
+	{"fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed,
+		func(p *Posture) *bool { return &p.FailClosed }},
+	{"secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection,
+		func(p *Posture) *bool { return &p.SecretDetection }},
+	{"content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture,
+		func(p *Posture) *bool { return &p.ContentCapture }},
+	{"findings", func(c DevConfig) *bool { return c.Findings }, false, EnvFindings,
+		func(p *Posture) *bool { return &p.Findings }},
+	{"telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry,
+		func(p *Posture) *bool { return &p.Telemetry }},
+	{"finops", func(c DevConfig) *bool { return c.Finops }, true, EnvFinops,
+		func(p *Posture) *bool { return &p.Finops }},
+	{"realtime_flush", func(c DevConfig) *bool { return c.RealtimeFlush }, true, EnvRealtime,
+		func(p *Posture) *bool { return &p.RealtimeFlush }},
+}
+
+func postureFields() []postureField { return postureFieldTable }
 
 // Metadata renders the posture for a session-start event's metadata under a
 // single "posture" key. The strings are omitted when empty, so a field the

@@ -92,10 +92,17 @@ func resolveConfigPath(name string) (string, error) {
 	return newPath, nil
 }
 
-func legacyConfigDir() string {
+// userConfigDir is os.UserConfigDir with the $HOME/.config fallback, so the
+// spool, the findings cursor and the legacy config path cannot drift onto
+// different bases.
+func userConfigDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
+		return filepath.Join(os.Getenv("HOME"), ".config")
 	}
-	return filepath.Join(dir, "openbox")
+	return dir
+}
+
+func legacyConfigDir() string {
+	return filepath.Join(userConfigDir(), "openbox")
 }

@@ -23,36 +23,33 @@ func MigrateLegacyConfig() ([]string, error) {
 		return nil, nil
 	}
 
-	var migrated []string
-	for _, name := range []string{"dev.json"} {
-		if os.Getenv(EnvConfigPath) != "" {
-			continue
-		}
-
-		dst := filepath.Join(newHome, name)
-		if _, err := os.Stat(dst); err == nil {
-			continue // already migrated, or written fresh by this binary
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return migrated, fmt.Errorf("stat %s: %w", dst, err)
-		}
-
-		src := filepath.Join(legacy, name)
-		raw, err := os.ReadFile(src)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue // nothing to migrate for this file
-			}
-			return migrated, fmt.Errorf("read legacy config %s: %w", src, err)
-		}
-		if _, err := ensureHome(); err != nil {
-			return migrated, err
-		}
-		if err := os.WriteFile(dst, raw, 0o600); err != nil {
-			return migrated, fmt.Errorf("write %s: %w", dst, err)
-		}
-		migrated = append(migrated, name)
+	if os.Getenv(EnvConfigPath) != "" {
+		return nil, nil
 	}
-	return migrated, nil
+	const name = "dev.json"
+
+	dst := filepath.Join(newHome, name)
+	if _, err := os.Stat(dst); err == nil {
+		return nil, nil // already migrated, or written fresh by this binary
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("stat %s: %w", dst, err)
+	}
+
+	src := filepath.Join(legacy, name)
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // nothing to migrate
+		}
+		return nil, fmt.Errorf("read legacy config %s: %w", src, err)
+	}
+	if _, err := ensureHome(); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(dst, raw, 0o600); err != nil {
+		return nil, fmt.Errorf("write %s: %w", dst, err)
+	}
+	return []string{name}, nil
 }
 
 // LegacyConfigPaths reports where the pre-that decision files live, for docs,

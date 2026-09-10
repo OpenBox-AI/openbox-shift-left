@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // EnvManagedConfig overrides the managed-config path. Primarily for tests;
@@ -116,7 +117,7 @@ func configKeysUncached(path string) map[string]bool {
 	keys := make(map[string]bool, len(obj))
 	for k := range obj {
 		if strings.HasPrefix(k, "//") {
-			continue // documentation, not a setting (see unmarshalStrict)
+			continue // documentation, not a setting
 		}
 		keys[k] = true
 	}
@@ -156,10 +157,9 @@ func unknownManagedKeys(raw []byte) []string {
 		return nil
 	}
 	known := lockableFields()
-	known["locked"] = true
 	var out []string
 	for k := range all {
-		if strings.HasPrefix(k, "//") || known[k] {
+		if strings.HasPrefix(k, "//") || k == "locked" || known[k] {
 			continue
 		}
 		out = append(out, k)
@@ -169,8 +169,9 @@ func unknownManagedKeys(raw []byte) []string {
 }
 
 // lockableFields derived from the DevConfig json tags so it cannot drift from
-// the schema.
-func lockableFields() map[string]bool {
+// the schema. Built once: the tags are a compile-time property of the type,
+// and every reader below treats the map as read-only.
+var lockableFields = sync.OnceValue(func() map[string]bool {
 	out := map[string]bool{}
 	t := reflect.TypeOf(DevConfig{})
 	for i := 0; i < t.NumField(); i++ {
@@ -180,7 +181,7 @@ func lockableFields() map[string]bool {
 		}
 	}
 	return out
-}
+})
 
 func unknownLocked(locked []string) []string {
 	known := lockableFields()
