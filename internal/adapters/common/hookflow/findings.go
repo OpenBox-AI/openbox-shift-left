@@ -132,13 +132,13 @@ func summarizeFindings(delta []byte) string {
 
 func (s findingsSummary) render() string {
 	var parts []string
-	if s.wouldBlock > 0 {
-		if v := slices.Sorted(maps.Keys(s.verdicts)); len(v) > 0 {
-			parts = append(parts, fmt.Sprintf("%d would-block [%s]", s.wouldBlock, strings.Join(v, ",")))
-		} else {
-			parts = append(parts, fmt.Sprintf("%d would-block", s.wouldBlock))
-		}
-	} else if v := slices.Sorted(maps.Keys(s.verdicts)); len(v) > 0 {
+	v := slices.Sorted(maps.Keys(s.verdicts))
+	switch {
+	case s.wouldBlock > 0 && len(v) > 0:
+		parts = append(parts, fmt.Sprintf("%d would-block [%s]", s.wouldBlock, strings.Join(v, ",")))
+	case s.wouldBlock > 0:
+		parts = append(parts, fmt.Sprintf("%d would-block", s.wouldBlock))
+	case len(v) > 0:
 		parts = append(parts, fmt.Sprintf("verdicts [%s]", strings.Join(v, ",")))
 	}
 	if g := slices.Sorted(maps.Keys(s.guardrailCats)); len(g) > 0 {

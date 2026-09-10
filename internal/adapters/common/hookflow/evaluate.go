@@ -137,5 +137,3 @@ func DecisionTightens(dec decision.Decision, c OutputContract) bool {
 	d, _ := MapVerdict(dec.Evaluation, c)
 	return d != ""
 }
-
-func resolveEvaluationTimeout() time.Duration { return DefaultEvaluationTimeout }

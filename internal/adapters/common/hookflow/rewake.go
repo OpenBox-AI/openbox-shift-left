@@ -48,11 +48,7 @@ func PendingApprovalDir() string {
 	if d := os.Getenv(devconfig.EnvPendingApprovalDir); d != "" {
 		return d
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox", "pending-approvals")
+	return filepath.Join(openboxConfigDir(), "pending-approvals")
 }
 
 // RecordPendingApproval marks that an approval has been filed for this call.

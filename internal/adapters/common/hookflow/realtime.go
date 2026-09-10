@@ -50,21 +50,9 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 		return
 	}
 
-	self := t.Self
-	if self == "" {
-		exe, err := os.Executable()
-		if err != nil || exe == "" {
-			logger.Printf("realtime flush: cannot resolve own binary: %v", err)
-			return
-		}
-		// The trigger may only ever spawn the openbox engine. Under `go test` the
-		// executable is the test binary, and spawning it with hook args would
-		// re-run the suite recursively, since those tests reach this code again:
-		// a fork bomb, not a flusher.
-		if strings.HasSuffix(strings.TrimSuffix(exe, ".exe"), ".test") {
-			return
-		}
-		self = exe
+	self, ok := selfBinary(logger, t.Self, "realtime flush")
+	if !ok {
+		return
 	}
 
 	window := t.Window
@@ -73,48 +61,87 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 	}
 	lock := t.Spool.FlushLockPath(sessionID)
 
+	if !claimWindowLock(logger, lock, window, "realtime flush") {
+		return
+	}
+
+	if err := t.Spool.spawnFlusher(self, t.Provider,
+		append(os.Environ(), EnvFlushSession+"="+sessionID), t.Start); err != nil {
+		logger.Printf("realtime flush: spawn failed (events wait for SessionEnd): %v", err)
+		_ = os.Remove(lock)
+	}
+}
+
+// selfBinary resolves the binary to spawn: the injected override, else
+// os.Executable() (never a PATH lookup). It reports !ok when that cannot be
+// resolved, or when it is the `go test` binary -- spawning that with hook args
+// would re-run the suite recursively, since those tests reach this code again:
+// a fork bomb, not a flusher. what prefixes the diagnostic.
+func selfBinary(logger *log.Logger, override, what string) (string, bool) {
+	if override != "" {
+		return override, true
+	}
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		logger.Printf("%s: cannot resolve own binary: %v", what, err)
+		return "", false
+	}
+	if strings.HasSuffix(strings.TrimSuffix(exe, ".exe"), ".test") {
+		return "", false
+	}
+	return exe, true
+}
+
+// claimWindowLock takes an mtime-debounced lockfile and reports whether this
+// process owns the window. A lock that vanished mid-race, or one still inside
+// the window, yields false; a stale one is taken over by refreshing its mtime.
+// Nothing releases such a lock -- the next claimant takes it over once it has
+// gone stale, which is what makes the window exactly one holder wide.
+func claimWindowLock(logger *log.Logger, lock string, window time.Duration, what string) bool {
 	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	switch {
 	case err == nil:
 		f.Close()
+		return true
 	case os.IsExist(err):
 		info, statErr := os.Stat(lock)
 		if statErr != nil {
-			return // lock vanished mid-race: a flusher just finished; next hook retries
+			return false
 		}
 		if time.Since(info.ModTime()) < window {
-			return // debounced: a flush is pending or running
+			return false
 		}
 		now := time.Now()
 		if chErr := os.Chtimes(lock, now, now); chErr != nil {
-			logger.Printf("realtime flush: stale-lock takeover skipped: %v", chErr)
-			return
+			logger.Printf("%s: stale-lock takeover skipped: %v", what, chErr)
+			return false
 		}
+		return true
 	default:
-		logger.Printf("realtime flush: lock claim skipped: %v", err)
-		return
+		logger.Printf("%s: lock claim skipped: %v", what, err)
+		return false
 	}
+}
 
-	cmd := exec.Command(self, "hook", t.Provider, "flush")
-	cmd.Env = append(os.Environ(), EnvFlushSession+"="+sessionID)
+// spawnFlusher starts the detached `hook <provider> flush` child. The flusher
+// gets a voice: a file, not the parent's descriptors, because this child
+// outlives the hook process and a hook's stdout injects what appears on it.
+func (s Spool) spawnFlusher(self, provider string, env []string, start func(*exec.Cmd) error) error {
+	cmd := exec.Command(self, "hook", provider, "flush")
+	cmd.Env = env
 	cmd.Stdin = nil
-	// The flusher gets a voice: a file, not the parent's stderr, because this child
-	// outlives the hook process.
-	if log := t.Spool.openFlusherLog(); log != nil {
-		defer log.Close()
-		cmd.Stdout, cmd.Stderr = log, log
+	if lf := s.openFlusherLog(); lf != nil {
+		defer lf.Close()
+		cmd.Stdout, cmd.Stderr = lf, lf
 	} else {
 		cmd.Stdout, cmd.Stderr = nil, nil
 	}
 	cmd.SysProcAttr = detachAttr()
-	start := t.Start
 	if start == nil {
 		start = (*exec.Cmd).Start
 	}
 	if err := start(cmd); err != nil {
-		logger.Printf("realtime flush: spawn failed (events wait for SessionEnd): %v", err)
-		_ = os.Remove(lock)
-		return
+		return err
 	}
 	if cmd.Process != nil {
 		// Reap the child, or a long-lived caller accumulates zombies until the
@@ -123,4 +150,5 @@ func (t RealtimeTrigger) Maybe(logger *log.Logger, sessionID string) {
 		// and there are no pipes to drain, so this blocks only on its exit.
 		go func() { _ = cmd.Wait() }()
 	}
+	return nil
 }

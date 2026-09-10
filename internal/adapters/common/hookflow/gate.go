@@ -113,7 +113,7 @@ func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t Enforce
 	if !ok {
 		return EvaluationFailOpen("event not mappable"), client.ApprovalKey{}
 	}
-	dec := g.Evaluator.Escalate(ctx, logger, ev, g.Evaluator.Budget(enforceStart, resolveEvaluationTimeout()))
+	dec := g.Evaluator.Escalate(ctx, logger, ev, g.Evaluator.Budget(enforceStart, DefaultEvaluationTimeout))
 	return dec, client.ApprovalKeyFor(ev)
 }
 

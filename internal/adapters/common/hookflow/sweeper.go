@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -71,45 +70,13 @@ func (s Sweeper) claimSweep(logger *log.Logger, window time.Duration) bool {
 		logger.Printf("spool sweep: cannot reach the spool directory: %v", err)
 		return false
 	}
-	lock := filepath.Join(s.Spool.Dir, sweepLockName)
-	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	switch {
-	case err == nil:
-		f.Close()
-		return true
-	case os.IsExist(err):
-		info, statErr := os.Stat(lock)
-		if statErr != nil {
-			return false // vanished mid-race; the next interval retries
-		}
-		if time.Since(info.ModTime()) < window {
-			return false // another lane's sweeper already owns this interval
-		}
-		now := time.Now()
-		if chErr := os.Chtimes(lock, now, now); chErr != nil {
-			logger.Printf("spool sweep: stale-lock takeover skipped: %v", chErr)
-			return false
-		}
-		return true
-	default:
-		logger.Printf("spool sweep: lock claim skipped: %v", err)
-		return false
-	}
+	return claimWindowLock(logger, filepath.Join(s.Spool.Dir, sweepLockName), window, "spool sweep")
 }
 
 func (s Sweeper) sweepOnce(logger *log.Logger, interval time.Duration) {
-	self := s.Self
-	if self == "" {
-		exe, err := os.Executable()
-		if err != nil || exe == "" {
-			logger.Printf("spool sweep: cannot resolve own binary: %v", err)
-			return
-		}
-		// Under `go test` the executable is the test binary: a fork bomb, not a sweep.
-		if strings.HasSuffix(strings.TrimSuffix(exe, ".exe"), ".test") {
-			return
-		}
-		self = exe
+	self, ok := selfBinary(logger, s.Self, "spool sweep")
+	if !ok {
+		return
 	}
 
 	pending := s.Spool.BacklogCount()
@@ -126,28 +93,10 @@ func (s Sweeper) sweepOnce(logger *log.Logger, interval time.Duration) {
 		return
 	}
 
-	cmd := exec.Command(self, "hook", s.Provider, "flush")
-	cmd.Env = os.Environ()
-	cmd.Stdin = nil
-	if lf := s.Spool.openFlusherLog(); lf != nil {
-		defer lf.Close()
-		cmd.Stdout, cmd.Stderr = lf, lf
-	} else {
-		cmd.Stdout, cmd.Stderr = nil, nil
-	}
-	cmd.SysProcAttr = detachAttr()
-
-	start := s.Start
-	if start == nil {
-		start = (*exec.Cmd).Start
-	}
-	if err := start(cmd); err != nil {
+	if err := s.Spool.spawnFlusher(self, s.Provider, os.Environ(), s.Start); err != nil {
 		logger.Printf("spool sweep: spawn failed (%d event(s) stay spooled): %v", pending, err)
 		return
 	}
 	logger.Printf("spool sweep: %d spooled event(s) had no session to trigger their delivery; "+
 		"spawned a catch-up flush (see %s)", pending, s.Spool.FlusherLogPath())
-	if cmd.Process != nil {
-		go func() { _ = cmd.Wait() }()
-	}
 }
