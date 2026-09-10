@@ -409,12 +409,20 @@ func ResolveCredentials() (Credentials, error) {
 	}
 
 	c := Credentials{
-		BaseURL:               FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
-		DID:                   FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
-		ContentCaptureEnabled: cfg.ContentCapture == nil || *cfg.ContentCapture,
-	}
-	if v, ok := os.LookupEnv(EnvContentCapture); ok {
-		c.ContentCaptureEnabled = IsTruthy(v)
+		BaseURL: FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
+		DID:     FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
+		// One resolver, not a second copy of the precedence chain. client.Config
+		// calls this field "the org's content posture", but the hand-rolled
+		// user-then-env pair this replaces read the user file and the environment
+		// and never the MANAGED layer -- so a *locked* managed
+		// `content_capture:false` was honoured by ResolveContentCapture (the
+		// mapper attached nothing to the observe copy) and ignored here, leaving
+		// the enforce copy and the model-call lane bodies to egress under an org
+		// lock, while the SessionStart posture row told the control plane
+		// `content_capture:false, source: managed`. ResolveContentCapture applies
+		// default -> managed (a locked key wins outright) -> user -> env in one
+		// place, so the two can no longer disagree.
+		ContentCaptureEnabled: ResolveContentCapture(),
 	}
 	if c.DID == "" {
 		return Credentials{}, fmt.Errorf("no developer DID configured (run `openbox init`)")

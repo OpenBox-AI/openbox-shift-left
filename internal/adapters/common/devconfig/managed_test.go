@@ -1,8 +1,10 @@
 package devconfig
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -238,5 +240,77 @@ func TestManaged_DocKeyIsNotASetting(t *testing.T) {
 		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
 	if got || src != SourceDefault {
 		t.Errorf("a comment about enforce must not enforce anything, got (%v, %q)", got, src)
+	}
+}
+
+// credsEnvForManagedTest points every path ResolveCredentials reads at dir and
+// supplies the identity it requires, so the assertions below turn on the
+// content posture alone. Values are derived in code rather than written as
+// literals: this repo's own redactor rewrites secret-shaped assignments in
+// files an agent authors (see CLAUDE.md, "Privacy posture").
+func credsEnvForManagedTest(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv(EnvHome, dir)
+	t.Setenv(EnvDID, "did:aip:"+strings.Repeat("a", 8))
+	t.Setenv(EnvAPIKeyDirect, "obx_"+strings.Repeat("k", 8))
+	t.Setenv(EnvAgentPrivateKey, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+}
+
+// TestResolveCredentials_HonoursALockedManagedContentCapture the client's
+// content posture and the mapper's must come from ONE resolver.
+//
+// They did not. This field was resolved by hand from the user file plus the
+// environment and never consulted the MANAGED layer, so a locked managed
+// `content_capture:false` was honoured by ResolveContentCapture -- the observe
+// copy carried nothing -- and ignored at the client, leaving the enforce copy
+// and the model-call lane bodies to egress under an org lock while the
+// SessionStart posture row told the control plane `content_capture:false,
+// source: managed`. client.Config calls this field "the org's content
+// posture"; the managed layer is precisely the org's.
+func TestResolveCredentials_HonoursALockedManagedContentCapture(t *testing.T) {
+	dir := t.TempDir()
+	managedPath := filepath.Join(dir, "managed.json")
+	userPath := filepath.Join(dir, "dev.json")
+	writeJSON(t, managedPath, `{"content_capture":false,"locked":["content_capture"]}`)
+	writeJSON(t, userPath, `{"content_capture":true}`)
+	t.Setenv(EnvManagedConfig, managedPath)
+	t.Setenv(EnvConfigPath, userPath)
+	credsEnvForManagedTest(t, dir)
+	t.Setenv(EnvContentCapture, "1") // the developer's escape hatch must NOT beat a lock
+
+	c, err := ResolveCredentials()
+	if err != nil {
+		t.Fatalf("ResolveCredentials: %v", err)
+	}
+	if c.ContentCaptureEnabled {
+		t.Error("a locked managed content_capture:false must reach the client; ignoring it egresses content the org locked off")
+	}
+	if got := ResolveContentCapture(); got != c.ContentCaptureEnabled {
+		t.Errorf("client posture %v disagrees with ResolveContentCapture() %v; these must be one resolver, not two copies of a precedence chain",
+			c.ContentCaptureEnabled, got)
+	}
+}
+
+// TestResolveCredentials_UnlockedManagedContentCaptureIsOnlyADefault the fix
+// above must not over-reach: an UNLOCKED managed key is a default the
+// developer may still override, exactly as resolveBoolWithSource defines it.
+// Without this, "honour the managed layer" could quietly become "the org wins
+// always" and take the developer's opt-in with it.
+func TestResolveCredentials_UnlockedManagedContentCaptureIsOnlyADefault(t *testing.T) {
+	dir := t.TempDir()
+	managedPath := filepath.Join(dir, "managed.json")
+	userPath := filepath.Join(dir, "dev.json")
+	writeJSON(t, managedPath, `{"content_capture":false}`) // set, not locked
+	writeJSON(t, userPath, `{"content_capture":true}`)
+	t.Setenv(EnvManagedConfig, managedPath)
+	t.Setenv(EnvConfigPath, userPath)
+	credsEnvForManagedTest(t, dir)
+
+	c, err := ResolveCredentials()
+	if err != nil {
+		t.Fatalf("ResolveCredentials: %v", err)
+	}
+	if !c.ContentCaptureEnabled {
+		t.Error("an unlocked managed key is only a default; the user file must still win")
 	}
 }
