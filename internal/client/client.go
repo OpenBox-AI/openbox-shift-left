@@ -110,7 +110,7 @@ func New(cfg Config) (*Client, error) {
 		now = time.Now
 	}
 	return &Client{
-		baseURL:    trimTrailingSlash(cfg.BaseURL),
+		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:     cfg.APIKey,
 		signer:     sg,
 		contentOn:  cfg.ContentCaptureEnabled,
@@ -315,15 +315,7 @@ func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey 
 		return nil, false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set(headerAuthorization, "Bearer "+c.apiKey)
-	req.Header.Set(headerSDKVersion, sdkVersion)
-	req.Header.Set(headerUserAgent, "OpenBox-SDK/"+sdkVersion)
-	req.Header.Set(headerAgentDID, c.signer.did)
-	req.Header.Set(headerAgentTS, sig.timestamp)
-	req.Header.Set(headerAgentNonce, sig.nonce)
-	req.Header.Set(headerAgentSig, sig.sig)
-	req.Header.Set(headerBodySHA256, sig.bodySHA)
+	c.setSignedHeaders(req.Header, sig)
 	if idemKey != "" {
 		req.Header.Set(headerIdempotencyKey, idemKey)
 	}
@@ -407,16 +399,24 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
-func trimTrailingSlash(s string) string {
-	for len(s) > 0 && s[len(s)-1] == '/' {
-		s = s[:len(s)-1]
-	}
-	return s
-}
-
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// setSignedHeaders writes the envelope every signed request carries: the
+// bearer, the SDK identity, and the AIP signature quadruple. One
+// implementation, so /evaluate and /auth/validate cannot sign differently.
+func (c *Client) setSignedHeaders(h http.Header, sig signature) {
+	h.Set("Accept", "application/json")
+	h.Set(headerAuthorization, "Bearer "+c.apiKey)
+	h.Set(headerSDKVersion, sdkVersion)
+	h.Set(headerUserAgent, "OpenBox-SDK/"+sdkVersion)
+	h.Set(headerAgentDID, c.signer.did)
+	h.Set(headerAgentTS, sig.timestamp)
+	h.Set(headerAgentNonce, sig.nonce)
+	h.Set(headerAgentSig, sig.sig)
+	h.Set(headerBodySHA256, sig.bodySHA)
 }

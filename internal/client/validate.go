@@ -27,15 +27,7 @@ func (c *Client) Validate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set(headerAuthorization, "Bearer "+c.apiKey)
-	req.Header.Set(headerSDKVersion, sdkVersion)
-	req.Header.Set(headerUserAgent, "OpenBox-SDK/"+sdkVersion)
-	req.Header.Set(headerAgentDID, c.signer.did)
-	req.Header.Set(headerAgentTS, sig.timestamp)
-	req.Header.Set(headerAgentNonce, sig.nonce)
-	req.Header.Set(headerAgentSig, sig.sig)
-	req.Header.Set(headerBodySHA256, sig.bodySHA)
+	c.setSignedHeaders(req.Header, sig)
 
 	resp, err := c.http.Do(req)
 	if err != nil {

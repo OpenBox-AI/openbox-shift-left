@@ -390,14 +390,7 @@ func turnActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 		// visible.
 		m[modelCallReplyKey] = capModelCallBody(ev.Content.Output)
 	}
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
+	return marshalOrNil(m)
 }
 
 var toolStatuses = map[string]bool{
@@ -586,11 +579,7 @@ func eventMetadataForEgress(ev DevEvent, cut *cutLog, dest string) map[string]an
 
 func buildMetadata(ev DevEvent, cut *cutLog) (json.RawMessage, error) {
 	m := eventMetadataForEgress(ev, cut, "metadata")
-	if ev.Content != nil && ev.Content.SignalDetail != "" {
-		if k := signalDetailKeyFor(ev.EventType); k != "" {
-			m[k] = capBodyInto(cut, "metadata", k, ev.Content.SignalDetail)
-		}
-	}
+	addSignalDetail(m, ev, cut, "metadata")
 	m["event_id"] = ev.EventID
 	if ev.Tool.Name != "" {
 		m["tool_name"] = ev.Tool.Name
@@ -602,27 +591,19 @@ func buildMetadata(ev DevEvent, cut *cutLog) (json.RawMessage, error) {
 		m["cost"] = ev.Cost
 	}
 	if ev.Model != "" {
-		if _, exists := m["model"]; !exists {
-			m["model"] = ev.Model
-		}
+		setIfAbsent(m, "model", ev.Model)
 	}
 	if ev.AgentID != "" {
-		if _, exists := m["agent_id"]; !exists {
-			m["agent_id"] = ev.AgentID
-		}
+		setIfAbsent(m, "agent_id", ev.AgentID)
 	}
 	// Rehomed from span attributes, which never persisted. NOT in
 	// contentMetadataKeys: derived evidence, not content.
 	if s := ev.Span; s != nil {
 		if s.CredentialFingerprint != "" {
-			if _, exists := m["credential_fingerprint"]; !exists {
-				m["credential_fingerprint"] = s.CredentialFingerprint
-			}
+			setIfAbsent(m, "credential_fingerprint", s.CredentialFingerprint)
 		}
 		if s.HTTPStatus != 0 && observesAResponse(ev.EventType) {
-			if _, exists := m["http_status"]; !exists {
-				m["http_status"] = s.HTTPStatus
-			}
+			setIfAbsent(m, "http_status", s.HTTPStatus)
 		}
 		// Here and not only in activity_input, which the content gate empties: the
 		// method and URL are account-binding evidence, and docs/data-and-privacy.md
@@ -632,14 +613,10 @@ func buildMetadata(ev DevEvent, cut *cutLog) (json.RawMessage, error) {
 		// activity_input rather than moved, where being unlisted makes the
 		// alignment judge's cap drop the pair before `content`.
 		if s.HTTPMethod != "" {
-			if _, exists := m["http_method"]; !exists {
-				m["http_method"] = s.HTTPMethod
-			}
+			setIfAbsent(m, "http_method", s.HTTPMethod)
 		}
 		if s.HTTPURL != "" {
-			if _, exists := m["http_url"]; !exists {
-				m["http_url"] = s.HTTPURL
-			}
+			setIfAbsent(m, "http_url", s.HTTPURL)
 		}
 		// Claude Code's own per-call correlation block (v1.9), parsed from the
 		// raw request body. Same treatment as CredentialFingerprint above: NOT
@@ -649,24 +626,16 @@ func buildMetadata(ev DevEvent, cut *cutLog) (json.RawMessage, error) {
 		// stored `false` would read as a confirmed non-subagent, which this
 		// lane never has grounds to claim.
 		if s.PromptID != "" {
-			if _, exists := m["prompt_id"]; !exists {
-				m["prompt_id"] = s.PromptID
-			}
+			setIfAbsent(m, "prompt_id", s.PromptID)
 		}
 		if s.PreviousRequestID != "" {
-			if _, exists := m["previous_request_id"]; !exists {
-				m["previous_request_id"] = s.PreviousRequestID
-			}
+			setIfAbsent(m, "previous_request_id", s.PreviousRequestID)
 		}
 		if s.IsSubagent {
-			if _, exists := m["is_subagent"]; !exists {
-				m["is_subagent"] = true
-			}
+			setIfAbsent(m, "is_subagent", true)
 		}
 		if s.Entrypoint != "" {
-			if _, exists := m["entrypoint"]; !exists {
-				m["entrypoint"] = s.Entrypoint
-			}
+			setIfAbsent(m, "entrypoint", s.Entrypoint)
 		}
 	}
 	// One combined summary of every capBodyInto cut across this event's wire
@@ -738,14 +707,7 @@ func structuralActivityInput(ev DevEvent, cut *cutLog) json.RawMessage {
 		key := contentKeyFor(ev.Tool.Kind, sem)
 		m[key] = capBodyInto(cut, "activity_input", key, ev.Content.ToolInput)
 	}
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
+	return marshalOrNil(m)
 }
 
 // structuralActivityOutput returns nil (field omitted) when nothing is known;
@@ -770,14 +732,7 @@ func structuralActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 	if ev.Content != nil && ev.Content.ToolOutput != "" {
 		m["output"] = capBodyInto(cut, "activity_output", "output", ev.Content.ToolOutput)
 	}
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
+	return marshalOrNil(m)
 }
 
 func durationMs(ev DevEvent) *float64 {
@@ -835,20 +790,9 @@ func buildSignalArgs(ev DevEvent, cut *cutLog) json.RawMessage {
 		// The same gate buildMetadata applies, from the same function, so a
 		// content key cannot be gated in one destination and not the other.
 		m = eventMetadataForEgress(ev, cut, "signal_args")
-		if ev.Content != nil && ev.Content.SignalDetail != "" {
-			if k := signalDetailKeyFor(ev.EventType); k != "" {
-				m[k] = capBodyInto(cut, "signal_args", k, ev.Content.SignalDetail)
-			}
-		}
+		addSignalDetail(m, ev, cut, "signal_args")
 	}
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
+	return marshalOrNil(m)
 }
 
 // stripContent the caller's event is never mutated.
@@ -1046,14 +990,7 @@ func turnActivityInput(ev DevEvent) json.RawMessage {
 	if s.HTTPURL != "" {
 		m["http_url"] = s.HTTPURL
 	}
-	if len(m) == 0 {
-		return nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return nil
-	}
-	return b
+	return marshalOrNil(m)
 }
 
 // capModelCallRequest keeps the TAIL: a /v1/messages body is a conversation whose
@@ -1069,4 +1006,39 @@ func capModelCallRequest(s string) string {
 		}
 	}
 	return truncationMark + tail
+}
+
+// marshalOrNil renders one wire object, or nil -- the field omitted -- when
+// there is nothing to say or the object cannot be encoded. Five builders close
+// this way, so the omit-on-error convention has one implementation.
+func marshalOrNil(m map[string]any) json.RawMessage {
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// setIfAbsent writes v under k only when the adapter's own metadata did not
+// already carry k: a caller-supplied value wins over a derived one.
+func setIfAbsent(m map[string]any, k string, v any) {
+	if _, exists := m[k]; !exists {
+		m[k] = v
+	}
+}
+
+// addSignalDetail attaches this class's free-text detail under its own key,
+// capped and recorded against dest. Both destinations of
+// eventMetadataForEgress carry it, so it is written once for the same reason
+// that gate is.
+func addSignalDetail(m map[string]any, ev DevEvent, cut *cutLog, dest string) {
+	if ev.Content == nil || ev.Content.SignalDetail == "" {
+		return
+	}
+	if k := signalDetailKeyFor(ev.EventType); k != "" {
+		m[k] = capBodyInto(cut, dest, k, ev.Content.SignalDetail)
+	}
 }

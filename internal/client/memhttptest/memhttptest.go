@@ -64,14 +64,8 @@ func install() error {
 			fallback = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 		}
 		next.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			mu.RLock()
-			l, known := registry[addr]
-			mu.RUnlock()
-			switch {
-			case l != nil:
-				return l.DialContext(ctx)
-			case known:
-				return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
+			if c, handled, err := dialRegistered(ctx, addr); handled {
+				return c, err
 			}
 			return fallback(ctx, network, addr)
 		}
@@ -171,16 +165,28 @@ func RequireResolvableHost(t TB, host string) {
 // code under test builds its OWN http.Transport and therefore never consults
 // http.DefaultTransport.
 func DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if c, handled, err := dialRegistered(ctx, addr); handled {
+		return c, err
+	}
+	// A test asserting dial latency would be measuring the wrong constant here;
+	// gateway's production dialer is 10s/30s; so do not write one against this.
+	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
+}
+
+// dialRegistered resolves a synthetic address to its in-memory pipe. The bool
+// is whether the registry answered at all, so each caller keeps its own
+// fallback dialer: a known-but-closed server is a connection refused, which is
+// the state a test relies on.
+func dialRegistered(ctx context.Context, addr string) (net.Conn, bool, error) {
 	mu.RLock()
 	l, known := registry[addr]
 	mu.RUnlock()
 	switch {
 	case l != nil:
-		return l.DialContext(ctx)
+		c, err := l.DialContext(ctx)
+		return c, true, err
 	case known:
-		return nil, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
+		return nil, true, fmt.Errorf("memhttptest: dial %s: connection refused (server closed)", addr)
 	}
-	// A test asserting dial latency would be measuring the wrong constant here;
-	// gateway's production dialer is 10s/30s; so do not write one against this.
-	return (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext(ctx, network, addr)
+	return nil, false, nil
 }
