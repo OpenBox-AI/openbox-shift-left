@@ -37,19 +37,5 @@ func (g Git) ReadNoteMirror(rev string) ([]string, error) {
 	if err != nil {
 		return nil, nil
 	}
-	var ids []string
-	seen := map[string]bool{}
-	prefix := TrailerKey + ":"
-	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		v := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		if v == "" || seen[v] {
-			continue
-		}
-		seen[v] = true
-		ids = append(ids, v)
-	}
-	return ids, nil
+	return parseTrailerValues(out), nil
 }

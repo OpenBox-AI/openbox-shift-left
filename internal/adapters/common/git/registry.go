@@ -51,28 +51,8 @@ func WriteSessionRecord(dir, sessionID, cwd string, now time.Time) error {
 	if err := ValidateSessionID(sessionID); err != nil {
 		return nil
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	data, err := json.Marshal(SessionRecord{SessionID: sessionID, Cwd: cwd, UpdatedAt: now.UnixNano()})
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(dir, sanitizeForFile(sessionID)+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, sessionRecordPath(dir, sessionID))
+	return writeRecordFile(dir, sessionID, sessionRecordPath(dir, sessionID),
+		SessionRecord{SessionID: sessionID, Cwd: cwd, UpdatedAt: now.UnixNano()})
 }
 
 // RemoveSessionRecord deletes a session's record (the adapter's SessionEnd).
@@ -234,10 +214,15 @@ func (s RunStore) Bump(sessionID string) (RunRecord, error) {
 	return rec, nil
 }
 
-// write is temp+rename (atomic), mirroring WriteSessionRecord: a concurrent
-// reader never observes a partial file.
 func (s RunStore) write(rec RunRecord) error {
 	dir := s.dir()
+	return writeRecordFile(dir, rec.SessionID, runRecordPath(dir, rec.SessionID), rec)
+}
+
+// writeRecordFile marshals rec and installs it at path via temp+rename, so a
+// concurrent reader never observes a partial file. dir is passed rather than
+// derived from path, so an empty dir still fails at MkdirAll.
+func writeRecordFile(dir, tmpID, path string, rec any) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -245,7 +230,7 @@ func (s RunStore) write(rec RunRecord) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, sanitizeForFile(rec.SessionID)+"-*.tmp")
+	f, err := os.CreateTemp(dir, sanitizeForFile(tmpID)+"-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -259,7 +244,7 @@ func (s RunStore) write(rec RunRecord) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, runRecordPath(dir, rec.SessionID))
+	return os.Rename(tmp, path)
 }
 
 func sanitizeForFile(id string) string {

@@ -70,12 +70,6 @@ func (c HookConfig) args() []string {
 // InstallHook writes a `prepare-commit-msg` hook into hooksDir (typically
 // `<repo>/.git/hooks`).
 func InstallHook(hooksDir string, cfg HookConfig) error {
-	if hooksDir == "" {
-		return fmt.Errorf("install hook: empty hooks dir")
-	}
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return fmt.Errorf("install hook: mkdir %s: %w", hooksDir, err)
-	}
 	return writeHookScript(hooksDir, "prepare-commit-msg", cfg)
 }
 
@@ -84,20 +78,21 @@ func InstallHook(hooksDir string, cfg HookConfig) error {
 // authoritative notes mirror and the signed attestation (E8-S10). Installing
 // it is additive; the same never-overwrite-a-foreign-hook rule applies.
 func InstallPostCommitHook(hooksDir string, cfg HookConfig) error {
-	if hooksDir == "" {
-		return fmt.Errorf("install hook: empty hooks dir")
-	}
-	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return fmt.Errorf("install hook: mkdir %s: %w", hooksDir, err)
-	}
 	post := cfg
 	post.Args = []string{"hook", "git", "post-commit"}
 	return writeHookScript(hooksDir, "post-commit", post)
 }
 
 // writeHookScript a developer's existing hook is theirs; silently replacing it
-// would be a worse failure than not installing.
+// would be a worse failure than not installing. It owns the two guards both
+// installers need, so neither can gain or lose one.
 func writeHookScript(hooksDir, name string, cfg HookConfig) error {
+	if hooksDir == "" {
+		return fmt.Errorf("install hook: empty hooks dir")
+	}
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return fmt.Errorf("install hook: mkdir %s: %w", hooksDir, err)
+	}
 	path := filepath.Join(hooksDir, name)
 
 	if existing, err := os.ReadFile(path); err == nil {
@@ -177,4 +172,25 @@ func hookScript(cfg HookConfig) string {
 
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// InstallAmbient is the opt-in SessionStart auto-install: both hooks, at this
+// binary's own path, best-effort. The caller owns the opt-in check, so this
+// package stays free of a devconfig import.
+func InstallAmbient(cwd string, logf func(string, ...any)) {
+	self, err := os.Executable()
+	if err != nil || self == "" {
+		return
+	}
+	hooksDir, err := Git{Dir: cwd}.HooksDirDefault()
+	if err != nil {
+		return // not a git repo / detached worktree; nothing to install into
+	}
+	cfg := HookConfig{Command: self, Args: []string{"hook", "git", "prepare-commit-msg"}}
+	if err := InstallPostCommitHook(hooksDir, cfg); err != nil {
+		logf("post-commit hook not installed (trailer still works): %v", err)
+	}
+	if err := InstallHook(hooksDir, cfg); err != nil {
+		logf("git-hook install skipped: %v", err)
+	}
 }

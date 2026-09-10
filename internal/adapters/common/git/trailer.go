@@ -32,7 +32,9 @@ func (g Git) bin() string {
 	return "git"
 }
 
-func (g Git) run(args ...string) ([]byte, error) {
+// command assembles the git child: the -C working directory and the inherited
+// environment, so run and runLimited cannot disagree about either.
+func (g Git) command(args []string) *exec.Cmd {
 	full := args
 	if g.Dir != "" {
 		full = append([]string{"-C", g.Dir}, args...)
@@ -41,6 +43,11 @@ func (g Git) run(args ...string) ([]byte, error) {
 	if g.Env != nil {
 		cmd.Env = g.Env
 	}
+	return cmd
+}
+
+func (g Git) run(args ...string) ([]byte, error) {
+	cmd := g.command(args)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -141,22 +148,10 @@ func scanSessionLines(data []byte) []string {
 	return out
 }
 
+// parseTrailerValues is the trailer scan plus the dedupe every reader of it
+// wants: column-0 session lines, trimmed, first occurrence kept.
 func parseTrailerValues(parsed []byte) []string {
-	var out []string
-	seen := map[string]bool{}
-	prefix := TrailerKey + ":"
-	for _, line := range strings.Split(string(parsed), "\n") {
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		v := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		if v == "" || seen[v] {
-			continue
-		}
-		seen[v] = true
-		out = append(out, v)
-	}
-	return out
+	return dedupe(scanSessionLines(parsed))
 }
 
 func validSessionIDs(sessions []string) []string {
@@ -204,14 +199,7 @@ func ValidateSessionID(id string) error {
 const MaxNoteBytes = 1 << 20 // 1 MiB
 
 func (g Git) runLimited(maxBytes int64, args ...string) (out []byte, truncated bool, err error) {
-	full := args
-	if g.Dir != "" {
-		full = append([]string{"-C", g.Dir}, args...)
-	}
-	cmd := exec.Command(g.bin(), full...)
-	if g.Env != nil {
-		cmd.Env = g.Env
-	}
+	cmd := g.command(args)
 	stdout, perr := cmd.StdoutPipe()
 	if perr != nil {
 		return nil, false, perr
