@@ -412,17 +412,6 @@ func writeSettings(path string, raw []byte) error {
 	return nil
 }
 
-func asString(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return t
-	default:
-		return fmt.Sprint(t)
-	}
-}
-
 func copyOf(m map[string]string) map[string]string {
 	out := make(map[string]string, len(m))
 	for k, v := range m {

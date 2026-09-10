@@ -24,14 +24,7 @@ func (a *app) requireCredentials() int {
 	if err != nil {
 		return a.errorf("%v", err)
 	}
-	haveKey := a.getenv(devconfig.EnvAPIKeyDirect) != "" || kv[devconfig.EnvAPIKeyDirect] != ""
-	havePrivateKey := a.getenv(devconfig.EnvAgentPrivateKey) != "" || kv[devconfig.EnvAgentPrivateKey] != ""
-	for _, alias := range []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
-		if a.getenv(alias) != "" || kv[alias] != "" {
-			havePrivateKey = true
-		}
-	}
-	if haveKey && havePrivateKey {
+	if a.credentialsPresent(kv) {
 		return exitOK
 	}
 	return a.errorf("no credentials on this machine; run `openbox auth` first.\n"+
@@ -46,10 +39,6 @@ func (a *app) requireCredentials() int {
 // when the machine blocks hooks -- that nothing is governed despite a
 // successful install.
 func (a *app) printGovernedScope(o devinit.Options) {
-	if o.Provider == "cursor" {
-		return
-	}
-
 	if o.Provider == "codex" {
 		fmt.Fprintf(a.stdout, "\nGoverned: EVERY CODEX SESSION on this machine (user-wide hooks).\n")
 		fmt.Fprintf(a.stdout, "  One more step inside Codex: run /hooks and TRUST the new OpenBox hooks -\n")
@@ -123,4 +112,19 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		fmt.Fprintf(a.stderr, "  OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks\n")
 		fmt.Fprintf(a.stderr, "Removal is `openbox uninstall`. Credentials are `openbox auth`.\n")
 	}
+}
+
+// credentialsPresent reports an API key plus a signing seed, from the
+// environment or from an already-parsed .env. `init`'s refusal and
+// `uninstall`'s check ask the same question, so they ask it in one place: an
+// alias added here reaches both.
+func (a *app) credentialsPresent(kv map[string]string) bool {
+	haveKey := a.getenv(devconfig.EnvAPIKeyDirect) != "" || kv[devconfig.EnvAPIKeyDirect] != ""
+	havePrivateKey := a.getenv(devconfig.EnvAgentPrivateKey) != "" || kv[devconfig.EnvAgentPrivateKey] != ""
+	for _, alias := range []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
+		if a.getenv(alias) != "" || kv[alias] != "" {
+			havePrivateKey = true
+		}
+	}
+	return haveKey && havePrivateKey
 }

@@ -36,18 +36,16 @@ func gatewayIdentity(homeDir string) laneIdentity {
 // was reachable only through an opt-in flag before; an install brings the lanes
 // up by default now, so it is the default path for anyone running from source.
 func (a *app) selfPath() (string, error) {
-	binPath, err := a.executable()
-	if err == nil {
-		if reason := temporaryBuild(binPath); reason != "" {
-			return "", fmt.Errorf("refusing to install a supervisor unit that points at %s: %s.\n"+
-				"  The unit would outlive that file, and a supervisor cannot restart a binary that is\n"+
-				"  gone -- every model call would then fail against a dead port.\n"+
-				"  Build it somewhere that survives first:  go build -o ./openbox ./cmd/openbox && ./openbox init …",
-				binPath, reason)
-		}
-	}
+	binPath, err := executableFn()
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve this binary's path for the service unit: %w", err)
+	}
+	if reason := temporaryBuild(binPath); reason != "" {
+		return "", fmt.Errorf("refusing to install a supervisor unit that points at %s: %s.\n"+
+			"  The unit would outlive that file, and a supervisor cannot restart a binary that is\n"+
+			"  gone -- every model call would then fail against a dead port.\n"+
+			"  Build it somewhere that survives first:  go build -o ./openbox ./cmd/openbox && ./openbox init …",
+			binPath, reason)
 	}
 	return binPath, nil
 }
@@ -55,8 +53,6 @@ func (a *app) selfPath() (string, error) {
 // executable is a seam only so a test can present a temporary path without
 // building one.
 var executableFn = os.Executable
-
-func (a *app) executable() (string, error) { return executableFn() }
 
 // temporaryBuild names why a path is not durable, or "" when it is.
 //
@@ -72,8 +68,6 @@ func temporaryBuild(path string) string {
 	}
 	return ""
 }
-
-func gatewaySettingsPath(homeDir string) string { return gatewayservice.SettingsPath(homeDir) }
 
 func fileExists(path string) bool {
 	_, err := os.Stat(path)

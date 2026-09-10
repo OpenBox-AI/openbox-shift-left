@@ -130,17 +130,7 @@ func (p *realPrompter) Confirm(promptText string, defaultYes bool) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "y", "yes":
-		return true, nil
-	case "n", "no":
-		return false, nil
-	case "":
-		return defaultYes, nil
-	default:
-		// A typo must not register an agent or rotate a credential.
-		return false, nil
-	}
+	return confirmed(v, defaultYes), nil
 }
 
 func (p *realPrompter) readLine() (string, error) {
@@ -164,4 +154,21 @@ func RequireTerminal(stdin *os.File) error {
 		return nil
 	}
 	return fmt.Errorf("%s\n\n%w", NonInteractiveHelp, ErrNotATerminal)
+}
+
+// confirmed maps a typed answer onto the yes/no contract: blank takes the
+// default, and anything unrecognized is "no" -- a typo must not register an
+// agent or rotate a credential. Both prompters share it, so the scripted one
+// cannot drift from what a developer actually sees.
+func confirmed(answer string, defaultYes bool) bool {
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return true
+	case "n", "no":
+		return false
+	case "":
+		return defaultYes
+	default:
+		return false
+	}
 }

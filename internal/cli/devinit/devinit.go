@@ -240,17 +240,6 @@ func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) err
 	return nil
 }
 
-func describePosture(v *bool) string {
-	switch {
-	case v == nil:
-		return "unchanged (keeps whatever dev.json already has)"
-	case *v:
-		return "true"
-	default:
-		return "false"
-	}
-}
-
 func resumeErr(reg *backend.Registration, step string, err error) error {
 	return fmt.Errorf("agent registered (id %s, DID %s) but failed to %s: %w; "+
 		"the API key and signing key were shown only once; rotate the key and re-run, or complete the step manually",

@@ -254,13 +254,6 @@ func (a *app) runDevInit(args []string) int {
 	return exitOK
 }
 
-func (a *app) env(key, def string) string {
-	if v := a.getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
 func (a *app) usage() {
 	fmt.Fprint(a.stderr, `openbox; OpenBox developer-runtime governance CLI
 

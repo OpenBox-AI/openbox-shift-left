@@ -60,33 +60,28 @@ func codexDir() (dir, warning string) {
 // on this machine, for `openbox doctor` and for posture.provider_managed
 // (E8-S8).
 func ProviderState(p Provider) string {
-	var dir string
-	var files []string
+	var dir, file string
 	switch p {
 	case ProviderClaudeCode:
 		dir, _ = claudeCodeDir()
-		files = []string{"managed-settings.json"}
+		file = "managed-settings.json"
 	case ProviderCodex:
 		dir, _ = codexDir()
-		files = []string{"requirements.toml"}
+		file = "requirements.toml"
 	default:
 		return "unknown (no template for this provider)"
 	}
 	if dir == "" {
 		return "unknown (no managed path known for this OS)"
 	}
-	for _, name := range files {
-		path := filepath.Join(dir, name)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
+	path := filepath.Join(dir, file)
+	if raw, err := os.ReadFile(path); err == nil {
 		if mandates(p, raw) {
 			return "managed (" + path + ")"
 		}
 		return "present but imposes no OpenBox mandate (" + path + ")"
 	}
-	return "not managed (no " + filepath.Join(dir, files[0]) + ")"
+	return "not managed (no " + path + ")"
 }
 
 var codexRequirementKeys = []string{

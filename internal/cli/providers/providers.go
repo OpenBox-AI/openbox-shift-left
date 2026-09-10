@@ -22,7 +22,7 @@ func Engine(name string) (provider.HookEngine, error) {
 	case provider.Codex:
 		return codex.Engine{}, nil
 	default:
-		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
+		return nil, unknownProvider(name)
 	}
 }
 
@@ -68,7 +68,7 @@ func Lookup(name string) (provider.Installer, error) {
 		}
 		return inst, nil
 	default:
-		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
+		return nil, unknownProvider(name)
 	}
 }
 
@@ -88,7 +88,7 @@ func RemoveProviderHooks(name, settingsPath string) ([]string, error) {
 	case provider.Codex:
 		return codex.RemoveHooks(settingsPath)
 	default:
-		return nil, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
+		return nil, unknownProvider(name)
 	}
 }
 
@@ -139,7 +139,7 @@ func RestoreProviderSettings(name, settingsPath, homeDir string) (SettingsRestor
 	case provider.Codex:
 		return SettingsRestoreResult{}, nil
 	default:
-		return SettingsRestoreResult{}, fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
+		return SettingsRestoreResult{}, unknownProvider(name)
 	}
 }
 
@@ -207,4 +207,10 @@ func HookMarkers(name string) []string {
 	default:
 		return nil
 	}
+}
+
+// unknownProvider is the one rendering of the unsupported-provider refusal;
+// every entry point below returns it, so a new provider name reaches all four.
+func unknownProvider(name string) error {
+	return fmt.Errorf("%w: %q (supported: %s)", provider.ErrUnknown, name, strings.Join(provider.Supported(), ", "))
 }

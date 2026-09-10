@@ -103,7 +103,7 @@ func (a *app) runAuth(args []string) int {
 	if code := a.writeCoordinates(f); code != exitOK {
 		return code
 	}
-	a.warnShadowedByEnv(f, envPath)
+	a.warnShadowedByEnv(envPath)
 	a.printAuthNextSteps()
 	return exitOK
 }
@@ -235,7 +235,7 @@ func (a *app) writeCoordinates(f authFields) int {
 // warnShadowedByEnv a real env var beats both files, so writing while one is
 // exported produces a config that silently has no effect; the user changes a
 // credential, sees success, and observes no change in behaviour.
-func (a *app) warnShadowedByEnv(f authFields, envPath string) {
+func (a *app) warnShadowedByEnv(envPath string) {
 	type shadow struct{ name, file string }
 	devPath, _ := devconfig.DevConfigWritePath()
 	for _, s := range []shadow{
@@ -253,7 +253,6 @@ func (a *app) warnShadowedByEnv(f authFields, envPath string) {
 			"         The file is correct; this shell will not use it. Unset the variable to use the file.\n",
 			s.name, s.file)
 	}
-	_ = f
 }
 
 func (a *app) printAuthSummary(f authFields, envPath string) {

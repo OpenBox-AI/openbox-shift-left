@@ -65,16 +65,7 @@ func (s *Scripted) Confirm(promptText string, defaultYes bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "y", "yes":
-		return true, nil
-	case "n", "no":
-		return false, nil
-	case "":
-		return defaultYes, nil
-	default:
-		return false, nil
-	}
+	return confirmed(v, defaultYes), nil
 }
 
 func (s *Scripted) Printf(format string, a ...any) { fmt.Fprintf(&s.Out, format, a...) }

@@ -238,7 +238,7 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	}
 	// The org's, not ours: removing either silently downgrades a governed
 	// machine, and a root-owned file is not writable here anyway.
-	for _, p := range []string{devconfig.ManagedConfigPath(), managedSettingsPathForDoctor()} {
+	for _, p := range []string{devconfig.ManagedConfigPath(), claudeManagedSettingsPath()} {
 		if p != "" && fileExists(p) {
 			inv.managed = appendUnique(inv.managed, p)
 		}
@@ -295,9 +295,8 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 	if len(inv.spools) == 0 {
 		return
 	}
-	for _, s := range inv.spools {
-		st.backlog += s.backlog
-	}
+	queued := sumBacklog(inv)
+	st.backlog += queued
 	if !a.haveCredentials() {
 		fmt.Fprintf(a.stdout, "\nflushing SKIPPED: no credentials on this machine, so nothing can be delivered.\n")
 		fmt.Fprintf(a.stdout, "  %d undelivered event(s) will be DESTROYED with the spool below. Run `openbox auth`\n", st.backlog)
@@ -324,7 +323,7 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 	// their attempt limit or retention age, and a retired event left the spool
 	// without reaching the control plane.
 	fmt.Fprintf(a.stdout, "  spool went from %d to %d event(s); some of that may be retirement, not delivery\n",
-		sumBacklog(inv), remaining)
+		queued, remaining)
 	if remaining > 0 {
 		fmt.Fprintf(a.stdout, "  those %d event(s) could not be delivered and will be DESTROYED with the spool.\n", remaining)
 	}
@@ -349,14 +348,7 @@ func (a *app) haveCredentials() bool {
 	if err != nil {
 		return false
 	}
-	haveKey := a.getenv(devconfig.EnvAPIKeyDirect) != "" || kv[devconfig.EnvAPIKeyDirect] != ""
-	havePrivateKey := a.getenv(devconfig.EnvAgentPrivateKey) != "" || kv[devconfig.EnvAgentPrivateKey] != ""
-	for _, alias := range []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
-		if a.getenv(alias) != "" || kv[alias] != "" {
-			havePrivateKey = true
-		}
-	}
-	return haveKey && havePrivateKey
+	return a.credentialsPresent(kv)
 }
 
 // removeHookSurfaces takes the gate out first, mirroring an install that

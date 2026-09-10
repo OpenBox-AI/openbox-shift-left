@@ -8,6 +8,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
@@ -273,4 +274,4 @@ func (a *app) reportDeactivation(label, homeDir, settingsPath string, lane activ
 
 // claudeSettingsPath resolved through gatewayservice so the three lanes and
 // doctor cannot disagree about which file they are all editing.
-func claudeSettingsPath(homeDir string) string { return gatewaySettingsPath(homeDir) }
+func claudeSettingsPath(homeDir string) string { return gatewayservice.SettingsPath(homeDir) }

@@ -140,7 +140,8 @@ func resolveHookBlock() hookBlockState {
 
 	// Managed-only keys first: either one stops our user-level hooks running,
 	// whatever any other file says.
-	for _, m := range managedLayers(managedPath, managed) {
+	layers := managedLayers(managedPath, managed)
+	for _, m := range layers {
 		if key, ok := hookLockKey(m.raw); ok {
 			state.blocked = true
 			// The lock does NOT mean the machine is ungoverned. OpenBox's own
@@ -149,7 +150,7 @@ func resolveHookBlock() hookBlockState {
 			// governing and only our user-level duplicate is inert. Saying
 			// "nothing is governed" there sends somebody hunting a gap that is
 			// not there.
-			if managedHooksAreOurs(managedPath, managedLayers(managedPath, managed)) {
+			if managedHooksAreOurs(managedPath, layers) {
 				state.governedElsewhere = true
 				state.summary = "not this install's copy, and it does not need to be: " + key +
 					" is set by managed policy and that policy installs OpenBox's own hooks. " +
@@ -205,7 +206,7 @@ func resolveHookBlock() hookBlockState {
 	// OpenBox's own, it is governed BY US, which is the opposite of what a bare
 	// "nothing is governed" would say.
 	if managed != nil && gjson.GetBytes(managed, "hooks").Exists() {
-		if managedHooksAreOurs(managedPath, managedLayers(managedPath, managed)) {
+		if managedHooksAreOurs(managedPath, layers) {
 			state.governedElsewhere = true
 			state.detail = append(state.detail,
 				fmt.Sprintf("This machine is STILL GOVERNED: %s declares OpenBox's own hooks, and a", managedPath),

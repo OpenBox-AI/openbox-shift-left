@@ -435,7 +435,7 @@ func TestEnvShadowWarningNamesTheRightFile(t *testing.T) {
 	} {
 		t.Run(tc.varName, func(t *testing.T) {
 			a, _, errb := testApp(map[string]string{tc.varName: "set"})
-			a.warnShadowedByEnv(authFields{}, envPath)
+			a.warnShadowedByEnv(envPath)
 			s := errb.String()
 			if !strings.Contains(s, tc.varName) {
 				t.Errorf("warning should name %s:\n%s", tc.varName, s)

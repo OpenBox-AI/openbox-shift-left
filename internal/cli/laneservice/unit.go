@@ -254,16 +254,15 @@ func (s Spec) foregroundCommand() string {
 // xmlEscape a path can legitimately contain '&' or '<', and an unescaped one
 // produces a plist launchd silently refuses to load; which presents as "the
 // daemon never starts" with no error anywhere.
-func xmlEscape(s string) string {
-	r := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&apos;",
-	)
-	return r.Replace(s)
-}
+var xmlEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	`"`, "&quot;",
+	"'", "&apos;",
+)
+
+func xmlEscape(s string) string { return xmlEscaper.Replace(s) }
 
 func systemdArg(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)

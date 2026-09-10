@@ -222,13 +222,8 @@ func withPresence(path string) string {
 
 // reportGateway four separate questions, kept separate on purpose.
 func (a *app) reportGateway() {
-	home := a.getenv("HOME")
-	if home == "" {
-		if h, err := os.UserHomeDir(); err == nil {
-			home = h
-		}
-	}
-	r := gatewaycheck.Inspect(home, managedSettingsPathForDoctor(), 750*time.Millisecond, a.getenv)
+	home := a.homeDir()
+	r := gatewaycheck.Inspect(home, claudeManagedSettingsPath(), 750*time.Millisecond, a.getenv)
 
 	fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
 
@@ -277,14 +272,6 @@ func (a *app) reportGateway() {
 		fmt.Fprintf(a.stdout, "               - %s\n", note)
 	}
 }
-
-// managedSettingsPathForDoctor reached through the managed package so doctor
-// and the managed-config reader cannot disagree about where the file lives.
-// managedSettingsPathForDoctor derives the path locally rather than through
-// internal/cli/managed: that package is CLI-lifecycle code with a different
-// lifetime, and doctor must not stop being able to read this file because it
-// goes away.
-func managedSettingsPathForDoctor() string { return claudeManagedSettingsPath() }
 
 func (a *app) reportLanes() {
 	home := a.homeDir()
@@ -381,13 +368,14 @@ func (a *app) reportSpool() {
 		fmt.Fprintf(a.stdout, "               flush` does it now.\n")
 	}
 
-	if discarded := spool.DiscardedCount(); discarded > 0 {
+	discarded := spool.DiscardedCount()
+	if discarded > 0 {
 		fmt.Fprintf(a.stdout, "  DISCARDED    at least %d event(s) were given up on and are GONE: past %d delivery\n", discarded, hookflow.MaxRecoveryAttempts)
 		fmt.Fprintf(a.stdout, "               attempts, or past the %d-day retention age. This is real loss of\n", int(hookflow.RetireSpoolAfter.Hours()/24))
 		fmt.Fprintf(a.stdout, "               governance evidence, recorded in %s. \"At least\" because\n", spool.DiscardPath())
 		fmt.Fprintf(a.stdout, "               that record is size-capped and restarts, so it is a floor.\n")
 	}
-	if backlog > 0 || spool.DiscardedCount() > 0 {
+	if backlog > 0 || discarded > 0 {
 		fmt.Fprintf(a.stdout, "  flusher log  %s\n", spool.FlusherLogPath())
 	}
 }
@@ -457,17 +445,12 @@ func portOf(addr string) string {
 func (a *app) reportHookRegistration() {
 	fmt.Fprintf(a.stdout, "\nHook registration\n")
 
-	levels := []struct {
-		label string
-		path  string
-	}{{"user-wide", providers.ClaudeUserSettingsPath()}}
+	type level struct{ label, path string }
+	levels := []level{{"user-wide", providers.ClaudeUserSettingsPath()}}
 	if wd, err := os.Getwd(); err != nil {
 		fmt.Fprintf(a.stdout, "  current directory unreadable (%v); this project's file was not checked\n", err)
 	} else {
-		levels = append(levels, struct {
-			label string
-			path  string
-		}{"this project", providers.ClaudeProjectSettingsPath(wd)})
+		levels = append(levels, level{"this project", providers.ClaudeProjectSettingsPath(wd)})
 	}
 
 	engines := map[string][]string{} // engine path -> the levels registering it
@@ -477,14 +460,12 @@ func (a *app) reportHookRegistration() {
 		case err != nil:
 			fmt.Fprintf(a.stdout, "  %-13s %s: could not be read; %v\n", level.label, level.path, err)
 			continue
-		case !audit.Present:
-			fmt.Fprintf(a.stdout, "  %-13s %s  (absent)\n", level.label, level.path)
-			if level.label == "user-wide" {
-				fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider claude-code`.\n")
+		case !audit.Present, len(audit.Engines) == 0:
+			note := "(present, no OpenBox hooks)"
+			if !audit.Present {
+				note = "(absent)"
 			}
-			continue
-		case len(audit.Engines) == 0:
-			fmt.Fprintf(a.stdout, "  %-13s %s  (present, no OpenBox hooks)\n", level.label, level.path)
+			fmt.Fprintf(a.stdout, "  %-13s %s  %s\n", level.label, level.path, note)
 			if level.label == "user-wide" {
 				fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider claude-code`.\n")
 			}
