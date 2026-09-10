@@ -2,8 +2,6 @@ package gitaction
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 //   - AgentID↔DID binding: at construction the verifier recomputes
@@ -221,30 +221,10 @@ func DIDForAgent(agentID string) (string, error) {
 }
 
 func uuidV5(namespace, name string) (string, error) {
-	ns, err := parseUUIDBytes(namespace)
+	ns, err := uuid.Parse(namespace)
 	if err != nil {
 		return "", fmt.Errorf("parse namespace UUID: %w", err)
 	}
-	h := sha1.New()
-	h.Write(ns)
-	h.Write([]byte(name)) // name hashed as its utf8 bytes (the agent id STRING)
-	sum := h.Sum(nil)
-	var u [16]byte
-	copy(u[:], sum[:16])
-	u[6] = (u[6] & 0x0f) | 0x50 // version 5
-	u[8] = (u[8] & 0x3f) | 0x80 // RFC 4122 variant
-	return formatUUID(u), nil
-}
-
-func parseUUIDBytes(s string) ([]byte, error) {
-	hexStr := strings.ReplaceAll(s, "-", "")
-	if len(hexStr) != 32 {
-		return nil, fmt.Errorf("not a UUID: %q", s)
-	}
-	return hex.DecodeString(hexStr)
-}
-
-func formatUUID(u [16]byte) string {
-	h := hex.EncodeToString(u[:])
-	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+	// The name is hashed as its utf8 bytes (the agent id STRING).
+	return uuid.NewSHA1(ns, []byte(name)).String(), nil
 }

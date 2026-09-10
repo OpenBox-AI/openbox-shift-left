@@ -34,12 +34,18 @@ func (r Repo) bin() string {
 }
 
 // run we never pass a secret to git, so stderr is secret-free by construction.
-func (r Repo) run(args ...string) (string, error) {
+// command assembles the git child: the -C working directory, so run and
+// runLimited cannot disagree about it.
+func (r Repo) command(args []string) *exec.Cmd {
 	full := args
 	if r.Dir != "" {
 		full = append([]string{"-C", r.Dir}, args...)
 	}
-	cmd := exec.Command(r.bin(), full...)
+	return exec.Command(r.bin(), full...)
+}
+
+func (r Repo) run(args ...string) (string, error) {
+	cmd := r.command(args)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -53,11 +59,7 @@ func (r Repo) run(args ...string) (string, error) {
 // hostile, arbitrarily large output (e.g. A giant commit body) can never be
 // buffered whole into memory (SEC-6-1).
 func (r Repo) runLimited(maxBytes int64, args ...string) (out string, truncated bool, err error) {
-	full := args
-	if r.Dir != "" {
-		full = append([]string{"-C", r.Dir}, args...)
-	}
-	cmd := exec.Command(r.bin(), full...)
+	cmd := r.command(args)
 	stdout, perr := cmd.StdoutPipe()
 	if perr != nil {
 		return "", false, perr
