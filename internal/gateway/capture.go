@@ -189,10 +189,10 @@ func capRunes(s string) string {
 
 // Captured is the evidence one relayed model call produces.
 type Captured struct {
-	RequestHeaders        map[string]string
-	ResponseHeaders       map[string]string
-	RequestBody           string
-	ResponseBody          string
+	RequestHeaders  map[string]string
+	ResponseHeaders map[string]string
+	RequestBody     string
+	ResponseBody    string
 
 	// ResponseBytesSeen and ResponseTruncated are the response-side twin of
 	// selectionNote (requestselect.go): the gateway's own view of whether the

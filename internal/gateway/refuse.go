@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
@@ -34,23 +35,14 @@ func (r RefusalShape) Validate() error {
 	if r.Status < 400 || r.Status > 499 {
 		return fmt.Errorf("gateway: refusal status %d is not a 4xx; a 5xx or a 2xx tells the client something other than \"refused\"", r.Status)
 	}
-	for _, transient := range []int{
-		http.StatusRequestTimeout, http.StatusTooManyRequests,
-	} {
-		if r.Status == transient {
-			return fmt.Errorf("gateway: refusal status %d is a transience signal the client retries around; a policy denial would be retried, not honoured", r.Status)
-		}
+	if slices.Contains(transientStatuses, r.Status) {
+		return fmt.Errorf("gateway: refusal status %d is a transience signal the client retries around; a policy denial would be retried, not honoured", r.Status)
 	}
 	if r.ErrorType == "" {
 		return fmt.Errorf("gateway: refusal error type is empty; the client would see an unnamed error")
 	}
-	for _, providerType := range []string{
-		"overloaded_error", "rate_limit_error", "api_error", "authentication_error",
-		"invalid_request_error", "permission_error", "not_found_error", "request_too_large",
-	} {
-		if r.ErrorType == providerType {
-			return fmt.Errorf("gateway: refusal error type %q is the provider's own literal; a wording-based retry rule could match it", r.ErrorType)
-		}
+	if slices.Contains(providerErrorTypes, r.ErrorType) {
+		return fmt.Errorf("gateway: refusal error type %q is the provider's own literal; a wording-based retry rule could match it", r.ErrorType)
 	}
 	return nil
 }
@@ -155,4 +147,15 @@ func RefuseEverything(shape RefusalShape) http.Handler {
 				"measure how this client reacts to the refusal shape. No policy was consulted.",
 		}, shape)
 	})
+}
+
+// transientStatuses are the 4xx a client retries around, so a denial wearing
+// one would be retried rather than honoured.
+var transientStatuses = []int{http.StatusRequestTimeout, http.StatusTooManyRequests}
+
+// providerErrorTypes are the provider's own literals; a wording-based retry
+// rule could match them.
+var providerErrorTypes = []string{
+	"overloaded_error", "rate_limit_error", "api_error", "authentication_error",
+	"invalid_request_error", "permission_error", "not_found_error", "request_too_large",
 }

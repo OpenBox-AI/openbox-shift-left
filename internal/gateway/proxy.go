@@ -302,7 +302,7 @@ func capturableBody(body []byte, h http.Header) string {
 	if len(body) > maxCaptureInputBytes {
 		// Marked, and with room for the mark inside the same bound: an unmarked cut
 		// here is a clipped reply that reads as a finished one.
-		return trimPartialRune(string(body[:maxCaptureInputBytes-len(bodyCutNote)])) + bodyCutNote
+		return noteByteCut(body)
 	}
 	return string(body)
 }
@@ -569,4 +569,11 @@ func connectionNamedHeaders(src http.Header) map[string]bool {
 		}
 	}
 	return named
+}
+
+// noteByteCut head-cuts to maxCaptureInputBytes INCLUDING the note, so the
+// mark rides inside the same bound the cut enforced. noteCut is the
+// rune-budget twin.
+func noteByteCut(b []byte) string {
+	return trimPartialRune(string(b[:maxCaptureInputBytes-len(bodyCutNote)])) + bodyCutNote
 }

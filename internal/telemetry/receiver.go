@@ -76,8 +76,6 @@ func WithWarnFunc(f func(string, ...any)) Option {
 	}
 }
 
-func (r *Receiver) warnf(format string, args ...any) { r.warn(format, args...) }
-
 // Addr is the validated listen address.
 func (r *Receiver) Addr() string { return r.cfg.Addr }
 

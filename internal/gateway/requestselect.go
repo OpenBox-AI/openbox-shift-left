@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -113,7 +113,7 @@ func selectModelCallRequest(body string) string {
 	}
 	// A marker from the decode step is already the honest answer; re-marking it
 	// would just stack two claims about the same body.
-	if len(body) >= len(markerPrefix) && body[:len(markerPrefix)] == markerPrefix {
+	if strings.HasPrefix(body, markerPrefix) {
 		return body
 	}
 
@@ -190,6 +190,18 @@ func selectModelCallRequest(body string) string {
 // json.Marshal renders as `"messages":null` -- a silently emptied conversation
 // carrying no marker, in the one function whose job is to make loss visible.
 func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, originalBytes int, dropped []string, prior *selectionNote, skipped int) ([]json.RawMessage, *selectionNote, bool) {
+	// One account, three drop counts: every other field is this pass's, whichever
+	// exit reports it. One int at the call site, so mergeNote's transposition
+	// hazard has nothing to transpose.
+	note := func(droppedMessages int) *selectionNote {
+		return mergeNote(prior, selectionNote{
+			DroppedMessages:         droppedMessages,
+			DroppedKeys:             dropped,
+			OriginalBytes:           originalBytes,
+			SkippedTrailingNonTurns: skipped,
+		})
+	}
+
 	// An empty history is a complete document -- but a dropped KEY is a loss too,
 	// and so is a prior pass's. Reporting only the message count would let
 	// `{"messages":[],"tools":[...]}` drop `tools` while claiming nothing went.
@@ -197,21 +209,12 @@ func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, origin
 		if len(dropped) == 0 && prior == nil && skipped == 0 {
 			return []json.RawMessage{}, nil, true
 		}
-		return []json.RawMessage{}, mergeNote(prior, selectionNote{
-			DroppedKeys:             dropped,
-			OriginalBytes:           originalBytes,
-			SkippedTrailingNonTurns: skipped,
-		}), true
+		return []json.RawMessage{}, note(0), true
 	}
 
 	probe := *doc
 	probe.Messages = []json.RawMessage{}
-	probe.Selection = mergeNote(prior, selectionNote{
-		DroppedMessages:         len(messages),
-		DroppedKeys:             dropped,
-		OriginalBytes:           originalBytes,
-		SkippedTrailingNonTurns: skipped,
-	})
+	probe.Selection = note(len(messages))
 	skeleton, err := marshalNoHTMLEscape(probe)
 	if err != nil {
 		return nil, nil, false
@@ -230,9 +233,7 @@ func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, origin
 	}
 	// Greedy from the end built it backwards; the stored document must read in
 	// conversation order or a reader cannot tell which turn is newest.
-	for l, r := 0, len(keep)-1; l < r; l, r = l+1, r-1 {
-		keep[l], keep[r] = keep[r], keep[l]
-	}
+	slices.Reverse(keep)
 
 	truncated := false
 	if len(keep) == 0 {
@@ -253,12 +254,7 @@ func keepNewestMessages(doc *selectedRequest, messages []json.RawMessage, origin
 		// the same class of defect as a marker claiming a cut that did not happen.
 		return keep, nil, true
 	}
-	return keep, mergeNote(prior, selectionNote{
-		DroppedMessages:         len(messages) - len(keep),
-		DroppedKeys:             dropped,
-		OriginalBytes:           originalBytes,
-		SkippedTrailingNonTurns: skipped,
-	}), true
+	return keep, note(len(messages) - len(keep)), true
 }
 
 // marshalNoHTMLEscape encodes without json.Marshal's HTML escaping, and the
@@ -496,7 +492,7 @@ func droppedKeys(fields map[string]json.RawMessage) []string {
 			out = append(out, k)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	elided := 0
 	if len(out) > maxDroppedKeyCount {
 		elided = len(out) - maxDroppedKeyCount
@@ -560,7 +556,7 @@ func unionKeys(a, b []string) []string {
 			}
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

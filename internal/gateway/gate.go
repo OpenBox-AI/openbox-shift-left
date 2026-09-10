@@ -51,27 +51,15 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 
 	if err != nil {
 		if errors.Is(err, context.Canceled) && ctx.Err() != nil {
-			return Decision{
-				Forward:   false,
-				Evaluated: true,
-				Reason:    reasonCallerGone,
-			}
+			return refuse("", reasonCallerGone)
 		}
-		return Decision{
-			Forward:     false,
-			Evaluated:   true,
-			Unreachable: true,
-			Reason:      reasonUnreachable,
-		}
+		d := refuse("", reasonUnreachable)
+		d.Unreachable = true
+		return d
 	}
 
 	if g := evaluation.Guardrail; g != nil && !g.Passed {
-		return Decision{
-			Forward:   false,
-			Evaluated: true,
-			Verdict:   evaluation.Verdict,
-			Reason:    reasonGuardrailFailed(evaluation),
-		}
+		return refuse(evaluation.Verdict, reasonGuardrailFailed(evaluation))
 	}
 
 	switch evaluation.Verdict {
@@ -79,27 +67,18 @@ func Decide(ctx context.Context, ev Evaluator, gated bool, c Captured) Decision 
 		return Decision{Forward: true, Evaluated: true, Verdict: evaluation.Verdict}
 
 	case client.VerdictRequireApproval:
-		return Decision{
-			Forward:   false,
-			Evaluated: true,
-			Verdict:   evaluation.Verdict,
-			Reason:    reasonApprovalRequired(evaluation.ApprovalRef()),
-		}
+		return refuse(evaluation.Verdict, reasonApprovalRequired(evaluation.ApprovalRef()))
 
 	case client.VerdictHalt, client.VerdictBlock:
-		return Decision{
-			Forward:   false,
-			Evaluated: true,
-			Verdict:   evaluation.Verdict,
-			Reason:    reasonPolicyRefused(evaluation.Reason),
-		}
+		return refuse(evaluation.Verdict, reasonPolicyRefused(evaluation.Reason))
 
 	default:
-		return Decision{
-			Forward:   false,
-			Evaluated: true,
-			Verdict:   evaluation.Verdict,
-			Reason:    reasonUninterpretable(string(evaluation.Verdict)),
-		}
+		return refuse(evaluation.Verdict, reasonUninterpretable(string(evaluation.Verdict)))
 	}
+}
+
+// refuse is an evaluated decision that does not forward. Forward and Evaluated
+// are the whole shape of such an arm; only the verdict and the wording differ.
+func refuse(v client.Verdict, reason string) Decision {
+	return Decision{Forward: false, Evaluated: true, Verdict: v, Reason: reason}
 }

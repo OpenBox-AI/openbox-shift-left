@@ -21,14 +21,11 @@ type Emitter interface {
 }
 
 func (r *Receiver) consumeLogs(ctx context.Context, ld plog.Logs) error {
-	for i := 0; i < ld.ResourceLogs().Len(); i++ {
-		rl := ld.ResourceLogs().At(i)
+	for _, rl := range ld.ResourceLogs().All() {
 		base := attrsOf(rl.Resource().Attributes(), nil)
-		for j := 0; j < rl.ScopeLogs().Len(); j++ {
-			sl := rl.ScopeLogs().At(j)
+		for _, sl := range rl.ScopeLogs().All() {
 			withScope := attrsOf(sl.Scope().Attributes(), base)
-			for k := 0; k < sl.LogRecords().Len(); k++ {
-				lr := sl.LogRecords().At(k)
+			for _, lr := range sl.LogRecords().All() {
 				r.deliver(ctx, Record{
 					Signal:    SignalLogs,
 					EventName: eventName(lr.Attributes()),
@@ -60,7 +57,7 @@ func (r *Receiver) deliver(ctx context.Context, rec Record) {
 		return
 	}
 	if err := r.emitter.Emit(ctx, rec); err != nil {
-		r.warnf("telemetry: emit %s/%s: %v", rec.Signal, rec.EventName, err)
+		r.warn("telemetry: emit %s/%s: %v", rec.Signal, rec.EventName, err)
 	}
 }
 

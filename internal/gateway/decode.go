@@ -101,7 +101,7 @@ func decodeCapturable(body []byte, encoding string) string {
 	if len(plain) > maxCaptureInputBytes {
 		// Room for the note inside the SAME bound, because clampAndRedact re-cuts at
 		// it downstream and would take the note off again.
-		return trimPartialRune(string(plain[:maxCaptureInputBytes-len(bodyCutNote)])) + bodyCutNote
+		return noteByteCut(plain)
 	}
 	// A short read is not a fault: an aborted turn ends mid-frame, and the prefix
 	// that decoded is the evidence.
