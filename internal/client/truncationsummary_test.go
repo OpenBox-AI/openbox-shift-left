@@ -290,3 +290,110 @@ func TestAnAdapterWrittenCaptureSummaryIsDropped(t *testing.T) {
 		t.Fatal("a forged summary reached signal_args, which OPA and Guardrails read")
 	}
 }
+
+// --- Phase 05: the gateway's own truncation joins the cut index ---
+//
+// payload.go's clientCut only fires from THIS client's own capModelCallBody
+// cut (len(body) > maxModelCallBodyBytes), but
+// activity_output.openbox_capture.truncated is the OR of clientCut and
+// ev.Span.ResponseTruncated. A gateway cut whose stored buffer lands AT OR
+// UNDER the client's own cap left clientCut false, so the row said
+// truncated:true while truncated_paths stayed silent about the one thing
+// that admission describes -- confirmed live on one row of 3104 (session
+// b1d98e0f, activity …:proxy:req_011CeuKVe5QpD7EY6TXShfXY):
+// original_bytes == len(content) == 65536 with truncated:true and no
+// truncated_paths entry at all.
+
+// gatewayCutMarker reproduces gateway/capture.go's unexported bodyCutNote
+// verbatim. internal/client must not import internal/gateway (gateway
+// imports client, never the reverse; see CLAUDE.md's import-direction rule),
+// so the live wire shape is inlined here rather than referenced.
+const gatewayCutMarker = "\n[openbox: truncated here; the rest of this body is not stored]"
+
+// TestGatewayCutAtOrUnderTheClientCapStillIndexes reproduces the live
+// defect's exact wire signature: a stored body landing exactly at
+// maxModelCallBodyBytes (so clientCut's own `>` comparison cannot fire) that
+// ends in the gateway's own cut marker, with Span.ResponseTruncated set --
+// the gateway's own report that its copy was incomplete before this client
+// ever saw it.
+func TestGatewayCutAtOrUnderTheClientCapStillIndexes(t *testing.T) {
+	body := strings.Repeat("y", maxModelCallBodyBytes-len(gatewayCutMarker)) + gatewayCutMarker
+	if len(body) != maxModelCallBodyBytes {
+		t.Fatalf("fixture precondition: body is %d bytes, want exactly %d", len(body), maxModelCallBodyBytes)
+	}
+
+	ev := modelCallEvent(EventTurnCompleted, "{}", body)
+	ev.Span.ResponseTruncated = true
+
+	got := truncated(t, ev)
+	want := []string{"activity_output.content"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("truncated_paths = %v, want %v: a gateway-observed truncation must index "+
+			"activity_output.content even when the client's own byte cap did not fire "+
+			"(len(body) == %d, not >)", got, want, maxModelCallBodyBytes)
+	}
+}
+
+// TestGatewayStreamAbortUnderCapStillIndexes is the wider class Key Insight 4
+// (phase-05-complete-the-cut-index.md) describes: responseTruncated
+// (gateway/proxy.go) folds streamErr != nil, sink.Incomplete() and
+// sink.Cut() into the same one bool this client reads, and none of them
+// need the stored body anywhere near the cap -- a stream that aborted after
+// a few hundred bytes is truncated exactly as much as one that hit 64 KiB.
+func TestGatewayStreamAbortUnderCapStillIndexes(t *testing.T) {
+	const reply = `{"type":"message","role":"assistant","content":[{"type":"text","text":"cut off mid-strea`
+	if len(reply) >= maxModelCallBodyBytes {
+		t.Fatalf("fixture precondition: body must be well under the cap, got %d bytes", len(reply))
+	}
+	ev := modelCallEvent(EventTurnCompleted, "{}", reply)
+	ev.Span.ResponseTruncated = true // streamErr/sink.Incomplete()/sink.Cut(), folded to this one bool
+
+	got := truncated(t, ev)
+	want := []string{"activity_output.content"}
+	if !slices.Equal(got, want) {
+		t.Errorf("truncated_paths = %v, want %v", got, want)
+	}
+}
+
+// TestGatewayDecodeFailureMarkerStillIndexes is the other member of the
+// wider class: gateway/decode.go stores a short marker string in place of a
+// compressed body it could not decode, and that marker's own length can
+// never reach maxModelCallBodyBytes, so clientCut alone would never fire
+// either.
+func TestGatewayDecodeFailureMarkerStillIndexes(t *testing.T) {
+	const marker = `[openbox: not captured; the br body could not be decoded ` +
+		`(truncated or corrupt), so redaction could not inspect it]`
+	ev := modelCallEvent(EventTurnCompleted, "{}", marker)
+	ev.Span.ResponseTruncated = true
+
+	got := truncated(t, ev)
+	want := []string{"activity_output.content"}
+	if !slices.Equal(got, want) {
+		t.Errorf("truncated_paths = %v, want %v", got, want)
+	}
+}
+
+// TestGatewayNotTruncatedRecordsNothing is the regression the fix must not
+// trade for a new silence: ResponseTruncated false and a body under the cap
+// must still leave truncated_paths absent, while the completeness note
+// itself (activity_output.openbox_capture.truncated) is still emitted as
+// false -- the "reply is complete" signal a UI needs. A typo turning the new
+// `||` into an `&&`, or keying it off the wrong field, would make every
+// complete reply look cut instead.
+func TestGatewayNotTruncatedRecordsNothing(t *testing.T) {
+	const reply = `{"type":"message"}`
+	ev := modelCallEvent(EventTurnCompleted, "{}", reply)
+	// Span.ResponseTruncated left at its zero value (false).
+
+	if got := truncated(t, ev); got != nil {
+		t.Errorf("truncated_paths = %v, want nil (ResponseTruncated is false and the body is under cap)", got)
+	}
+
+	oc := openboxCapture(t, wireOf(t, ev))
+	if oc == nil {
+		t.Fatal("activity_output.openbox_capture is absent for a completed call carrying a response body")
+	}
+	if got, ok := oc["truncated"].(bool); !ok || got {
+		t.Errorf("truncated = %v, want false present (not omitted)", oc["truncated"])
+	}
+}
