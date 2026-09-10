@@ -1,10 +1,14 @@
 package devconfig
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -26,6 +30,34 @@ func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 	}
 }
 
+// TestPostureMetadataOmitsTheInertTier2Key tier2 is parsed but deliberately
+// not honoured (docs/upgrading-to-inline-evaluation.md:67: "there are no
+// tiers; every gated call is evaluated. Deliberately not honoured"), so
+// publishing it beside the flags that ARE honoured lets a control-plane
+// reader mistake a dead key for live governance. It must not appear in
+// Metadata() or config_source, even when the config sets it explicitly.
+func TestPostureMetadataOmitsTheInertTier2Key(t *testing.T) {
+	isolateConfig(t)
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"tier2":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvConfigPath, cfgPath)
+
+	m := EffectivePosture().Metadata()
+	if _, present := m["tier2"]; present {
+		t.Errorf("tier2 present in posture metadata with DevConfig.Tier2=true; "+
+			"docs/upgrading-to-inline-evaluation.md:67 says it is deliberately not honoured, "+
+			"so it must not be published beside the flags that are: %v", m)
+	}
+	if src, ok := m["config_source"].(map[string]any); ok {
+		if _, present := src["tier2"]; present {
+			t.Errorf("config_source.tier2 present with DevConfig.Tier2=true; "+
+				"docs/upgrading-to-inline-evaluation.md:67 says tier2 is deliberately not honoured: %v", src)
+		}
+	}
+}
+
 // TestPostureFields_CoverEveryConfigControl every governance control in
 // DevConfig must be reported in the posture.
 func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
@@ -34,6 +66,10 @@ func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 	notPosture := map[string]bool{
 		"install_git_hook":        true,
 		"require_verified_bundle": true,
+		// tier2 is deprecated and deliberately not honoured
+		// (docs/upgrading-to-inline-evaluation.md:67); reporting it would let a
+		// control-plane reader mistake a dead key for live governance.
+		"tier2": true,
 	}
 
 	reported := map[string]bool{}
@@ -125,7 +161,6 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	p := EffectivePosture()
 	if p.Enforce != ResolveEnforce() ||
 		p.FailClosed != ResolveFailClosed() ||
-		p.Tier2 != ResolveTier2() ||
 		p.SecretDetection != ResolveSecretDetection() ||
 		p.ContentCapture != ResolveContentCapture() ||
 		p.Findings != ResolveFindings() ||
@@ -239,5 +274,50 @@ func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
 				t.Errorf("deadKeysPresent() = %v, want [%s]", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestTier2DeprecationWarningFiresExactlyOnce tier2 no longer appears in the
+// posture (TestPostureMetadataOmitsTheInertTier2Key), so its one-shot stderr
+// warning is now the only remaining surface telling a developer the key is
+// dead (CLAUDE.md: "the key stays parseable so it can warn"). It must still
+// fire, and deprecationOnce must still cap it at one print per process even
+// across repeated resolution.
+func TestTier2DeprecationWarningFiresExactlyOnce(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvTier2, "1")
+
+	// deprecationOnce is a package-level sync.Once shared by every test in this
+	// binary; reset it so this test's result cannot depend on whether some
+	// other test happened to resolve a dead key first.
+	deprecationOnce = sync.Once{}
+	t.Cleanup(func() { deprecationOnce = sync.Once{} })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }() // restore even if a call below fails fatally
+
+	EffectivePosture()
+	EffectivePosture() // repeat resolution must not warn a second time
+
+	os.Stderr = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read pipe: %v", err)
+	}
+
+	out := buf.String()
+	if got := strings.Count(out, "tier2"); got != 1 {
+		t.Errorf("tier2 deprecation warning printed to stderr %d times, want exactly 1: %q", got, out)
+	}
+	if !strings.Contains(out, "set but ignored") {
+		t.Errorf("stderr = %q, want the tier2 deprecation warning", out)
 	}
 }

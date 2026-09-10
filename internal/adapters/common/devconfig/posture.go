@@ -7,7 +7,6 @@ type Posture struct {
 	// Enforce resolved enforcement/privacy posture.
 	Enforce         bool
 	FailClosed      bool
-	Tier2           bool
 	SecretDetection bool
 	ContentCapture  bool
 	Findings        bool
@@ -96,8 +95,6 @@ func postureFields() []struct {
 			func(p *Posture) *bool { return &p.Enforce }},
 		{"fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed,
 			func(p *Posture) *bool { return &p.FailClosed }},
-		{"tier2", func(c DevConfig) *bool { return c.Tier2 }, false, EnvTier2,
-			func(p *Posture) *bool { return &p.Tier2 }},
 		{"secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection,
 			func(p *Posture) *bool { return &p.SecretDetection }},
 		{"content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture,

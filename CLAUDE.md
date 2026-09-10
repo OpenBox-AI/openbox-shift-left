@@ -94,10 +94,13 @@ model call `llm_completion` *is* the activity. **`prompt_submitted`'s
 and core's source-and-name gate is the only thing keeping the two apart -- so a
 build carrying the projection must not reach a developer before that gate is
 running. And **thinking keeps its own `activity_output` key**.
-And **every `activity_id` carries exactly two rows** (`Workflow*` one each;
-`SignalReceived` alone is unpaired): every in-path row was single-sided for the
-life of the feature, because the live pairing check filters to *tool* types. Check
-per `activity_id`, never by parity.
+And **every activity that *ran* carries exactly two rows** (`Workflow*` one
+each; `SignalReceived` alone is unpaired): every in-path row was single-sided
+for the life of the feature, because the live pairing check filters to *tool*
+types. A tool blocked before it ran -- a `PreToolUse` hook erroring, so nothing
+executed and no `PostToolUse*` could fire -- produces the started row only,
+and fabricating a completion would be worse than the asymmetry. Check per
+`activity_id`, never by parity.
 
 **Bounds have owners.** `MaxCommandLen` bounds a local decision request, never
 egress; egress is `MaxRedactBody` then `capBody`, and `maxThinkingBytes` must stay

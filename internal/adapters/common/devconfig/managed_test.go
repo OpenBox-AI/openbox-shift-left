@@ -176,7 +176,11 @@ func TestEffectivePosture_ReportsSourceForEveryFlag(t *testing.T) {
 		t.Fatalf("config_source missing from posture metadata: %v", m)
 	}
 	for _, flag := range []string{
-		"enforce", "fail_closed", "tier2", "secret_detection",
+		// tier2 excluded: deprecated and deliberately not honoured
+		// (docs/upgrading-to-inline-evaluation.md:67), so it is deliberately
+		// absent from the posture and its config_source (see posture_test.go's
+		// TestPostureMetadataOmitsTheInertTier2Key).
+		"enforce", "fail_closed", "secret_detection",
 		"content_capture", "findings", "finops",
 	} {
 		if _, present := m[flag]; !present {
