@@ -159,32 +159,10 @@ func (i Installer) writeHooks() error {
 			}
 		}
 	}
-	out = bytes.TrimRight(out, "\n")
-
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("codex install: hooks dir: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".hooks-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(out, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("codex install: commit hooks.json: %w", err)
-	}
-	return nil
+	return writeHooksFile(path, out, "codex install: commit hooks.json")
 }
 
 func (i Installer) mergeEvent(existing json.RawMessage, ev HookName) (json.RawMessage, error) {
@@ -237,25 +215,28 @@ func isOpenBoxHandler(raw json.RawMessage) bool {
 	if json.Unmarshal(raw, &h) != nil || h.Type != "command" {
 		return false
 	}
-	rest, ok := stripEngineToken(strings.TrimSpace(h.Command))
+	_, rest, ok := stripEngineToken(strings.TrimSpace(h.Command))
 	return ok && ownedInvocation.MatchString(rest)
 }
 
-func stripEngineToken(cmd string) (rest string, ok bool) {
+// stripEngineToken splits `"<engine>" hook codex X` into its two halves, so
+// the shape is parsed once: handlerEngine wants the engine, isOpenBoxHandler
+// wants the rest.
+func stripEngineToken(cmd string) (engine, rest string, ok bool) {
 	if cmd == "" {
-		return "", false
+		return "", "", false
 	}
 	if cmd[0] == '"' {
 		end := strings.IndexByte(cmd[1:], '"')
 		if end < 0 {
-			return "", false // unterminated quote; not our shape
+			return "", "", false // unterminated quote; not our shape
 		}
-		return strings.TrimSpace(cmd[end+2:]), true
+		return cmd[1 : end+1], strings.TrimSpace(cmd[end+2:]), true
 	}
 	if i := strings.IndexByte(cmd, ' '); i >= 0 {
-		return strings.TrimSpace(cmd[i+1:]), true
+		return cmd[:i], strings.TrimSpace(cmd[i+1:]), true
 	}
-	return "", true // a bare single token carries no hook invocation
+	return cmd, "", true // a bare single token carries no hook invocation
 }
 
 func (i Installer) hookCommand(event string) string {
@@ -312,15 +293,4 @@ func defaultHooksPath() string {
 		home = os.Getenv("HOME")
 	}
 	return filepath.Join(home, ".codex", "hooks.json")
-}
-
-func contentCaptureLabel(b *bool) string {
-	switch {
-	case b == nil:
-		return "on (default)"
-	case *b:
-		return "on"
-	default:
-		return "off"
-	}
 }

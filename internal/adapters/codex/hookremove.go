@@ -71,7 +71,7 @@ func RemoveHooks(hooksPath string) (removed []string, err error) {
 		// for no change at all.
 		return removed, nil
 	}
-	if err := writeHooksFile(hooksPath, out); err != nil {
+	if err := writeHooksFile(hooksPath, out, "codex uninstall: commit "+hooksPath); err != nil {
 		return removed, err
 	}
 	return removed, nil
@@ -118,26 +118,17 @@ func handlerEngine(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &h) != nil {
 		return "unknown"
 	}
-	cmd := strings.TrimSpace(h.Command)
-	if cmd == "" {
+	engine, _, ok := stripEngineToken(strings.TrimSpace(h.Command))
+	if !ok {
 		return "unknown"
 	}
-	if cmd[0] == '"' {
-		if end := strings.IndexByte(cmd[1:], '"'); end >= 0 {
-			return cmd[1 : end+1]
-		}
-		return "unknown"
-	}
-	if i := strings.IndexByte(cmd, ' '); i >= 0 {
-		return cmd[:i]
-	}
-	return cmd
+	return engine
 }
 
 // writeHooksFile commits the document the way writeHooks does: 0600, one
 // trailing newline, atomic rename. Codex reads this file on every session, so a
 // partially written one is a governed machine that stops being governed.
-func writeHooksFile(path string, out []byte) error {
+func writeHooksFile(path string, out []byte, commitErr string) error {
 	out = bytes.TrimRight(out, "\n")
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".hooks-*.tmp")
 	if err != nil {
@@ -157,7 +148,7 @@ func writeHooksFile(path string, out []byte) error {
 		return err
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("codex uninstall: commit %s: %w", path, err)
+		return fmt.Errorf("%s: %w", commitErr, err)
 	}
 	return nil
 }

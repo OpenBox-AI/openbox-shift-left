@@ -1,9 +1,7 @@
 package codex
 
 import (
-	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
@@ -12,14 +10,6 @@ import (
 
 // INV-3b (the carve-out to "observe never blocks"): an enforce PreToolUse hook
 // may block, but only pre-execution, hard-bounded, and fail-open by default.
-
-// EnforceDecision is the PreToolUse enforce gate: it synchronously obtains a
-// governance decision from the in-process decider for the tool about to run.
-// It never errors and never blocks; the decider fails open
-// (VerdictUnknown/allow) on any fault.
-func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *HookEvent, localRedaction bool) decision.Decision {
-	return cl.Decide(ctx, buildDecisionRequest(id, e, localRedaction))
-}
 
 // buildDecisionRequest assembles the local decision request from a PreToolUse
 // payload, reusing the mapper's tool classification (classifyTool) so the
@@ -83,8 +73,3 @@ type hookSpecificOutput struct {
 	// (redactToolInput); never sourced whole from the decision.
 	UpdatedInput json.RawMessage `json:"updatedInput,omitempty"`
 }
-
-// For a fail-closed org that is a silently ungoverned call, so our verdict
-// must land first.
-
-const maxEnforceTimeout = 2 * time.Second

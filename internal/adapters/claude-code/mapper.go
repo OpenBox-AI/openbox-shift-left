@@ -377,24 +377,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// Never set ev.Model: buildMetadata copies ev.Model into
 		// metadata.model, the key core aggregates token rollups under. A
 		// switch spends no tokens; from_model/to_model are their own keys.
-		meta := compact(map[string]any{
-			"from_model":      capStr(e.FromModel),
-			"to_model":        capStr(e.ToModel),
-			"requested_model": capStr(e.RequestedModel),
-			"source":          enumOr(e.Source, preModelSwitchSources),
-			"cache_ttl":       enumOr(e.CacheTTL, cacheTTLValues),
-			"pricing":         enumOr(e.Pricing, pricingValues),
-		})
-		if e.ContextTokens != nil {
-			meta["context_tokens"] = *e.ContextTokens
-		}
-		if e.PromptCacheWarm != nil {
-			meta["prompt_cache_warm"] = *e.PromptCacheWarm
-		}
-		if e.EstimatedCacheWriteUSD != nil {
-			meta["estimated_cache_write_usd"] = *e.EstimatedCacheWriteUSD
-		}
-		m.signalEvent(&ev, client.EventPreModelSwitch, meta)
+		m.signalEvent(&ev, client.EventPreModelSwitch, modelSwitchMetadata(e, preModelSwitchSources))
 
 	case HookPostModelSwitch:
 		// Same shape as PreModelSwitch, postModelSwitchSources only:
@@ -402,24 +385,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// the two constants agreeing today stays a visible coincidence, not
 		// a hidden derivation (phase 09 asserts pre ⊆ post). Never set
 		// ev.Model, for the same reason as PreModelSwitch.
-		meta := compact(map[string]any{
-			"from_model":      capStr(e.FromModel),
-			"to_model":        capStr(e.ToModel),
-			"requested_model": capStr(e.RequestedModel),
-			"source":          enumOr(e.Source, postModelSwitchSources),
-			"cache_ttl":       enumOr(e.CacheTTL, cacheTTLValues),
-			"pricing":         enumOr(e.Pricing, pricingValues),
-		})
-		if e.ContextTokens != nil {
-			meta["context_tokens"] = *e.ContextTokens
-		}
-		if e.PromptCacheWarm != nil {
-			meta["prompt_cache_warm"] = *e.PromptCacheWarm
-		}
-		if e.EstimatedCacheWriteUSD != nil {
-			meta["estimated_cache_write_usd"] = *e.EstimatedCacheWriteUSD
-		}
-		m.signalEvent(&ev, client.EventPostModelSwitch, meta)
+		m.signalEvent(&ev, client.EventPostModelSwitch, modelSwitchMetadata(e, postModelSwitchSources))
 
 	case HookElicitation:
 		// requested_schema not bound (R3).
@@ -790,13 +756,9 @@ func enumOr(v string, allowed map[string]bool) string {
 	return ""
 }
 
-func capStr(s string) string {
-	r := []rune(s)
-	if len(r) <= maxIdentLen {
-		return s
-	}
-	return string(r[:maxIdentLen])
-}
+// capStr delegates so the adapters and the engine cap an identifier the same
+// way; maxIdentLen stays declared here because tests read it.
+func capStr(s string) string { return hookflow.CapIdent(s) }
 
 func compact(m map[string]any) map[string]any {
 	for k, v := range m {
@@ -910,4 +872,28 @@ func deriveID(ev client.DevEvent) string {
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return "cc-" + hex.EncodeToString(sum[:])
+}
+
+// modelSwitchMetadata is the shape both model-switch classes carry; only the
+// accepted source allowlist differs, and those two tables stay separately
+// declared on purpose.
+func modelSwitchMetadata(e *HookEvent, sources map[string]bool) map[string]any {
+	meta := compact(map[string]any{
+		"from_model":      capStr(e.FromModel),
+		"to_model":        capStr(e.ToModel),
+		"requested_model": capStr(e.RequestedModel),
+		"source":          enumOr(e.Source, sources),
+		"cache_ttl":       enumOr(e.CacheTTL, cacheTTLValues),
+		"pricing":         enumOr(e.Pricing, pricingValues),
+	})
+	if e.ContextTokens != nil {
+		meta["context_tokens"] = *e.ContextTokens
+	}
+	if e.PromptCacheWarm != nil {
+		meta["prompt_cache_warm"] = *e.PromptCacheWarm
+	}
+	if e.EstimatedCacheWriteUSD != nil {
+		meta["estimated_cache_write_usd"] = *e.EstimatedCacheWriteUSD
+	}
+	return meta
 }

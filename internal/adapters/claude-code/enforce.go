@@ -1,20 +1,12 @@
 package claudecode
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
-
-// EnforceDecision is the PreToolUse enforce gate: it synchronously obtains a
-// governance decision from the in-process decider for the tool that is about
-// to run.
-func EnforceDecision(ctx context.Context, cl decision.Decider, id Identity, e *HookEvent, localRedaction bool) decision.Decision {
-	return cl.Decide(ctx, buildDecisionRequest(id, e, localRedaction))
-}
 
 // buildDecisionRequest assembles the local decision request from a PreToolUse
 // payload, reusing the Mapper's tool classification (classifyTool / filePath)

@@ -10,10 +10,7 @@ import (
 
 const (
 	envEnforcementFile = devconfig.EnvEnforcementFile
-	envEnforceTimeout  = devconfig.EnvEnforceTimeout
 	envTier2Timeout    = devconfig.EnvTier2Timeout
-	envSidecarBundle   = "OPENBOX_SIDECAR_BUNDLE" // decision-bundle override; enforce-only
-	envStaleDir        = "OPENBOX_STALE_DIR"      // per-session stale-marker dir; enforce-only
 )
 
 // DevConfig is the shared non-secret coordinate file contract.
@@ -118,7 +115,7 @@ func ResolveSecretDetection() bool { return devconfig.ResolveSecretDetection() }
 func ResolveFindings() bool { return devconfig.ResolveFindings() }
 
 // ResolveFindingsCursor resolves the findings-loop cursor state file path.
-func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor("codex") }
+func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor(provider) }
 
 // ResolveAgentID resolves the backend agent id for policy sync/staleness.
 func ResolveAgentID() string { return devconfig.ResolveAgentID() }

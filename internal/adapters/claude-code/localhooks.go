@@ -232,18 +232,10 @@ func writeHooks(settingsPath, engine string) error {
 			return fmt.Errorf("local-hooks: %s in %s: %w", ev.Event, settingsPath, err)
 		}
 	}
-	if len(before) == 0 {
-		// Nothing of the developer's to preserve in a file this created, and sjson
-		// splices compactly, so give it the indentation a person can read.
-		var doc any
-		if json.Unmarshal(out, &doc) == nil {
-			if pretty, mErr := json.MarshalIndent(doc, "", "  "); mErr == nil {
-				out = append(pretty, '\n')
-			}
-		}
-	} else if before[len(before)-1] == '\n' && (len(out) == 0 || out[len(out)-1] != '\n') {
-		out = append(out, '\n') // sjson's splice can consume the trailing newline
-	}
+	// Nothing of the developer's to preserve in a file this created, and sjson
+	// splices compactly, so give it the indentation a person can read; a file that
+	// already ended in a newline keeps one, which sjson's splice can consume.
+	out = finishClaudeSettingsWrite(out, before)
 
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return fmt.Errorf("local-hooks: mkdir %s: %w", filepath.Dir(settingsPath), err)

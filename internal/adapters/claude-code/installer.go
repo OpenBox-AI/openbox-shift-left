@@ -351,24 +351,6 @@ func (i Installer) configPath() string {
 	return DefaultConfigPath()
 }
 
-func onOff(b bool) string {
-	if b {
-		return "ON"
-	}
-	return "OFF by default"
-}
-
-func contentCaptureLabel(b *bool) string {
-	switch {
-	case b == nil:
-		return "on (default)"
-	case *b:
-		return "on"
-	default:
-		return "off"
-	}
-}
-
 func userPluginDir() string {
 	return filepath.Join(homeDir(), ".claude", "plugins", "openbox-observe")
 }

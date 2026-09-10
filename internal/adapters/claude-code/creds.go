@@ -19,7 +19,6 @@ const (
 	envInstallGitHook  = devconfig.EnvInstallGitHook
 	envEnforce         = devconfig.EnvEnforce
 	envFailClosed      = devconfig.EnvFailClosed
-	envEnforceTimeout  = devconfig.EnvEnforceTimeout
 	envTier2           = devconfig.EnvTier2
 	envTier2Timeout    = devconfig.EnvTier2Timeout
 	envSecretDetection = devconfig.EnvSecretDetection
@@ -29,11 +28,6 @@ const (
 	envAPIKeyDirect    = devconfig.EnvAPIKeyDirect
 	envAgentPrivateKey = devconfig.EnvAgentPrivateKey
 	envConfigPath      = devconfig.EnvConfigPath
-	envAgentID         = devconfig.EnvAgentID
-	envBackendURL      = devconfig.EnvBackendURL
-	envControlToken    = devconfig.EnvControlToken
-	envSidecarBundle   = "OPENBOX_SIDECAR_BUNDLE" // decision-bundle override; enforce-only, not part of the shared contract
-	envStaleDir        = "OPENBOX_STALE_DIR"
 
 	defaultBaseURL = devconfig.DefaultBaseURL
 )
@@ -106,13 +100,10 @@ func ResolveSecretDetection() bool { return devconfig.ResolveSecretDetection() }
 func ResolveFindings() bool { return devconfig.ResolveFindings() }
 
 // ResolveFindingsCursor resolves the findings-loop cursor state file path.
-func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor("claude-code") }
+func ResolveFindingsCursor() string { return devconfig.ResolveFindingsCursor(provider) }
 
 // ResolveEnforce reports whether the developer runtime is in enforce mode.
 func ResolveEnforce() bool { return devconfig.ResolveEnforce() }
-
-// maxEnforceTimeout provider-specific; deliberately not moved into devconfig.
-const maxEnforceTimeout = 2 * time.Second
 
 // ResolveFailClosed reports the enforce failure policy (default false = fail-
 // open).
@@ -169,7 +160,3 @@ func ResolveCredentials() (Credentials, error) {
 		ContentCaptureEnabled: dc.ContentCaptureEnabled,
 	}, nil
 }
-
-func firstNonEmpty(vals ...string) string { return devconfig.FirstNonEmpty(vals...) }
-
-func isTruthy(s string) bool { return devconfig.IsTruthy(s) }

@@ -143,7 +143,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	nudgeFlush := func() {
-		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: "claude-code"}.Maybe(logger, ev.SessionID)
+		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: provider}.Maybe(logger, ev.SessionID)
 	}
 
 	if hook == HookStop || hook == HookSubagentStop {
@@ -182,10 +182,8 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			hookflow.ReplaySessionHalt(logger, stdout, info, ev.SessionID, toolName, toolKind, c)
 			return
 		}
-	}
 
-	var spoolObserve func()
-	if gated {
+		var spoolObserve func()
 		if devEv, ok := ad.Mapper.Map(hook, ev); ok {
 			appendObserve := ad.RecordDeferred(devEv)
 			spoolObserve = func() {
@@ -195,18 +193,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 				nudgeFlush()
 			}
 		}
-	} else {
-		if _, err := ad.Observe(hook, ev); err != nil {
-			logger.Printf("spool %s event: %v", hook, err)
-		}
-		if hook != HookSessionEnd {
-			nudgeFlush()
-		}
-	}
 
-	// With enforce off the gate is never invoked and the observe path stays byte-
-	// identical to observe-only.
-	if gated {
 		var (
 			c      hookflow.OutputContract = promptContract
 			target hookflow.EnforceTarget  = promptTarget{id: id, mapper: ad.Mapper, ev: ev}
@@ -227,19 +214,28 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 		res := g.Run(context.Background(), logger, stdout, target)
 		if hook == HookUserPromptSubmit && !res.Emitted && ResolveFindings() {
-			hookflow.SurfaceFindings("claude-code", string(hook), stdout, logger)
+			hookflow.SurfaceFindings(provider, string(hook), stdout, logger)
 		}
 		return
 	}
 
+	// With enforce off the gate is never invoked and the observe path stays byte-
+	// identical to observe-only.
+	if _, err := ad.Observe(hook, ev); err != nil {
+		logger.Printf("spool %s event: %v", hook, err)
+	}
+	if hook != HookSessionEnd {
+		nudgeFlush()
+	}
+
 	if hook == HookPostToolUse || hook == HookUserPromptSubmit {
 		if ResolveFindings() {
-			hookflow.SurfaceFindings("claude-code", string(hook), stdout, logger)
+			hookflow.SurfaceFindings(provider, string(hook), stdout, logger)
 		}
 	}
 
-	if hook == HookSessionStart {
-		maybeInstallGitHook(logger, ev.Cwd)
+	if hook == HookSessionStart && ResolveInstallGitHook() {
+		obgit.InstallAmbient(ev.Cwd, logger.Printf)
 	}
 
 	if hook == HookSessionEnd {
@@ -366,27 +362,6 @@ func emitTurn(ad *Adapter, logger *log.Logger, hook HookName, ev *HookEvent) {
 	next.Index = pos.Index + 1
 	if err := ad.Turns.Write(ev.SessionID, agentID, next); err != nil {
 		logger.Printf("finops: turn cursor write failed (window may be re-read): %v", err)
-	}
-}
-
-func maybeInstallGitHook(logger *log.Logger, cwd string) {
-	if !ResolveInstallGitHook() {
-		return
-	}
-	self, err := os.Executable()
-	if err != nil || self == "" {
-		return
-	}
-	hooksDir, err := obgit.Git{Dir: cwd}.HooksDirDefault()
-	if err != nil {
-		return // not a git repo / detached worktree; nothing to install into
-	}
-	cfg := obgit.HookConfig{Command: self, Args: []string{"hook", "git", "prepare-commit-msg"}}
-	if err := obgit.InstallPostCommitHook(hooksDir, cfg); err != nil {
-		logger.Printf("post-commit hook not installed (trailer still works): %v", err)
-	}
-	if err := obgit.InstallHook(hooksDir, cfg); err != nil {
-		logger.Printf("git-hook install skipped: %v", err)
 	}
 }
 

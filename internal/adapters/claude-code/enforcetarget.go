@@ -130,7 +130,7 @@ func toolInputExtract(e *HookEvent, redacted *client.Content) string {
 }
 
 func commandOf(input json.RawMessage, e *HookEvent) string {
-	if len(input) == 0 || jsonEqualRaw(input, e.ToolInput) {
+	if len(input) == 0 || string(input) == string(e.ToolInput) {
 		return e.command()
 	}
 	var obj struct {
@@ -141,7 +141,5 @@ func commandOf(input json.RawMessage, e *HookEvent) string {
 	}
 	return obj.Command
 }
-
-func jsonEqualRaw(a, b json.RawMessage) bool { return string(a) == string(b) }
 
 var _ hookflow.EnforceTarget = enforceTarget{}

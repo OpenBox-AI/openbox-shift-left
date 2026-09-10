@@ -322,13 +322,9 @@ func enumOr(v string, allowed map[string]bool) string {
 	return ""
 }
 
-func capStr(s string) string {
-	r := []rune(s)
-	if len(r) <= maxIdentLen {
-		return s
-	}
-	return string(r[:maxIdentLen])
-}
+// capStr delegates so the adapters and the engine cap an identifier the same
+// way; maxIdentLen stays declared here because tests read it.
+func capStr(s string) string { return hookflow.CapIdent(s) }
 
 func compact(m map[string]any) map[string]any {
 	for k, v := range m {
