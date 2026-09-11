@@ -183,11 +183,22 @@ var lockableFields = sync.OnceValue(func() map[string]bool {
 	return out
 })
 
+// deprecatedFields are parsed so they can warn, never honoured. A lock on one
+// is reported alongside a misspelled lock because the consequence is the same
+// and doctor already words it correctly: these lock NOTHING. Without this an
+// org locks `tier2`, is told the lock is active, and nothing anywhere says the
+// key is inert.
+var deprecatedFields = map[string]bool{
+	"tier2":                   true,
+	"tier2_timeout_ms":        true,
+	"require_verified_bundle": true,
+}
+
 func unknownLocked(locked []string) []string {
 	known := lockableFields()
 	var out []string
 	for _, f := range locked {
-		if f = strings.TrimSpace(f); f != "" && !known[f] {
+		if f = strings.TrimSpace(f); f != "" && (!known[f] || deprecatedFields[f]) {
 			out = append(out, f)
 		}
 	}

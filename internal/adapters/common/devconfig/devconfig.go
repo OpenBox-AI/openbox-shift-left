@@ -28,7 +28,6 @@ const (
 	EnvInstallGitHook  = "OPENBOX_INSTALL_GIT_HOOK"
 	EnvEnforce         = "OPENBOX_ENFORCE"
 	EnvFailClosed      = "OPENBOX_FAIL_CLOSED"
-	EnvEnforceTimeout  = "OPENBOX_ENFORCE_TIMEOUT_MS"
 	EnvTier2           = "OPENBOX_TIER2"
 	EnvTier2Timeout    = "OPENBOX_TIER2_TIMEOUT_MS"
 	EnvApprovalHold    = "OPENBOX_APPROVAL_HOLD_MS"
@@ -317,17 +316,34 @@ func warnDeprecatedKeys() {
 	})
 }
 
+// deadKeysPresent looks in every layer a key can arrive from, the managed one
+// included. An org is the reader who most needs the warning: it cannot see the
+// developer's stderr, but a key it sets is one it believes is governing, and
+// the posture row no longer mentions the key at all.
 func deadKeysPresent() []string {
-	cfg, err := load()
-	ok := err == nil
+	cfgs := make([]DevConfig, 0, 2)
+	if cfg, err := load(); err == nil {
+		cfgs = append(cfgs, cfg)
+	}
+	if st := cachedManaged(); st.readable {
+		cfgs = append(cfgs, st.cfg.DevConfig)
+	}
+	set := func(pick func(DevConfig) bool) bool {
+		for _, c := range cfgs {
+			if pick(c) {
+				return true
+			}
+		}
+		return false
+	}
 	var dead []string
-	if _, env := os.LookupEnv(EnvTier2); env || (ok && cfg.Tier2 != nil) {
+	if _, env := os.LookupEnv(EnvTier2); env || set(func(c DevConfig) bool { return c.Tier2 != nil }) {
 		dead = append(dead, "`tier2`")
 	}
-	if _, env := os.LookupEnv(EnvTier2Timeout); env || (ok && cfg.Tier2TimeoutMS != 0) {
+	if _, env := os.LookupEnv(EnvTier2Timeout); env || set(func(c DevConfig) bool { return c.Tier2TimeoutMS != 0 }) {
 		dead = append(dead, "`tier2_timeout_ms`")
 	}
-	if _, env := os.LookupEnv(EnvRequireVerified); env || (ok && cfg.RequireVerifiedBundle != nil) {
+	if _, env := os.LookupEnv(EnvRequireVerified); env || set(func(c DevConfig) bool { return c.RequireVerifiedBundle != nil }) {
 		dead = append(dead, "`require_verified_bundle`")
 	}
 	return dead

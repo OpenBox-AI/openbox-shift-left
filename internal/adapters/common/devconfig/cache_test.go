@@ -3,6 +3,7 @@ package devconfig
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -80,8 +81,11 @@ func TestResolve_RewrittenFileIsPickedUp(t *testing.T) {
 	}
 }
 
-// TestManaged_UnknownLockedNamesAreReported a `locked` entry naming no real
-// setting locks nothing.
+// TestManaged_UnknownLockedNamesAreReported a `locked` entry that governs
+// nothing is reported, whether it names no setting at all (`enforcee`, a
+// typo) or names a deprecated key that parses but is never honoured
+// (`tier2`). The consequence is identical -- the org is told a mandate is in
+// force and it is not -- so both reach doctor's "these lock NOTHING" line.
 func TestManaged_UnknownLockedNamesAreReported(t *testing.T) {
 	dir := t.TempDir()
 	managed := filepath.Join(dir, "managed.json")
@@ -95,7 +99,31 @@ func TestManaged_UnknownLockedNamesAreReported(t *testing.T) {
 	if !st.Readable {
 		t.Fatalf("managed file should be readable: %+v", st)
 	}
-	if len(st.UnknownLocked) != 1 || st.UnknownLocked[0] != "enforcee" {
-		t.Errorf("UnknownLocked = %v, want [enforcee]", st.UnknownLocked)
+	want := []string{"enforcee", "tier2"}
+	if !slices.Equal(st.UnknownLocked, want) {
+		t.Errorf("UnknownLocked = %v, want %v", st.UnknownLocked, want)
+	}
+}
+
+// TestDeadKeysWarnFromTheManagedLayer the deprecation warning is the only
+// surface left that tells anyone a dead key is dead: the posture row stopped
+// publishing `tier2` so it could not be mistaken for live governance. That
+// makes the managed layer the one it most has to reach -- an org setting the
+// key is the reader who believes it is governing something.
+func TestDeadKeysWarnFromTheManagedLayer(t *testing.T) {
+	dir := t.TempDir()
+	managed := filepath.Join(dir, "managed.json")
+	if err := os.WriteFile(managed, []byte(`{"tier2":true,"locked":["tier2"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvManagedConfig, managed)
+	t.Setenv(EnvConfigPath, filepath.Join(dir, "dev.json"))
+	os.Unsetenv(EnvTier2)
+	os.Unsetenv(EnvTier2Timeout)
+	os.Unsetenv(EnvRequireVerified)
+
+	dead := deadKeysPresent()
+	if !slices.Contains(dead, "`tier2`") {
+		t.Errorf("deadKeysPresent = %v, want it to name `tier2` from the managed layer", dead)
 	}
 }

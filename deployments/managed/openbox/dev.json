@@ -11,8 +11,5 @@
   "//secret_detection": "Locked on: Tier-1 local secret redaction is cheap, stays local, and the incident record shows credential access dominates blocked coding-agent activity.",
   "secret_detection": true,
 
-  "//tier2": "Synchronous escalation for high-risk classes. An org default rather than a mandate — it adds hot-path latency, which is a local performance trade-off a team should be able to make.",
-  "tier2": true,
-
   "locked": ["enforce", "fail_closed", "secret_detection"]
 }

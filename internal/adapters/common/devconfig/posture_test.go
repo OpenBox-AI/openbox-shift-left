@@ -314,10 +314,13 @@ func TestTier2DeprecationWarningFiresExactlyOnce(t *testing.T) {
 	}
 
 	out := buf.String()
-	if got := strings.Count(out, "tier2"); got != 1 {
-		t.Errorf("tier2 deprecation warning printed to stderr %d times, want exactly 1: %q", got, out)
+	// Count the warning, not the key name: one line names every dead key that
+	// is set, so `tier2` appears twice in it the moment tier2_timeout_ms is
+	// also present -- which any machine still carrying a legacy env var has.
+	if got := strings.Count(out, "set but ignored"); got != 1 {
+		t.Errorf("deprecation warning printed to stderr %d times, want exactly 1: %q", got, out)
 	}
-	if !strings.Contains(out, "set but ignored") {
+	if !strings.Contains(out, "`tier2`") {
 		t.Errorf("stderr = %q, want the tier2 deprecation warning", out)
 	}
 }

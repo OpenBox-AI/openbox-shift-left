@@ -17,6 +17,13 @@ func isolateConfig(t *testing.T) {
 	for _, name := range append([]string{EnvAPIKeyDirect, EnvAgentPrivateKey}, deprecatedPrivateKeyEnvNames...) {
 		t.Setenv(name, "")
 	}
+	// The deprecated keys are read with LookupEnv, so an empty value still
+	// counts as set: unset them, or a developer who still exports a legacy key
+	// gets a different fixture from one who does not.
+	for _, name := range []string{EnvTier2, EnvTier2Timeout, EnvRequireVerified} {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+	}
 }
 
 func writeEnvFileForTest(t *testing.T, kv map[string]string) {
