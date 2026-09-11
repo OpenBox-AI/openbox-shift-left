@@ -28,25 +28,30 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 // verbatim is the exception, only where a recorded decision says so -- see
 // the shell-and-MCP carve-out in docs/data-and-privacy.md (§What an enforced
 // call sends; deliberately no line number, the bullet moves):
-//   - A shell-KINDED call carries only its `command` field, verbatim: a policy
-//     deciding whether a command is dangerous has to see the command that will
-//     actually run. Note the arm is WIDER than "Bash": classifyTool's default
-//     is shell/"internal", so any name absent from builtinTools lands here and
-//     carries content only if its input has a `command` key. BashOutput and
-//     KillShell take `bash_id`/`shell_id`, so in practice they carry nothing.
+//   - A shell call named in builtinTools carries only its `command` field,
+//     verbatim: a policy deciding whether a command is dangerous has to see
+//     the command that will actually run. Membership in the table is part of
+//     the test, not decoration -- classifyTool's default is shell/"internal",
+//     so testing the kind alone would put every name the provider adds next,
+//     and every typo, on the verbatim path by fallthrough.
 //   - An MCP call carries its whole tool_input verbatim; same rationale, same
 //     carve-out.
 //   - A file write carries the redacted body, rebuilt through the same
 //     RedactToolInput the local decider already redacted with (E8: the
-//     enforce copy is the same bytes the rewrite put on disk).
+//     enforce copy is the same bytes the rewrite put on disk), and then the
+//     whole rebuilt object is scanned: the rebuild preserves byte-for-byte
+//     every field the decider was never handed.
 //   - Everything else -- a subagent spawn's prompt (Agent/ToolSearch), a file
-//     read's arguments, a glob/grep pattern, and any future builtin with no
-//     override below -- keeps Map's own redacted Content untouched.
+//     read's arguments, a glob/grep pattern, an unrecognized tool name, and
+//     any future builtin with no override -- keeps Map's own redacted Content.
 //
 // Map runs here with CaptureContent forced on, so the shape of the enforce
 // copy does not depend on the target's own flag: three tests construct this
 // target with CaptureContent at its zero value, and the escalation test pins
 // that the enforce copy equals Map's output computed as if capture were on.
+// It is skipped only when an override already produced the content, because
+// Map's redaction pass is the expensive half of this blocking hook and an
+// override overwrites its result.
 // Whether that content then LEAVES the machine is decided once, at the client:
 // Emit strips Content when capture is off (client.go's stripContent; C19).
 //
@@ -57,46 +62,83 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 // ResolveContentCapture) and let this one through. Both now resolve through
 // ResolveContentCapture, so the two cannot disagree about a lock.
 func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool) {
+	kind, sem, _, _, _ := classifyTool(t.ev.ToolName)
+	override := t.overrideContent(kind, sem, redacted)
+
 	m := t.mapper
-	m.CaptureContent = true
+	m.CaptureContent = override == ""
 	ev, ok := m.Map(HookPreToolUse, t.ev)
 	if !ok {
 		return ev, false
 	}
-
-	kind, sem, _, _, _ := classifyTool(t.ev.ToolName)
-	switch {
-	case kind == client.ToolShell && sem != "llm_tool_call":
-		// Verbatim by decision (the section named above). A subagent spawn
-		// (Agent/ToolSearch) is shell-KINDED but "llm_tool_call"-semantic, so
-		// it is excluded here and falls through to the redacted default.
-		if in := bounded(commandOf(t.ev.ToolInput, t.ev)); in != "" {
-			ev.Content = &client.Content{ToolInput: in}
-		}
-	case kind == client.ToolMCP:
-		// Verbatim by decision (same rationale, same doc).
-		if in := bounded(string(t.ev.ToolInput)); in != "" {
-			ev.Content = &client.Content{ToolInput: in}
-		}
-	case isFileSemantic(sem) && redacted != nil && redacted.FileText != "":
-		// E8: the enforce copy is the same bytes the rewrite put on disk.
-		if rebuilt := hookflow.RedactToolInput(t.ev.ToolInput, redacted.FileText, contentFieldKeys); len(rebuilt) > 0 {
-			if in := bounded(string(rebuilt)); in != "" {
-				ev.Content = &client.Content{ToolInput: in}
-			}
-		}
+	if override != "" {
+		ev.Content = &client.Content{ToolInput: override}
+		return ev, true
 	}
-	// No case matched above: keep Map's redacted Content untouched (Agent,
-	// ToolSearch, Read, NotebookRead, Glob, Grep, ...).
+	// No override: Map's redacted Content (Agent, ToolSearch, Read, Glob, ...).
+	// It is bounded here and not upstream because Mapper.redact is the identity
+	// function when no redactor is wired -- with secret_detection off, nothing
+	// else on this arm applies MaxRedactBody at all.
+	if ev.Content != nil {
+		ev.Content.ToolInput = bounded(ev.Content.ToolInput)
+	}
 	return ev, true
 }
 
-// bounded caps an override arm's content at MaxRedactBody. The default
-// (redacted) arm needs no separate bound here: RedactText already
-// bound-then-redacts (hookflow/enforce.go), but a verbatim or rebuilt
-// override bypasses that, so it re-applies the same cap on its own content --
-// after the rebuild for the file arm, so a placeholder that grew past the
-// bound while replacing a shorter secret is still caught.
+// overrideContent returns the content for a class with a recorded carve-out,
+// or "" for the redacted default. It reads only the hook event, never Map's
+// output, so the caller can decide whether Map needs to build content at all.
+func (t enforceTarget) overrideContent(kind client.ToolKind, sem string, redacted *client.Content) string {
+	switch {
+	case shellCarveOut(t.ev.ToolName, kind, sem):
+		// Verbatim by decision (the section named above). A subagent spawn
+		// (Agent/ToolSearch) is shell-KINDED but "llm_tool_call"-semantic, so
+		// it is excluded here and falls through to the redacted default.
+		return bounded(t.ev.command())
+	case kind == client.ToolMCP:
+		// Verbatim by decision (same rationale, same doc).
+		return bounded(string(t.ev.ToolInput))
+	case isFileSemantic(sem) && redacted != nil && redacted.FileText != "":
+		// E8: the enforce copy is the same bytes the rewrite put on disk.
+		// The rebuild swaps only the content field, so every other field is
+		// still the original -- an Edit's old_string among them, a full copy
+		// of the text being replaced that the decider never saw, because
+		// fileText reads content/new_string and buildDecisionRequest puts only
+		// that on the request. Scan the whole rebuilt object, the same pass
+		// the observe copy runs over tool_input, so the two copies agree on
+		// what redaction covers. Re-scanning the body the decider already
+		// redacted is a no-op: the assignment rule and the entropy pass both
+		// skip a value containing OPENBOX_REDACTED, so the bytes E8 is about
+		// are unchanged. This is the egress copy only; the disk rewrite goes
+		// through ApplyInputRedaction, which must keep old_string verbatim or
+		// the Edit stops matching the file.
+		rebuilt := hookflow.RedactToolInput(t.ev.ToolInput, redacted.FileText, contentFieldKeys)
+		if len(rebuilt) == 0 {
+			return ""
+		}
+		return bounded(t.mapper.redact(string(rebuilt)))
+	}
+	return ""
+}
+
+// shellCarveOut reports whether a call is the recorded verbatim shell case:
+// shell-kinded, not a subagent spawn, and named in builtinTools. The table
+// membership is the "recorded" half -- without it classifyTool's shell default
+// makes the carve-out a fallthrough that any unknown name lands in.
+func shellCarveOut(name string, kind client.ToolKind, sem string) bool {
+	if kind != client.ToolShell || sem == "llm_tool_call" {
+		return false
+	}
+	_, recorded := builtinTools[name]
+	return recorded
+}
+
+// bounded caps content at MaxRedactBody, the first of the two bounds every
+// egressing body passes (the client's capBody is the second). Every arm needs
+// it: a verbatim override never reaches RedactText, and the rebuilt override
+// and the redacted default reach it only when a redactor is wired. For the
+// file arm it runs after the rebuild and its scan, so a placeholder that grew
+// past the bound while replacing a shorter secret is still caught.
 func bounded(s string) string {
 	return hookflow.TruncateBytes(s, hookflow.MaxRedactBody)
 }
@@ -105,17 +147,11 @@ func bounded(s string) string {
 // (mapper.go) to build every tool_input body it attaches: the shell command
 // alone for a real shell call, the whole tool_input otherwise. Its result is
 // never used unredacted -- both mapper.go call sites run it through m.redact
-// before attaching it, so a verbatim default arm here is not a verbatim
-// result on the wire. Kept as-is: DevEvent above no longer calls it for the
-// enforce copy.
-func toolInputExtract(e *HookEvent, redacted *client.Content) string {
+// before attaching it, so a verbatim shell arm here is not a verbatim result
+// on the wire. DevEvent no longer calls it: the enforce copy has its own
+// carve-out table, which is an allowlist rather than this kind test.
+func toolInputExtract(e *HookEvent) string {
 	kind, sem, _, _, _ := classifyTool(e.ToolName)
-	input := e.ToolInput
-	if redacted != nil && redacted.FileText != "" {
-		if rebuilt := hookflow.RedactToolInput(input, redacted.FileText, contentFieldKeys); len(rebuilt) > 0 {
-			input = rebuilt
-		}
-	}
 	// A subagent spawn (Agent/ToolSearch) is shell-KINDED, so the local enforce
 	// gate is unchanged (insight 6), but its semantic is "llm_tool_call", not a
 	// real shell command: e.command() would unmarshal it against {command} and
@@ -123,22 +159,9 @@ func toolInputExtract(e *HookEvent, redacted *client.Content) string {
 	// {subagent_type} alone would be a judgement about a spawn the judge cannot
 	// see (insight 3).
 	if kind == client.ToolShell && sem != "llm_tool_call" {
-		return commandOf(input, e)
-	}
-	return string(input)
-}
-
-func commandOf(input json.RawMessage, e *HookEvent) string {
-	if len(input) == 0 || string(input) == string(e.ToolInput) {
 		return e.command()
 	}
-	var obj struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal(input, &obj); err != nil {
-		return e.command()
-	}
-	return obj.Command
+	return string(e.ToolInput)
 }
 
 var _ hookflow.EnforceTarget = enforceTarget{}

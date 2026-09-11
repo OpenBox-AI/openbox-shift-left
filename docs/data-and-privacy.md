@@ -343,7 +343,13 @@ An enforced call sends, in this order:
    same call. Three classes override that default, each because a recorded
    decision says so: a shell-kinded call's `command`, an MCP call's whole
    `tool_input`, and a file write's body, rebuilt through the same redactor so
-   the enforce copy is the bytes the rewrite put on disk.
+   the enforce copy is the bytes the rewrite put on disk. That rebuild swaps
+   only the body, so the whole rebuilt object is scanned afterwards as well --
+   an `Edit` carries the text it replaces in `old_string`, which the decider is
+   never handed, and without that second pass it egressed unscanned. Only the
+   egress copy is scanned that way: the `updatedInput` written back to your
+   machine keeps `old_string` verbatim, or the edit would stop matching the
+   file.
 
 Three limits, stated rather than implied:
 
@@ -370,11 +376,12 @@ Three limits, stated rather than implied:
   written back to your machine. It is the one place where the *ordinary
   telemetry* copy of a call is better protected than the copy sent for
   enforcement; the observe copy of that same command IS redacted. Two edges of
-  the carve-out are worth knowing: the shell arm is **wider than `Bash`**, since
-  a tool name the adapter does not recognize classifies as shell and lands here
-  if its input carries a `command` key; and a **subagent spawn is outside it**,
-  because `Agent` and `ToolSearch` are shell-kinded but semantically an LLM
-  call, so their prompt takes the redacted default.
+  the carve-out are worth knowing: it is an **allowlist**, not a kind test --
+  only a shell tool the adapter recognizes by name (`Bash`, `BashOutput`,
+  `KillShell`) reaches it, so a tool name the adapter does not know takes the
+  redacted default rather than landing here by fallthrough; and a **subagent
+  spawn is outside it**, because `Agent` and `ToolSearch` are shell-kinded but
+  semantically an LLM call, so their prompt takes the redacted default too.
 - **Every other class is redacted on Claude Code, and verbatim on Codex.** A
   subagent prompt, a read's arguments, a glob or grep pattern: on Claude Code
   these leave exactly as their observe copy does. **This changed.** They used to

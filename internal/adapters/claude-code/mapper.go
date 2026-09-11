@@ -153,7 +153,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		if m.CaptureContent {
 			// It also coupled two unrelated numbers: changing MaxCommandLen for local-
 			// matching reasons silently changed what the server can see.
-			if in := m.redact(toolInputExtract(e, nil)); in != "" {
+			if in := m.redact(toolInputExtract(e)); in != "" {
 				ev.Content = &client.Content{ToolInput: in}
 			}
 		}
@@ -283,7 +283,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			"tool_name":       capStr(e.ToolName),
 			"permission_mode": enumOr(e.PermissionMode, permissionModes),
 		}))
-		ev.Content = m.gatedSignalDetail(toolInputExtract(e, nil))
+		ev.Content = m.gatedSignalDetail(toolInputExtract(e))
 
 	case HookPostToolBatch:
 		// D1: no content line. tool_calls[] is span-shaped and no event
