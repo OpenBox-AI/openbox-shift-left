@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -20,7 +21,8 @@ type toolCensusClass int
 const (
 	// censusVerbatim: the extract (a shell command, an MCP call's raw
 	// tool_input) reaches /evaluate unredacted. Deliberate and documented
-	// (docs/data-and-privacy.md:362): a policy deciding whether a command is
+	// (docs/data-and-privacy.md, §What an enforced call sends): a policy
+	// deciding whether a command is
 	// dangerous has to see the command that will actually run.
 	censusVerbatim toolCensusClass = iota
 	// censusRebuilt: a file-write body is spliced back in via
@@ -29,8 +31,8 @@ const (
 	censusRebuilt
 	// censusRedacted: everything else -- a subagent prompt, a search query, a
 	// file read's arguments, a glob/grep pattern -- must be scanned and
-	// redacted like any other content body (docs/data-and-privacy.md:37,
-	// "redacted then capped"). It is not, today; that is this phase's red.
+	// redacted like any other content body ("redacted then capped", the
+	// subagent-prompt row of docs/data-and-privacy.md's capture table).
 	censusRedacted
 )
 
@@ -45,14 +47,12 @@ func censusLabel(c toolCensusClass) string {
 	}
 }
 
-// toolCensusTable is the literal table phase 01 requires: every builtinTools
-// entry, plus the one mcp__ probe standing in for the whole MCP class, gets
-// an explicit redaction decision here. It is NOT derived from
-// classifyTool/builtinTools -- deriving the census from the same map it
-// checks would make the assertion vacuous (plan
-// 260910-1347-enforce-path-redaction-repair, phase 01 risk table). An entry
-// with no row fails the test outright ("classify me") instead of silently
-// inheriting a classification nobody chose.
+// toolCensusTable is a literal table: every builtinTools entry, plus the one
+// mcp__ probe standing in for the whole MCP class, gets an explicit redaction
+// decision here. It is deliberately NOT derived from classifyTool or
+// builtinTools -- a census read out of the same map it checks asserts nothing.
+// An entry with no row fails the test outright ("classify me") instead of
+// silently inheriting a classification nobody chose.
 var toolCensusTable = map[string]toolCensusClass{
 	"Bash":         censusVerbatim,
 	"BashOutput":   censusVerbatim,
@@ -117,9 +117,8 @@ func censusFixture(t *testing.T, name string) (json.RawMessage, *client.Content)
 	}
 }
 
-// TestEnforceCopyRedactionByClass is the classification seam (plan
-// 260910-1347-enforce-path-redaction-repair, phase 01): for every tool class
-// enforceTarget.DevEvent can see, does the content it attaches for the
+// TestEnforceCopyRedactionByClass is the classification seam: for every tool
+// class enforceTarget.DevEvent can see, does the content it attaches for the
 // synchronous /evaluate call match the class's assigned bucket? It
 // constructs enforceTarget{mapper: m} directly, so it is blind to real
 // wiring (the conformance case covers that); what it catches is a class
@@ -161,7 +160,8 @@ func TestEnforceCopyRedactionByClass(t *testing.T) {
 			case censusVerbatim:
 				if !strings.Contains(got, testSentinel) {
 					t.Errorf("verbatim class %q: sentinel absent from the /evaluate content "+
-						"(it should reach it unredacted, docs/data-and-privacy.md:362); got %q", name, got)
+						"(it should reach it unredacted, docs/data-and-privacy.md, §What an "+
+						"enforced call sends); got %q", name, got)
 				}
 			case censusRebuilt, censusRedacted:
 				if strings.Contains(got, testSentinel) {
@@ -173,5 +173,71 @@ func TestEnforceCopyRedactionByClass(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestEnforceCopyBoundsEveryArm pins MaxRedactBody on the redacted default,
+// not just on the three override arms. The bound cannot be delegated to
+// RedactText: Mapper.redact is the identity function when RedactContent is
+// nil, which is exactly how hookrun wires the mapper with secret_detection
+// off, and RedactText itself returns early on a nil redactor without
+// truncating. So with no redactor the default arm is the only place the first
+// of the two egress bounds can be applied at all.
+func TestEnforceCopyBoundsEveryArm(t *testing.T) {
+	oversized := strings.Repeat("z", hookflow.MaxRedactBody+4096)
+
+	for _, tc := range []struct {
+		name  string
+		tool  string
+		input json.RawMessage
+	}{
+		{"redacted default", "Agent", json.RawMessage(`{"prompt":"` + oversized + `"}`)},
+		{"verbatim shell", "Bash", json.RawMessage(`{"command":"` + oversized + `"}`)},
+		{"verbatim mcp", censusMCPProbe, json.RawMessage(`{"query":"` + oversized + `"}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testMapper()
+			m.RedactContent = nil // secret_detection off
+			tgt := enforceTarget{
+				id:     Identity{DeveloperDID: testDID},
+				mapper: m,
+				ev:     &HookEvent{SessionID: "s1", ToolName: tc.tool, ToolInput: tc.input},
+			}
+			ev, ok := tgt.DevEvent(nil)
+			if !ok || ev.Content == nil {
+				t.Fatalf("DevEvent ok=%v content=%v", ok, ev.Content)
+			}
+			if got := len(ev.Content.ToolInput); got > hookflow.MaxRedactBody {
+				t.Errorf("enforce copy unbounded: got %d bytes, want <= %d", got, hookflow.MaxRedactBody)
+			}
+		})
+	}
+}
+
+// TestEnforceCopyVerbatimArmIsAnAllowlist pins that the verbatim shell
+// carve-out tests membership in builtinTools, not just the tool kind.
+// classifyTool's default is shell/"internal", so a kind-only test puts every
+// name the provider adds next -- and every typo -- on the verbatim path by
+// fallthrough, unseen by the census above, which iterates builtinTools.
+func TestEnforceCopyVerbatimArmIsAnAllowlist(t *testing.T) {
+	input := json.RawMessage(`{"command":"` + testSentinel + `"}`)
+	tgt := enforceTarget{
+		id:     Identity{DeveloperDID: testDID},
+		mapper: testMapper(),
+		ev:     &HookEvent{SessionID: "s1", ToolName: "SomeFutureShellTool", ToolInput: input},
+	}
+	ev, ok := tgt.DevEvent(nil)
+	if !ok {
+		t.Fatal("DevEvent ok=false")
+	}
+	var got string
+	if ev.Content != nil {
+		got = ev.Content.ToolInput
+	}
+	if strings.Contains(got, testSentinel) {
+		t.Errorf("a tool name absent from builtinTools reached /evaluate verbatim; got %q", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Errorf("unrecognized tool name: no redaction placeholder attached; got %q", got)
 	}
 }
