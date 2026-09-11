@@ -276,7 +276,8 @@ func TestEnforcementConformance(t *testing.T) {
 				"nothing if content never egressed at all: %s", agentBodies)
 		}
 
-		// Bash control: the shell carve-out is deliberate (docs/data-and-privacy.md:362,
+		// Bash control: the shell carve-out is deliberate (docs/data-and-privacy.md,
+		// §What an enforced call sends,
 		// "a gated shell or MCP call sends its command verbatim, unredacted"). Do NOT
 		// "fix" this half to redact -- it pins a documented decision this same case
 		// would otherwise leave unguarded in the other direction.
@@ -289,7 +290,8 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 		if !strings.Contains(bashBodies, awsSecret) {
 			t.Errorf("Bash control: the raw command must reach /evaluate verbatim, unredacted "+
-				"(docs/data-and-privacy.md:362's documented carve-out); got %s", bashBodies)
+				"(the documented carve-out in docs/data-and-privacy.md, §What an "+
+				"enforced call sends); got %s", bashBodies)
 		}
 	})
 

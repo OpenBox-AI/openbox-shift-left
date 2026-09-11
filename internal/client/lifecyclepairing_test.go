@@ -9,8 +9,10 @@ import (
 // The live suite DOES assert pairing (test/20-capture.sh), but filters every
 // query to TOOL activity types, so the llm_completion rows sat outside it.
 //
-// The invariant: every activity_id carries exactly two rows, one ActivityStarted
-// and one ActivityCompleted; Workflow* are one each; SignalReceived is the only
+// The invariant: every activity that RAN carries exactly two rows, one
+// ActivityStarted and one ActivityCompleted. A tool blocked before it ran
+// produces the started row only; fabricating a completion would be worse than
+// the asymmetry, so check per activity_id, never by parity; Workflow* are one each; SignalReceived is the only
 // unpaired type. So total = W + 2A + S, with W = 1 for a session still in flight.
 //
 // Three ways to get it wrong: `total % 2` is even only when W + S is; a parity

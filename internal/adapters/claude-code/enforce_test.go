@@ -1084,10 +1084,10 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 		{"mcp carries the arguments", "mcp__github__create_issue", `{"title":"ship it"}`, "ship it"},
 		{"file carries the body", "Write", `{"file_path":"/tmp/a","content":"hello"}`, "hello"},
 		// The two rows below carry testSentinel (wired into testMapper()'s
-		// RedactContent) rather than plain text. Today the escalation copy skips
-		// m.redact entirely (enforcetarget.go's default arm), so `want` names the
-		// POST-FIX expectation -- "[REDACTED]", never the raw sentinel -- and is
-		// RED until phase 02 lands.
+		// RedactContent) rather than plain text: a subagent spawn is
+		// shell-KINDED but "llm_tool_call"-semantic, so it takes no verbatim
+		// carve-out and keeps Map's redacted Content. What they pin is that
+		// "[REDACTED]" reaches /evaluate and the raw sentinel never does.
 		{"llm_tool_call (Agent) redacts the prompt", "Agent",
 			`{"description":"d","subagent_type":"code-reviewer","prompt":"` + testSentinel + `"}`, "[REDACTED]"},
 		{"llm_tool_call (ToolSearch) redacts the query", "ToolSearch",
@@ -1103,11 +1103,12 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 			if escalated.Content == nil || !strings.Contains(escalated.Content.ToolInput, tc.want) {
 				t.Errorf("escalation lacks the approval context: %+v", escalated.Content)
 			}
-			// Pins the shell carve-out exactly (docs/data-and-privacy.md:362): not
-			// merely "contains the command" but IS the command, verbatim.
+			// Pins the shell carve-out exactly (docs/data-and-privacy.md, §What an
+			// enforced call sends): not merely "contains the command" but IS the
+			// command, verbatim.
 			if escalated.Content != nil && tc.tool == bashToolName && escalated.Content.ToolInput != hookEv.command() {
-				t.Errorf("Bash escalation content = %q, want exactly the command (verbatim carve-out), got %q",
-					hookEv.command(), escalated.Content.ToolInput)
+				t.Errorf("Bash escalation content = %q, want exactly the command (verbatim carve-out) %q",
+					escalated.Content.ToolInput, hookEv.command())
 			}
 
 			observed, _ := m.Map(HookPreToolUse, hookEv)

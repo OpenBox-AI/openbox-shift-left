@@ -759,8 +759,8 @@ func TestContentCaptureConformance(t *testing.T) {
 	// Half of this case inverted at v1.9 and half did not, and the split is the
 	// point. signal_args is now required: it is the only field a policy engine
 	// reads on a signal, and a class carrying none is unenforceable. activity_id
-	// is still forbidden: a signal that acquired one would break "every
-	// activity_id carries exactly two rows", which is what makes SignalReceived
+	// is still forbidden: a signal that acquired one would break "every activity
+	// that ran carries exactly two rows", which is what makes SignalReceived
 	// legitimately unpaired. The alternative of putting the payload in
 	// activity_input was rejected for exactly that reason.
 	t.Run("C52 every new class carries signal_args and no activity_id", func(t *testing.T) {

@@ -336,7 +336,7 @@ func turnActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 		// here would fire on a different body than the one actually cut.
 		clientCut := len(body) > maxModelCallBodyBytes
 		// truncated_paths is a COMPLETE index of what is incomplete on egress (owner
-		// ruling, plan 260909-1549), and the gateway's cut is exactly that: a body this
+		// ruling), and the gateway's cut is exactly that: a body this
 		// row admits is short. Keyed off the same bool captureNote ORs below, so the
 		// note and the index cannot disagree. A gateway cut whose buffer lands at or
 		// under our own cap leaves clientCut false, which is how one live row carried

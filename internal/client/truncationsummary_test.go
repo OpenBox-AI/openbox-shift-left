@@ -291,7 +291,7 @@ func TestAnAdapterWrittenCaptureSummaryIsDropped(t *testing.T) {
 	}
 }
 
-// --- Phase 05: the gateway's own truncation joins the cut index ---
+// --- The gateway's own truncation joins the cut index ---
 //
 // payload.go's clientCut only fires from THIS client's own capModelCallBody
 // cut (len(body) > maxModelCallBodyBytes), but
@@ -305,9 +305,9 @@ func TestAnAdapterWrittenCaptureSummaryIsDropped(t *testing.T) {
 // truncated_paths entry at all.
 
 // gatewayCutMarker reproduces gateway/capture.go's unexported bodyCutNote
-// verbatim. internal/client must not import internal/gateway (gateway
-// imports client, never the reverse; see CLAUDE.md's import-direction rule),
-// so the live wire shape is inlined here rather than referenced.
+// verbatim. internal/client cannot import internal/gateway -- gateway imports
+// client, so the edge would be a cycle -- and bodyCutNote is unexported, so
+// the live wire shape is inlined here rather than referenced.
 const gatewayCutMarker = "\n[openbox: truncated here; the rest of this body is not stored]"
 
 // TestGatewayCutAtOrUnderTheClientCapStillIndexes reproduces the live
@@ -334,8 +334,8 @@ func TestGatewayCutAtOrUnderTheClientCapStillIndexes(t *testing.T) {
 	}
 }
 
-// TestGatewayStreamAbortUnderCapStillIndexes is the wider class Key Insight 4
-// (phase-05-complete-the-cut-index.md) describes: responseTruncated
+// TestGatewayStreamAbortUnderCapStillIndexes is the wider class:
+// responseTruncated
 // (gateway/proxy.go) folds streamErr != nil, sink.Incomplete() and
 // sink.Cut() into the same one bool this client reads, and none of them
 // need the stored body anywhere near the cap -- a stream that aborted after
