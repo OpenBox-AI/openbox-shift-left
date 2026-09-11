@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 //   - Sessions in different worktrees never collide; the worktree filter is
@@ -36,11 +38,7 @@ func DefaultSessionDir() string {
 	if p := os.Getenv(EnvSessionDir); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox", "sessions")
+	return filepath.Join(devconfig.ConfigDir(), "sessions")
 }
 
 // WriteSessionRecord creates or refreshes a session's liveness record (a
@@ -51,7 +49,7 @@ func WriteSessionRecord(dir, sessionID, cwd string, now time.Time) error {
 	if err := ValidateSessionID(sessionID); err != nil {
 		return nil
 	}
-	return writeRecordFile(dir, sessionID, sessionRecordPath(dir, sessionID),
+	return writeRecordFile(dir, sessionRecordPath(dir, sessionID),
 		SessionRecord{SessionID: sessionID, Cwd: cwd, UpdatedAt: now.UnixNano()})
 }
 
@@ -216,13 +214,15 @@ func (s RunStore) Bump(sessionID string) (RunRecord, error) {
 
 func (s RunStore) write(rec RunRecord) error {
 	dir := s.dir()
-	return writeRecordFile(dir, rec.SessionID, runRecordPath(dir, rec.SessionID), rec)
+	return writeRecordFile(dir, runRecordPath(dir, rec.SessionID), rec)
 }
 
-// writeRecordFile marshals rec and installs it at path via temp+rename, so a
-// concurrent reader never observes a partial file. dir is passed rather than
-// derived from path, so an empty dir still fails at MkdirAll.
-func writeRecordFile(dir, tmpID, path string, rec any) error {
+// writeRecordFile marshals rec and installs it at path through hookflow's
+// atomic writer, so a concurrent reader never observes a partial file and a
+// crash after the rename cannot leave a zero-length one -- a zeroed run record
+// restarts run identity at generation 0. dir is passed rather than derived
+// from path, so an empty dir still fails at MkdirAll.
+func writeRecordFile(dir, path string, rec any) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -230,21 +230,7 @@ func writeRecordFile(dir, tmpID, path string, rec any) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(dir, sanitizeForFile(tmpID)+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return os.Rename(tmp, path)
+	return hookflow.AtomicWriteFile(path, data, 0o600)
 }
 
 func sanitizeForFile(id string) string {

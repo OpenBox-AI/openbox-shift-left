@@ -1,18 +1,15 @@
 package hookflow
 
 import (
-	"os"
-	"path/filepath"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
-// openboxConfigDir one resolver, so the sinks can never drift onto different
-// bases.
+// openboxConfigDir the sinks in this package resolve their base through
+// devconfig, which owns it, rather than through a second copy of the same
+// fallback -- two copies is how the enforcement sink and the spool end up on
+// different bases.
 func openboxConfigDir() string {
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox")
+	return devconfig.ConfigDir()
 }
 
 // EnvStaleDir named the stale-marker directory the session-start freshness

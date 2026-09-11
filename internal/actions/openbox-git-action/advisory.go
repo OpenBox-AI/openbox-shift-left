@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -41,11 +42,7 @@ func DefaultAdvisoryPath() string {
 	if p := os.Getenv("OPENBOX_ADVISORY_FILE"); p != "" {
 		return p
 	}
-	dir, err := os.UserConfigDir()
-	if err != nil || dir == "" {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "openbox", "advisories.jsonl")
+	return filepath.Join(devconfig.ConfigDir(), "advisories.jsonl")
 }
 
 // Record writes a deploy advisory when the evaluation is worth recording

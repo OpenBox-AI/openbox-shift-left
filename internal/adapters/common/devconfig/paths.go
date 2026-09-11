@@ -92,9 +92,7 @@ func resolveConfigPath(name string) (string, error) {
 	return newPath, nil
 }
 
-// userConfigDir is os.UserConfigDir with the $HOME/.config fallback, so the
-// spool, the findings cursor and the legacy config path cannot drift onto
-// different bases.
+// userConfigDir is os.UserConfigDir with the $HOME/.config fallback.
 func userConfigDir() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
@@ -103,6 +101,17 @@ func userConfigDir() string {
 	return dir
 }
 
-func legacyConfigDir() string {
+// ConfigDir is OpenBox's directory under the user's config base, and the one
+// resolver for it. Everything the developer runtime keeps there -- the spool,
+// the findings cursor, the legacy config, the session registry, the pending
+// approvals, the halted sessions, the enforcement and advisory sinks -- goes
+// through here, because the fallback above is a rule about one machine: a
+// second copy of it that changes (an XDG_CONFIG_HOME reading, a Windows-shaped
+// fallback) puts two of those sinks on different bases with nothing to notice.
+func ConfigDir() string {
 	return filepath.Join(userConfigDir(), "openbox")
+}
+
+func legacyConfigDir() string {
+	return ConfigDir()
 }

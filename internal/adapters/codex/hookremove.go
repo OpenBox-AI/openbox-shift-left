@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -127,27 +127,14 @@ func handlerEngine(raw json.RawMessage) string {
 
 // writeHooksFile commits the document the way writeHooks does: 0600, one
 // trailing newline, atomic rename. Codex reads this file on every session, so a
-// partially written one is a governed machine that stops being governed.
+// partially written one is a governed machine that stops being governed -- and
+// that is why the commit goes through hookflow's writer rather than a local
+// temp+rename: without the fsync it does, a zero-length file is a valid
+// outcome of the rename after a crash, which is exactly the state this
+// function exists to prevent.
 func writeHooksFile(path string, out []byte, commitErr string) error {
-	out = bytes.TrimRight(out, "\n")
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".hooks-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(out, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
+	out = append(bytes.TrimRight(out, "\n"), '\n')
+	if err := hookflow.AtomicWriteFile(path, out, 0o600); err != nil {
 		return fmt.Errorf("%s: %w", commitErr, err)
 	}
 	return nil

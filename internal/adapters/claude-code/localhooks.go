@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -270,26 +271,12 @@ func writeHooks(settingsPath, engine string) error {
 
 // writeFileAtomic claude Code then cannot parse the settings for that project
 // at all: every hook in the file stops applying, which is a governance failure
-// that reports itself as nothing.
+// that reports itself as nothing. The same reasoning is why the commit goes
+// through hookflow's writer: this copy renamed without an fsync, so after a
+// crash the settings file could come back zero-length -- unparseable, which is
+// the failure above by another route.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return hookflow.AtomicWriteFile(path, data, perm)
 }
 
 // LocalHookAudit is the read-only view of one settings file's OpenBox hook
