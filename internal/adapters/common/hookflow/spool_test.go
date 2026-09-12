@@ -245,3 +245,94 @@ func TestSanitizeSessionID(t *testing.T) {
 		t.Errorf("uuid mangled: %q", got)
 	}
 }
+
+// writeRecoveryFile writes a carry-over file directly under name, one line per
+// id, bypassing the production writer so the test controls the exact
+// filename -- including shapes the writer itself never produces.
+func writeRecoveryFile(t *testing.T, dir, name string, ids ...string) {
+	t.Helper()
+	var buf []byte
+	for _, id := range ids {
+		line, err := jsonLine(ev("irrelevant", id))
+		if err != nil {
+			t.Fatalf("jsonLine: %v", err)
+		}
+		buf = append(buf, line...)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), buf, 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+}
+
+// TestUndeliveredCountForIsolatesBySession is the fix itself: another
+// session's carry-over sitting in the same directory must never inflate this
+// session's count, which is what a directory-wide sum did.
+func TestUndeliveredCountForIsolatesBySession(t *testing.T) {
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	writeRecoveryFile(t, dir, "sessA.rec1-aaa.jsonl", "a1", "a2")
+	writeRecoveryFile(t, dir, "sessB.rec1-bbb.jsonl", "b1", "b2", "b3")
+
+	if got := sp.UndeliveredCountFor("sessA"); got != 2 {
+		t.Errorf("sessA count = %d, want 2 (its own file only)", got)
+	}
+	if got := sp.UndeliveredCountFor("sessB"); got != 3 {
+		t.Errorf("sessB count = %d, want 3 (its own file only)", got)
+	}
+	if got := sp.UndeliveredCountFor("sessC"); got != 0 {
+		t.Errorf("a session with no carry-over of its own must report 0, got %d", got)
+	}
+}
+
+// TestUndeliveredCountForCountsLegacyName the pre-attempt-counter carry-over
+// name (`<session>.rec-<id>.jsonl`, written before the counter existed) must
+// count exactly like a `.rec<N>` one.
+func TestUndeliveredCountForCountsLegacyName(t *testing.T) {
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	writeRecoveryFile(t, dir, "sess.rec-legacy.jsonl", "l1")
+
+	if got := sp.UndeliveredCountFor("sess"); got != 1 {
+		t.Errorf("legacy carry-over not counted: got %d, want 1", got)
+	}
+}
+
+// TestUndeliveredCountForIgnoresNonRecoveryFileWithMatchingPrefix a filename
+// sharing the session's prefix is not enough on its own; it must also satisfy
+// IsRecoveryFile, or any plain file that happens to start with
+// "<session>.rec" would inflate the count.
+func TestUndeliveredCountForIgnoresNonRecoveryFileWithMatchingPrefix(t *testing.T) {
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	// Shares the "sess.rec" prefix, but the run before '-' is not all digits
+	// (an unparsable attempt), so IsRecoveryFile rejects it.
+	writeRecoveryFile(t, dir, "sess.recX-abc.jsonl", "n1", "n2")
+
+	if got := sp.UndeliveredCountFor("sess"); got != 0 {
+		t.Errorf("a non-recovery file with a matching prefix was counted: got %d, want 0", got)
+	}
+}
+
+// TestUndeliveredCountForSanitizesSessionID both the writer's stem and the
+// query prefix run the raw session id through sanitizeSessionID, so a raw id
+// containing a character it rewrites must still match its own carry-over.
+func TestUndeliveredCountForSanitizesSessionID(t *testing.T) {
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	rawID := "team/alpha" // sanitizeSessionID rewrites '/' to '_'
+	writeRecoveryFile(t, dir, sanitizeSessionID(rawID)+".rec1-ccc.jsonl", "c1", "c2", "c3", "c4")
+
+	if got := sp.UndeliveredCountFor(rawID); got != 4 {
+		t.Errorf("sanitized-id count = %d, want 4", got)
+	}
+}
+
+// TestUndeliveredCountForMissingDirectoryReportsZero this feeds a telemetry
+// field and must never fail a session, even when the spool directory itself
+// does not exist.
+func TestUndeliveredCountForMissingDirectoryReportsZero(t *testing.T) {
+	sp := Spool{Dir: filepath.Join(t.TempDir(), "does-not-exist")}
+	if got := sp.UndeliveredCountFor("sess"); got != 0 {
+		t.Errorf("missing dir = %d, want 0", got)
+	}
+}

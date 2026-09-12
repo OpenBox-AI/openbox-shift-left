@@ -205,6 +205,38 @@ func TestEvidenceState_ReportedOnSessionEnd(t *testing.T) {
 			t.Errorf("%s must not carry evidence_state", hook)
 		}
 	}
+
+	// The bug this guards: evidence_undelivered used to come from a
+	// directory-wide count, so a session with no carry-over of its own was
+	// marked degraded by another session's backlog sitting in the same spool
+	// directory. Undelivered must come from Spool.UndeliveredCountFor scoped to
+	// the ending session, never the raw directory-wide count.
+	dir := t.TempDir()
+	s := hookflow.Spool{Dir: dir}
+	if err := s.Append(client.DevEvent{EventID: "evt-other", SessionID: "s2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FlushAll(context.Background(), func(context.Context, client.DevEvent) error {
+		return errors.New("network down")
+	}); err != nil {
+		t.Fatalf("flush s2: %v", err)
+	}
+
+	m.Evidence = &EvidenceState{Undelivered: s.UndeliveredCountFor("s1")}
+	bystander, _ := m.Map(HookSessionEnd, &HookEvent{SessionID: "s1", Reason: "other"})
+	if bystander.Metadata["evidence_state"] != "complete" {
+		t.Errorf("a session with no carry-over of its own must be complete even while "+
+			"another's backlog sits in the directory, got %v", bystander.Metadata)
+	}
+	if _, present := bystander.Metadata["evidence_undelivered"]; present {
+		t.Errorf("another session's backlog must not surface as this session's evidence_undelivered: %v", bystander.Metadata)
+	}
+
+	m.Evidence = &EvidenceState{Undelivered: s.UndeliveredCountFor("s2")}
+	own, _ := m.Map(HookSessionEnd, &HookEvent{SessionID: "s2", Reason: "other"})
+	if own.Metadata["evidence_state"] != "degraded" || own.Metadata["evidence_undelivered"] != 1 {
+		t.Errorf("a session with its own carry-over must still be degraded with the right count, got %v", own.Metadata)
+	}
 }
 
 // TestEvidenceState_CountsOnlyCarriedOverEvents undeliveredCount counts carry-
@@ -227,8 +259,37 @@ func TestEvidenceState_CountsOnlyCarriedOverEvents(t *testing.T) {
 	if got := s.UndeliveredCount(); got != 1 {
 		t.Errorf("after a failed flush the event is undelivered evidence, got %d", got)
 	}
+	if got := s.UndeliveredCountFor("s1"); got != 1 {
+		t.Errorf("s1's own carry-over should count, got %d", got)
+	}
+
+	// A second session's carry-over must add to the directory-wide total but
+	// never to a different session's own count.
+	if err := s.Append(client.DevEvent{EventID: "evt-other", SessionID: "s2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FlushAll(context.Background(), func(context.Context, client.DevEvent) error {
+		return errors.New("network down")
+	}); err != nil {
+		t.Fatalf("flush s2: %v", err)
+	}
+	if got := s.UndeliveredCount(); got != 2 {
+		t.Errorf("directory-wide count should include both sessions, got %d", got)
+	}
+	if got := s.UndeliveredCountFor("s1"); got != 1 {
+		t.Errorf("s2's carry-over must not inflate s1's count, got %d", got)
+	}
+	if got := s.UndeliveredCountFor("s2"); got != 1 {
+		t.Errorf("s2 count = %d, want 1 (its own carry-over)", got)
+	}
+	if got := s.UndeliveredCountFor("s3"); got != 0 {
+		t.Errorf("a session with no carry-over of its own must report 0 even while others' backlog sits in the directory, got %d", got)
+	}
 
 	if got := (hookflow.Spool{Dir: filepath.Join(dir, "nope")}).UndeliveredCount(); got != 0 {
 		t.Errorf("missing dir should report 0, got %d", got)
+	}
+	if got := (hookflow.Spool{Dir: filepath.Join(dir, "nope")}).UndeliveredCountFor("s1"); got != 0 {
+		t.Errorf("missing dir should report 0 for UndeliveredCountFor too, got %d", got)
 	}
 }

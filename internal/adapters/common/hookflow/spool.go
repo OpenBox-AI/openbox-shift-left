@@ -427,6 +427,19 @@ func (s Spool) UndeliveredCount() int {
 	return s.sumLines(IsRecoveryFile)
 }
 
+// UndeliveredCountFor is UndeliveredCount narrowed to one session: it counts
+// only carry-over files whose name starts with that session's sanitized
+// prefix, so another session's backlog sitting in the same directory never
+// inflates this one's count. Best-effort; an unreadable directory reports 0,
+// for the same reason UndeliveredCount does: this feeds a telemetry field and
+// must never fail a session.
+func (s Spool) UndeliveredCountFor(sessionID string) int {
+	prefix := sanitizeSessionID(sessionID) + ".rec"
+	return s.sumLines(func(n string) bool {
+		return strings.HasPrefix(n, prefix) && IsRecoveryFile(n)
+	})
+}
+
 func (s Spool) sumLines(match func(name string) bool) int {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {

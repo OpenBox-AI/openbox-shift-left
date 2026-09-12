@@ -177,4 +177,22 @@ func TestUndeliveredCountSkipsReclaim(t *testing.T) {
 	if got := sp.UndeliveredCount(); got != 1 {
 		t.Errorf("UndeliveredCount = %d, want 1 (the .rec1 file only)", got)
 	}
+	if got := sp.UndeliveredCountFor("th"); got != 1 {
+		t.Errorf("UndeliveredCountFor(th) = %d, want 1 (the .rec1 file only, reclaim skipped)", got)
+	}
+
+	// Another thread's own carry-over in the same directory must not count
+	// against a thread with none of its own.
+	if err := os.WriteFile(filepath.Join(dir, "th-other.rec1-cx-jkl.jsonl"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := sp.UndeliveredCountFor("th"); got != 1 {
+		t.Errorf("another thread's carry-over inflated th's count: got %d, want 1", got)
+	}
+	if got := sp.UndeliveredCountFor("bystander"); got != 0 {
+		t.Errorf("a thread with no carry-over of its own must report 0, got %d", got)
+	}
+	if got := sp.UndeliveredCount(); got != 2 {
+		t.Errorf("directory-wide UndeliveredCount = %d, want 2 (both threads' carry-over)", got)
+	}
 }

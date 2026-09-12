@@ -75,7 +75,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	if hook == HookSessionEnd {
 		ad.Mapper.Evidence = &EvidenceState{
-			Undelivered: ad.Spool.UndeliveredCount(),
+			Undelivered: ad.Spool.UndeliveredCountFor(ev.SessionID),
 			Discarded:   ad.Spool.DiscardedCount(),
 		}
 	}
