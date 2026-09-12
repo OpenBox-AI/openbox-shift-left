@@ -98,41 +98,59 @@ transport and gateway observe the bytes in path; telemetry is the governed tool
 reporting its own calls, so it is suppressible by the thing it observes. A
 lane's presence in a row will say which one produced the evidence.
 
+**Per-hook client-surface marker (§1 below).** A different axis from the lane
+matrix above: this marks whether a given lifecycle hook is reachable from the
+**terminal CLI**, the **desktop app**, or both -- not which model-call lane
+observes it. Recorded as an annotation inside the existing Claude Code cell
+rather than a fourth column, matching how the table already carries other
+per-row caveats. Fixed vocabulary: `both` (observed firing on both surfaces)
+· `terminal` (observed on the terminal CLI only) · `desktop` (observed on
+the desktop app only) · `vendor-gap(<surface>)` (the named surface has no
+path to this event at all -- a provider gap, not an adapter defect) ·
+`unsurveyed` (no per-surface observation exists; the default, and never
+inferred as `both`). Unrelated to the Cursor column's own `*(unsurveyed)*`,
+which answers a different question -- whether Cursor supports the hook at
+all, not which Claude Code surface it fires on. Every marked row cites the
+session or audit section that observed it; an uncited claim is downgraded to
+`unsurveyed`. Seven rows below are marked from one measurement (audit §3.3,
+2026-09-12); the rest stay `unsurveyed` pending a desktop-specific run of the
+same exercise.
+
 ## 1. Lifecycle coverage matrix
 
 | Contract type | Claude Code *(shipped)* | Cursor *(survey only unbuilt)* | Codex *(shipped)* |
 |---|---|---|---|
-| `SessionStarted` | `SessionStart` hook | `sessionStart` | `SessionStart` hook |
-| `PromptSubmitted` | `UserPromptSubmit` | `beforeSubmitPrompt` | `UserPromptSubmit` |
-| `ToolCall` | `PreToolUse` | `preToolUse` / `beforeShellExecution` / `beforeMCPExecution` / `beforeReadFile` | `PreToolUse` / `PermissionRequest` |
-| `ToolResult` | `PostToolUse` | `postToolUse` / `afterShellExecution` / `afterMCPExecution` / `afterFileEdit` | `PostToolUse` |
-| `SessionEnded` | `SessionEnd` hook | `sessionEnd` | `SessionEnd` hook (real, ≥ 0.145.0; no longer synthesized) |
-| `CommitCreated` | *(git-level)* | *(git-level)* | *(git-level)* |
-| `Deploy` | *(git-level)* | *(git-level)* | *(git-level)* |
-| `SubagentStarted` *(v1.2)* | `SubagentStart` hook | *(unsurveyed)* | **none** |
-| `PermissionDenied` *(v1.2)* | `PermissionDenied` hook; **auto-mode classifier denials only**; a static `permissions.deny` rule denies without firing it (verified), so absence is not evidence that nothing was denied | `permissionRequest`? *(unsurveyed)* | **none** |
-| `APIError` *(v1.2)* | `StopFailure` hook | *(unsurveyed)* | **none** |
-| `Setup` *(v1.8)* | `Setup` hook | *(unsurveyed)* | **none** |
-| `InstructionsLoaded` *(v1.8)* | `InstructionsLoaded` hook | *(unsurveyed)* | **none** |
-| `UserPromptExpansion` *(v1.8)* | `UserPromptExpansion` hook; structural-only, no content line ever | *(unsurveyed)* | **none** |
-| `MessageDisplay` *(v1.8)* | `MessageDisplay` hook; structural-only, `message_id` is not the API's `msg_…` id — no transcript join exists (see the annotation below) | *(unsurveyed)* | **none** |
-| `PermissionRequest` *(v1.8)* | `PermissionRequest` hook; no `tool_use_id`, so it cannot pair with any tool activity (see the annotation below); **content-gated** (`requested_tool_input`) | *(unsurveyed)* | **none** |
-| `PostToolBatch` *(v1.8)* | `PostToolBatch` hook; structural-only, no `tool_calls[]` content | *(unsurveyed)* | **none** |
-| `Notification` *(v1.8)* | `Notification` hook; **content-gated** (`notification_message`) | *(unsurveyed)* | **none** |
-| `TaskCreated` *(v1.8)* | `TaskCreated` hook; **content-gated** (`task_subject`; the description is never sent) | *(unsurveyed)* | **none** |
-| `TaskCompleted` *(v1.8)* | `TaskCompleted` hook; same `task_subject` key as `TaskCreated`, never paired as an Activity | *(unsurveyed)* | **none** |
-| `TeammateIdle` *(v1.8)* | `TeammateIdle` hook | *(unsurveyed)* | **none** |
-| `ConfigChange` *(v1.8)* | `ConfigChange` hook; the one new hook that is gated (§4); `source:policy_settings` never gated | *(unsurveyed)* | **none** |
-| `CwdChanged` *(v1.8)* | `CwdChanged` hook; structural, always sent | *(unsurveyed)* | **none** |
-| `DirectoryAdded` *(v1.8)* | `DirectoryAdded` hook; structural, always sent | *(unsurveyed)* | **none** |
-| `FileChanged` *(v1.8)* | `FileChanged` hook; a bounded watch list, not coverage — never the file body (see §3 and the annotation below) | *(unsurveyed)* | **none** |
-| `WorktreeRemove` *(v1.8)* | `WorktreeRemove` hook; unpaired by construction — `WorktreeCreate` is refused, not missing (§3) | *(unsurveyed)* | **none** |
-| `PreCompact` *(v1.8)* | `PreCompact` hook; **content-gated** (`compact_instructions`) | *(unsurveyed)* | **none** |
-| `PostCompact` *(v1.8)* | `PostCompact` hook; **content-gated** (`compact_summary`) | *(unsurveyed)* | **none** |
-| `PreModelSwitch` *(v1.8)* | `PreModelSwitch` hook; never sets the token-rollup `model` field (see the annotation below) | *(unsurveyed)* | **none** |
-| `PostModelSwitch` *(v1.8)* | `PostModelSwitch` hook; not a pair with `PreModelSwitch` in either direction (see the annotation below) | *(unsurveyed)* | **none** |
-| `Elicitation` *(v1.8)* | `Elicitation` hook; **content-gated** (`elicitation_message`, the MCP server's prompt) | *(unsurveyed)* | **none** |
-| `ElicitationResult` *(v1.8)* | `ElicitationResult` hook; **content-gated** (`elicitation_response`) — your answer, form values included; residual risk in [data-and-privacy.md](data-and-privacy.md) | *(unsurveyed)* | **none** |
+| `SessionStarted` | `SessionStart` hook — `terminal` for the `clear` source value only (audit §3.3, 2026-09-12): desktop's `/clear` instead produces `SessionEnd(other)` + `SessionStart(startup)`, never `clear` — provider truth, not an adapter bug (`enumOr` would have kept it) | `sessionStart` | `SessionStart` hook |
+| `PromptSubmitted` | `UserPromptSubmit` — `unsurveyed` | `beforeSubmitPrompt` | `UserPromptSubmit` |
+| `ToolCall` | `PreToolUse` — `unsurveyed` | `preToolUse` / `beforeShellExecution` / `beforeMCPExecution` / `beforeReadFile` | `PreToolUse` / `PermissionRequest` |
+| `ToolResult` | `PostToolUse` — `unsurveyed` | `postToolUse` / `afterShellExecution` / `afterMCPExecution` / `afterFileEdit` | `PostToolUse` |
+| `SessionEnded` | `SessionEnd` hook — `unsurveyed` | `sessionEnd` | `SessionEnd` hook (real, ≥ 0.145.0; no longer synthesized) |
+| `CommitCreated` | *(git-level)* — `unsurveyed` | *(git-level)* | *(git-level)* |
+| `Deploy` | *(git-level)* — `unsurveyed` | *(git-level)* | *(git-level)* |
+| `SubagentStarted` *(v1.2)* | `SubagentStart` hook — `unsurveyed` | *(unsurveyed)* | **none** |
+| `PermissionDenied` *(v1.2)* | `PermissionDenied` hook; **auto-mode classifier denials only**; a static `permissions.deny` rule denies without firing it (verified), so absence is not evidence that nothing was denied — `both` (audit §3.3, 2026-09-12), auto-mode only. Not regression-testable on demand: deny rules, manual denials and hook blocks all bypass it, and no forcing recipe exists; verified by mapper fixture only — `internal/adapters/claude-code/content_conformance_test.go:258-262` (`TestContentCaptureConformance` C38 `"PermissionDenied.reason"`), `internal/adapters/claude-code/enforce_conformance_test.go:395` (`TestEnforcementConformance` C23), `internal/adapters/claude-code/mapper_test.go:625-633` (`TestMap_LifecycleSignals`) | `permissionRequest`? *(unsurveyed)* | **none** |
+| `APIError` *(v1.2)* | `StopFailure` hook — `unsurveyed` | *(unsurveyed)* | **none** |
+| `Setup` *(v1.8)* | `Setup` hook — `unsurveyed` | *(unsurveyed)* | **none** |
+| `InstructionsLoaded` *(v1.8)* | `InstructionsLoaded` hook — `unsurveyed` | *(unsurveyed)* | **none** |
+| `UserPromptExpansion` *(v1.8)* | `UserPromptExpansion` hook; structural-only, no content line ever — `unsurveyed` | *(unsurveyed)* | **none** |
+| `MessageDisplay` *(v1.8)* | `MessageDisplay` hook; structural-only, `message_id` is not the API's `msg_…` id — no transcript join exists (see the annotation below) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `PermissionRequest` *(v1.8)* | `PermissionRequest` hook; no `tool_use_id`, so it cannot pair with any tool activity (see the annotation below); **content-gated** (`requested_tool_input`) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `PostToolBatch` *(v1.8)* | `PostToolBatch` hook; structural-only, no `tool_calls[]` content — `unsurveyed` | *(unsurveyed)* | **none** |
+| `Notification` *(v1.8)* | `Notification` hook; **content-gated** (`notification_message`) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `TaskCreated` *(v1.8)* | `TaskCreated` hook; **content-gated** (`task_subject`; the description is never sent) — `both` (audit §3.3, 2026-09-12), `TaskCreate` tool only | *(unsurveyed)* | **none** |
+| `TaskCompleted` *(v1.8)* | `TaskCompleted` hook; same `task_subject` key as `TaskCreated`, never paired as an Activity — `both` (audit §3.3, 2026-09-12), `TaskCreate` tool only | *(unsurveyed)* | **none** |
+| `TeammateIdle` *(v1.8)* | `TeammateIdle` hook — `unsurveyed` | *(unsurveyed)* | **none** |
+| `ConfigChange` *(v1.8)* | `ConfigChange` hook; the one new hook that is gated (§4); `source:policy_settings` never gated — `unsurveyed` | *(unsurveyed)* | **none** |
+| `CwdChanged` *(v1.8)* | `CwdChanged` hook; structural, always sent — `vendor-gap(desktop)` (audit §3.3, 2026-09-12): the desktop directory tool `mcp__ccd_directory__change_directory` moves cwd without firing it | *(unsurveyed)* | **none** |
+| `DirectoryAdded` *(v1.8)* | `DirectoryAdded` hook; structural, always sent — `terminal` (audit §3.3, 2026-09-12): `/add-dir` is absent on desktop | *(unsurveyed)* | **none** |
+| `FileChanged` *(v1.8)* | `FileChanged` hook; a bounded watch list, not coverage — never the file body (see §3 and the annotation below) — `both` (audit §3.3, 2026-09-12), watcher-only | *(unsurveyed)* | **none** |
+| `WorktreeRemove` *(v1.8)* | `WorktreeRemove` hook; unpaired by construction — `WorktreeCreate` is refused, not missing (§3) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `PreCompact` *(v1.8)* | `PreCompact` hook; **content-gated** (`compact_instructions`) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `PostCompact` *(v1.8)* | `PostCompact` hook; **content-gated** (`compact_summary`) — `unsurveyed` (surface axis; retention decision is in [data-and-privacy.md](data-and-privacy.md)) | *(unsurveyed)* | **none** |
+| `PreModelSwitch` *(v1.8)* | `PreModelSwitch` hook; never sets the token-rollup `model` field (see the annotation below) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `PostModelSwitch` *(v1.8)* | `PostModelSwitch` hook; not a pair with `PreModelSwitch` in either direction (see the annotation below) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `Elicitation` *(v1.8)* | `Elicitation` hook; **content-gated** (`elicitation_message`, the MCP server's prompt) — `unsurveyed` | *(unsurveyed)* | **none** |
+| `ElicitationResult` *(v1.8)* | `ElicitationResult` hook; **content-gated** (`elicitation_response`) — your answer, form values included; residual risk in [data-and-privacy.md](data-and-privacy.md) — `unsurveyed` | *(unsurveyed)* | **none** |
 
 **Four rows above buy less than they appear to, named individually because a matrix cell can't carry the caveat:**
 
@@ -282,6 +300,12 @@ session. `doctor` now compares each lane's activation record against the setting
 file as it is and names any managed key that has gone missing or changed. This is
 detection, not prevention: prevention belongs to MDM, exactly as the base
 architecture already records.
+
+**Routing integrity is a separate backend feature, and does not apply to a
+developer session.** Routing integrity (backend `/routing-integrity/*`) is
+OpenRouter-provenance only and answers `not_applicable` for developer
+sessions; a dev model call carries model and token counts, never provider,
+region, own-key or cost, so no routing promise exists to honour.
 
 ## 2. Field-derivation rules
 

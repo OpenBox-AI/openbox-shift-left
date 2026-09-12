@@ -483,6 +483,17 @@ same field the UI shows.
 | `elicitation_message` | Elicitation | the MCP server's prompt |
 | `elicitation_response` | ElicitationResult | **your submitted form values** |
 
+**Kept in full, by explicit decision (2026-09-12): `compact_summary` is not
+truncated beyond the standard cap.** It rides the same three bounds as every
+other content field on this page -- the `content_capture` switch, local
+redaction before attachment, and the 64KB cap (`capBodyInto`,
+`internal/client/payload.go:813,:844`) -- and it is this session's single
+largest content payload, since a compaction can fold an entire context window
+into one field. Keeping it was reviewed rather than left as an unexamined
+default: it is consistent with the full-capture posture and the one gate
+everything else here answers to. This narrows nothing and widens nothing; it
+turns an existing default into a stated posture.
+
 `elicitation_response` is the most sensitive of the nine, and the keyword blind
 spot below applies to it in full: a value typed into a field name the redactor
 does not recognize is invisible to it and egresses as ordinary text.
