@@ -557,17 +557,25 @@ and the two things that justified it both turned out to be wrong:
   fabricated took their place on a field that persists: the `http_*` pair rides
   `activity_input` only for the lanes that really observed it, because that
   field is emitted only alongside a captured request body.
-- **Alignment no longer needs it.** Its primary path is now an `ActivityStarted`
-  carrying non-empty `activity_input`, resolved to a judgeable operation; the
-  span-based extractor survives only as a fallback for events with no activity
-  input.
+- **Alignment no longer needs it, on the hook lane.** A tool call's
+  `ActivityStarted`, carrying non-empty `activity_input`, resolves to a
+  judgeable operation exactly as this bullet described; the span-based
+  extractor survives only as a fallback for events with no activity input. A
+  relayed model-call `ActivityStarted` does not follow this path at all —
+  verified 2026-09-12, `isRelayedNonToolActivity` (`goal_alignment.go:456-458`,
+  `:554-580`, openbox-core) drops it before `buildGoalOperation` runs — which is
+  why the in-path lanes get their own statement below rather than sharing this
+  one.
 
-The reply text now rides `activity_output.content`, which maps to a dedicated
-column and does persist -- so it is retained server-side for the first time, and
-`docs/data-and-privacy.md` says so. What is given up, stated rather than glossed:
-alignment judges **operations** and not the model's reply text, because that path
-still reads only `payload.Spans`. Restoring it is a core-side change, and is
-deferred.
+The reply text now rides `activity_output` — as raw `content` (verbatim SSE)
+on an in-path lane's row, or as reassembled `reply_text` on the hook lane's —
+either way mapped to a dedicated column that persists, so it is retained
+server-side for the first time, and `docs/data-and-privacy.md` says so. What
+alignment does with each differs, and no longer needs a caveat calling it
+deferred: the judge reads a hook-lane turn's `reply_text` directly (since
+v1.9, `replyTextFromActivityOutput`), and still does not parse an in-path
+lane's raw `content` — verified 2026-09-12, and stated for that lane alone
+below rather than as a blanket limitation.
 
 **An in-path lane is a second content producer, and it behaves differently in
 both respects**. Its record describes a real observed HTTP exchange, so nothing

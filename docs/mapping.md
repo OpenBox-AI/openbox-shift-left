@@ -523,24 +523,54 @@ them when the control plane moves assistant content onto the `llm_completion`
 moot rather than premature. The old warning -- "removing them before that lands
 kills the feature silently" -- was correct about the mechanism and is now spent.
 
-**Goal Alignment still scores, and no longer through a span.** Verified on
-`openbox-core` `develop`, 2026-09-01: its primary path is an `ActivityStarted`
+**Goal Alignment still scores, but not by reading a relayed request body.**
+Superseded, kept for history — verified on `openbox-core` `develop`,
+2026-09-01: this section said the primary path was an `ActivityStarted`
 carrying non-empty `activity_input`, resolved to a judgeable *operation*
-(`goal_alignment.go:268` → `buildGoalOperation`). The span-based assistant
-extractor survives only as a **fallback** for events with no activity input
-(`:298`). So the request body on the opening half feeds alignment natively.
+(`goal_alignment.go:268` → `buildGoalOperation`), the span-based extractor
+surviving only as a **fallback** (`:298`), and concluded "the request body on
+the opening half feeds alignment natively." True of a tool call; the sentence
+did not distinguish a relayed model-call row, where it is false.
 
-How much of it, precisely, because it changes what is worth storing: the judge
-sees roughly **390-444 bytes** of that body, and keeps them as **head 3/5 + tail
-2/5** with the middle elided (`elideMiddle`, `goal_alignment_session.go:773-786`).
-The window is core-side and not ours to set. What *is* ours is which bytes land in
-it, which is why the stored request document puts `messages` last -- see
+**Verified on `openbox-core` `develop`, 2026-09-12** (`resolveAction`,
+`goal_alignment.go:456-458`): a relayed `ActivityStarted` whose `activity_type`
+is one of `llm_completion`, `provider_request`, `token_count`,
+`tool_telemetry` is dropped by `isRelayedNonToolActivity` (`:554-580`)
+**before** `buildGoalOperation` ever runs, so a relayed row's
+`activity_input.content` — the window described below — is never opened for
+judging. A tool call is unaffected: its `ActivityStarted` is never
+relayed-non-tool, so `buildGoalOperation` still reads its `activity_input`
+exactly as this section originally said. The matching `ActivityCompleted` of a
+model turn is judged only when `activity_output.reply_text` is present
+(`replyTextFromActivityOutput`, `:591-602`), a key this client sets on the
+**hook lane only** (`modelCallReplyKey`, `internal/client/payload.go:884-911`,
+from `mapper.go`'s `MapTurn`). So an in-path (`:gateway:`/`:proxy:`) turn is
+judged on **neither** half — matching
+[architecture.md](architecture.md)'s "a lane-observed turn contributes nothing
+to goal alignment. Alignment for those turns comes from the hook path or not
+at all," which this section now agrees with instead of contradicting.
+
+This is the settled disposition of §3.7's proxy-lane finding — filed and
+withdrawn twice, 2026-09-10 and 2026-09-12: a relayed model call is never
+goal-judged **by design**. Do not re-file it.
+
+How much text the judge keeps, where it does resolve an operation — a tool
+call's `activity_input`, or the hook lane's reassembled `reply_text` — is
+still governed by the same core-side cap: roughly **390-444 bytes**, kept as
+**head 3/5 + tail 2/5** with the middle elided (`elideMiddle`,
+`goal_alignment_session.go:773-786`). The window is core-side and not ours to
+set, and a relayed row's window is simply never opened. What *is* ours is
+which bytes would land in it, which is why the stored request document puts
+`messages` last — still load-bearing for OPA, Guardrails and any human or UI
+reader of `activity_input.content` on an in-path row, per
 [The request window is a SELECTION](#the-request-window-is-a-selection-and-what-it-contains).
 
-What that gives up, stated rather than glossed: with no spans, alignment judges
-**operations** and never the model's reply text, because that path still reads
-only `payload.Spans`. Restoring it is a core-side change, not a client one, and
-is deferred. The operation signal is the more governance-relevant one.
+What alignment gives up, stated rather than glossed: a **relayed** turn is not
+judged at all, on either half. A **hook-lane** turn is judged on its
+reassembled `reply_text` (v1.9) instead of the model's reply riding a span,
+which is what "operations, not spans" used to mean here. The operation
+signal — a tool call's `activity_input` — is the one path untouched by any of
+this, since a tool call is never a relayed-non-tool activity.
 
 ### `semantic_type`: computed for nothing, because nothing sends a span
 
@@ -595,7 +625,7 @@ than useless.
 | `span.semantic_type` |; |; | the client has never sent this field, and there is no wire span to recompute it from either (§2) |
 | `span.stage` |; |; | **retained, read by nothing on the wire.** Kept deliberately: the adapter contract is frozen, adapters still set it, and it now says which half of a pair a local event is, which a reader of the spool wants. |
 | `span.module` |; |; | never had a wire home |
-| `span.request_body` | `activity_input.content` | started | **In-path lanes only.** No hook adapter sets it, and none may; that is what §1's "span-less" means. The observed model REQUEST, content-gated by `stripContent`. **SELECTED, not truncated** -- see the note below; `capModelCallRequest` (which keeps the TAIL) remains the net but the wired path no longer reaches its cut. The key is `content` and not `request_body` because the alignment judge's per-operation cap orders by a fixed priority list and drops unlisted keys first |
+| `span.request_body` | `activity_input.content` | started | **In-path lanes only.** No hook adapter sets it, and none may; that is what §1's "span-less" means. The observed model REQUEST, content-gated by `stripContent`. **SELECTED, not truncated** -- see the note below; `capModelCallRequest` (which keeps the TAIL) remains the net but the wired path no longer reaches its cut. The key is `content` and not `request_body` because the alignment judge's per-operation cap orders by a fixed priority list and drops unlisted keys first — still the reason for the name, though verified 2026-09-12 that a relayed row's `activity_input` never reaches that cap to be dropped from at all (`isRelayedNonToolActivity`, `goal_alignment.go:456-458`); the naming protects the tool-call operations that do |
 | `span.response_body` | `activity_output.content` | completed | **In-path lanes only.** The observed model RESPONSE, verbatim SSE frames and all, content-gated and capped by `capModelCallBody` |
 | `span.http_status` | `metadata.http_status` | completed | structural, ungated, **absent when no response was observed at all** -- a relayed call whose transport failed before one existed. Rehomed alongside `credential_fingerprint` for the same reason: without it a 5xx stores identically to a success whose reply was not captured. "completed" here is now enforced rather than described: it shipped on **both** halves until v1.8, and 116 of 116 live `ActivityStarted` rows asserted `200` on a request nothing had answered yet. `observesAResponse` bounds it, and it bounds the metadata KEY as well as the span field, so an adapter cannot reinstate the assertion by writing `http_status` itself |
 | *(none -- client-synthesized from every wire value this payload knows to be incomplete on egress)* | `metadata.openbox_capture.truncated_paths` | every event | Sorted array of destination-qualified wire paths (e.g. `activity_output.output`, `metadata.denial_reason`, `signal_args.prompt`) naming every value known-incomplete on egress: every `capBodyInto` cut, every `capModelCallBody` cut on a model-call row's `content`/`reply_text` keys (since v1.9 -- these previously bypassed this summary entirely and left it silent about the single largest thing a relayed call's row cut), and every gateway-observed truncation (`span.response_truncated`, since v1.9 -- a gateway cut whose stored buffer lands at or under this client's own byte cap left `clientCut` false and the index silent even though the row's own `truncated: true` already admitted the loss). **Omitted entirely when nothing was cut** -- absence means "nothing truncated", never an empty array. The same value cut into two wire objects (the `eventMetadataForEgress` backstop runs once for `metadata` and once for `signal_args`) yields **two** entries; no dedupe. Structural: deliberately **not** in `contentMetadataKeys`, so the content gate never drops it and the dynamic backstop can never re-cap it (the object is appended after that loop has returned). The field is `truncated_paths`, not `truncated`, because `activity_output.openbox_capture.truncated` is a **bool** about one response body's completeness -- a different, now-answered question; see the row below. The gateway's request-side window selection (`openbox_selection`, in the request-window table below) is also a known-incomplete value, but is reported in-band inside `activity_input.content` itself rather than indexed here -- deliberate, not an oversight |
@@ -634,9 +664,9 @@ call, and dropping it is the one change here that *reduces* egress.
 
 Two properties are load-bearing and easy to undo by accident:
 
-- **`messages` is last because the document is a Go struct, not a map.** `json.Marshal` sorts a map's keys, which would emit `messages` first, into the exact middle core's `elideMiddle` discards (it keeps head 3/5 + tail 2/5 of a ~390-444 byte window, `goal_alignment_session.go:773-786`). Declaring it last is what puts the newest turn in the tail the judge keeps.
+- **`messages` is last because the document is a Go struct, not a map.** `json.Marshal` sorts a map's keys, which would emit `messages` first, into the exact middle core's `elideMiddle` discards (it keeps head 3/5 + tail 2/5 of a ~390-444 byte window, `goal_alignment_session.go:773-786`) **on a row that reaches it**. Declaring it last still puts the newest turn in the tail — read by OPA, Guardrails and any human or UI viewer of `activity_input.content` on every in-path row; the alignment judge itself opens that tail only on the hook lane's own operations (verified 2026-09-12: a relayed row's `activity_input` is dropped before `buildGoalOperation`, `goal_alignment.go:456-458`, `:554-580`). The ordering is unchanged and still what every one of those readers needs.
 - **The selection budget (48 KiB) sits deliberately below the 65,536-byte net.** Redaction runs *after* selection and can grow a body, and one byte of growth hands `capRunes` a head cut that removes the newest turn again. The headroom is pinned by a test against a secret-dense body, not left as arithmetic.
-- **Trailing non-turns are dropped, so the judged tail carries a turn.** The agent runtime appends elements to `messages` that are not conversation -- most often a 51-132 byte `role:"system"` element holding `<total_tokens>N tokens left</total_tokens>`. Since the judge reads the LAST element as the current goal, that is what it read on **67%** of measured calls. Selection now walks back past trailing elements whose `role` is neither `user` nor `assistant` -- at most 4, never emptying the history -- and reports the count under its own `skipped_trailing_non_turns` key rather than folding it into `dropped_messages`: a budget drop and a shape problem are different losses. The predicate reads `role` and **never content**, because the same `<total_tokens>` marker also rides inside real turns (`assistant` 81, `user` 59 of 1,144 measured occurrences), so a content match destroys 140 genuine turns to catch the synthetic ones. A `role:"system"` element inside `messages` is a **client artifact** -- the Anthropic Messages API carries `system` as a top-level field -- and no contract this repo publishes defines it.
+- **Trailing non-turns are dropped, so the judged tail carries a turn.** The agent runtime appends elements to `messages` that are not conversation -- most often a 51-132 byte `role:"system"` element holding `<total_tokens>N tokens left</total_tokens>`. Under the belief that a relayed row's tail fed the judge directly, that would have been the current goal on **67%** of measured calls; verified 2026-09-12 that no relayed row reaches the judge at all (`isRelayedNonToolActivity`, `goal_alignment.go:456-458`), so what actually reads the LAST element on those rows is OPA, Guardrails and any human or UI viewer of `activity_input.content` — the same readers the walk-back below still serves. Selection now walks back past trailing elements whose `role` is neither `user` nor `assistant` -- at most 4, never emptying the history -- and reports the count under its own `skipped_trailing_non_turns` key rather than folding it into `dropped_messages`: a budget drop and a shape problem are different losses. The predicate reads `role` and **never content**, because the same `<total_tokens>` marker also rides inside real turns (`assistant` 81, `user` 59 of 1,144 measured occurrences), so a content match destroys 140 genuine turns to catch the synthetic ones. A `role:"system"` element inside `messages` is a **client artifact** -- the Anthropic Messages API carries `system` as a top-level field -- and no contract this repo publishes defines it.
 
 Anything that is not a conversation -- non-JSON, a missing or non-array `messages`,
 a truncated body -- degrades to a tail window carrying a marker that names the
@@ -825,8 +855,8 @@ what closed it.
 | # | What a run must confirm |
 |---|---|
 | 40 | The provider **response body** is readable on a stored `ActivityCompleted`, decompressed and redacted, rather than the 88-byte placeholder every capture held before |
-| 41 | The **request body** is readable on the paired `ActivityStarted`, under `content`, having survived the judge's per-operation cap |
-| 42 | `aligned_goal_evaluations` still advances with no span anywhere: alignment feeds from `activity_input` on the opening half (`goal_alignment.go:268`), and a field name that loses the cap fails **here and nowhere else** |
+| 41 | The **request body** is readable on the paired `ActivityStarted`, under `content`, capped by the gateway's own selection budget — not by the alignment judge, which never opens a relayed row (verified 2026-09-12, see §"Goal Alignment still scores") |
+| 42 | `aligned_goal_evaluations` still advances with no span anywhere: on the **hook lane**, alignment feeds from `activity_input` on a tool call's opening half (`buildGoalOperation`, `goal_alignment.go:460-464`) — a relayed model-call `ActivityStarted` is dropped before it gets there instead (`isRelayedNonToolActivity`, `:456-458`, `:554-580`; verified 2026-09-12) — and a field name that loses the cap fails **here and nowhere else** |
 | 43 | `api_response_ms` stays inside budget with a 64 KB body attached. Baseline is 536–725 ms; both OPA and Guardrails read `activity_output` synchronously inside a 30 s envelope the caller blocks on, expanding every string leaf, with no server-side size limit |
 | 44 | Session-wide lifecycle pairing holds on a real session: `select activity_id, count(*) … group by activity_id having count(*) <> 2` returns zero rows |
 | 45 | No stored row has `activity_type: llm_completion` with a `count_tokens` URL, and no `token_count` row is stored at all for the session -- the probe is classified (`PathClass.Emits()` in `internal/cli/gatewayemit/pathclass.go`) but never spooled; the completion-to-probe ratio is unverifiable as an observable of this release since other landings in the same release add rows, so a run reports the net per-session volume range instead |
