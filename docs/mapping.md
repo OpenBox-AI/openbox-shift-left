@@ -118,7 +118,7 @@ feeding one serializer.
 |---|---|---|---|---|---|
 | `SessionStarted` | `WorkflowStarted` |; |; | `provider`, `tool_version`, `repo`, `cwd` | **create** session `(workflow_id, run_id, workflow_type)` (`storage_session.go`) |
 | `SessionEnded` | `WorkflowCompleted` |; |; | `total_tokens`, `total_cost`, `duration_ms` | **terminal**; closes the session |
-| `PromptSubmitted` | `SignalReceived` | `prompt_submitted` |; | `tokens`, `cost`, `model` | mid-session signal |
+| `PromptSubmitted` | `SignalReceived` | `prompt_submitted` |; | `tokens`, `cost`, `model`, `prompt_source`?, `prompt_source_inferred`? | mid-session signal; a machine-injected turn (a task notification arriving as a prompt) is labelled here and withholds its text as the goal -- see the rule below |
 | `CommitCreated` | `SignalReceived` | `commit_created` |; | `commit_sha`, `repo`, `branch` (FR-5) | mid-session signal; commit lineage |
 | `Deploy` | `SignalReceived` | `deploy` |; | `deploy_id`, `commit_sha`, `repo`, `environment`, `deploy_did` (FR-6/7) | signal; deploy lineage |
 | `ToolCall` | `ActivityStarted` |; | `activity_id`, `activity_type`, `activity_input` | `tool_name`, `tool_use_id`?, `agent_id`?, `agent_type`? | one `governance_events` row; pre-exec decision (OPA + Guardrails stage 0) |
@@ -155,7 +155,11 @@ Two more per model turn, when usage capture is on.
 
 **Every signal but `prompt_submitted` carries its payload in `signal_args`
 (v1.9), and `prompt_submitted`'s `signal_args` is the goal. Core's gate is what
-keeps the two apart.**
+keeps the two apart. A machine-injected `prompt_submitted` -- the mapper's
+`machineInjectedPrompt` classifying a task notification that arrived as a
+prompt instead of typed input -- carries no `signal_args` at all:
+`metadata.prompt_source` records the classification, but the text that would
+otherwise have become the goal is withheld, not merely emptied.**
 
 This reverses the rule v1.8 documented here, so it is worth stating what the old
 constraint was and what actually removed it rather than quietly swapping the

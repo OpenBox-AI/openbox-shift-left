@@ -134,12 +134,22 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookUserPromptSubmit:
 		ev.EventType = client.EventPromptSubmitted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = mergeMetadata(
-			compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)}),
-			subagentMetadata(e))
+		injected, fromVendor := machineInjectedPrompt(e.Source, e.Prompt)
+		meta := compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		switch {
+		case fromVendor:
+			meta["prompt_source"] = enumOr(e.Source, promptSources)
+		case injected:
+			meta["prompt_source"] = "task_notification"
+			meta["prompt_source_inferred"] = true
+		}
+		ev.Metadata = mergeMetadata(meta, subagentMetadata(e))
 		// Default off ⇒ Content stays nil and the prompt never egresses (Emit would
-		// strip it anyway).
-		if m.CaptureContent && e.Prompt != "" {
+		// strip it anyway). A machine-injected turn never becomes Content either,
+		// so buildSignalArgs (client/payload.go) sees a nil Content and
+		// marshalOrNil omits signal_args from the wire entirely: the false goal
+		// claim is withheld, not merely emptied.
+		if m.CaptureContent && e.Prompt != "" && !injected {
 			if p := m.redact(e.Prompt); p != "" {
 				ev.Content = &client.Content{Prompt: p}
 			}
@@ -735,6 +745,18 @@ var (
 	}
 	directoryAddedSources = map[string]bool{"slash_command": true, "register_repo_root": true}
 	fileChangeEvents      = map[string]bool{"change": true, "add": true, "unlink": true}
+	// promptSources is UserPromptSubmit's `source` enum: forward compatible
+	// with a Claude Code that starts sending it on this hook (2.1.263 sends
+	// none, per changelog 2.1.248-2.1.269) -- the vendor arm wins the moment
+	// it exists; the structural fallback in machineInjectedPrompt is what
+	// classifies today's traffic. "user" belongs in this set too: it is a
+	// valid, non-injected vendor value, so the mapper only tags
+	// prompt_source:"user" when the vendor actually says so, never as a
+	// default for the common no-source case.
+	promptSources = map[string]bool{
+		"user": true, "sdk": true, "system": true,
+		"loop_wakeup": true, "schedule_wakeup": true, "poll_event": true,
+	}
 	preModelSwitchSources = map[string]bool{"command": true, "picker": true, "sdk": true}
 	// postModelSwitchSources is declared in full rather than derived from
 	// preModelSwitchSources: the repo's precedent for two constants that
@@ -748,6 +770,41 @@ var (
 	elicitationModes   = map[string]bool{"form": true, "url": true}
 	elicitationActions = map[string]bool{"accept": true, "decline": true, "cancel": true}
 )
+
+// machineInjectedPrompt classifies a UserPromptSubmit turn the tool injected
+// (a task notification arriving as a prompt instead of any of the other 21
+// lifecycle hooks) from one the developer actually typed. fromVendor reports
+// whether the verdict rests on the payload's own source field rather than on
+// the prompt's shape, so the mapper can tell "vendor said so" from "we
+// inferred it from shape" (metadata.prompt_source_inferred).
+//
+// The vendor arm wins the moment source is set, forward compatible with a
+// Claude Code that starts sending it on this hook; live 2.1.263 traffic sends
+// none here, so the structural fallback below is what actually classifies
+// today's notifications. The rule is source != "user", never source ==
+// "system": a notification may plausibly arrive tagged as "sdk" too.
+//
+// The shape arm only runs when source == "" and matches the WHOLE trimmed
+// prompt, prefix AND suffix: a real prompt that merely quotes a notification
+// mid-text must stay a goal.
+func machineInjectedPrompt(source, prompt string) (injected, fromVendor bool) {
+	switch {
+	case source == "user":
+		return false, true
+	case source != "" && promptSources[source]:
+		return true, true
+	case source != "":
+		// An unrecognised vendor value is not evidence either way; the shape
+		// arm below is reserved for source == "" (risk table: extend
+		// promptSources if a real notification starts arriving with one).
+		return false, false
+	}
+	p := strings.TrimSpace(prompt)
+	if strings.HasPrefix(p, "<task-notification>") && strings.HasSuffix(p, "</task-notification>") {
+		return true, false
+	}
+	return false, false
+}
 
 func enumOr(v string, allowed map[string]bool) string {
 	if allowed[v] {
