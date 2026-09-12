@@ -175,9 +175,9 @@ func TestEngine_RecordDeferredThreadsDurationBeforeSpooling(t *testing.T) {
 
 	appendObserve := e.RecordDeferred(started)
 
-	if got := e.Durations.TakeStart(started.SessionID, ToolCallStartKey(started)); got != started.StartedAt {
+	if rec := e.Durations.takePair(started.SessionID, pairKey(started)); rec.StartedAt != started.StartedAt {
 		t.Errorf("duration stash = %q, want %q; suppressing the spool copy must not "+
-			"cost the call its duration_ms", got, started.StartedAt)
+			"cost the call its duration_ms", rec.StartedAt, started.StartedAt)
 	}
 	if n := spooledLines(t, e, started.SessionID); n != 0 {
 		t.Errorf("spool holds %d events before the deferred append ran, want 0", n)

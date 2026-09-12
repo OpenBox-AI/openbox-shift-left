@@ -70,16 +70,44 @@ func (e *Engine) RecordDeferred(ev client.DevEvent) func() error {
 }
 
 // ThreadDuration records/recovers a tool call's start time across the separate
-// Pre/PostToolUse hook processes (DurationStash), mutating only ev.StartedAt
-// on the completed (ToolResult) event; which the client turns into the
-// completed span's start_time, and thus a non-zero duration_ns.
+// Pre/PostToolUse hook processes (DurationStash), mutating the completed
+// (ToolResult) event's ev.StartedAt -- which the client turns into the
+// completed span's start_time, and thus a non-zero duration_ns -- and, when
+// the started half's operation id differs from the completed half's own
+// mapped one, ev.Span.OperationID too, so the two halves still resolve to one
+// activity_id (activityIDFor, client/payload.go) instead of tearing the call
+// in two. An MCP call's Pre and Post hook processes can each map a different
+// tool_input, which is exactly when this divergence happens; the started
+// half's own operation id is never touched here or anywhere else in this
+// function -- it is the approval key, derived from what THAT hook process
+// actually saw, and must stay that way for a retry to consume an approval.
+//
+// When adoption changes the id, ev.Metadata["pair_recovered"] records that the
+// two halves' mapped arguments actually disagreed (never `false`; simply
+// absent otherwise), so how often that happens is measurable after ship.
 func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 	switch ev.EventType {
 	case client.EventToolCall:
-		_ = e.Durations.PutStart(ev.SessionID, ToolCallStartKey(*ev), ev.StartedAt)
+		var opID string
+		if ev.Span != nil {
+			opID = ev.Span.OperationID
+		}
+		_ = e.Durations.putPair(ev.SessionID, pairKey(*ev), pairRecord{StartedAt: ev.StartedAt, OperationID: opID})
 	case client.EventToolResult:
-		if start := e.Durations.TakeStart(ev.SessionID, ToolCallStartKey(*ev)); start != "" {
-			ev.StartedAt = start
+		rec := e.Durations.takePair(ev.SessionID, pairKey(*ev))
+		if ev.Span != nil && rec.OperationID != "" {
+			// The inequality MUST be computed before the assignment below
+			// overwrites the value it compares against -- compare, then assign.
+			if rec.OperationID != ev.Span.OperationID {
+				if ev.Metadata == nil {
+					ev.Metadata = map[string]any{}
+				}
+				ev.Metadata["pair_recovered"] = true
+			}
+			ev.Span.OperationID = rec.OperationID
+		}
+		if rec.StartedAt != "" {
+			ev.StartedAt = rec.StartedAt
 		}
 	case client.EventSessionEnded:
 		e.Durations.ClearSession(ev.SessionID)

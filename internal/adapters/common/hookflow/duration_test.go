@@ -81,3 +81,70 @@ func TestDurationStash_EmptyDirIsInert(t *testing.T) {
 	}
 	d.ClearSession("s1") // must not panic
 }
+
+// TestDurationStash_PutTakePairRoundTrip the pair record (start time plus the
+// started half's operation id) survives a write/read cycle intact, and is
+// removed on read like PutStart/TakeStart.
+func TestDurationStash_PutTakePairRoundTrip(t *testing.T) {
+	d := DurationStash{Dir: t.TempDir()}
+	const sess, key = "s1", "k1"
+	rec := pairRecord{StartedAt: "2026-07-15T12:00:00Z", OperationID: "args:deadbeef"}
+
+	if err := d.putPair(sess, key, rec); err != nil {
+		t.Fatalf("putPair: %v", err)
+	}
+	if got := d.takePair(sess, key); got != rec {
+		t.Fatalf("takePair = %+v, want %+v", got, rec)
+	}
+	if got := d.takePair(sess, key); got != (pairRecord{}) {
+		t.Fatalf("second takePair = %+v, want the zero value (record removed on read)", got)
+	}
+}
+
+// TestDurationStash_TakePairParsesALegacyBareTimestamp a record written before
+// the pair format existed is a bare RFC3339 timestamp, no JSON. A session that
+// straddles an upgrade must still recover its duration from one.
+func TestDurationStash_TakePairParsesALegacyBareTimestamp(t *testing.T) {
+	d := DurationStash{Dir: t.TempDir()}
+	const sess, key, ts = "s1", "k1", "2026-07-15T12:00:00Z"
+	if err := d.putRaw(sess, key, []byte(ts)); err != nil {
+		t.Fatalf("seed legacy record: %v", err)
+	}
+	got := d.takePair(sess, key)
+	if got.StartedAt != ts || got.OperationID != "" {
+		t.Fatalf("takePair on a legacy bare-timestamp record = %+v, want StartedAt=%q OperationID=\"\"", got, ts)
+	}
+}
+
+func TestDurationStash_TakePairMissingIsZeroValue(t *testing.T) {
+	d := DurationStash{Dir: t.TempDir()}
+	if got := d.takePair("s1", "never-written"); got != (pairRecord{}) {
+		t.Fatalf("takePair on missing = %+v, want the zero value", got)
+	}
+}
+
+// TestPairKey_FallsBackToToolCallStartKeyWithoutAnInvocationID pairKey keys on
+// the invocation id alone when the event carries one; otherwise it is exactly
+// ToolCallStartKey.
+func TestPairKey_FallsBackToToolCallStartKeyWithoutAnInvocationID(t *testing.T) {
+	noSpan := client.DevEvent{SessionID: "s1", Tool: client.Tool{Name: "Bash"}}
+	if got, want := pairKey(noSpan), ToolCallStartKey(noSpan); got != want {
+		t.Errorf("pairKey with no Span = %q, want the ToolCallStartKey fallback %q", got, want)
+	}
+
+	noInvocation := client.DevEvent{SessionID: "s1", Tool: client.Tool{Name: "Bash"}, Span: &client.Span{}}
+	if got, want := pairKey(noInvocation), ToolCallStartKey(noInvocation); got != want {
+		t.Errorf("pairKey with an empty invocation id = %q, want the ToolCallStartKey fallback %q", got, want)
+	}
+
+	a := client.DevEvent{SessionID: "s1", Span: &client.Span{InvocationID: "tu_1", OperationID: "args:aaa"}}
+	b := client.DevEvent{SessionID: "s1", Span: &client.Span{InvocationID: "tu_1", OperationID: "args:bbb"}}
+	if pairKey(a) != pairKey(b) {
+		t.Error("pairKey must key on the invocation id alone, ignoring a differing operation id")
+	}
+
+	c := client.DevEvent{SessionID: "s1", Span: &client.Span{InvocationID: "tu_2", OperationID: "args:aaa"}}
+	if pairKey(a) == pairKey(c) {
+		t.Error("two different invocation ids collided")
+	}
+}
