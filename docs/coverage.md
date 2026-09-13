@@ -228,8 +228,8 @@ not measured-empty.
 | Request/response headers | ❌ **no longer emitted** | ❌ no longer emitted | ❌ |
 | 4 token counts + model id | ✅ | ✅ | ✅ (its whole payload) |
 | Credential fingerprint (one-way) | ✅ on `metadata` | ✅ on `metadata` | ❌ |
-| `br` response body (89.5% of recorded responses) | ✅ decompressed in the capture path | ✅ decompressed | n/a |
-| `gzip` response body (8.9% of recorded responses) | ✅ decompressed in the capture path | ✅ decompressed | n/a |
+| `br` response body (the large majority of recorded responses) | ✅ decompressed in the capture path | ✅ decompressed | n/a |
+| `gzip` response body (nearly all the rest) | ✅ decompressed in the capture path | ✅ decompressed | n/a |
 | `zstd` / `deflate` response body | ⚠️ marker naming the encoding | ⚠️ marker naming the encoding | n/a |
 | Relayed call **latency** (`duration_ms`) | ✅ measured to end-of-stream | ✅ measured | ✅ from the tool's reported `duration_ms` |
 | Paired `ActivityStarted`/`ActivityCompleted` | ✅ | ✅ | ✅ |

@@ -20,10 +20,10 @@ What leaves the machine, what never does, and the one setting that changes it.
 | **Your provider account's email** | yes, if you are signed in | **new**; one field per session, read from Claude Code's own local account record. This is PII, and it egresses as governance evidence like your DID. Not gated by `content_capture`: it is attribution, not content. See [Account attribution](#account-attribution) |
 | **Your provider organization's UUID** | yes, if you are signed in | **new**; same source, same session field |
 | **Your provider organization's NAME, role, tier, billing** | **never** | all four sit in the same local file beside the two rows above, and none of them is sent. The evidence scope is org UUID + email, deliberately |
-| **Model-call request and response bodies** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; and it is a **selection** of the request rather than the whole of it. What is stored: the model id, a ~4KB head of the **system prompt**, and the **newest messages** of the conversation that fit a 48KB budget -- newest first, so what changed since the last call is what survives. Tool definitions are dropped entirely, older messages are dropped once the budget is full, and a trailing element that is not a conversation turn -- the agent runtime appends a `role:"system"` token counter, which was the newest element on 67% of measured calls -- is dropped so the newest stored element is a real turn. The stored document records how many of each of the three went, each under its own key, and never drops all of the history: a history that is entirely non-turn keeps its newest element as it is. Plus the model's response, which is kept from its start. This is still the largest content class OpenBox collects, and the system prompt and recent conversation are the sensitive part of it. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is decompressed in the capture path** so redaction can inspect it before attachment: `gzip` and `br` are decoded, which between them is every encoding observed across 83,190 recorded responses. An encoding outside that set (`zstd`, `deflate` -- advertised by the tool, returned by no provider) stores a marker naming it instead. Same session caveat as the row below |
+| **Model-call request and response bodies** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; and it is a **selection** of the request rather than the whole of it. What is stored: the model id, a ~4KB head of the **system prompt**, and the **newest messages** of the conversation that fit a 48KB budget -- newest first, so what changed since the last call is what survives. Tool definitions are dropped entirely, older messages are dropped once the budget is full, and a trailing element that is not a conversation turn -- the agent runtime appends a `role:"system"` token counter, which was the newest element on 67% of measured calls -- is dropped so the newest stored element is a real turn. The stored document records how many of each of the three went, each under its own key, and never drops all of the history: a history that is entirely non-turn keeps its newest element as it is. Plus the model's response, which is kept from its start. This is still the largest content class OpenBox collects, and the system prompt and recent conversation are the sensitive part of it. Three bounds apply and all three are fallible: the `content_capture` switch, local secret redaction before anything is attached, and a 64KB cap. A body the provider sent **compressed is decompressed in the capture path** so redaction can inspect it before attachment: `gzip` and `br` are decoded, which between them is every encoding observed in the recorded corpus. An encoding outside that set (`zstd`, `deflate` -- advertised by the tool, returned by no provider) stores a marker naming it instead. Same session caveat as the row below |
 | **Model-call HTTP headers** | **never** | they no longer leave the machine at all. The relay still redacts the credential headers by name locally, and the local gateway still reads two of them to attribute a call, but no header reaches the control plane under any posture. A relayed call that carries no `x-claude-code-session-id` header is recorded NOWHERE; the gateway declines to invent a session, so this is a real gap in the record rather than a silent attribution |
 | **A one-way fingerprint of your provider credential** | only with an **in-path lane** running (gateway or transport), and only when the call names a session | **new**; a truncated SHA-256, so OpenBox can tell WHICH registered credential made a call without holding it. Not gated by `content_capture`: it is the account-binding control, and a privacy switch that removed it would let an org opt out of being identified |
-| **Credentials** | **never** | they stay on your machine; in a plaintext file readable by you, see [Where credentials live](#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
+| **Credentials** | **never** | they stay on your machine; in a plaintext file readable by you, see [Where credentials live](credentials-and-secrets.md#where-credentials-live). The gateway relays yours to the provider byte-for-byte and stores none of it |
 | Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id; no diff, no file content |
 | **Slash-command expansions** | **never** | `UserPromptExpansion` is structural-only; the typed `/command` itself already ships as an ordinary prompt |
 | **What a tool was asked to do when permission was requested** | yes, by default | for an `Agent` request this is the **whole subagent prompt**, under `requested_tool_input` — a second surface for the same widening as the subagent-prompt row below |
@@ -81,7 +81,7 @@ sent under an encoding this relay cannot decode is **not captured at all**, a
 marker naming that encoding is stored instead, because compressed bytes are
 opaque to the secret detector and attaching them would satisfy every redaction
 guarantee vacuously -- the decode set is `gzip` and `br`, which is every encoding
-observed across 83,190 recorded responses, so in practice the marker is now the
+observed in the recorded corpus, so in practice the marker is now the
 rare case rather than the universal one -- and a call whose transport fails
 after the request was already sent is recorded **with no response and no
 status**, so a suppressed answer still leaves a trace.
@@ -246,7 +246,7 @@ value and where it came from.
 > **Redaction at source is not implemented yet.** The server-side Guardrail
 > redaction layer is not wired anywhere in this product. Local secret detection is
 > the only control on content in transit, and what it catches is
-> [measured, not assumed](#what-the-scanner-catches-and-where-it-stops). If that
+> [measured, not assumed](credentials-and-secrets.md#what-the-scanner-catches-and-where-it-stops). If that
 > matters for your data, run with capture off.
 
 > **An elicitation form is the one place where content capture can collect a credential you typed deliberately.** When an MCP server asks you for a value and you answer, your answer is sent under `content_capture` like every other body: redacted locally first, then capped. **Local secret detection is keyword-driven.** It finds values that look like or are labelled as known credential shapes. A password, an API key or a token typed into a form field whose name it does not recognise is not labelled, may not match a known shape, and is then **invisible to the redactor** — it egresses as ordinary text. Turning `content_capture` off is the only control that removes it.
@@ -302,7 +302,7 @@ are worth knowing rather than discovering:
   detector used everywhere else in this engine, **231 format rules where the
   shape decides, plus a keyword-and-entropy layer for everything else**, with
   the same measured limits (see [Secret detection stays
-  local](#secret-detection-stays-local)), and thinking is the field those limits
+  local](credentials-and-secrets.md#secret-detection-stays-local)), and thinking is the field those limits
   apply to most.
 
 What is NOT sent on this path: the stop reason, and any tool output the reply
@@ -622,8 +622,9 @@ is larger than the table above can show in one row.
     `gzip` and `br` are decoded; any other encoding still yields an honest marker
     naming it. **Adding `br` was the larger half of this change by volume.** The
     decode set was gzip-only at first, on the stated belief that `br` was
-    unobserved -- and a recorded 8.4 GB corpus then showed `br` on 74,477 of
-    83,190 responses (89.5%), gzip on 7,378 (8.9%), and nothing else at all. So
+    unobserved -- and a recorded corpus then showed `br` on the large majority of
+    responses, gzip on nearly all the rest, and nothing else at all ([the figures
+    and the corpus](architecture.md#model-calls-and-the-lanes)). So
     roughly nine in ten response bodies had been storing a marker, and now store
     provider text. The volume of provider text leaving the machine rises by about
     an order of magnitude, under the same `content_capture` gate and the same
@@ -669,10 +670,11 @@ is larger than the table above can show in one row.
 completion bodies to disk. OpenBox does **not** set it. It would create a local
 liability with no corresponding evidence, since this lane ingests no bodies.
 
-**~97% of captured model-call requests are truncated.** Measured on 5,049
-recorded calls: 96.75% of request bodies exceed the 65,536 cap (p50 529,175 runes,
-max 2,566,660). Response bodies: 0.06%. So for an in-path lane the org typically
-holds a *fragment* of a prompt, not the prompt. That is accepted policy, and it
+**Almost every captured model-call request is truncated.** Measured, not
+estimated: nearly all recorded request bodies exceed the 65,536 cap, while
+response bodies almost never do ([the figures and the
+run](architecture.md#model-calls-and-the-lanes)). So for an in-path lane the org
+typically holds a *fragment* of a prompt, not the prompt. That is accepted policy, and it
 cuts both ways; less of your content leaves, and less of it is reviewable.
 
 **Which fragment changed, and it is the more revealing one.** Truncation used to
@@ -750,144 +752,12 @@ follow, and they point in opposite directions, so both are stated:
   age errs long and the deletion is loud rather than silent. Nothing inside the
   age is touched.
 
-## Where credentials live
+## Credentials and secret detection
 
-`~/.openbox/.env`, in **plaintext**. Nothing is sent to OpenBox; but there is no
-encryption at rest either, and the difference matters, so here it is plainly :
-
-```
-OPENBOX_API_KEY='obx_…'                 # your agent's runtime key
-OPENBOX_AGENT_PRIVATE_KEY='…'           # the Ed25519 key this machine signs with
-OPENBOX_CONTROL_TOKEN='obx_key_…'       # approver installs only; see below
-```
-
-- **On macOS and Linux** the file is `0600` under a `0700` directory, so other
-  local users cannot read it. Anything running **as you** can: a shell
-  one-liner, a dependency's install script, and **the coding agent under
-  governance**, which by design runs arbitrary commands as you.
-- **On Windows there is no at-rest protection at all.** `0600` is a no-op there,
-  it only toggles the read-only attribute, so the file inherits the parent ACL
-  and other local accounts can read it. Use full-disk encryption; do not treat
-  this file as protected.
-- **It is the only copy.** OpenBox shows the API key and signing key exactly
-  once, at registration, and does not store them. Lose the file and there is no
-  recovery for that identity: `openbox auth` registers a new agent with a new
-  DID, which leaves work attributed to the old one attached to the old one.
-- **Never commit it.** The file's own header comment says so; it lives in your
-  home directory rather than anywhere near a repo for that reason.
-
-What that means for evidence: a signed event or commit attestation proves
-**origin-of-config**, a machine holding this agent's key produced it, not
-tamper-resistance against the developer or the agent they run. The OS keychain
-this replaced did not actually change that, since it was unlocked for the whole
-desktop session and readable by the same processes; the plaintext file just
-makes it obvious.
-
-**The organization credential is never written here.** Registering an agent
-needs `OPENBOX_CONTROL_TOKEN`, and when that is an `obx_key_…` organization key
-it can **create and rotate agents across your whole organization** — the signing
-key above compromises one agent, that one compromises the fleet. It is read from
-the environment only, never accepted as a flag, and never persisted to this
-plaintext file. A machine that ran an older approver install may still have a
-copy in `.env`; no `auth` run removes it, and `openbox uninstall` is the only
-thing that does.
-
-A real environment variable always beats the file, so CI can supply credentials
-without writing anything to disk:
-
-```
-secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var  >  ~/.openbox/.env
-coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json  >  default
-```
-
-Secrets and non-secrets never share a file, and no value lives in two places.
-
-## Secret detection stays local
-
-In enforce mode, a `Write`/`Edit` body is scanned locally for credential
-patterns before the tool runs. A hit is redacted **in the tool input**, the file
-is written with `OPENBOX_REDACTED…` in place of the secret, and the audit
-records the category (`aws_key`, `entropy`, …), never the value. Nothing about
-the finding except the category leaves the machine.
-
-### What the scanner catches; and where it stops
-
-Measured against the real detector, not asserted (conformance
-`TestContentCaptureCredentialCoverage` drives a dotenv dump through a real tool
-event and asserts the flushed bytes):
-
-| In tool output | Redacted? | Why |
-|---|---|---|
-| an AWS / GitHub / Stripe / JWT / `sk-` key, anywhere | yes | matched by shape, so surrounding syntax is irrelevant |
-| a GitLab / Shopify / Twilio / DigitalOcean / Grafana / … token, anywhere | yes | one of gitleaks' 222 rules; shape again, no key name needed |
-| `OPENBOX_API_KEY=obx_…` | yes | the key name matches a known credential keyword |
-| `OPENBOX_AGENT_PRIVATE_KEY=<base64>` | yes | matched as a generic API key by shape; the entropy pass would catch it too |
-| `API_KEY=<64 hex chars>` | yes | keyword match; the value's alphabet does not matter |
-| **`AWS_ACCESS_KEY_ID=<value in no known format>`** | **no** | **the keyword must sit NEXT TO the delimiter, and `_ID` intervenes** |
-| `DEPLOY_HEX=<64 hex chars>` | **no** | no keyword, and hex cannot clear the entropy floor |
-| `{"password":"…"}` or `{"key":"<base64>"}` **nested in tool output** | yes | the generic patterns tolerate JSON quoting and escaping |
-
-The format layer is two sets that stack: nine hand-rolled regexes
-(`decision/secrets.go`) beneath gitleaks' 222 maintained rules
-(`decision/gitleaks.go`). The nine are loose where gitleaks is precise,
-gitleaks adds charset, length and entropy floors and allowlists published
-documentation keys, so deleting them in favour of it regressed six conformance
-cases and they were restored as a floor. Both layers run before the
-keyword/entropy layer.
-
-Two standing limits and one recently closed, all measured rather than assumed:
-
-**1. For generic secrets, the keyword decides; not the shape of the value.** A
-high-entropy value next to an unrecognized key name is invisible. That one is
-deliberate: the entropy floor sits above what hex can reach (16 symbols cap it
-at 4.0 bits per character, against a 4.5 threshold) precisely so git SHAs, UUIDs
-and content hashes are never flagged. Lowering it would make the scanner fire on
-ordinary identifiers; and on the enforce path the scanner **rewrites the file
-your tool is about to write**, so a false positive corrupts real content.
-
-**1b. The keyword has to be adjacent to the delimiter.** `access_key=…` is
-caught; `AWS_ACCESS_KEY_ID=…` is not, because `_ID` sits between the recognised
-keyword and the `=`. If the value happens to match one of the 231 format rules
-the format layer catches it anyway, a real AWS key id is caught, but a
-credential-named assignment carrying an unrecognised value is invisible.
-Measured, and it is the gap that caused a real regression: when the nine format
-regexes were briefly deleted, six conformance cases went red on exactly this
-shape.
-
-**A false-positive class worth stating, because the enforce path rewrites
-files.** The entropy pass fires on a base64-class token of ≥24 characters at
-≥4.5 bits per character **in a value position**; and a Go source line like
-`myConstant := "<48 chars of base64>"` is a value position. During this work the
-redactor rewrote three of the repo's own test files that way, replacing a
-fixture with a placeholder on disk. Nothing detected it except a test that then
-measured the wrong thing. If you keep base64 fixtures in source under a governed
-session, that is the shape to know about.
-
-**2. Nested JSON used to be a second gap. It is closed.** A tool's response is
-itself JSON, so a nested value arrives escaped (`{\"key\":\"…\"}`), and both
-generic mechanisms used to miss that shape; which covers `cat config.json` and
-every MCP tool result. Both were widened, so a password or a high-entropy token
-inside nested JSON is now redacted like a flat one. Recorded because the
-scanner's behaviour changed, and because the named formats were never affected:
-an AWS key in JSON was always caught while a database password was not, which is
-exactly what made the gap easy to miss.
-
-If your credentials fall under limit 1, that is the case to plan around: run
-with `content_capture: false`, or keep them out of the working directory of a
-governed session.
-
-The same scanner runs on **every** content body before it is attached to an
-event, enforce mode or not: the prompt, the assistant's reply, tool input, tool
-output, and the refusal reasons. **The prompt is no longer exempt**; it was the
-one field assigned directly instead of through the mapper's redactor, so it
-egressed unscanned with `secret_detection` fully on; that was fixed on
-2026-08-26 and conformance C42 asserts it on the outbound bytes
-(`internal/adapters/claude-code/mapper.go:225`). The same shape is **still live
-for Codex**, whose mapper has no redactor at all; see [coverage.md
-§3.4](coverage.md). Redaction runs **before** attachment in all cases; a
-redaction applied afterwards would pass every code-level test and still ship the
-secret, so the ordering is asserted on the outbound bytes (conformance C18, C26,
-C34).
+Both moved to their own document, because two other surfaces link straight into
+them: [Credentials and secret detection](credentials-and-secrets.md) — where the
+signing key and API key live, and what the keyword-and-entropy redactor catches
+before a body is attached.
 
 ## How this is checked
 

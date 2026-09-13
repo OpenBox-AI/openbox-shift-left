@@ -49,7 +49,7 @@ For the same reason the control-plane token is read only from
 `OPENBOX_CONTROL_TOKEN` and is never a flag: a flag puts a credential in `argv`,
 where `ps` and shell history can read it. What `auth` writes is nonetheless a
 plaintext file, on purpose; see [where credentials
-live](../../docs/data-and-privacy.md#where-credentials-live).
+live](../../docs/credentials-and-secrets.md#where-credentials-live).
 
 ## Build & test
 

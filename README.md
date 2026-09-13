@@ -285,7 +285,7 @@ adapter behind one SPI. Adding a tool is an adapter, not a fork. →
 |---|---|---|---|---|---|---|
 | **Claude Code** | shipped; hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | three opt-in lanes (gateway, telemetry, transport), capture only, one elected per call | project or global | managed settings |
 | **Codex** | shipped; hooks + durable spool | deny · redact (no native "ask") | deny + findings channel | not built | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
-| **Cursor** | not built |; |; |; |; | Team hooks available |
+| **Cursor** | not built | n/a | n/a | n/a | n/a | Team hooks available |
 
 The two providers also send **different amounts of content under one posture**:
 Claude Code captures tool input, tool output, the failure detail and the turn's
@@ -398,9 +398,10 @@ prevent, so the limits are documented as first-class:
 - **Content-based policy sees at most the first 64KB of a write.** Bodies are
   truncated before egress, so a rule that would match past that offset does not
   fire. Local secret detection is not subject to the cap. For model calls that
-  bound binds hard and it is now measured rather than estimated: **96.75% of
-  5,049 recorded request bodies exceeded it** (p50 529,175 runes), so an org
-  typically holds the head of a prompt rather than the prompt.
+  bound binds hard, and it is measured rather than estimated: **almost every
+  recorded request body exceeded it**, so an org typically holds the head of a
+  prompt rather than the prompt. The figures and the run that produced them are
+  in [Assurance](docs/architecture.md#model-calls-and-the-lanes).
 - **Windows is build-verified, not runtime-verified.** CI cross-compiles it on
   every change; no automated suite exercises it, and `install.sh` is bash.
 
@@ -434,13 +435,18 @@ string — but they are not commands you type, so they are not listed above.
 | [Getting started](docs/getting-started.md) | install → onboard → verify, with troubleshooting |
 | [Architecture](docs/architecture.md) | engine, adapters, enforcement, approvals, assurance |
 | [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent |
-| [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
+| [Credentials and secret detection](docs/credentials-and-secrets.md) | where the keys live, and what the local redactor catches |
 | [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
 | [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
 | [Event contract](docs/dev-event-contract.md) | the normalized event schema in `api/`, its lifecycle types, and the INV-2 content gate |
 | [Wire mapping](docs/mapping.md) | how each field lands in core's columns |
 | [Provider coverage](docs/coverage.md) | what each provider's native surface does and does not supply, and the bounded non-goals |
 | [End-to-end tests](docs/test/e2e.md) | `test/`; a mock-free suite against a real stack |
+
+**One-time migration note**, not current authority:
+[Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) — what
+changed for an install predating inline evaluation, including file bodies now
+egressing. A fresh install needs nothing from it.
 
 ## Contributing
 

@@ -139,7 +139,7 @@ can be on without the others:
   (`decision/gitleaks.go`), then a keyword-and-entropy layer for values
   in no known format. What that reaches, and the two shapes it does not, is
   measured in
-  [data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches-and-where-it-stops).
+  [credentials-and-secrets.md](credentials-and-secrets.md#what-the-scanner-catches-and-where-it-stops).
 - **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict
   is applied before the tool runs. Every gated class, not a risk-selected
   subset; risk is a property of the policy. Prompts gate the same way:
@@ -189,6 +189,8 @@ value (default, your config, environment, or org mandate).
 
 Being precise here is part of the product.
 
+### Identity, attribution and the gate
+
 - **Commit attribution.** The `OpenBox-Session` trailer records which session
   was live when a commit was made. That is an *inferred claim*, and a trailer
   can be hand-written. Server-side ownership verification raises it to
@@ -225,6 +227,8 @@ Being precise here is part of the product.
   developer can remove it: prevention without assurance. For Codex the hook
   itself cannot yet be mandated, a `requirements.toml` cannot define one, so the
   shipped mandate pins approval and sandbox modes instead.
+### Model calls and the lanes
+
 - **Model calls are governed only where a lane is installed.** On Claude Code
   `init` brings up the transport relay and the telemetry receiver, retiring an
   older `ANTHROPIC_BASE_URL` gateway if it finds one; where no lane is packaged,
@@ -270,9 +274,9 @@ Being precise here is part of the product.
     is recorded as a marker naming its encoding.** The client's own
     `Accept-Encoding` is relayed verbatim (`gzip, deflate, br, zstd`), so the
     provider chooses, and it chooses `br` for 89.5% of responses and `gzip` for
-    the remaining 8.9% -- measured over 83,190 recorded responses, zero
-    exceptions. Both are decoded, on the teed copy only, so the bytes forwarded to
-    the tool stay identical. Compressed bytes are opaque to the secret detector,
+    the remaining 8.9% -- `br` on 74,477 of 83,190 recorded responses and `gzip`
+    on 7,378, measured over an 8.4 GB corpus, zero exceptions. Both are decoded,
+    on the teed copy only, so the bytes forwarded to the tool stay identical. Compressed bytes are opaque to the secret detector,
     which would otherwise attach an unredacted unreadable body while every
     redaction guarantee held vacuously, so an encoding outside the decode set is
     still not captured at all: the honest marker is preferred. The decode set is
@@ -387,6 +391,8 @@ Being precise here is part of the product.
     0.06%. Under an owner decision(c) the tail of an oversized body exists nowhere org-side, so
     content-based policy and every reader see the head only. This is accepted, not a
     defect; but a reader must not assume a captured call is a complete call.
+### Secret detection
+
 - **Local secret detection has a measured reach, and two shapes fall outside
   it.** 231 format rules catch a known credential by shape wherever it appears.
   Anything in no known format is caught only by the keyword-and-entropy layer,
@@ -397,9 +403,11 @@ Being precise here is part of the product.
   deliberate; lowering it would flag every git SHA and UUID, and on the enforce
   path the redactor **rewrites the developer's file**, so a false positive
   corrupts real content. Both are measured, not assumed
-  ([data-and-privacy.md](data-and-privacy.md#what-the-scanner-catches-and-where-it-stops)).
+  ([credentials-and-secrets.md](credentials-and-secrets.md#what-the-scanner-catches-and-where-it-stops)).
   The same redactor also fires on a base64 literal in a source assignment, which
   rewrote three of this repo's own test files during the gitleaks adoption.
+### Dependency and layering guards
+
 - **The dependency guard bounds a package subtree's direct imports, not
   transitive code**. `internal/gateway` must never read the developer's provider
   credential; its own files are scanned for that and its imports are held to a
@@ -471,6 +479,8 @@ longer means anything; there is no workspace to switch off.) Either way it is
 roughly **5 MB more than the estimate**, and it carries goproxy and the
 transport lane as well as telemetry. Recorded rather than rounded: the decision
 was made on the smaller number.
+### Enforcement in practice
+
 - **The inline-evaluation path has not been exercised against a live stack.**
   Every claim below about enforcement rests on tests that drive the real hook
   against a local `/evaluate` stub; which is real HTTP and the real gate, but
@@ -510,6 +520,8 @@ was made on the smaller number.
   would match past that offset does not fire. Content-based policy is not a
   complete check on large files. Local secret detection is not subject to this;
   it runs before the cap and sees the whole body.
+### What the evidence covers
+
 - **Absence of events is not evidence of absence of activity.** One `openbox
   init` governs every session on that machine, in any directory, so the gap is
   no longer between directories — it is between machines. A machine that never
@@ -590,6 +602,8 @@ consequence is a silent gap rather than an error: a lane's `activity_output`
 carries the provider's **raw** response body, which is not the shape core's
 alignment extractor parses, so a lane-observed turn contributes nothing to goal
 alignment. Alignment for those turns comes from the hook path or not at all.
+### Usage, cost and content
+
 - **Token usage is stored, aggregated and queryable.** Per-turn model + usage is
   emitted as an `llm_completion` activity pair, and the core-side extractor that
   aggregates activities has **merged** (`ExtractModelMetricsFromActivity`,

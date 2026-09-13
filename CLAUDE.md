@@ -62,8 +62,8 @@ output, thinking and a relayed call's bodies all egress under the one
 `content_capture` key. Local secret detection redacts a body before it is
 attached, and that ordering is the only in-transit control there is; detection is
 keyword-driven, so an unlabelled high-entropy value below the floor is invisible
-to it, and `docs/data-and-privacy.md` must stay true. The redactor also rewrites
-developer files: check what this repo writes for `${OPENBOX_REDACTED_*}`, and
+to it, and `docs/credentials-and-secrets.md` must stay true. The redactor also
+rewrites developer files: check what this repo writes for `${OPENBOX_REDACTED_*}`, and
 derive a base64 test fixture in code.
 
 ## Invariants a contributor would otherwise break

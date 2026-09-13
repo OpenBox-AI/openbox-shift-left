@@ -1,7 +1,10 @@
 # Upgrading: inline policy evaluation
 
-What changes for an existing install when inline evaluation lands. Read the two
-starred items even if you read nothing else.
+**A one-time migration note, not current authority.** It records what changed
+for an install predating inline evaluation; a fresh install needs nothing from
+it, and the current behaviour is owned by
+[Architecture](architecture.md) and [Data and privacy](data-and-privacy.md).
+Read the two starred items even if you read nothing else.
 
 ## ⚠️ File bodies now leave the machine on a gated call
 
