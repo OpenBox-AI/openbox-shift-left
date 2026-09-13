@@ -95,20 +95,21 @@ func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 		_ = e.Durations.putPair(ev.SessionID, pairKey(*ev), pairRecord{StartedAt: ev.StartedAt, OperationID: opID})
 	case client.EventToolResult:
 		rec := e.Durations.takePair(ev.SessionID, pairKey(*ev))
-		if ev.Span != nil && rec.OperationID != "" {
-			// The inequality MUST be computed before the assignment below
-			// overwrites the value it compares against -- compare, then assign.
-			if rec.OperationID != ev.Span.OperationID {
-				if ev.Metadata == nil {
-					ev.Metadata = map[string]any{}
-				}
-				ev.Metadata["pair_recovered"] = true
-			}
-			ev.Span.OperationID = rec.OperationID
-		}
 		if rec.StartedAt != "" {
 			ev.StartedAt = rec.StartedAt
 		}
+		if ev.Span == nil || rec.OperationID == "" {
+			break
+		}
+		// The inequality MUST be computed before the assignment below
+		// overwrites the value it compares against -- compare, then assign.
+		if rec.OperationID != ev.Span.OperationID {
+			if ev.Metadata == nil {
+				ev.Metadata = map[string]any{}
+			}
+			ev.Metadata["pair_recovered"] = true
+		}
+		ev.Span.OperationID = rec.OperationID
 	case client.EventSessionEnded:
 		e.Durations.ClearSession(ev.SessionID)
 		e.Turns.ClearSession(ev.SessionID)
