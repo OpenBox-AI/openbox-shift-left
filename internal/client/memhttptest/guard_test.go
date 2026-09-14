@@ -18,6 +18,16 @@ func TestMemhttptestStaysTestOnly(t *testing.T) {
 	root := repoRoot(t)
 
 	const self = "github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+
+	// testOnlyPackages are packages that are themselves test-only and therefore
+	// may reach memhttptest from a non-_test.go file. Each one must carry its
+	// own tripwire proving nothing in production imports IT; the entry is the
+	// second link of a chain, never a hole. fakecore's is
+	// TestFakecoreStaysTestOnly.
+	testOnlyPackages := []string{
+		"internal" + string(filepath.Separator) + "client" + string(filepath.Separator) + "fakecore" + string(filepath.Separator),
+	}
+
 	var offenders []string
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -39,6 +49,11 @@ func TestMemhttptestStaysTestOnly(t *testing.T) {
 		}
 		if strings.Contains(string(b), self) {
 			rel, _ := filepath.Rel(root, path)
+			for _, pkg := range testOnlyPackages {
+				if strings.HasPrefix(rel, pkg) {
+					return nil
+				}
+			}
 			offenders = append(offenders, rel)
 		}
 		return nil
