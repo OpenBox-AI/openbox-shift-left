@@ -104,7 +104,6 @@ type Server struct {
 
 	mu            sync.Mutex
 	inbox         []Received
-	received      int
 	scripted      int
 	outage        bool
 	hits          int
@@ -238,7 +237,6 @@ func (f *Server) serveEvaluate(w http.ResponseWriter, r *http.Request, raw []byt
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	f.received++
 	status, verdict := f.script.answer(rec.ToolUseID())
 	if status >= 200 && status < 300 {
 		// Only an accepted request is in the inbox. A refused attempt was not

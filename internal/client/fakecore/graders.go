@@ -331,7 +331,3 @@ func replaceJSONString(raw, key, value string) string {
 	}
 	return string(out)
 }
-
-// jsonMarshal is the package's one marshal seam, so a test building a synthetic
-// row produces the same bytes a real one would.
-func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }

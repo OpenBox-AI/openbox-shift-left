@@ -1,12 +1,17 @@
 package fakecore
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 )
 
-// Every reason a grader can emit is exercised here, against a hand-built run.
+// Every reason a grader can emit is reachable, and most are exercised here
+// against a hand-built run. The rest are reached by the scenario tests in
+// cmd/openbox, which drive the real binary -- this file does not duplicate
+// those. What the pair guarantees together, and what TestEveryReasonSiteHasACase
+// enforces, is that no reason is reachable by nothing.
 //
 // The mutation meta-test proves each grader can go red. It proves it by ONE
 // route -- the grader's declared mutation -- and says nothing about the other
@@ -78,7 +83,7 @@ func TestEveryGraderReasonIsReachable(t *testing.T) {
 			"different activity_ids",
 		},
 		{
-			"pairing: declared blocked but the binary allowed it",
+			"pairing: declared blocked but the binary let it proceed",
 			PairingGrader(), denied(id),
 			Run{Inbox: []Received{started("act-1", id)}, Decisions: decided(id, "")},
 			"but the binary rendered",
@@ -130,6 +135,13 @@ func TestEveryGraderReasonIsReachable(t *testing.T) {
 			CompletenessGrader(), ranCall(id),
 			Run{Inbox: []Received{started("act-1", id), completed("act-1", id), completed("act-2", other)}},
 			"delivered with nothing in the input asking for it",
+		},
+		{
+			"completeness: a demanded signal row never arrived",
+			CompletenessGrader(),
+			Scenario{Payloads: []HookPayload{{Event: "UserPromptSubmit", JSON: `{"session_id":"s","prompt":"hi"}`}}},
+			Run{},
+			"named prompt_submitted",
 		},
 		{
 			"activity-type: a call is labelled as a different tool",
@@ -197,7 +209,7 @@ func signalRow(name string, args map[string]any) Received {
 }
 
 func mustJSON(v map[string]any) string {
-	b, err := jsonMarshal(v)
+	b, err := json.Marshal(v)
 	if err != nil {
 		panic(err)
 	}

@@ -1,6 +1,8 @@
 package fakecore
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,27 +113,30 @@ func TestFakecoreKeepsItsImportWall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", dir, err)
 	}
+	scanned := 0
 	for _, e := range entries {
-		// The wall applies to the package's own source. A guard test names
-		// repository paths as data, which is not an import.
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		// Parsed, not string-matched, and test files are scanned too.
+		// Matching the file text meant skipping every _test.go -- a guard test
+		// names repository paths as data -- which left the wall unchecked for
+		// exactly the files a mirrored oracle would be written in. The parser
+		// sees imports and nothing else, so the two cannot be confused.
+		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, e.Name()), nil, parser.ImportsOnly)
 		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
+			t.Fatalf("parse %s: %v", e.Name(), err)
 		}
-		for _, line := range strings.Split(string(b), "\n") {
-			line = strings.TrimSpace(line)
-			i := strings.Index(line, `"github.com/openbox-ai/openbox-shift-left/`)
-			if i < 0 {
-				continue
-			}
-			path := strings.Trim(line[i:], `"`)
-			if path == allowed {
+		scanned++
+		for _, spec := range f.Imports {
+			path := strings.Trim(spec.Path.Value, `"`)
+			if !strings.HasPrefix(path, "github.com/openbox-ai/openbox-shift-left/") || path == allowed {
 				continue
 			}
 			t.Errorf("%s imports %s. fakecore is the oracle: reaching into the code it grades would let a renamed key or a broken derivation move the expectation and the answer together. Restate the contract here instead.", e.Name(), path)
 		}
+	}
+	if scanned == 0 {
+		t.Fatal("no Go files were scanned; the wall would pass vacuously")
 	}
 }
