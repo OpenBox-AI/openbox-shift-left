@@ -36,6 +36,7 @@ import (
 // and the test would still pass.
 const (
 	evaluatePath = "/api/v1/governance/evaluate"
+	approvalPath = "/api/v1/governance/approval"
 )
 
 // Header names core reads. Same rationale as the paths above.
@@ -101,10 +102,15 @@ type Server struct {
 	seedB64 string
 	did     string
 
-	mu       sync.Mutex
-	inbox    []Received
-	hits     int
-	rejected []string
+	mu            sync.Mutex
+	inbox         []Received
+	received      int
+	scripted      int
+	outage        bool
+	hits          int
+	rejected      []string
+	approval      func(Received) (int, string)
+	approvalPolls int
 }
 
 // New starts a fake core and mints the keypair the client under test must sign
@@ -160,6 +166,24 @@ func (f *Server) Hits() int {
 	return f.hits
 }
 
+// SetOutage takes the control plane up or down. A scenario uses it to fail the
+// synchronous gate delivery while leaving the later flush to succeed, which is
+// the only way to exercise the observe-copy election against the real
+// condition rather than one only a test can reach.
+func (f *Server) SetOutage(down bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.outage = down
+}
+
+// ScriptedFailures counts the responses the scenario itself asked the fake to
+// fail, as opposed to the ones the fake refused on inspection.
+func (f *Server) ScriptedFailures() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scripted
+}
+
 // Rejections is why each refused request was refused. A rejection reason never
 // quotes the request body: INV-2 applies to test logs.
 func (f *Server) Rejections() []string {
@@ -178,6 +202,8 @@ func (f *Server) serve(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case evaluatePath:
 		f.serveEvaluate(w, r, raw)
+	case approvalPath:
+		f.serveApproval(w, r, raw)
 	default:
 		// Recorded and answered, never left to hang: a route the fake does not
 		// know is a defect in the test or a new client route, and either way the
@@ -206,8 +232,29 @@ func (f *Server) serveEvaluate(w http.ResponseWriter, r *http.Request, raw []byt
 	}
 
 	f.mu.Lock()
-	f.inbox = append(f.inbox, rec)
-	status, verdict := f.script.answer(len(f.inbox), rec.ToolUseID())
+	if f.outage {
+		f.scripted++
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+	f.received++
+	// The nth call is counted on arrival, not on acceptance: a test saying
+	// "the second call fails" means the second request, and numbering by
+	// acceptances would renumber itself as soon as one of them did.
+	status, verdict := f.script.answer(f.received, rec.ToolUseID())
+	if status >= 200 && status < 300 {
+		// Only an accepted request is in the inbox. A refused attempt was not
+		// delivered, and counting it would make a redelivery after an outage
+		// look like a double delivery -- which is the property the outage
+		// scenario exists to check.
+		f.inbox = append(f.inbox, rec)
+	} else {
+		// A scripted failure is the test's own doing and is counted apart from
+		// a refusal the fake decided on: a caller asserting "nothing I sent
+		// was malformed" must not be answered by an outage it asked for.
+		f.scripted++
+	}
 	delay := f.script.Delay
 	f.mu.Unlock()
 
@@ -221,6 +268,49 @@ func (f *Server) serveEvaluate(w http.ResponseWriter, r *http.Request, raw []byt
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, verdict)
+}
+
+// Approval installs the handler for the approval poll, and is not optional for
+// any scenario that scripts REQUIRE_APPROVAL. Without it the route 404s, which
+// the hold reads as undecided and denies on -- so a "an unanswered approval
+// denies" assertion would pass through the degraded path and prove only that
+// the endpoint is missing.
+func (f *Server) Approval(fn func(Received) (int, string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.approval = fn
+}
+
+// ApprovalPolls counts how many times the hold asked. A scenario that expects
+// a hold asserts this is non-zero, or it cannot tell a real hold from a fake
+// that was never consulted.
+func (f *Server) ApprovalPolls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.approvalPolls
+}
+
+func (f *Server) serveApproval(w http.ResponseWriter, r *http.Request, raw []byte) {
+	if reason, ok := f.verify(r, r.Method, approvalPath, raw); !ok {
+		f.reject(w, http.StatusUnauthorized, reason)
+		return
+	}
+	var body map[string]any
+	_ = json.Unmarshal(raw, &body)
+
+	f.mu.Lock()
+	f.approvalPolls++
+	fn := f.approval
+	f.mu.Unlock()
+
+	if fn == nil {
+		f.reject(w, http.StatusNotFound, "approval polled but no handler is installed")
+		return
+	}
+	status, resp := fn(Received{Headers: r.Header.Clone(), Raw: raw, Body: body})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, resp)
 }
 
 // verify reimplements the AIP check core performs. Deliberately a second

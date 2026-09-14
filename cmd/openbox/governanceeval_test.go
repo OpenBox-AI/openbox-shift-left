@@ -57,6 +57,9 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 	requireUsableFixture(t, sc)
 
 	fake := fakecore.New(t, sc.Script())
+	if sc.Approval != nil {
+		fake.Approval(sc.Approval)
+	}
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
 	evalEnv(t, fake, dir, spool, sc.Posture)
@@ -64,6 +67,9 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 	run := evalRun{Fake: fake, Spool: spool}
 	run.Dir = dir
 	for i, p := range sc.Payloads {
+		if sc.OutageDuring != nil {
+			fake.SetOutage(sc.OutageDuring(i, p.Event))
+		}
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader(p.JSON)
 		// The spooled DevEvents are held to the contract before the flush
@@ -93,7 +99,8 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 	// A refusal means the binary put something on the wire that core would
 	// have rejected, or reached a route core does not serve. Either is a
 	// finding, and leaving it for a grader to notice would let it pass as an
-	// empty inbox.
+	// empty inbox. A failure the scenario scripted is counted separately and
+	// is not one of these.
 	if refused := fake.Rejections(); len(refused) > 0 {
 		t.Errorf("the fake refused %d request(s): %s", len(refused), strings.Join(refused, " | "))
 	}
@@ -236,4 +243,8 @@ func evalEnv(t *testing.T, fake *fakecore.Server, dir, spool string, p fakecore.
 	if p.ApprovalHoldMS != "" {
 		t.Setenv(devconfig.EnvApprovalHold, p.ApprovalHoldMS)
 	}
+}
+
+func stringsContainsFold(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }

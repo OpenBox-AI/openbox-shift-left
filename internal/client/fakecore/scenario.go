@@ -23,11 +23,21 @@ type Scenario struct {
 	// here rather than being read off the wire because EnforcementRecord
 	// carries no activity or tool id -- see PairingGrader.
 	Denied map[string]bool
-	// Status forces an HTTP status on the nth accepted request (1-based).
+	// Status forces an HTTP status on the nth request (1-based).
 	Status map[int]int
+	// AlwaysStatus, when non-zero, answers every request with this status.
+	AlwaysStatus int
+	// Approval answers the approval poll. A scenario scripting
+	// REQUIRE_APPROVAL without one runs the degraded 404 path, which denies
+	// for the wrong reason.
+	Approval func(Received) (int, string)
 	// Posture is the run's configuration. Empty fields take the suite
 	// default, which a bool could not express.
 	Posture Posture
+	// OutageDuring reports, per payload, whether the control plane is down
+	// while that hook runs. Expressed over the payload list rather than a
+	// request count so it never couples to the retry schedule.
+	OutageDuring func(payloadIndex int, event string) bool
 	// Provenance says where the payloads came from: recorded from a real
 	// session (with the date), or authored. A field on the scenario, never a
 	// key inside a native payload, which would change the shape under test.
@@ -46,7 +56,7 @@ type Posture struct {
 
 // Script projects the scenario onto what the fake should answer.
 func (s Scenario) Script() Script {
-	return Script{Verdicts: s.Verdicts, Status: s.Status}
+	return Script{Verdicts: s.Verdicts, Status: s.Status, AlwaysStatus: s.AlwaysStatus}
 }
 
 // Grader is a predicate over (scenario, inbox) returning reasons, not a
