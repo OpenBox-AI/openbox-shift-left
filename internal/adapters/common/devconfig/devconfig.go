@@ -397,12 +397,34 @@ func ResolveBackendURL() string {
 	return FirstNonEmpty(os.Getenv(EnvBackendURL), cfg.BackendURL)
 }
 
-// ResolveControlToken resolves the org control-plane credential: the
-// OPENBOX_CONTROL_TOKEN env only. Deliberately not a config field and never
-// read from the runtime secret store; supplied via env only so it cannot leak
-// via a config file or argv (INV-1).
+// ResolveControlToken resolves the org control-plane credential:
+// OPENBOX_CONTROL_TOKEN, then the org-level .env.
+//
+// It was env-only until `auth` stopped registering agents and `init` started.
+// Those are two different processes with nothing exported between them, so the
+// token has to survive on disk, and ~/.openbox/.env is the one file both
+// agree on. State the cost plainly: this credential creates and rotates agents
+// across the whole organization, the file is plaintext, 0600 on macOS and
+// Linux and unprotected on Windows, and anything running as the developer --
+// the governed agent included -- can read it. Persisting it buys the
+// auth/init split; it hardens nothing.
+//
+// It is still never a config field and never the per-tool secret store: this
+// reads OrgEnvFilePath, not EnvFilePath, so a fleet credential planted in a
+// tool's own .env cannot be served to a bound process (INV-1).
 func ResolveControlToken() string {
-	return os.Getenv(EnvControlToken)
+	if v := os.Getenv(EnvControlToken); v != "" {
+		return v
+	}
+	path, err := OrgEnvFilePath()
+	if err != nil {
+		return ""
+	}
+	kv, err := ParseEnvFile(path)
+	if err != nil {
+		return ""
+	}
+	return kv[EnvControlToken]
 }
 
 // ResolveCredentials assembles Credentials from the environment, the
@@ -459,7 +481,7 @@ func ResolveCredentials() (Credentials, error) {
 func loadSecretFile() (map[string]string, string, error) {
 	path, err := EnvFilePath()
 	if err != nil {
-		return map[string]string{}, "", nil
+		return nil, "", err
 	}
 	kv, err := ParseEnvFile(path)
 	if err != nil {

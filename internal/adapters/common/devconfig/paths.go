@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 )
 
 // EnvHome relocates the whole OpenBox config directory.
@@ -38,9 +40,118 @@ func ensureHome() (string, error) {
 	return dir, nil
 }
 
-// EnvFilePath is ~/.openbox/.env; the credential file.
-func EnvFilePath() (string, error) {
+// bound is the tool this process is acting for. Each governed tool carries its
+// own agent identity under ~/.openbox/<tool>/, so every identity path has to
+// know which tool is asking -- and the processes that ask (a hook, a rewake, an
+// installer, a lane daemon) each act for exactly one tool for their whole life.
+// Binding once at dispatch reaches ResolveDID, ResolveCredentials,
+// ResolveCoordinates and every other resolver without threading a provider
+// argument through each of them.
+//
+// The zero value means unbound, which resolves the org-level files -- what
+// `auth`, the legacy-config migration and the enumerating commands want.
+var bound struct {
+	mu   sync.RWMutex
+	name string
+}
+
+// BindProvider binds this process to a tool's identity store and returns a
+// closure restoring the previous binding. Production binds once per process;
+// the restore closure exists for a test binary, which dispatches many commands
+// in one process and would otherwise let the first bind decide every later
+// case's identity.
+//
+// The name becomes a directory component under ~/.openbox, so validation here
+// is the whole defence against a traversal: this is the only writer of `bound`.
+// It cannot check the name against provider.Supported() -- internal/provider
+// imports this package -- so it validates the shape and a cmd/openbox test
+// cross-checks the set.
+func BindProvider(name string) (release func(), err error) {
+	if err := validateProviderName(name); err != nil {
+		return nil, err
+	}
+	bound.mu.Lock()
+	previous := bound.name
+	bound.name = name
+	bound.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			bound.mu.Lock()
+			bound.name = previous
+			bound.mu.Unlock()
+		})
+	}, nil
+}
+
+// BoundProvider reports the tool this process is acting for, or "" when
+// nothing is bound.
+func BoundProvider() string {
+	bound.mu.RLock()
+	defer bound.mu.RUnlock()
+	return bound.name
+}
+
+// validateProviderName rejects anything that would not survive being joined
+// onto Home() as exactly one directory element. A separator, a dot element or
+// surrounding whitespace would each put a credential somewhere other than the
+// store it claims to be.
+func validateProviderName(name string) error {
+	switch {
+	case name == "":
+		return fmt.Errorf("provider name is empty; an identity store needs a tool to belong to")
+	case strings.TrimSpace(name) != name:
+		return fmt.Errorf("provider name %q has surrounding whitespace", name)
+	case strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, os.PathSeparator):
+		return fmt.Errorf("provider name %q contains a path separator; it must be one directory element", name)
+	case name == "." || name == "..":
+		return fmt.Errorf("provider name %q is a relative path element", name)
+	case filepath.VolumeName(name) != "":
+		return fmt.Errorf("provider name %q carries a volume name", name)
+	case filepath.Base(name) != name || filepath.Clean(name) != name:
+		return fmt.Errorf("provider name %q is not a single clean path element", name)
+	}
+	return nil
+}
+
+// identityDirFor is the one join site for every per-tool identity path: the
+// org directory when tool is empty, else ~/.openbox/<tool>. It re-validates
+// because the explicit *For accessors take a caller-supplied name that never
+// passed through BindProvider.
+func identityDirFor(tool string) (string, error) {
 	dir, err := Home()
+	if err != nil {
+		return "", err
+	}
+	if tool == "" {
+		return dir, nil
+	}
+	if err := validateProviderName(tool); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, tool), nil
+}
+
+// EnvFilePath is the bound tool's credential file, ~/.openbox/<tool>/.env, or
+// ~/.openbox/.env when nothing is bound. Note what is deliberately absent:
+// OPENBOX_CONFIG names a dev.json and has never shadowed this file, which is
+// why a per-tool .env stays per-tool even under an operator override.
+func EnvFilePath() (string, error) {
+	return EnvFilePathFor(BoundProvider())
+}
+
+// OrgEnvFilePath is always ~/.openbox/.env, whatever is bound. The org control
+// token lives here and nowhere else, so that a compromised tool store is not a
+// fleet compromise; `uninstall` purges this file by name.
+func OrgEnvFilePath() (string, error) { return EnvFilePathFor("") }
+
+// EnvFilePathFor names one tool's credential file without binding. The
+// enumerating commands (doctor, uninstall) read every store through this, so
+// that they never bind inside a loop -- a bind held across a cached read is the
+// one way those loops could report the first store's identity for every row.
+func EnvFilePathFor(tool string) (string, error) {
+	dir, err := identityDirFor(tool)
 	if err != nil {
 		return "", err
 	}
@@ -48,11 +159,17 @@ func EnvFilePath() (string, error) {
 }
 
 // DevConfigPath is where to read the dev config: $OPENBOX_CONFIG when set,
-// else ~/.openbox/dev.json, falling back to the legacy location while an
-// unmigrated file still lives there (see resolveConfigPath).
+// else the bound tool's ~/.openbox/<tool>/dev.json. Unbound it is
+// ~/.openbox/dev.json, falling back to the legacy location while an unmigrated
+// file still lives there (see resolveConfigPath) -- a bound read has no legacy
+// location to fall back to, because a per-tool store has never existed
+// anywhere else.
 func DevConfigPath() (string, error) {
 	if p := os.Getenv(EnvConfigPath); p != "" {
 		return p, nil
+	}
+	if tool := BoundProvider(); tool != "" {
+		return DevConfigPathFor(tool)
 	}
 	return resolveConfigPath("dev.json")
 }
@@ -64,7 +181,19 @@ func DevConfigWritePath() (string, error) {
 	if p := os.Getenv(EnvConfigPath); p != "" {
 		return p, nil
 	}
-	dir, err := Home()
+	return DevConfigWritePathFor(BoundProvider())
+}
+
+// DevConfigPathFor and DevConfigWritePathFor name one tool's dev config
+// without binding and without the OPENBOX_CONFIG override: an enumerator
+// asking for a specific store wants that store, not whatever the operator
+// pointed the ambient resolver at. For a per-tool store the read and write
+// paths are the same file; they stay two functions so callers keep reading
+// like their unbound counterparts.
+func DevConfigPathFor(tool string) (string, error) { return DevConfigWritePathFor(tool) }
+
+func DevConfigWritePathFor(tool string) (string, error) {
+	dir, err := identityDirFor(tool)
 	if err != nil {
 		return "", err
 	}

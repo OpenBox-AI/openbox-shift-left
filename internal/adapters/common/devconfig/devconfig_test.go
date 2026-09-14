@@ -504,3 +504,82 @@ func TestResolveTelemetryDefaultsOnAndEnvWins(t *testing.T) {
 		t.Errorf("%s=1 did not switch the lane on", EnvTelemetry)
 	}
 }
+
+// TestControlTokenComesFromTheOrgFileWhenTheEnvIsEmpty the org control token
+// is persisted now (owner ruling O1): `auth` writes it once and `init` reads
+// it later, in a different process, with no exported variable between them.
+// The environment still outranks the file so an operator can override a run
+// without editing anything.
+func TestControlTokenComesFromTheOrgFileWhenTheEnvIsEmpty(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvControlToken, "")
+
+	org, err := OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(org, map[string]string{EnvControlToken: "obx_key_from_the_file"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ResolveControlToken(); got != "obx_key_from_the_file" {
+		t.Fatalf("ResolveControlToken() = %q, want the value in the org .env", got)
+	}
+
+	t.Setenv(EnvControlToken, "obx_key_from_the_env")
+	if got := ResolveControlToken(); got != "obx_key_from_the_env" {
+		t.Fatalf("ResolveControlToken() = %q, want the environment to outrank the file", got)
+	}
+}
+
+// TestControlTokenStaysOrgLevelWhileBound the token authorizes agent creation
+// across the whole organization; a per-tool store must never be able to supply
+// one, or a compromised tool store becomes a fleet compromise.
+func TestControlTokenStaysOrgLevelWhileBound(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvControlToken, "")
+
+	org, err := OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(org, map[string]string{EnvControlToken: "obx_key_org"}); err != nil {
+		t.Fatal(err)
+	}
+	perTool, err := EnvFilePathFor("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(perTool, map[string]string{EnvControlToken: "obx_key_planted_in_the_tool_store"}); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := BindProvider("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if got := ResolveControlToken(); got != "obx_key_org" {
+		t.Fatalf("ResolveControlToken() = %q while bound to codex, want the org value; a tool store must not supply a fleet credential", got)
+	}
+}
+
+// TestCredentialResolutionReportsAnUnresolvablePath loadSecretFile used to
+// swallow the path error and return an empty map, which reads downstream as
+// "no credentials": a machine that cannot resolve its home would send its
+// owner hunting for a registration problem it does not have. The comment on
+// that function always said this; the code did not.
+func TestCredentialResolutionReportsAnUnresolvablePath(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvHome, "relative/openbox")
+
+	_, err := ResolveCredentials()
+	if err == nil {
+		t.Fatal("ResolveCredentials() succeeded with an unresolvable OPENBOX_HOME")
+	}
+	if !strings.Contains(err.Error(), EnvHome) {
+		t.Fatalf("ResolveCredentials() error = %v, want it to name %s rather than report a missing credential", err, EnvHome)
+	}
+}
