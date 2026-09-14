@@ -73,6 +73,16 @@ func (a *app) runUninstall(args []string) int {
 	if home == "" {
 		return code
 	}
+	// And that guard is about $HOME, while every credential path derives from
+	// devconfig.Home(), which prefers OPENBOX_HOME. An absolute $HOME with a
+	// relative OPENBOX_HOME passed the guard and then resolved nothing, so the
+	// inventory came back empty and this command reported "not installed on
+	// this machine" at exit 0 with every credential intact. Looking nowhere and
+	// calling it clean is the one answer it must never give.
+	if _, err := devconfig.Home(); err != nil {
+		return a.errorf("%v\n  Refusing to report on a machine this command cannot examine: "+
+			"an empty inventory here would be indistinguishable from a clean one.", err)
+	}
 
 	st := &uninstallState{}
 	inv := a.uninstallInventory(home)
@@ -117,7 +127,13 @@ type uninstallInventory struct {
 	// identity; leaving it would orphan every per-tool key and seed behind a
 	// command whose whole promise is that it reverses all of it.
 	envFiles []string
-	managed  []string
+	// The residue of a credential write killed between its temp file and its
+	// rename. Deleted with the credentials and listed beside them, but kept out
+	// of envFiles because the flush gate asks "can anything still deliver?" and
+	// no adapter reads one of these -- counting it would make the gate answer
+	// yes on a machine whose real credentials are gone.
+	envResidue []string
+	managed    []string
 	// unrecordedLane is a unit file or routed env key with no activation record
 	// behind it.
 	unrecordedLane bool
@@ -182,7 +198,8 @@ func (inv uninstallInventory) empty() bool {
 		}
 	}
 	return inv.pluginDir == "" && len(inv.lanes) == 0 && !inv.unrecordedLane &&
-		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && len(inv.envFiles) == 0 && len(inv.spools) == 0
+		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && len(inv.envFiles) == 0 &&
+		len(inv.envResidue) == 0 && len(inv.spools) == 0
 }
 
 func (a *app) uninstallInventory(home string) uninstallInventory {
@@ -268,7 +285,7 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	// agents across the whole organization.
 	for _, tool := range append([]string{""}, provider.Supported()...) {
 		for _, p := range interruptedCredentialWrites(tool) {
-			inv.envFiles = appendUnique(inv.envFiles, p)
+			inv.envResidue = appendUnique(inv.envResidue, p)
 		}
 	}
 	// The org's, not ours: removing either silently downgrades a governed
@@ -355,6 +372,9 @@ func (a *app) printInventory(inv uninstallInventory) {
 	}
 	for _, p := range inv.envFiles {
 		fmt.Fprintf(a.stdout, "  credentials    %s (deleted last, and its signing seed cannot be re-retrieved)\n", p)
+	}
+	for _, p := range inv.envResidue {
+		fmt.Fprintf(a.stdout, "  credentials    %s (an interrupted write; same secrets, deleted with them)\n", p)
 	}
 	for _, p := range inv.managed {
 		fmt.Fprintf(a.stdout, "  kept           %s (your organization's, not OpenBox's)\n", p)
@@ -632,11 +652,11 @@ func (a *app) deletePath(st *uninstallState, path string, remove func(string) er
 // Keeping .env alone would preserve nothing retryable, because the spool is
 // already gone; so there is one rule, reported precisely.
 func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
-	if len(inv.envFiles) == 0 {
+	if len(inv.envFiles) == 0 && len(inv.envResidue) == 0 {
 		return
 	}
 	fmt.Fprintf(a.stdout, "\nRemoving credentials\n")
-	for _, path := range inv.envFiles {
+	for _, path := range append(append([]string{}, inv.envFiles...), inv.envResidue...) {
 		a.deletePath(st, path, os.Remove)
 	}
 	// The directories follow, from runUninstall: by name first and the
@@ -708,6 +728,13 @@ func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 	fmt.Fprintf(a.stdout, "\nDone. %d item(s) removed.\n", st.deleted)
 	for _, p := range inv.managed {
 		fmt.Fprintf(a.stdout, "  kept           %s; your organization's mandate, not OpenBox's state.\n", p)
+	}
+	// Everything the steps above decided to keep, repeated here. Each was named
+	// as it happened, but this block is what an operator reads to decide the
+	// machine is clean -- and a store directory reaching it unmentioned is the
+	// same silence the residue sweep exists to end, one level up.
+	for _, p := range st.kept {
+		fmt.Fprintf(a.stdout, "  kept           %s; see the reason above.\n", p)
 	}
 	// Two residues, opposite severities. Conflating them would tell an operator
 	// to ignore the one that breaks every tool call.

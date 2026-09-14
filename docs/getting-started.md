@@ -146,6 +146,14 @@ Keep them separate. `.env` holds only secrets and `dev.json` only coordinates:
 a copy of the DID in `.env` reintroduces a stale-copy bug that reverted a
 corrected DID on every install.
 
+**`OPENBOX_CONFIG` is a single-tool knob.** It names one `dev.json` outright and
+overrides the per-tool one — but it does *not* override `.env`, which stays per
+tool. So two tools governed under one `OPENBOX_CONFIG` share a DID while holding
+different agent keys, and events from at least one of them are signed by an
+identity that DID does not match: the control plane answers 401, and a 401 never
+spends a delivery attempt, so the spool grows and nothing says why. Use it for
+one tool, or not at all.
+
 **Rotating a key.** There is no rotate command. Either rewrite
 `~/.openbox/<tool>/.env` by hand as above, or delete it and re-run `openbox init
 --provider <tool>`: with no store present it offers to **adopt** an existing

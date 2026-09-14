@@ -274,11 +274,17 @@ func (a *app) reportIdentities() {
 // Only a difference is printed. A line on every row, for every healthy
 // machine, is one people learn to skip.
 func (a *app) reportURLDrift(name string, org, tool devconfig.DevConfig) {
-	for _, f := range []struct{ label, org, tool string }{
-		{"core URL", org.BaseURL, tool.BaseURL},
-		{"backend URL", org.BackendURL, tool.BackendURL},
+	for _, f := range []struct{ label, env, org, tool string }{
+		{"core URL", devconfig.EnvBaseURL, org.BaseURL, tool.BaseURL},
+		{"backend URL", devconfig.EnvBackendURL, org.BackendURL, tool.BackendURL},
 	} {
 		if f.org == "" || f.org == f.tool {
+			continue
+		}
+		// An exported value outranks both files, so neither is what the runtime
+		// uses and "re-run init" would change nothing. The environment is
+		// already named in the identity block above.
+		if a.getenv(f.env) != "" {
 			continue
 		}
 		fmt.Fprintf(a.stdout, "  %-11s  %s differs from org (%s vs %s); re-run `openbox init --provider %s`\n",

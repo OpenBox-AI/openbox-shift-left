@@ -984,3 +984,106 @@ func TestResidueSweepIgnoresWhatItDoesNotOwn(t *testing.T) {
 		t.Fatalf("sweep = %v, want exactly [%s]", got, want)
 	}
 }
+
+// TestUninstallRefusesAHomeItCannotResolve the worst shape this command has:
+// it looked, found nothing because it could not resolve where to look, and
+// said "OpenBox is not installed on this machine" at exit 0 while every
+// credential sat intact.
+//
+// The guard that exists validates $HOME, but every credential path derives
+// from devconfig.Home(), which prefers OPENBOX_HOME -- so an absolute $HOME
+// and a relative OPENBOX_HOME passes the guard and then silently resolves
+// nothing. A command whose promise is "it reverses all of it" must never
+// report success having looked nowhere.
+func TestUninstallRefusesAHomeItCannotResolve(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seeded := filepath.Join(home, "claude-code", ".env")
+
+	// $HOME stays absolute, so the existing guard passes; only OPENBOX_HOME is
+	// unusable. That is the combination that made this silent.
+	t.Setenv(devconfig.EnvHome, "relative/openbox")
+
+	a, out, errb := testApp(nil)
+	code := a.run([]string{"uninstall"})
+	if code == exitOK {
+		t.Errorf("uninstall exited 0 with an unresolvable home; it looked nowhere:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "not installed on this machine") {
+		t.Errorf("uninstall reported a clean machine it never examined:\n%s", out.String())
+	}
+	if !strings.Contains(errb.String(), devconfig.EnvHome) {
+		t.Errorf("the refusal does not name the variable to fix:\n%s", errb.String())
+	}
+	if _, err := os.Stat(seeded); err != nil {
+		t.Errorf("a refused uninstall deleted something anyway: %v", err)
+	}
+}
+
+// TestDoctorDoesNotFlagDriftAnEnvVarOverrides the drift line tells an operator
+// to re-run `init` so a tool picks up the organization's URL. With that URL
+// exported, neither file's value is what the runtime uses, so the advice is
+// wrong and the finger points at a file nothing reads. A warning that fires on
+// a healthy machine is one people learn to skip.
+func TestDoctorDoesNotFlagDriftAnEnvVarOverrides(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
+		BaseURL: "https://core.corrected"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
+		DID: testDIDFor(t, "claude-code"), BaseURL: "https://core.stale"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(devconfig.EnvBaseURL, "https://core.exported")
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "core URL differs from org") {
+			t.Errorf("doctor flagged a file drift an exported variable overrides:\n%s", line)
+		}
+	}
+	// The drift is still real once the override is gone, so the line must come
+	// back rather than have been deleted.
+	t.Setenv(devconfig.EnvBaseURL, "")
+	out, _ = runDoctorHere(t)
+	if !strings.Contains(out, "core URL differs from org") {
+		t.Errorf("doctor stopped reporting a real drift:\n%s", out)
+	}
+}
+
+// TestTheKeptSummaryNamesWhatSurvived the step output names each kept thing as
+// it happens, but the "Done." block is what an operator reads to decide
+// whether the machine is clean -- and it listed only the organization's own
+// files. A store directory this command declined to remove reaching that block
+// unmentioned is the same silence the residue sweep exists to end, one level
+// up.
+func TestTheKeptSummaryNamesWhatSurvived(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	dir := filepath.Join(home, "claude-code")
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not ours\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	s := out.String()
+	i := strings.Index(s, "Done.")
+	if i < 0 {
+		t.Fatalf("no report block:\n%s", s)
+	}
+	if !strings.Contains(s[i:], dir) {
+		t.Errorf("the Done block does not name the directory that survived:\n%s", s[i:])
+	}
+}
