@@ -53,7 +53,11 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 		getenv: func(k string) string { return env[k] },
 		newRegistrar: func(_, _, _ string) devinit.Registrar {
 			panic("newRegistrar should not be called in this path")
-		}}
+		},
+		// Non-interactive by default. A test that did not script answers is a
+		// test about something other than prompting, and this is the shape those
+		// runs take in production -- a CI machine with no terminal.
+		newPrompt: func() (prompt.Prompter, error) { return nil, prompt.ErrNotATerminal }}
 	return a, &out, &errb
 }
 

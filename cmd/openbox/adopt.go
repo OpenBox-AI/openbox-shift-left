@@ -62,20 +62,19 @@ func (a *app) adoptExistingAgent(tool string) (adopted bool, code int) {
 
 	// Validated before anything is written, so a mistyped seed does not leave a
 	// half-populated store that the next run reads as "already registered".
+	if strings.TrimSpace(agentID) == "" {
+		return false, a.errorf("no agent id given. It is on the agent's page in the dashboard,\n" +
+			"  beside the DID. Decline the adopt prompt to register a new agent instead.")
+	}
 	if problem := validateAgentIdentity(did, apiKey, signingKey); problem != "" {
 		return false, a.errorf("%s", problem)
 	}
 
-	envPath, err := devconfig.EnvFilePathFor(tool)
-	if err != nil {
-		return false, a.errorf("%v", err)
-	}
-	if err := devconfig.WriteEnvFile(envPath, map[string]string{
-		devconfig.EnvAPIKeyDirect:    strings.TrimSpace(apiKey),
-		devconfig.EnvAgentPrivateKey: strings.TrimSpace(signingKey),
-	}); err != nil {
-		return false, a.errorf("write credentials: %v", err)
-	}
+	// The config first, then the credentials. Both orders can be interrupted;
+	// only this one fails safe. A DID with no credential file is the state the
+	// hook warns about by name and the next `init` repairs, because the reuse
+	// decision reads the credential file -- credentials with no DID would be
+	// reused forever while resolving nothing.
 	cfgPath, err := devconfig.DevConfigWritePathFor(tool)
 	if err != nil {
 		return false, a.errorf("%v", err)
@@ -85,6 +84,16 @@ func (a *app) adoptExistingAgent(tool string) (adopted bool, code int) {
 		AgentID: strings.TrimSpace(agentID),
 	}); err != nil {
 		return false, a.errorf("write dev config: %v", err)
+	}
+	envPath, err := devconfig.EnvFilePathFor(tool)
+	if err != nil {
+		return false, a.errorf("%v", err)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
+		devconfig.EnvAPIKeyDirect:    strings.TrimSpace(apiKey),
+		devconfig.EnvAgentPrivateKey: strings.TrimSpace(signingKey),
+	}); err != nil {
+		return false, a.errorf("write credentials: %v", err)
 	}
 
 	// Paths only. The seed reached this process from a terminal and goes to a

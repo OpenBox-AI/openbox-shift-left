@@ -6,13 +6,28 @@ before anything is attached to an event. The companion to
 
 ## Where credentials live
 
-`~/.openbox/.env`, in **plaintext**. Nothing is sent to OpenBox; but there is no
-encryption at rest either, and the difference matters, so here it is plainly :
+Two kinds of file, both in **plaintext**. Nothing is sent to OpenBox; but there
+is no encryption at rest either, and the difference matters, so here it is
+plainly.
+
+**One store per governed tool.** Each tool you run `openbox init --provider
+<tool>` for gets its own agent, with its own DID, in its own directory:
 
 ```
-OPENBOX_API_KEY='obx_…'                 # your agent's runtime key
-OPENBOX_AGENT_PRIVATE_KEY='…'           # the Ed25519 key this machine signs with
-OPENBOX_CONTROL_TOKEN='obx_key_…'       # approver installs only; see below
+~/.openbox/claude-code/.env
+~/.openbox/codex/.env
+    OPENBOX_API_KEY='obx_…'             # that tool's agent runtime key
+    OPENBOX_AGENT_PRIVATE_KEY='…'       # the Ed25519 key that tool signs with
+```
+
+**One org-level file**, shared by every tool, holding the organization
+connection and nothing else:
+
+```
+~/.openbox/.env
+    OPENBOX_CONTROL_TOKEN='obx_key_…'   # written by `openbox auth`; see below
+~/.openbox/dev.json
+    backend_url, base_url               # coordinates `init` copies into each tool
 ```
 
 - **On macOS and Linux** the file is `0600` under a `0700` directory, so other
@@ -24,9 +39,11 @@ OPENBOX_CONTROL_TOKEN='obx_key_…'       # approver installs only; see below
   and other local accounts can read it. Use full-disk encryption; do not treat
   this file as protected.
 - **It is the only copy.** OpenBox shows the API key and signing key exactly
-  once, at registration, and does not store them. Lose the file and there is no
-  recovery for that identity: `openbox auth` registers a new agent with a new
-  DID, which leaves work attributed to the old one attached to the old one.
+  once, at registration, and does not store them. Lose a tool's file and there
+  is no recovery for that identity: `openbox init --provider <tool>` registers a
+  new agent with a new DID, which leaves work attributed to the old one attached
+  to the old one. If you still have the key and seed, that command offers to
+  **adopt** the existing agent instead, which keeps the DID.
 - **Never commit it.** The file's own header comment says so; it lives in your
   home directory rather than anywhere near a repo for that reason.
 
@@ -37,22 +54,40 @@ this replaced did not actually change that, since it was unlocked for the whole
 desktop session and readable by the same processes; the plaintext file just
 makes it obvious.
 
-**The organization credential is never written here.** Registering an agent
-needs `OPENBOX_CONTROL_TOKEN`, and when that is an `obx_key_…` organization key
-it can **create and rotate agents across your whole organization** — the signing
-key above compromises one agent, that one compromises the fleet. It is read from
-the environment only, never accepted as a flag, and never persisted to this
-plaintext file. A machine that ran an older approver install may still have a
-copy in `.env`; no `auth` run removes it, and `openbox uninstall` is the only
-thing that does.
+**The organization credential is written to the org-level file, and that is a
+real exposure.** `OPENBOX_CONTROL_TOKEN` is what registers an agent, and when it
+is an `obx_key_…` organization key it can **create and rotate agents across your
+whole organization** — a tool's signing key compromises one agent, this one
+compromises the fleet.
+
+`openbox auth` takes it and persists it to `~/.openbox/.env`, because `auth`
+takes it and `openbox init` needs it, and those are two separate processes with
+nothing exported between them. So it sits on disk in plaintext, `0600` on macOS
+and Linux, unprotected on Windows, readable by anything running as you —
+**including the coding agent under governance**. Everything the first section
+says about at-rest protection applies to this credential too, and it is the one
+worth caring about most.
+
+Two things bound it. It is **never written to a per-tool `.env`**, so a
+compromised tool store is not a fleet compromise. And it is never accepted as a
+flag, so it cannot leak through argv or shell history.
+
+Prefer exporting `OPENBOX_CONTROL_TOKEN` for the one `init` run and skipping
+`auth`'s token prompt if you would rather it never touch the disk; a real
+environment variable wins, and `openbox uninstall` deletes the file either way.
 
 A real environment variable always beats the file, so CI can supply credentials
 without writing anything to disk:
 
 ```
-secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var  >  ~/.openbox/.env
-coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json  >  default
+secrets       OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY  env var > ~/.openbox/<tool>/.env
+org secret    OPENBOX_CONTROL_TOKEN                       env var > ~/.openbox/.env
+coordinates   OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …      env var > <tool>/dev.json > default
 ```
+
+An exported variable outranks **every** store at once: one `OPENBOX_AGENT_DID`
+makes every governed tool report the same identity. `openbox doctor` names which
+source is actually in effect for exactly this reason.
 
 Secrets and non-secrets never share a file, and no value lives in two places.
 

@@ -157,16 +157,21 @@ func TestRequireTerminalFailsFastOnAPipe(t *testing.T) {
 	if !errors.Is(err, ErrNotATerminal) {
 		t.Errorf("error should wrap ErrNotATerminal, got %v", err)
 	}
-	// The remediation names the two routes that survive, and must not name a
-	// flag: `auth` takes none, so a message pointing at one sends the reader to
-	// a parse error.
-	for _, want := range []string{"OPENBOX_API_KEY", ".openbox/.env", "dev.json", "OPENBOX_HOME"} {
+	// The remediation names the routes that survive, including the per-tool
+	// stores, and must not hand `auth` a flag: it takes none, so a message
+	// pointing at one sends the reader to a parse error. `init --provider` is a
+	// different command and its flag is required, so the check is on the auth
+	// line rather than on the whole text.
+	for _, want := range []string{"OPENBOX_API_KEY", "OPENBOX_CONTROL_TOKEN",
+		".openbox/<tool>/.env", "dev.json", "OPENBOX_HOME"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("remediation missing %q:\n%s", want, err)
 		}
 	}
-	if strings.Contains(err.Error(), "--") {
-		t.Errorf("the remediation names a flag; auth accepts none:\n%s", err)
+	for _, line := range strings.Split(err.Error(), "\n") {
+		if strings.Contains(line, "openbox auth") && strings.Contains(line, "--") {
+			t.Errorf("the remediation gives `auth` a flag; it accepts none:\n%s", line)
+		}
 	}
 }
 

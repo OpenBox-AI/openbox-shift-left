@@ -31,8 +31,14 @@ const (
 type app struct {
 	stdout, stderr io.Writer
 	stdin          io.Reader
-	getenv         func(string) string
-	newRegistrar   func(baseURL, credential, clientID string) devinit.Registrar
+	// getenv is for reporting which variables are set -- the shadow warnings,
+	// the attestation markers, doctor's "in effect" line. Credential and token
+	// RESOLUTION deliberately does not go through it: those read the real
+	// environment through devconfig, because that is what the runtime reads,
+	// and a gate asking a different source than the resolver is how an install
+	// ends up accepting an identity the resolver cannot find.
+	getenv       func(string) string
+	newRegistrar func(baseURL, credential, clientID string) devinit.Registrar
 	// newPrompt is the seam `auth` reaches the terminal through. One seam, not
 	// two: the terminal REQUIREMENT and the prompter are the same decision, and
 	// a test that could supply answers but not get past RequireTerminal could
@@ -186,6 +192,9 @@ func (a *app) warnIfUnconfigured(name string, logger *log.Logger) {
 	// gated call then fails to resolve and fails open -- silently, which is the
 	// state this line exists to explain. Stat, never parse: the hot path does
 	// zero secret I/O (INV-1), and existence is the whole question.
+	if devconfig.EnvIdentityPresent() {
+		return // exported credentials answer for every tool; there is no file to miss
+	}
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
 		logger.Printf("cannot resolve %s's credential file: %v; governance is inactive", name, err)
@@ -289,16 +298,29 @@ func (a *app) runDevInit(args []string) int {
 
 	d := devinit.Deps{Installer: inst, Out: a.stdout}
 	if !plan.reuse {
+		// Adopt first, and before the token check: pasting an agent's own key
+		// needs no organization credential, and requiring one locked out the
+		// developer whose org key lives with an administrator.
 		adopted, code := a.adoptExistingAgent(o.Provider)
 		if code != exitOK {
 			return code
 		}
 		if !adopted {
+			token, code := a.requireControlToken()
+			if code != exitOK {
+				return code
+			}
 			// Wired on this branch only. A registrar present on the reuse path
 			// would make an offline re-run one refactor away from a network call,
 			// and the reuse path is the one that has to work on a plane.
-			d.Registrar = a.newRegistrar(
-				firstNonEmptyStr(o.BackendURL, devconfig.DefaultBackendURL), plan.token, "openbox-cli")
+			//
+			// The environment outranks the org config for the backend URL at
+			// runtime, so it has to here too: minting the agent in one deployment
+			// and posting its events to another surfaces later as a 401 and never
+			// as a message about URLs.
+			d.Registrar = a.newRegistrar(firstNonEmptyStr(
+				a.getenv(devconfig.EnvBackendURL), o.BackendURL, devconfig.DefaultBackendURL),
+				token, "openbox-cli")
 		}
 	}
 	res, runErr := devinit.Run(context.Background(), o, d)
@@ -352,8 +374,10 @@ func (a *app) usage() {
 	fmt.Fprint(a.stderr, `openbox; OpenBox developer-runtime governance CLI
 
 Setup is two commands, in this order:
-  openbox auth                                 credentials for this machine
-  openbox init --provider <claude-code|codex>  install hooks, lanes and posture
+  openbox auth                                 connect your organization
+  openbox init --provider <claude-code|codex>  register that tool's agent and
+                                               install hooks, lanes and posture
+                                               (run it once per tool)
 
 Usage:
   openbox auth
@@ -368,22 +392,33 @@ running are governed too. It installs every model-call lane the provider
 supports, enforces, and turns on commit trailers. There are no flags to choose
 between, because there is one right answer for each of those.
 
+Each governed tool carries its OWN agent identity, in its own
+~/.openbox/<tool>/ store, so run 'init' once for each tool you use. A tool that
+already has an agent is reused offline, with no control-plane call at all.
+
 Two postures stay per-machine, as environment variables rather than flags:
   OPENBOX_ENFORCE=false            observe only, for this run; nothing persists
   OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks
 
-Environment (needed only at 'auth' time, and only to register a new agent):
+Environment (needed at 'init' time, to register a tool's agent; 'auth' can
+store it for you instead):
   OPENBOX_CONTROL_TOKEN   control-plane credential (Keycloak JWT or obx_key_ org key).
                           Never a flag, so it cannot leak via argv or shell history.
+                          It can create and rotate agents across your whole
+                          organization: 'auth' persists it in plaintext to
+                          ~/.openbox/.env, so export it for one run instead if
+                          you would rather it never touch the disk.
   OPENBOX_BACKEND_URL     openbox-backend CONTROL-PLANE base URL
   OPENBOX_BASE_URL        openbox-core DATA-PLANE base URL. Self-hosted? Set BOTH: the
                           control plane cannot tell the CLI where your core is, so one
                           default and one override sends events to the hosted core and
                           surfaces later as a 401.
 
-Credentials live in ~/.openbox/.env (plaintext, 0600); posture and coordinates
-in ~/.openbox/dev.json. OPENBOX_HOME relocates both. A real environment
-variable always wins over either file.
+Each tool's credentials live in ~/.openbox/<tool>/.env (plaintext, 0600), with
+its posture and coordinates in ~/.openbox/<tool>/dev.json. The org-level
+~/.openbox/.env holds the control token and ~/.openbox/dev.json the
+organization's URLs. OPENBOX_HOME relocates all of it. A real environment
+variable always wins over every file, for every tool at once.
 
 'openbox uninstall' reverses all of it, including the credentials.
 'openbox doctor' reports the effective posture and where each value came from.

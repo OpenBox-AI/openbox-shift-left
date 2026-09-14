@@ -253,7 +253,7 @@ func TestInitWithNoStoreAndNoTokenRefuses(t *testing.T) {
 
 	a, _, errb := testApp(nil)
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
-	a.newPrompt = panicPrompt(t)
+	a.newPrompt = noTerminal(t)
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
 		t.Fatalf("exit = %d, want a refusal", code)
 	}
@@ -422,6 +422,16 @@ func declineAdopt(t *testing.T) func() (prompt.Prompter, error) {
 	return func() (prompt.Prompter, error) { return &prompt.Scripted{Answers: []string{"n"}}, nil }
 }
 
+// noTerminal is how an unattended run reaches the prompter. Adopt is offered
+// before the token check, so a refusal case legitimately gets this far; what it
+// must not do is ask a question nobody can answer.
+func noTerminal(t *testing.T) func() (prompt.Prompter, error) {
+	t.Helper()
+	return func() (prompt.Prompter, error) { return nil, prompt.ErrNotATerminal }
+}
+
+// panicPrompt is for a run that must not reach the prompter at all: the reuse
+// path, which is offline and asks nothing.
 func panicPrompt(t *testing.T) func() (prompt.Prompter, error) {
 	t.Helper()
 	return func() (prompt.Prompter, error) {
@@ -518,5 +528,125 @@ func TestTheAgentNameIsPerToolOnTheWire(t *testing.T) {
 	}
 	if names["claude-code"] == names["codex"] {
 		t.Errorf("both tools registered under one name %q; the second would halt on a duplicate", names["codex"])
+	}
+}
+
+// TestInitInstallsAgainstAnEnvironmentIdentity the documented four-variable
+// route, which is what a CI image uses. It broke silently once: the install
+// gate accepted an environment identity and devinit's reuse branch looked only
+// at the file, so the run reached registration with no registrar wired and was
+// told it had hit a wiring defect. The two predicates have to stay one
+// question.
+//
+// Registering here would be wrong for a second reason: exported credentials
+// outrank every store at runtime, so a minted agent would never be used -- one
+// orphan per ephemeral runner.
+func TestInitInstallsAgainstAnEnvironmentIdentity(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	t.Setenv(devconfig.EnvControlToken, "")
+	t.Setenv(devconfig.EnvAPIKeyDirect, "obx"+"_from_the_environment")
+	t.Setenv(devconfig.EnvAgentPrivateKey, testSeedB64)
+	t.Setenv(devconfig.EnvDID, "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301")
+
+	a, out, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+	a.newPrompt = panicPrompt(t)
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("init exit = %d on the documented env route; stderr=%q", code, errb.String())
+	}
+	if strings.Contains(errb.String(), "wiring bug") {
+		t.Errorf("a configuration route reported itself as a defect in the binary:\n%s", errb.String())
+	}
+	if !strings.Contains(out.String(), "EVERY SESSION") {
+		t.Errorf("the install did not complete:\n%s", out.String())
+	}
+	// Nothing minted, and no per-tool credential file invented for it.
+	if _, err := os.Stat(filepath.Join(home, "claude-code", ".env")); !os.IsNotExist(err) {
+		t.Errorf("an env-provisioned install wrote a credential file (err=%v)", err)
+	}
+}
+
+// TestAdoptNeedsNoOrganizationToken adopting is four values pasted by hand and
+// makes no control-plane call, so requiring fleet authority for it locked out
+// the shape this exists to serve: a developer holding their own agent's key
+// while the organization key lives with an administrator. It is also the only
+// route back from the duplicate-name halt.
+func TestAdoptNeedsNoOrganizationToken(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	clearAgentEnv(t)
+	t.Setenv(devconfig.EnvControlToken, "")
+
+	a, _, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+	p := &prompt.Scripted{Answers: []string{"y", "adopted-agent-9",
+		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_pasted_by_hand", testSeedB64}}
+	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("adopt exit = %d with no organization token; stderr=%q", code, errb.String())
+	}
+	cfg, err := devconfig.Load(filepath.Join(home, "claude-code", "dev.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentID != "adopted-agent-9" {
+		t.Errorf("the adopted agent was not stored: %+v", cfg)
+	}
+}
+
+// TestAdoptRefusesABlankAgentID the id identifies the agent this store belongs
+// to, and a store carrying a DID with no id is one doctor cannot attribute.
+func TestAdoptRefusesABlankAgentID(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	clearAgentEnv(t)
+	t.Setenv(devconfig.EnvControlToken, "")
+
+	a, _, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+	p := &prompt.Scripted{Answers: []string{"y", "",
+		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_pasted_by_hand", testSeedB64}}
+	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
+		t.Fatalf("exit = %d, want a refusal on a blank agent id", code)
+	}
+	if !strings.Contains(errb.String(), "agent id") {
+		t.Errorf("the refusal does not say what is missing:\n%s", errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "claude-code", "dev.json")); !os.IsNotExist(err) {
+		t.Errorf("a rejected adopt wrote a config anyway (err=%v)", err)
+	}
+}
+
+// TestTheRegistrarTargetsTheEnvironmentBackend an exported backend URL
+// outranks the org config at runtime, so it has to here too. Minting the agent
+// in one deployment while events post to another surfaces later as a 401, with
+// nothing anywhere naming a URL.
+func TestTheRegistrarTargetsTheEnvironmentBackend(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	clearAgentEnv(t)
+	t.Setenv(devconfig.EnvControlToken, testOrgToken)
+	t.Setenv(devconfig.EnvBackendURL, "https://api.internal.example")
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"),
+		devconfig.Update{BackendURL: "https://api.from-the-org-file"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var target string
+	a, _, errb := testApp(map[string]string{devconfig.EnvBackendURL: "https://api.internal.example"})
+	a.newRegistrar = func(backendURL, _, _ string) devinit.Registrar {
+		target = backendURL
+		return &countingReg{byName: map[string]*backend.AgentSummary{}}
+	}
+	a.newPrompt = noTerminal(t)
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
+	}
+	if target != "https://api.internal.example" {
+		t.Errorf("the registrar targeted %q, want the exported backend URL", target)
 	}
 }

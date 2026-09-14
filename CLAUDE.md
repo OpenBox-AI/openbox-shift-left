@@ -16,7 +16,13 @@ sessions write no `spans` rows at all, and send no `spans[]`: see the invariant.
 
 The shape is a provider-agnostic engine plus one thin adapter per tool behind a
 normalized event contract, so adding a provider is an adapter rather than an
-engine change. An adapter is four things: its native hook shape, its mapper, an
+engine change. Identity is per tool and fully data-driven off
+`provider.Supported()` -- the store, the agent, `doctor`'s rows,
+`uninstall`'s sweep -- but do not overread that into the rest: `laneCapable`
+(`cmd/openbox/initlanes.go`), `printGovernedScope` (`scope.go`), the two
+provider switches in `cmd/openbox/main.go`, `doctor.go`'s managed-config loop
+and `uninstall.go`'s hook-surface list still name their providers, deliberately,
+and a third tool needs each of them read. An adapter is four things: its native hook shape, its mapper, an
 `OutputContract`, its installer; everything else is the engine's, which was once
 copy-pasted per adapter and drifted on the enforcement path.
 

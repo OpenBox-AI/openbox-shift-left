@@ -19,14 +19,22 @@
 # It deliberately does NOT register you with OpenBox or wire Claude Code. That is
 # the second step you run yourself once the binary is on PATH:
 #
-#   export OPENBOX_CONTROL_TOKEN=<keycloak-jwt-or-obx_key_…>   # never a flag (INV-1)
-#   openbox auth                          # prompts; registers this machine's agent
-#   openbox init --provider claude-code   # hooks, lanes and posture
+#   openbox auth                          # prompts for two URLs and the org token
+#   openbox init --provider claude-code   # registers this tool's agent, then
+#   openbox init --provider codex         # hooks, lanes and posture. Once per tool.
 #
-# `auth` registers your agent and stores your credentials; `init` registers the
-# hooks that govern EVERY session on this machine, brings up the model-call lanes
-# the provider supports, and writes posture. Enforcement evaluates in-process, so
-# there is no daemon to run for it and no runtime env to keep set.
+# `auth` connects this machine to an organization and registers nothing. `init`
+# registers that tool's own agent, then registers the hooks that govern EVERY
+# session on this machine, brings up the model-call lanes the provider supports,
+# and writes posture. Each governed tool carries its own identity, in its own
+# ~/.openbox/<tool>/ store, so run `init` once for each tool you use.
+# Enforcement evaluates in-process, so there is no daemon to run for it and no
+# runtime env to keep set.
+#
+# The organization control token can create and rotate agents across your whole
+# organization. `auth` persists it in plaintext to ~/.openbox/.env; export
+# OPENBOX_CONTROL_TOKEN for the one `init` run instead if you would rather it
+# never reach the disk. It is never a flag either way (INV-1).
 #
 # Tunables (all optional env vars):
 #   OPENBOX_INSTALL_DIR    where to place the binary        (default: ~/.local/bin)

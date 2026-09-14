@@ -1,4 +1,5 @@
-// Package prompt is the interactive input layer for `openbox auth`: plain
+// Package prompt is the interactive input layer for `openbox auth` and
+// `openbox init`'s adopt question: plain
 // lines, masked secrets, and yes/no confirmation.
 package prompt
 
@@ -46,20 +47,30 @@ var ErrNotATerminal = errors.New("stdin is not a terminal")
 // environment variable beats both files at read time, and the files are the
 // files -- so neither is a lesser path.
 const NonInteractiveHelp = `openbox auth needs a terminal: it prompts, and it takes no flags.
-Two routes provision a machine without one, and both are read in preference to
+Three routes provision a machine without one, and all are read in preference to
 anything auth writes (no secret ever goes on argv; INV-1):
 
-  1. Export the variables and skip auth entirely:
+  1. Export the org token and let 'init' register each tool's agent. This is
+     the one to reach for; it is the only route that mints an identity:
+       OPENBOX_CONTROL_TOKEN=…  openbox init --provider <tool>
+
+  2. Export an agent identity directly. Note the limit: these variables outrank
+     every store at once, so one exported DID makes EVERY governed tool report
+     the same identity. Fine for a single-tool CI image, wrong for a developer
+     machine running two:
        OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY, OPENBOX_AGENT_DID, OPENBOX_AGENT_ID
 
-  2. Write the two files auth writes:
-       ~/.openbox/.env      0600, secrets only:
-                              OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY
-       ~/.openbox/dev.json  coordinates only:
-                              agent_id, developer_did, base_url, backend_url
-     OPENBOX_HOME relocates both. Keep them separate: a secret in dev.json or a
-     coordinate in .env reintroduces a stale-copy bug that reverted a corrected
-     DID on every install.`
+  3. Write the files by hand; one store per governed tool. This is also the
+     key-rotation route:
+       ~/.openbox/<tool>/.env      0600, secrets only:
+                                     OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY
+       ~/.openbox/<tool>/dev.json  coordinates only:
+                                     agent_id, developer_did, base_url, backend_url
+       ~/.openbox/.env             0600, the org control token only
+       ~/.openbox/dev.json         the organization's base_url and backend_url
+     OPENBOX_HOME relocates all of it. Keep secrets and coordinates separate: a
+     secret in dev.json or a coordinate in .env reintroduces a stale-copy bug
+     that reverted a corrected DID on every install.`
 
 // New returns a Prompter over a real terminal (or a pipe). Masking is decided
 // per call from term.IsTerminal rather than once at construction, so a caller

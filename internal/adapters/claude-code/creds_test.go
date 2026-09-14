@@ -9,7 +9,7 @@ import (
 )
 
 // TestResolveCredentials_FromCredentialFile proves the hook reads
-// ~/.openbox/.env, which is where `openbox auth` writes credentials and the
+// ~/.openbox/<tool>/.env, which is where `openbox init` writes credentials and the
 // position the deleted OS secret store used to hold.
 func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)

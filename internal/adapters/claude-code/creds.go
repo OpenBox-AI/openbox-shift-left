@@ -136,7 +136,10 @@ func ResolveAgentID() string { return devconfig.ResolveAgentID() }
 func ResolveBackendURL() string { return devconfig.ResolveBackendURL() }
 
 // ResolveControlToken resolves the org control-plane credential: the
-// OPENBOX_CONTROL_TOKEN env only (never config, never the secret store).
+// OPENBOX_CONTROL_TOKEN: the environment first, then the org-level
+// ~/.openbox/.env that `openbox auth` writes. Never a config field and never a
+// per-tool secret store, so a compromised tool store cannot supply a
+// fleet-wide credential.
 func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 
 // ResolveOrgSigningKey returns the org's pinned policy-bundle signing key
@@ -144,7 +147,7 @@ func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }
 
 // ResolveCredentials assembles Credentials through the shared resolver:
-// secrets from the environment then ~/.openbox/.env, coordinates from the
+// secrets from the environment then this tool's ~/.openbox/<tool>/.env, coordinates from the
 // environment then dev.json. It returns an error (never a panic) when identity
 // is incomplete; the caller logs it fail-open and exits 0 (INV-3).
 func ResolveCredentials() (Credentials, error) {

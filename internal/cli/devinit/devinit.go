@@ -1,6 +1,8 @@
 // Package devinit registers a developer agent, captures its once-shown
 // credentials into that tool's ~/.openbox/<tool>/.env, and delegates the
-// tool's native config to the provider installer. Invariants enforced here: - INV-1: the obx_ key and
+// tool's native config to the provider installer. One store per governed tool:
+// the reuse decision reads that tool's own file and never falls back to the
+// org-level one. Invariants enforced here: - INV-1: the obx_ key and
 // signing key are written only to the credential file and never printed,
 // logged, or placed on an argv. Output shows the file path, never a value.
 package devinit
@@ -161,7 +163,15 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 	res := &Result{AgentName: name}
 
-	if existing, err := readLocalCredentials(); err == nil && existing.apiKey != "" && existing.privateKey != "" {
+	stored, readErr := readLocalCredentials()
+	fromFile := readErr == nil && stored.apiKey != "" && stored.privateKey != ""
+	// The environment counts, and has to, because the caller's gate already
+	// accepted it: a machine provisioned entirely through exported variables
+	// would otherwise reach the registration branch with no registrar wired and
+	// be told it had hit a build bug. An exported identity also outranks every
+	// store at runtime, so minting an agent here would create one that is never
+	// used -- one per ephemeral runner.
+	if fromFile || devconfig.EnvIdentityPresent() {
 		did := devconfig.ResolveDIDOrEmpty()
 		ref.DID = did
 		res.Reused = true
@@ -169,8 +179,12 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// Losing it disables that check silently.
 		res.AgentID = devconfig.ResolveAgentID()
 		ref.AgentID = res.AgentID
+		where := credentialFileLabel()
+		if !fromFile {
+			where = "the environment"
+		}
 		fmt.Fprintf(d.Out, "%s already has credentials in %s; reusing them (DID %s).\n",
-			o.Provider, credentialFileLabel(), didOrNone(did))
+			o.Provider, where, didOrNone(did))
 		fmt.Fprintf(d.Out, "  Nothing was registered. This store belongs to %s alone; another tool has its\n", o.Provider)
 		fmt.Fprintf(d.Out, "  own agent and its own DID. `openbox doctor` lists every store and says which\n")
 		fmt.Fprintf(d.Out, "  identity is in effect for each.\n")
@@ -178,8 +192,10 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// like a complete store and this run never goes online to find out. That
 		// makes deleting the file the whole rotation procedure, and a reader who
 		// is not told will look for a flag that does not exist.
-		fmt.Fprintf(d.Out, "  Rotating a key? Delete %s and re-run this command; it will offer to adopt\n", credentialFileLabel())
-		fmt.Fprintf(d.Out, "  the agent so the DID stays the same.\n")
+		if fromFile {
+			fmt.Fprintf(d.Out, "  Rotating a key? Delete %s and re-run this command; it will offer to adopt\n", credentialFileLabel())
+			fmt.Fprintf(d.Out, "  the agent so the DID stays the same.\n")
+		}
 		return res, ref, nil
 	}
 

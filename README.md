@@ -21,42 +21,46 @@ binary.
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
 ```
 
-**2. Authenticate.** `openbox auth` asks for what it needs and stores it. The
-URLs prefill with sensible defaults or your current values, so a first run is
-mostly pressing Enter. The agent id is **never** prefilled: **leave it blank and
-a new agent is registered for you**; then it stops asking, because there is
-nothing left to ask.
+**2. Connect your organization.** `openbox auth` asks for three things and
+stores them. The URLs prefill with sensible defaults or your current values, so
+a first run is mostly pressing Enter. It registers nothing and writes no agent
+credential — that is step 3's job, once per tool.
 
 ```bash
-export OPENBOX_CONTROL_TOKEN=obx_key_…    # your org key, from the dashboard
 openbox auth
 ```
 
 ```
 Backend URL (control plane)   [https://api.openbox.ai]:
 Core URL (data plane)         [https://core.openbox.ai]:
-Agent id (blank registers a new agent):   ← press Enter
+Organization control token (obx_key_… or JWT):   ← masked
 
-  Register a new developer agent? [y/N] y
-  ✓ registered  agent 4f2a…  did:aip:9c1b…
-  ✓ wrote ~/.openbox/.env       (api key, signing key; 0600)
-  ✓ wrote ~/.openbox/dev.json   (agent id, DID, URLs)
+  ✓ wrote ~/.openbox/.env       (0600; plaintext;)
+  ✓ wrote ~/.openbox/dev.json   (URLs; no secrets)
 
-Next: openbox init --provider claude-code
+Next: openbox init --provider <claude-code|codex>
 ```
 
-Give an existing agent id instead and it asks for that agent's DID, API key and
-signing key; paste them and it writes the same two files. Secrets are masked as
-you type and **no flag ever takes a secret value**, so nothing lands in your
-shell history. Re-run `auth` any time to change any of it.
+The token is masked as you type and **no flag ever takes a secret value**, so
+nothing lands in your shell history. It is persisted so `init` can use it in a
+later process; it can **create and rotate agents across your whole
+organization**, so read [Credentials](docs/credentials-and-secrets.md) before
+deciding whether to let it sit on disk — exporting `OPENBOX_CONTROL_TOKEN` for
+one `init` run instead works and writes nothing. Re-run `auth` any time.
 
-**3. Govern this machine.** `openbox init` installs the hooks. It governs
-**every session on this machine, in any directory**, and it **enforces**;
-blocking, ask-for-approval and secret redaction are on by default, on tool calls
-and on submitted prompts alike, and a HALT verdict ends the whole session, not
-just the call. Blocking and approval come from OpenBox, so they need it
-reachable; secret redaction is local and does not. It never touches credentials;
-if they are missing it stops and points you back at `auth`.
+**3. Govern this machine, once per tool.** `openbox init --provider <tool>`
+registers that tool's own agent, then installs the hooks. It governs **every
+session on this machine, in any directory**, and it **enforces**; blocking,
+ask-for-approval and secret redaction are on by default, on tool calls and on
+submitted prompts alike, and a HALT verdict ends the whole session, not just the
+call. Blocking and approval come from OpenBox, so they need it reachable; secret
+redaction is local and does not.
+
+Each governed tool carries its **own agent identity**, in its own
+`~/.openbox/<tool>/` store, so run it once for each tool you use. A tool that
+already has an agent is reused offline and no control-plane call is made. If you
+already have an agent and still hold its key and seed, `init` offers to **adopt**
+it instead of registering a new one.
 
 ```bash
 openbox init --provider claude-code
@@ -191,8 +195,10 @@ Four things to know:
 ## Where things live
 
 ```
-~/.openbox/.env          your credentials; API key, signing key (0600, never commit)
-  dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
+~/.openbox/.env          the organization control token (0600, never commit)
+  dev.json      the organization's coordinates; backend and core URLs
+  <tool>/.env   that tool's agent; API key, signing key (0600, never commit)
+  <tool>/dev.json  that tool's posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
                     ── only on a machine that ran an older gateway install ──
   gateway.log   the daemon's stdio; the only place it says it is recording nothing
   gateway-prior-env.json   the ANTHROPIC_BASE_URL the install displaced, so
@@ -219,9 +225,13 @@ real environment variable always wins, so CI can override anything without
 touching disk. `OPENBOX_HOME` relocates the configuration directory.
 
 ```
-secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var  >  ~/.openbox/.env
-coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json  >  default
+secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var > ~/.openbox/<tool>/.env
+org secret   OPENBOX_CONTROL_TOKEN                        env var > ~/.openbox/.env
+coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var > <tool>/dev.json > default
 ```
+
+An exported variable outranks every store at once, for every tool; `openbox
+doctor` names which source is actually in effect.
 
 ---
 
@@ -423,10 +433,10 @@ There are five, and `init` is the only one that takes a flag.
 
 | | |
 |---|---|
-| `openbox auth` | credentials for this machine. It prompts, and takes nothing: it asks for everything authentication needs and nothing else. Blank keeps what is already there |
-| `openbox init --provider <claude-code\|codex>` | install the hooks, every model-call lane the provider supports, and posture. Every session on this machine, enforcing, commit trailers on |
+| `openbox auth` | connect your organization: two URLs and the control token, written to the org-level files. It prompts, and takes nothing. Blank keeps what is already there. It registers nothing |
+| `openbox init --provider <claude-code\|codex>` | register that tool's own agent, then install the hooks, every model-call lane the provider supports, and posture. Every session on this machine, enforcing, commit trailers on. Run it once per tool; a tool that already has an agent is reused offline |
 | `openbox doctor` | the posture actually in effect and who decides it; whether core is reachable and this machine authenticates; whether the hooks can run at all on a managed machine; where this machine's model calls go and what could bypass that |
-| `openbox uninstall` | the full reversal, credentials included. It detects what is installed rather than being told |
+| `openbox uninstall` | the full reversal; every tool's credentials and the org control token included. It detects what is installed rather than being told |
 | `openbox version` | |
 
 Two postures stay per-machine, as environment variables rather than flags:

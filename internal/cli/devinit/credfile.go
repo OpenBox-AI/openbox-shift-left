@@ -61,7 +61,11 @@ func credentialFileLabel() string {
 
 func didOrNone(did string) string {
 	if did == "" {
-		return fmt.Sprintf("no DID in this tool's dev.json; re-run init to register one, or export %s", devconfig.EnvDID)
+		// Not "re-run init": this message prints from the reuse branch, so a
+		// re-run reuses again and says the same thing. Deleting the credential
+		// file is what sends the next run down the branch that can fix it.
+		return fmt.Sprintf("no DID in this tool's dev.json; delete %s and re-run init, or export %s",
+			credentialFileLabel(), devconfig.EnvDID)
 	}
 	return did
 }

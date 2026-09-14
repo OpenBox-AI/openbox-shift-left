@@ -76,6 +76,15 @@ func (a *app) runAuth(args []string) int {
 	if problem := controlTokenProblem(f.controlToken); problem != "" {
 		return a.errorf("%s", problem)
 	}
+	// Both URLs are chosen here, so this is where the mismatch is visible. One
+	// default and one override sends events to the hosted core and surfaces
+	// later as a 401 with nothing naming a URL.
+	if selfHostedWithoutDataPlane(f.backendURL, f.baseURL) {
+		fmt.Fprintf(a.stderr,
+			"warning: the backend is %s but the core URL is the hosted default (%s).\n"+
+				"         If OpenBox is self-hosted, set the core URL to your own openbox-core.\n",
+			f.backendURL, devconfig.DefaultBaseURL)
+	}
 
 	if code := a.writeSecrets(envPath, f); code != exitOK {
 		return code

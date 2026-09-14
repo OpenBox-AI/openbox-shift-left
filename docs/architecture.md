@@ -199,7 +199,8 @@ Being precise here is part of the product.
   accepted attestation both hold. CI must fetch that ref, which is not the
   default.
 - **The signing key is readable by anything running as the developer.** It sits
-  in plaintext at `~/.openbox/.env`; `0600` on macOS/Linux, and on Windows
+  in plaintext at `~/.openbox/<tool>/.env`, one per governed tool; `0600` on
+  macOS/Linux, and on Windows
   `0600` is a no-op so other local accounts can read it too. The coding agent
   under governance runs arbitrary commands as that user, so it can read the key
   it is being attested with. Attestation therefore proves **origin-of-config**,
@@ -208,8 +209,9 @@ Being precise here is part of the product.
   keychain this replaced did not actually change that (it was unlocked for the
   desktop session and readable by the same processes); the plaintext file makes
   it legible. The org key that can create and rotate agents fleet-wide is a
-  strictly larger blast radius than one agent's seed, which is why it is read
-  from the environment only and never written to this file.
+  strictly larger blast radius than one agent's seed, which is why it is kept
+  out of every per-tool store: it lives only in the org-level `~/.openbox/.env`,
+  where it is subject to exactly the same at-rest exposure described above.
 - **A project can hold a registration from an older engine until the next
   `init`.** Hooks live in a file on the developer's machine, so an install run
   with a different `HOME` used to leave a second OpenBox entry beside the

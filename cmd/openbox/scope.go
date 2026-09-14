@@ -13,25 +13,26 @@ import (
 )
 
 // credentialPlan is what requireCredentials decided: reuse the tool's own
-// store, or register a new agent with the org token it resolved. It is a
-// decision, not a state, which is why it is returned rather than re-derived --
-// asking the same question twice is how the register branch ends up running
-// against a store that was present after all.
+// identity, or go and get one. It is a decision, not a state, which is why it
+// is returned rather than re-derived -- asking the same question twice is how
+// the register branch ends up running against a store that was present after
+// all. That exact disagreement happened once between this gate and devinit's,
+// so the predicate here and the one in devinit.register must stay the same
+// question.
 type credentialPlan struct {
 	reuse bool
-	token string // the org control token; set on the register branch only
 }
 
 // requireCredentials it must not half-install: a bundle installed against no
 // identity produces hooks that fire, fail to resolve credentials, and fail
 // open silently; an install that looks finished and governs nothing.
 //
-// Three outcomes, not two, since `init` became the command that mints an
-// agent. The tool's own store is complete, so this run is offline and touches
-// no credential. Or it is not, and an org token can create one. Or it is not
-// and there is no token, which is the only refusal left -- and it names both
-// routes to a token, because a user who skipped `auth` and a user whose token
-// is only in their environment reach it the same way.
+// It no longer refuses for a missing organization token. Adopting an existing
+// agent needs no fleet authority -- it is four values pasted by hand -- and
+// gating it behind the token locked out the shape this restores: a developer
+// holding their own agent's key while the org key lives with an administrator.
+// The token is required by the register branch, where it is actually used, and
+// that refusal names both routes to one.
 func (a *app) requireCredentials() (credentialPlan, int) {
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
@@ -41,24 +42,28 @@ func (a *app) requireCredentials() (credentialPlan, int) {
 	if err != nil {
 		return credentialPlan{}, a.errorf("%v", err)
 	}
-	if a.credentialsPresent(kv) {
-		return credentialPlan{reuse: true}, exitOK
-	}
+	return credentialPlan{reuse: a.credentialsPresent(kv)}, exitOK
+}
 
+// requireControlToken is the register branch's own gate, and the only refusal
+// `init` has left.
+func (a *app) requireControlToken() (string, int) {
+	envPath, _ := devconfig.EnvFilePath()
 	token := devconfig.ResolveControlToken()
 	if token == "" {
-		return credentialPlan{}, a.errorf(
+		return "", a.errorf(
 			"no agent identity for this tool, and no organization credential to register one with.\n"+
 				"  Nothing was installed.\n"+
 				"  Run `openbox auth` (it stores the token), or export %s, then re-run.\n"+
-				"  An existing agent works too: with the token set, `init` offers to adopt one.\n"+
+				"  Already have this tool's agent? Re-run with a terminal and answer yes when it\n"+
+				"  offers to adopt one; that needs no organization credential.\n"+
 				"  Expected %s and %s in %s, or as environment variables.",
 			devconfig.EnvControlToken, devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
 	}
 	if problem := controlTokenProblem(token); problem != "" {
-		return credentialPlan{}, a.errorf("%s\n  Nothing was installed.", problem)
+		return "", a.errorf("%s\n  Nothing was installed.", problem)
 	}
-	return credentialPlan{token: token}, exitOK
+	return token, exitOK
 }
 
 // printGovernedScope states what this install governs, in the terms a reader
@@ -143,14 +148,27 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 }
 
 // credentialsPresent reports an API key plus a signing seed, from the
-// environment or from an already-parsed .env. `init`'s refusal and
-// `uninstall`'s check ask the same question, so they ask it in one place: an
-// alias added here reaches both.
+// environment or from an already-parsed .env. `init`'s gate and `uninstall`'s
+// check ask the same question, so they ask it in one place: an alias added
+// here reaches both.
+//
+// The environment half is devconfig's, not the app's getenv seam, and that is
+// load-bearing rather than an oversight. Credential resolution at runtime goes
+// through devconfig and reads the real environment; a gate that asked a
+// different source could answer "present" where the resolver answers "absent",
+// and it did -- a machine provisioned through exported variables passed this
+// check, reached registration with no registrar wired, and was told it had hit
+// a defect in the binary. The seam stays for what it is good at: reporting
+// which variables are set, where a test wants to drive the message without
+// touching the process environment.
 func (a *app) credentialsPresent(kv map[string]string) bool {
-	haveKey := a.getenv(devconfig.EnvAPIKeyDirect) != "" || kv[devconfig.EnvAPIKeyDirect] != ""
-	havePrivateKey := a.getenv(devconfig.EnvAgentPrivateKey) != "" || kv[devconfig.EnvAgentPrivateKey] != ""
+	if devconfig.EnvIdentityPresent() {
+		return true
+	}
+	haveKey := kv[devconfig.EnvAPIKeyDirect] != ""
+	havePrivateKey := kv[devconfig.EnvAgentPrivateKey] != ""
 	for _, alias := range []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
-		if a.getenv(alias) != "" || kv[alias] != "" {
+		if kv[alias] != "" {
 			havePrivateKey = true
 		}
 	}

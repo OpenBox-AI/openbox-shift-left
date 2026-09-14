@@ -175,7 +175,7 @@ func Load(path string) (DevConfig, error) {
 func load() (DevConfig, error) { return Load(DefaultConfigPath()) }
 
 // Credentials is the resolved runtime identity for a hook binary. It carries
-// the secret values (read from the environment or ~/.openbox/.env); it exists
+// the secret values (read from the environment or ~/.openbox/<tool>/.env); it exists
 // only in process memory on the flush path and must never be logged or
 // persisted.
 type Credentials struct {
@@ -523,6 +523,31 @@ func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) 
 	}
 
 	return c, nil
+}
+
+// EnvIdentityPresent reports whether the environment alone supplies a complete
+// agent identity: an API key and a signing seed, under the documented name or
+// a deprecated alias.
+//
+// It exists so the install gate and the registration decision ask the same
+// question. They disagreed once: the gate accepted an environment identity and
+// registration looked only at the file, so a machine provisioned entirely
+// through exported variables was told it had hit a build bug. And an exported
+// identity outranks every store at runtime, so minting an agent for such a
+// machine would create one nobody ever uses -- one per ephemeral CI runner.
+func EnvIdentityPresent() bool {
+	if os.Getenv(EnvAPIKeyDirect) == "" {
+		return false
+	}
+	if os.Getenv(EnvAgentPrivateKey) != "" {
+		return true
+	}
+	for _, alias := range deprecatedPrivateKeyEnvNames {
+		if os.Getenv(alias) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func resolvePrivateKey(secrets map[string]string) string {
