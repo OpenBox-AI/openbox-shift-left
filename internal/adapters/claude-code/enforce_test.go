@@ -248,6 +248,11 @@ func parsePermissionDecision(t *testing.T, out []byte) (decision, reason string)
 // TestMapVerdict exercises the full SDK cascade port (OD-ENF-scope):
 // HALT/BLOCK/guardrail-fail → deny; REQUIRE_APPROVAL → ask; constrain/ALLOW/
 // unknown → proceed (no decision).
+//
+// This is the MAPPER, not the gate. The gate holds a REQUIRE_APPROVAL for a
+// real decision before anything is rendered, so the ask arm here is the
+// tighten-only fallback for a caller that renders without the hold -- it is
+// never what the coding agent receives. See outputcontract.ApprovalDecision.
 func TestMapVerdict(t *testing.T) {
 	guardFail := &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii", Reason: "secret detail"}}}
 	guardPass := &client.GuardrailResult{Passed: true}

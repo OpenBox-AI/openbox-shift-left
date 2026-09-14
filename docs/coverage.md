@@ -515,9 +515,11 @@ decides one. What the hook does in-process (its no-sidecar shape) is apply it,
 **tighten-only**; it never turns a provider's own deny into an allow, and the
 one `allow` it may emit rides a redacting rewrite, never a grant.
 
-Verdict mapping differs by provider surface: Claude Code has an hitl prompt so
-`REQUIRE_APPROVAL` → `ask`; Codex's hook parser rejects `ask`, so it maps to
-**deny** with the approval reference in the reason (an owner decision; a fallthrough
+`REQUIRE_APPROVAL` is held for a real decision on both providers, and denies
+with the approval reference in the reason if it goes unanswered or is refused.
+Neither surface renders `ask`: on Claude Code that is a deliberate refusal to
+show the provider's own prompt, which would ask the developer to approve their
+own filed request; on Codex the hook parser has no such verb either way (an owner decision; a fallthrough
 under `approval_policy=never` would auto-run ungoverned, so deny is the safe
 mapping). The deny-and-retry approval design that makes this a real four-eyes
 control rather than self-approval is described in `docs/architecture.md` §

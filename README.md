@@ -246,7 +246,7 @@ coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json
  claude / codex ──hooks──▶ openbox engine ──┬──▶ redact secrets locally (µs)
                                             │
                                             ├──▶ openbox-core /evaluate  ⟵ BLOCKS the call
-                                            │      └─▶ allow · deny · ask · redact
+                                            │      └─▶ allow · deny · hold · redact
                                             ▼
                                    spool ──▶ openbox-core ──▶ sessions · events · lineage
                                               (AIP-signed, same endpoint as agent runtime)
@@ -283,8 +283,8 @@ adapter behind one SPI. Adding a tool is an adapter, not a fork. →
 
 | Provider | Telemetry | Enforcement | Approvals | Model calls | Scope | Org mandate |
 |---|---|---|---|---|---|---|
-| **Claude Code** | shipped; hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | three opt-in lanes (gateway, telemetry, transport), capture only, one elected per call | project or global | managed settings |
-| **Codex** | shipped; hooks + durable spool | deny · redact (no native "ask") | deny + findings channel | not built | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
+| **Claude Code** | shipped; hooks + durable spool | deny · hold · redact | full, incl. waking a session on a late decision | three opt-in lanes (gateway, telemetry, transport), capture only, one elected per call | project or global | managed settings |
+| **Codex** | shipped; hooks + durable spool | deny · hold · redact | deny + findings channel | not built | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
 | **Cursor** | not built | n/a | n/a | n/a | n/a | Team hooks available |
 
 The two providers also send **different amounts of content under one posture**:

@@ -17,7 +17,7 @@ Claude Code hook (stdin JSON)
         ├─ append → local spool            # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout            # telemetry leg: no verdict to render
    gated call (PreToolUse / UserPromptSubmit / ConfigChange)
-        └─ /evaluate → outputcontract.go   # enforce leg: renders deny/ask/block
+        └─ /evaluate → outputcontract.go   # enforce leg: renders deny/block
    SessionEnd / `flush`
         └─ drain spool → client.Emit → POST /api/v1/governance/evaluate  (off the hot path)
 ```

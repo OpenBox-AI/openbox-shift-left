@@ -22,7 +22,7 @@ flowchart LR
   CC -- "hook event" --> ENG
   ENG --> RED
   ENG -- "evaluate (gated call, blocking)" --> CORE
-  CORE -- "allow · deny · ask · redact" --> CC
+  CORE -- "allow · deny · hold · redact" --> CC
   ENG --> SPOOL --> CORE --> DB
   ENG -- "poll approval" --> CORE
   GIT --> CORE
@@ -125,7 +125,7 @@ Each install runs at exactly one level, and reports which:
 |---|---|---|
 | **Observe** (default) | normalized telemetry, lineage, cost. Never blocks. | none; spooled |
 | **Advisory** | verdicts and guardrail findings are recorded and surfaced back into the session, never applied | none |
-| **Enforce** (default since) | the PreToolUse and UserPromptSubmit gates apply the verdict: deny/block, ask, or redact; and a HALT stops the whole session | one round-trip to `/evaluate` per gated hook, bounded by the provider's hook ceiling |
+| **Enforce** (default since) | the PreToolUse and UserPromptSubmit gates apply the verdict: deny/block, hold for an approval, or redact; and a HALT stops the whole session | one round-trip to `/evaluate` per gated hook, bounded by the provider's hook ceiling |
 
 Enforce is three named things, not three tiers. They are independent; any one
 can be on without the others:

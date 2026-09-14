@@ -53,4 +53,20 @@ func TestCapabilities(t *testing.T) {
 	if how := byKey["telemetry.tokens"].How; strings.Contains(how, "opt-in") {
 		t.Errorf("telemetry.tokens is no longer opt-in; the How note still claims it is: %q", how)
 	}
+
+	// The profile said the gate renders "deny/ask on tools" for as long as the
+	// gate has been holding approvals instead. `ask` is the provider's own
+	// prompt, and showing it would ask the developer to approve their own filed
+	// request -- refused on purpose (OD-E9-1, gate.go). A profile that names a
+	// verb the gate cannot render invites someone to test for it, or to "fix"
+	// the gate toward it.
+	//
+	// Measured, not assumed: TestGovernanceEvalApproval drives a REQUIRE_APPROVAL
+	// through the real entrypoint in three directions and reads the rendered
+	// decision. This ties the profile to that measurement.
+	if how := byKey["verdict.apply"].How; strings.Contains(how, "deny/ask") {
+		t.Errorf("verdict.apply claims the gate renders `ask`; it holds the approval and then "+
+			"proceeds or denies, and rendering the provider's own prompt would be self-approval. "+
+			"Describe the hold, not a verb table; got %q", how)
+	}
 }

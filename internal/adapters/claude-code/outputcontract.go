@@ -18,8 +18,15 @@ var contentFieldKeys = []string{"content", "new_string"}
 
 type outputContract struct{}
 
-// ApprovalDecision: Claude Code has a native permission prompt, so a
-// REQUIRE_APPROVAL verdict becomes `ask` and the developer decides.
+// ApprovalDecision is the tighten-only fallback for a caller that renders a
+// decision WITHOUT the approval hold. The gate is not such a caller: it holds a
+// REQUIRE_APPROVAL for a real decision first and renders what came back, so
+// `ask` never reaches the coding agent through it. Deliberately -- the
+// provider's own prompt would ask the developer to approve their own filed
+// request (OD-E9-1, gate.go).
+//
+// It stays non-empty because DecisionTightens treats an empty approval verb as
+// "does not tighten", which would let a REQUIRE_APPROVAL through.
 func (outputContract) ApprovalDecision() string { return ccDecisionAsk }
 
 func (outputContract) ContentFieldKeys() []string { return contentFieldKeys }
