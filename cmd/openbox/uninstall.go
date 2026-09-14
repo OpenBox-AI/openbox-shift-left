@@ -86,6 +86,12 @@ func (a *app) runUninstall(args []string) int {
 	a.removeLanes(st, home)
 	a.removeArtifacts(st, inv)
 	a.removeCredentials(st, inv)
+	// Unconditional, and after the credential step rather than inside it: a
+	// store can hold a config and no credential file at all -- an interrupted
+	// adopt leaves exactly that, because adopt writes the config first on
+	// purpose -- and nesting this inside the credential step put it behind that
+	// step's "nothing to delete" guard.
+	a.removeEmptyIdentityDirs(st)
 	a.reportUnrestorableRouting(st, home)
 	a.printUninstallReport(st, inv)
 	if st.failed {
@@ -255,6 +261,16 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 			inv.envFiles = appendUnique(inv.envFiles, p)
 		}
 	}
+	// The interrupted-write residue of every store, the org's included. The org
+	// one matters most and is the one a per-tool loop would miss: its directory
+	// is Home() itself, which this command never removes, so nothing sweeps it
+	// as a side effect -- and the credential it holds can create and rotate
+	// agents across the whole organization.
+	for _, tool := range append([]string{""}, provider.Supported()...) {
+		for _, p := range interruptedCredentialWrites(tool) {
+			inv.envFiles = appendUnique(inv.envFiles, p)
+		}
+	}
 	// The org's, not ours: removing either silently downgrades a governed
 	// machine, and a root-owned file is not writable here anyway.
 	for _, p := range []string{devconfig.ManagedConfigPath(), claudeManagedSettingsPath()} {
@@ -263,6 +279,33 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 		}
 	}
 	return inv
+}
+
+// interruptedCredentialWrites finds the residue of a credential write that was
+// killed between its temp file and its rename.
+//
+// WriteEnvFile is atomic by writing the whole body into a 0600 `.env-*.tmp`
+// beside the target and renaming over it, and its deferred cleanup does not run
+// if the process dies. So a lid closing, an OOM or a Ctrl-C at the wrong
+// microsecond leaves a readable copy of the API key and the signing seed in the
+// store directory, under a name nothing else looks for. `uninstall` printing
+// that those values "cannot be re-retrieved" while one of them is still on disk
+// is the one failure this command cannot have.
+//
+// The pattern is matched, not guessed: it is the literal prefix and suffix
+// os.CreateTemp is handed in envfile.go, and nothing else writes that shape.
+// An empty tool names the org-level directory, whose residue holds the
+// organization control token.
+func interruptedCredentialWrites(tool string) []string {
+	dir, err := devconfig.IdentityDirFor(tool)
+	if err != nil {
+		return nil
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".env-*.tmp"))
+	if err != nil {
+		return nil
+	}
+	return matches
 }
 
 func (a *app) printInventory(inv uninstallInventory) {
@@ -582,10 +625,9 @@ func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
 	for _, path := range inv.envFiles {
 		a.deletePath(st, path, os.Remove)
 	}
-	// By name first, directories after: a directory delete racing the
-	// credential delete is how a store survives an uninstall that reported
-	// success.
-	a.removeEmptyIdentityDirs(st)
+	// The directories follow, from runUninstall: by name first and the
+	// directory after, because a directory delete racing the credential delete
+	// is how a store survives an uninstall that reported success.
 	fmt.Fprintf(a.stdout, "  the obx_ keys and Ed25519 signing seeds in those files cannot be re-retrieved.\n")
 	fmt.Fprintf(a.stdout, "  `openbox init --provider <tool>` registers a NEW agent; it does not recover these.\n")
 	fmt.Fprintf(a.stdout, "  The organization control token went with them; `openbox auth` takes a new one.\n")
@@ -596,6 +638,12 @@ func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
 // left in it. Only when empty, and never recursively: the direction of error
 // in this command is over-keep, and a directory still holding something is
 // something this run did not account for.
+//
+// Which is exactly why a kept one is named. Every other residue this command
+// cannot clear says so -- the org's managed config, a directory it refuses to
+// recurse into, a lane it could not unroute -- and a store directory surviving
+// silently after "Done" reads as a finished uninstall to the only person who
+// could deal with it.
 func (a *app) removeEmptyIdentityDirs(st *uninstallState) {
 	for _, name := range provider.Supported() {
 		dir, err := devconfig.IdentityDirFor(name)
@@ -603,7 +651,15 @@ func (a *app) removeEmptyIdentityDirs(st *uninstallState) {
 			continue
 		}
 		entries, err := os.ReadDir(dir)
-		if err != nil || len(entries) > 0 {
+		if err != nil {
+			fmt.Fprintf(a.stdout, "  kept           %s (could not read it: %v)\n", dir, err)
+			st.kept = appendUnique(st.kept, dir)
+			continue
+		}
+		if len(entries) > 0 {
+			fmt.Fprintf(a.stdout, "  kept           %s (%d file(s) OpenBox did not put there; delete it by hand)\n",
+				dir, len(entries))
+			st.kept = appendUnique(st.kept, dir)
 			continue
 		}
 		a.deletePath(st, dir, os.Remove)

@@ -234,8 +234,10 @@ func withPresence(path string) string {
 // first tool's identity, and the differing DIDs are what would stop showing
 // it.
 func (a *app) reportIdentities() {
+	var orgCfg devconfig.DevConfig
 	orgPath, err := devconfig.DevConfigPathFor("")
 	if err == nil {
+		orgCfg, _ = devconfig.Load(orgPath)
 		fmt.Fprintf(a.stdout, "  %-11s  %s  (URLs; no agent identity)\n", "org", withPresence(orgPath))
 	}
 	for _, name := range provider.Supported() {
@@ -248,6 +250,7 @@ func (a *app) reportIdentities() {
 		switch {
 		case cfg.DID != "":
 			fmt.Fprintf(a.stdout, "  %-11s  %s  DID %s\n", name, cfgPath, cfg.DID)
+			a.reportURLDrift(name, orgCfg, cfg)
 		default:
 			fmt.Fprintf(a.stdout, "  %-11s  %s  no agent; governing nothing. Run `openbox init --provider %s`\n",
 				name, withPresence(cfgPath), name)
@@ -255,6 +258,32 @@ func (a *app) reportIdentities() {
 	}
 	a.reportIdentitySource()
 	fmt.Fprintln(a.stdout)
+}
+
+// reportURLDrift names a tool still pointing at coordinates the organization
+// has since changed.
+//
+// `auth` writes the organization's URLs once and `init` copies them into each
+// tool's own config, because one dev.json is loaded and never merged over
+// another. That copy is a second store for two fields, so an `auth` re-run
+// correcting a URL changes nothing for an already installed tool until that
+// tool re-runs `init`. Nothing else would ever say so: the tool keeps posting
+// to the old core, which answers 401, and a 401 never spends a delivery
+// attempt -- so the spool grows quietly and no message anywhere names a URL.
+//
+// Only a difference is printed. A line on every row, for every healthy
+// machine, is one people learn to skip.
+func (a *app) reportURLDrift(name string, org, tool devconfig.DevConfig) {
+	for _, f := range []struct{ label, org, tool string }{
+		{"core URL", org.BaseURL, tool.BaseURL},
+		{"backend URL", org.BackendURL, tool.BackendURL},
+	} {
+		if f.org == "" || f.org == f.tool {
+			continue
+		}
+		fmt.Fprintf(a.stdout, "  %-11s  %s differs from org (%s vs %s); re-run `openbox init --provider %s`\n",
+			"", f.label, f.tool, f.org, name)
+	}
 }
 
 // reportIdentitySource names which source actually wins, because an exported

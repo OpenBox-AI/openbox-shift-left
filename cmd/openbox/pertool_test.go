@@ -747,3 +747,182 @@ func TestUninstallRunsUnbound(t *testing.T) {
 		t.Errorf("uninstall left %q bound", got)
 	}
 }
+
+// TestUninstallRemovesAnInterruptedCredentialWrite the credential write is
+// atomic, and the way it is atomic leaves a hazard: WriteEnvFile writes the
+// whole body into a 0600 `.env-*.tmp` beside the target and then renames. Kill
+// the process in between -- a laptop lid, an OOM, a Ctrl-C -- and a readable
+// copy of the API key and signing seed stays in the store directory under a
+// name nothing inventories.
+//
+// `uninstall` then prints that the keys and seeds "cannot be re-retrieved"
+// while one of them is still sitting there. That is the command's central
+// promise, so the residue has to go with the file it was becoming.
+func TestUninstallRemovesAnInterruptedCredentialWrite(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+
+	// Exactly what an interrupted WriteEnvFile leaves behind.
+	residue := filepath.Join(home, "claude-code", ".env-1234567890.tmp")
+	if err := os.WriteFile(residue, []byte("OPENBOX_API_KEY='${OPENBOX_REDACTED_SECRET_ASSIGNMENT}'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if _, err := os.Stat(residue); !os.IsNotExist(err) {
+		t.Errorf("an interrupted credential write survived uninstall (err=%v)\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "claude-code")); !os.IsNotExist(err) {
+		t.Errorf("the store directory survived because of the residue in it")
+	}
+}
+
+// TestUninstallRemovesAnIdentityDirWithNoCredentialFile the dir sweep used to
+// live inside the credential step, behind its "nothing to delete" guard, so a
+// store holding only a dev.json was never reached. That state is reachable:
+// adopt writes the config first on purpose, so an interrupted adopt leaves
+// exactly this, and so does deleting a .env by hand to rotate a key.
+func TestUninstallRemovesAnIdentityDirWithNoCredentialFile(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	// A config and no credential file ANYWHERE. With one present the credential
+	// step runs and sweeps directories on its way out, which is why this case
+	// has to be the machine that has none: that is the branch the sweep sits
+	// behind.
+	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"),
+		devconfig.Update{DID: testDIDFor(t, "claude-code")}); err != nil {
+		t.Fatal(err)
+	}
+
+	a, _, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, "claude-code")); !os.IsNotExist(err) {
+		t.Errorf("a store holding only a config survived uninstall (err=%v)", err)
+	}
+}
+
+// TestUninstallReportsAnIdentityDirItCouldNotClear the direction of error here
+// is over-keep, so a directory holding something this run did not account for
+// stays. What must not happen is it staying silently: every other residue this
+// command cannot clear is named, and a store directory left behind after
+// "Done" reads as a finished uninstall.
+func TestUninstallReportsAnIdentityDirItCouldNotClear(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	stranger := filepath.Join(home, "claude-code", "notes.txt")
+	if err := os.WriteFile(stranger, []byte("not ours\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if _, err := os.Stat(stranger); err != nil {
+		t.Errorf("uninstall deleted a file it does not own: %v", err)
+	}
+	dir := filepath.Join(home, "claude-code")
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("the directory holding it was removed anyway: %v", err)
+	}
+	// Not a bare Contains: the inventory line for `<dir>/.env` carries the
+	// directory path as a prefix, so that would pass without a word being said
+	// about what was kept.
+	var said bool
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "kept") && strings.Contains(line, dir) {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("uninstall kept %s and did not say so:\n%s", dir, out.String())
+	}
+}
+
+// TestDoctorReportsOrgToToolURLDrift `auth` writes the organization's URLs
+// once and `init` copies them into each tool's own config, so a re-run of
+// `auth` that corrects a URL has no effect on an already installed tool until
+// that tool re-runs `init`. Nothing about that is visible: the tool keeps
+// posting to the old core, which answers 401, and a 401 never spends a
+// delivery attempt -- so the spool grows and no message anywhere names a URL.
+//
+// doctor is the only place both values are in hand at once.
+func TestDoctorReportsOrgToToolURLDrift(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvBaseURL, "")
+	t.Setenv(devconfig.EnvBackendURL, "")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
+		BackendURL: "https://api.corrected", BaseURL: "https://core.corrected"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
+		DID: testDIDFor(t, "claude-code"), BackendURL: "https://api.stale", BaseURL: "https://core.stale"}); err != nil {
+		t.Fatal(err)
+	}
+	// codex agrees with the org, so only one row may be flagged.
+	if err := devconfig.WriteConfig(filepath.Join(home, "codex", "dev.json"), devconfig.Update{
+		DID: testDIDFor(t, "codex"), BackendURL: "https://api.corrected", BaseURL: "https://core.corrected"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "https://core.stale") || !strings.Contains(out, "https://core.corrected") {
+		t.Errorf("doctor does not show both sides of the drift:\n%s", out)
+	}
+	if !strings.Contains(out, "openbox init --provider claude-code") {
+		t.Errorf("doctor names the drift without the remedy:\n%s", out)
+	}
+	// A tool that matches must not be flagged, or the line becomes noise
+	// everybody learns to skip.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "codex") && strings.Contains(line, "differs from org") {
+			t.Errorf("doctor flagged a tool whose URLs match the org:\n%s", line)
+		}
+	}
+}
+
+// TestUninstallRemovesAnInterruptedOrgTokenWrite the same hazard at the file
+// that matters most. `auth` writes the organization control token through the
+// same atomic path, so an interrupted run leaves a readable copy of it in
+// ~/.openbox/ -- and that credential can create and rotate agents across the
+// whole organization, which is a strictly larger blast radius than any one
+// tool's seed.
+//
+// The org directory is Home() itself, which uninstall never removes, so the
+// residue cannot be swept as a side effect of removing a directory. It has to
+// be named.
+func TestUninstallRemovesAnInterruptedOrgTokenWrite(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+
+	residue := filepath.Join(home, ".env-9876543210.tmp")
+	if err := os.WriteFile(residue, []byte("OPENBOX_CONTROL_TOKEN='${OPENBOX_REDACTED_SECRET_ASSIGNMENT}'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if _, err := os.Stat(residue); !os.IsNotExist(err) {
+		t.Errorf("an interrupted organization-token write survived uninstall (err=%v)\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), residue) {
+		t.Errorf("the inventory did not list it before deleting it:\n%s", out.String())
+	}
+}
