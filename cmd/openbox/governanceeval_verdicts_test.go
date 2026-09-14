@@ -177,6 +177,10 @@ func TestGovernanceEvalApproval(t *testing.T) {
 		if d := requireVerb(t, run, ""); d.Stop {
 			t.Error("an approved request stopped the session")
 		}
+		rec := requireLedgerRow(t, run)
+		if src, _ := rec["source"].(string); src != "approval:decided" {
+			t.Errorf("the ledger records source %q, want approval:decided; proceeding is not the same as having read an answer", src)
+		}
 		grade(t, fakecore.PairingGrader(), sc, run.Run)
 	})
 }
@@ -220,6 +224,15 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 		// would make a change to the backoff read as a governance regression.
 		if run.Fake.Hits() < 1 {
 			t.Error("the gate denied without ever reaching /evaluate; the failure policy ran before the evaluation instead of after it")
+		}
+		// Stronger than counting requests. This source is written only by the
+		// fail-open path, which exists only after an escalation was attempted
+		// and failed -- so it pins the ORDER, not merely that a round trip
+		// happened. Had the policy run first it would have recorded the local
+		// decider's source instead and never asked.
+		rec := requireLedgerRow(t, run)
+		if src, _ := rec["source"].(string); src != "evaluate:fail-open" {
+			t.Errorf("the ledger records source %q, want evaluate:fail-open; the denial did not come from a failed evaluation, which means the failure policy was applied before the evaluation rather than after it", src)
 		}
 		if d.Reason == "" {
 			t.Error("a fail-closed deny gave the coding agent no reason at all")
@@ -346,6 +359,49 @@ func TestGovernanceEvalGateOutageReportsTheCallOnce(t *testing.T) {
 
 	if n := countStartedFor(run, noToolUseID); n != 1 {
 		t.Errorf("the call reached the wire %d times, want exactly 1: both the gate and the observe copy elected, or neither did", n)
+	}
+	grade(t, fakecore.PairingGrader(), sc, run.Run)
+}
+
+// TestGovernanceEvalHaltLatchesTheRestOfTheRun is the behavioural half of the
+// latch, and the real difference between a HALT and a BLOCK.
+//
+// A file under the halt directory is weak evidence: the directory is
+// env-pinned, so a regression writing the latch somewhere else would satisfy a
+// file check while the session carried on. What the latch is FOR is that the
+// next call in the run is refused without asking again -- so that is what is
+// asserted.
+func TestGovernanceEvalHaltLatchesTheRestOfTheRun(t *testing.T) {
+	const secondCall = "toolu_01after"
+	sc := fakecore.Scenario{
+		Name: "a-halt-refuses-the-next-call-without-asking-again",
+		Payloads: []fakecore.HookPayload{
+			sessionStart(),
+			preBash(noToolUseID, "rm -rf /important"),
+			preBash(secondCall, "ls -la"),
+			sessionEnd(),
+		},
+		Verdicts: map[string]string{
+			noToolUseID: haltVerdict,
+			// Scripted ALLOW: if the latch is not consulted, this call
+			// proceeds and the test says so.
+			secondCall: allowVerdict,
+		},
+		Denied:     map[string]bool{noToolUseID: true, secondCall: true},
+		Provenance: authoredProvenance,
+	}
+	run := runScenario(t, sc)
+
+	first, _ := run.DecisionFor(noToolUseID)
+	if !first.Stop {
+		t.Fatal("the HALT did not stop the session, so there is no latch to test")
+	}
+	second, ok := run.DecisionFor(secondCall)
+	if !ok {
+		t.Fatal("the second call was never gated")
+	}
+	if second.Verb != "deny" {
+		t.Errorf("the call after a HALT rendered %q; a latched run refuses every later call, and this one was scripted ALLOW so it would have proceeded had the latch not been read", second.Verb)
 	}
 	grade(t, fakecore.PairingGrader(), sc, run.Run)
 }

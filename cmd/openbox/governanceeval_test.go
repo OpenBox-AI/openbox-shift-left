@@ -77,14 +77,17 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 		// four-value vocabulary, and ValidateDevEvent pointed at it would
 		// reject every event.
 		if p.Event == "SessionEnd" {
-			validateSpool(t, spool)
+			validateSpool(t, spool, sc.Posture.ContentCapture == "1")
 		}
 		if code := a.run([]string{"hook", "claude-code", p.Event}); code != exitOK {
 			t.Fatalf("%s payload #%d exit = %d; stderr=%q", p.Event, i, code, errb.String())
 		}
 		// runHook always returns 0 and recovers panics, so the exit code says
-		// nothing; stderr is where a panic surfaces.
-		if strings.Contains(errb.String(), "recovered from panic") {
+		// nothing; stderr is where a panic surfaces. Both recoveries have to
+		// be matched: RunHook's own runs first and logs "recovered:", so
+		// watching only for the outer "recovered from panic" would miss every
+		// panic inside the hook body -- which is all of them that matter.
+		if panicked(errb.String()) {
 			t.Fatalf("%s payload #%d panicked: %s", p.Event, i, errb.String())
 		}
 		run.Stdout = append(run.Stdout, out.String())
@@ -192,10 +195,13 @@ func requireUsableFixture(t *testing.T, sc fakecore.Scenario) {
 // synchronously at the gate and its observe copy is discarded, so ToolCall and
 // PromptSubmitted never reach the spool at all. The observe-only scenario is
 // what puts those two under the validator.
-func validateSpool(t *testing.T, spoolDir string) {
+func validateSpool(t *testing.T, spoolDir string, contentCapture bool) {
 	t.Helper()
 	for i, line := range fakecore.SpoolLines(spoolDir) {
-		if err := conformance.ValidateDevEvent(line, false); err != nil {
+		// The posture is an argument, not a constant: the validator refuses an
+		// event carrying content when capture is off, so hard-coding "off"
+		// would call a correctly captured session non-conformant.
+		if err := conformance.ValidateDevEvent(line, contentCapture); err != nil {
 			// The line itself is never echoed: INV-2 applies to test logs.
 			t.Errorf("spooled event #%d is not contract-conformant: %v", i, err)
 		}
@@ -243,6 +249,16 @@ func evalEnv(t *testing.T, fake *fakecore.Server, dir, spool string, p fakecore.
 	if p.ApprovalHoldMS != "" {
 		t.Setenv(devconfig.EnvApprovalHold, p.ApprovalHoldMS)
 	}
+	if p.SecretDetection != "" {
+		t.Setenv(devconfig.EnvSecretDetection, p.SecretDetection)
+	} else {
+		os.Unsetenv(devconfig.EnvSecretDetection) // default: on
+	}
+}
+
+// panicked reports whether either recovery fired.
+func panicked(stderr string) bool {
+	return strings.Contains(stderr, "recovered from panic") || strings.Contains(stderr, "recovered:")
 }
 
 func stringsContainsFold(haystack, needle string) bool {

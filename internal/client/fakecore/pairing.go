@@ -53,7 +53,7 @@ func PairingGrader() Grader {
 	return Grader{
 		Name:   "pairing",
 		Check:  checkPairing,
-		Mutate: func(s Scenario) Scenario { return Drop(s, "PostToolUse") },
+		Mutate: func(s Scenario) (Scenario, []string) { return Drop(s, "PostToolUse"), DroppedIDs(s, "PostToolUse") },
 	}
 }
 

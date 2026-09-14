@@ -51,7 +51,10 @@ type Posture struct {
 	Enforce        string // "0" | "1"
 	FailClosed     string // "0" | "1"
 	ContentCapture string // "0" | "1"
-	ApprovalHoldMS string
+	// SecretDetection is "" (the default, on) or "0". Turning it off is how a
+	// test proves the redactor is what keeps a secret off the wire.
+	SecretDetection string
+	ApprovalHoldMS  string
 }
 
 // Script projects the scenario onto what the fake should answer.
@@ -66,11 +69,16 @@ func (s Scenario) Script() Script {
 // An expectation read out of the same inbox it is checking is an identity, not
 // a property.
 //
-// Mutate returns the scenario that must make this grader fail. Every grader
-// ships one and the suite executes it, because a grader nobody has watched
-// fail is not yet a grader.
+// Mutate returns the scenario that must make this grader fail, together with
+// the calls it interfered with. Every grader ships one and the suite executes
+// it, because a grader nobody has watched fail is not yet a grader; and the
+// returned ids let the suite require that the grader NAMES what was taken,
+// which it can only do by having noticed.
+//
+// A mutation that touches no particular call returns no ids, and is held to
+// going red without the naming requirement.
 type Grader struct {
 	Name   string
 	Check  func(Scenario, Run) []string
-	Mutate func(Scenario) Scenario
+	Mutate func(Scenario) (Scenario, []string)
 }

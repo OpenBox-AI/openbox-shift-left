@@ -194,33 +194,46 @@ func TestGovernanceEvalReferenceGraders(t *testing.T) {
 }
 
 // TestGovernanceEvalMutations executes every grader's declared mutation and
-// requires the named grader to go red, on a run that is otherwise healthy. A
-// grader nobody has watched fail is not yet a grader, and a drill recorded in
-// a PR body is not a test.
+// requires the named grader to go red, on a run that is otherwise healthy.
+//
+// This single test replaces three weaker devices: a minimum registry size, a
+// mutation drill written up in a pull request, and a prose review rule. It
+// also catches a grader that returns nil early, and one that is red on
+// everything.
+//
+// Each grader brings its own base scenario. A content grader has nothing to
+// say about a session carrying no content, and registering every grader
+// against one shared base would make some of their mutations no-ops that still
+// looked executed.
 func TestGovernanceEvalMutations(t *testing.T) {
-	graders := registeredGraders()
-	if len(graders) == 0 {
+	registry := gradedScenarios()
+	if len(registry) == 0 {
 		t.Fatal("the grader registry is empty")
 	}
 	seen := map[string]bool{}
-	for _, g := range graders {
-		if seen[g.Name] {
-			t.Fatalf("two graders are registered as %q; one would silently shadow the other", g.Name)
+	for _, gs := range registry {
+		if seen[gs.grader.Name] {
+			t.Fatalf("two graders are registered as %q; one would silently shadow the other", gs.grader.Name)
 		}
-		seen[g.Name] = true
+		seen[gs.grader.Name] = true
 	}
 
-	for _, g := range graders {
-		t.Run(g.Name, func(t *testing.T) {
+	for _, gs := range registry {
+		t.Run(gs.grader.Name, func(t *testing.T) {
+			g := gs.grader
 			if g.Mutate == nil {
-				t.Fatalf("grader %q declares no mutation, so nothing proves it can fail", g.Name)
+				if gs.whyNoMutation == "" {
+					t.Fatalf("grader %q declares no mutation and no reason, so nothing proves it can fail", g.Name)
+				}
+				t.Logf("no input mutation can falsify %q: %s", g.Name, gs.whyNoMutation)
+				return
 			}
-			base := ranFineSession()
+			base := gs.base()
 			if reasons := g.Check(base, runScenario(t, base).Run); len(reasons) != 0 {
-				t.Fatalf("grader %q is red on the healthy control, so its mutation proves nothing: %v", g.Name, reasons)
+				t.Fatalf("grader %q is red on its own healthy control, so its mutation proves nothing: %v", g.Name, reasons)
 			}
 
-			mutated := g.Mutate(base)
+			mutated, touched := g.Mutate(gs.base())
 			run := runScenario(t, mutated)
 			// The mutated run must still be a working session, or every
 			// grader would be red for the wrong reason.
@@ -230,29 +243,23 @@ func TestGovernanceEvalMutations(t *testing.T) {
 			if len(reasons) == 0 {
 				t.Fatalf("grader %q stayed green on its own declared mutation (%s); it cannot fail", g.Name, mutated.Name)
 			}
-			joined := strings.Join(reasons, " ")
 			for _, r := range reasons {
 				if strings.TrimSpace(r) == "" {
 					t.Errorf("grader %q returned an empty reason; a reason nobody can read is a boolean", g.Name)
 				}
 			}
 			// Named attribution, not isolation: dropping a completion
-			// legitimately fails more than one grader. What it may not do is
-			// fail without saying which call it is about -- and the grader can
-			// only name it by having found it.
-			for _, id := range fakecore.DroppedIDs(base, "PostToolUse") {
+			// legitimately fails pairing AND completeness. What a grader may
+			// not do is go red without saying which call it is about -- and it
+			// can only name one by having found it.
+			joined := strings.Join(reasons, " ")
+			for _, id := range touched {
 				if !strings.Contains(joined, id) {
-					t.Errorf("grader %q went red but never named %s, the call its mutation took a half from: %v", g.Name, id, reasons)
+					t.Errorf("grader %q went red but never named %s, the call its mutation interfered with: %v", g.Name, id, reasons)
 				}
 			}
 		})
 	}
-}
-
-// registeredGraders is the set under test. Reference graders are deliberately
-// absent: they are the wrong answers, kept executable elsewhere.
-func registeredGraders() []fakecore.Grader {
-	return []fakecore.Grader{fakecore.PairingGrader()}
 }
 
 // requireHealthyRun rejects a mutated run that broke the session rather than
