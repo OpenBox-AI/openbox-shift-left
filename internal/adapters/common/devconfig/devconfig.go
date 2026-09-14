@@ -133,11 +133,24 @@ type DevConfig struct {
 }
 
 // DefaultConfigPath is where the hook looks for the dev config when
-// OPENBOX_CONFIG is unset: ~/.openbox/dev.json, with a read-side fallback to
-// the pre-that decision location while an unmigrated file lives there.
+// OPENBOX_CONFIG is unset: the bound tool's ~/.openbox/<tool>/dev.json, or
+// ~/.openbox/dev.json unbound, with a read-side fallback to the pre-that
+// decision location while an unmigrated file lives there.
+//
+// The fallback is scoped to the bound tool for the same reason the bound
+// branch of DevConfigPath skips resolveConfigPath: a per-tool store has never
+// existed at the legacy location, so a bound read landing there would be one
+// tool answering with the org's identity -- exactly the cross-boundary read
+// the per-tool split exists to make impossible. It is reached only when Home()
+// itself fails (a relative OPENBOX_HOME, or no home directory at all), where
+// the honest answer is a path that does not exist rather than one that does
+// and belongs to somebody else.
 func DefaultConfigPath() string {
 	p, err := DevConfigPath()
 	if err != nil {
+		if tool := BoundProvider(); tool != "" {
+			return filepath.Join(legacyConfigDir(), tool, "dev.json")
+		}
 		return filepath.Join(legacyConfigDir(), "dev.json")
 	}
 	return p

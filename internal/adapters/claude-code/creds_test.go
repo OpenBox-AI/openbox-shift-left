@@ -33,6 +33,16 @@ func isolateConfig(t *testing.T) {
 	t.Setenv(envConfigPath, filepath.Join(t.TempDir(), "none.json"))
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 
+	// Every production caller of this adapter runs under `openbox hook
+	// claude-code`, which binds before anything resolves a credential. Leaving
+	// the fixture unbound would read the org store, which under the per-tool
+	// split holds no agent identity at all.
+	release, err := devconfig.BindProvider("claude-code")
+	if err != nil {
+		t.Fatalf("bind claude-code: %v", err)
+	}
+	t.Cleanup(release)
+
 	// Never clobber a pin the test already made: helpers like findingsEnv point
 	// the advisory sink at a file they then seed, and they are called either side
 	// of this one.

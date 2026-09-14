@@ -353,3 +353,34 @@ func TestUnboundIdentityPathsAreTheOrgFiles(t *testing.T) {
 		t.Fatalf("EnvFilePath() = %q after release, want the org file %q", env, want)
 	}
 }
+
+// TestABoundReadNeverLandsOnTheOrgOrLegacyFile the degraded path, which is the
+// one a reader skips: DefaultConfigPath swallows its error and answers with a
+// path anyway, and the path it used to answer with was the org-level legacy
+// file -- for a bound process as much as an unbound one. A machine whose home
+// cannot be resolved would then stamp the org DID onto one tool's events while
+// its credentials failed to resolve at all, which is the cross-boundary read
+// the per-tool split exists to make impossible.
+func TestABoundReadNeverLandsOnTheOrgOrLegacyFile(t *testing.T) {
+	t.Setenv(EnvConfigPath, "")
+	pointUserConfigDirAt(t, t.TempDir())
+	orgLegacy := filepath.Join(legacyConfigDir(), "dev.json")
+
+	release, err := BindProvider("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	// A home that cannot resolve is the only way into the fallback.
+	t.Setenv(EnvHome, "relative/openbox")
+	if _, err := DevConfigPath(); err == nil {
+		t.Fatal("DevConfigPath() resolved a relative OPENBOX_HOME; this case no longer reaches the fallback")
+	}
+	if got := DefaultConfigPath(); got == orgLegacy {
+		t.Fatalf("a bound read fell back to the org-level legacy config %q", got)
+	}
+	if got := DefaultConfigPath(); !strings.Contains(got, "codex") {
+		t.Fatalf("DefaultConfigPath() = %q while bound to codex; the degraded path must stay scoped to the tool", got)
+	}
+}

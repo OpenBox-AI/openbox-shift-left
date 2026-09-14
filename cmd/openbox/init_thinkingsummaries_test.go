@@ -53,7 +53,7 @@ func TestInitSetsThinkingSummariesAndSaysSo(t *testing.T) {
 // name nothing and leave no restore record for a later `uninstall` to find.
 func TestInitCodexWritesNoThinkingSummariesKeyOrRecord(t *testing.T) {
 	isolateHome(t)
-	seedCredentials(t)
+	seedCredentials(t, "codex")
 	a, out, errb := testApp(nil)
 	if code := a.runDevInit([]string{"--provider", "codex"}); code != exitOK {
 		t.Fatalf("openbox init --provider codex = %d, want 0; stderr=%q", code, errb.String())

@@ -66,9 +66,35 @@ func testApp(env map[string]string) (*app, *bytes.Buffer, *bytes.Buffer) {
 //   - The working directory.
 func isolateHome(t *testing.T) string {
 	t.Helper()
+	dir := isolateHomeOnly(t)
+	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
+	return dir
+}
+
+// isolateHomeOnly is isolateHome without the OPENBOX_CONFIG pin, for a test
+// that needs each tool's dev.json to land in that tool's own directory. With
+// the pin set, two tools share one dev.json and a per-tool test passes
+// vacuously against the override -- which is the whole failure it exists to
+// catch, so the pin is cleared rather than merely left alone.
+//
+// It binds claude-code, because that is what the command under test will bind
+// and a fixture that seeds a different store than the command reads proves
+// nothing. A test that wants another tool rebinds over this one.
+func isolateHomeOnly(t *testing.T) string {
+	t.Helper()
+	dir := isolateHomeUnbound(t)
+	bindProviderForTest(t, defaultTestProvider)
+	return dir
+}
+
+// isolateHomeUnbound is isolateHomeOnly with nothing bound, for the one case
+// that has to look like a real process before it learns which tool it is
+// acting for: a git hook with no tool marker in its environment.
+func isolateHomeUnbound(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	t.Setenv(devconfig.EnvHome, dir)
-	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
+	t.Setenv(devconfig.EnvConfigPath, "")
 	t.Setenv("HOME", t.TempDir())
 
 	sinks := t.TempDir()
@@ -91,6 +117,23 @@ func isolateHome(t *testing.T) string {
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 	fakeSupervisor(t, dir)
 	return dir
+}
+
+// defaultTestProvider is the tool a fixture binds and seeds when a test does
+// not say otherwise.
+const defaultTestProvider = "claude-code"
+
+// bindProviderForTest binds for the length of one test. A test binary
+// dispatches many commands in one process, so the release is mandatory:
+// without it the first bind would decide every later case's identity. Nothing
+// that binds may call t.Parallel().
+func bindProviderForTest(t *testing.T, tool string) {
+	t.Helper()
+	release, err := devconfig.BindProvider(tool)
+	if err != nil {
+		t.Fatalf("bind %s: %v", tool, err)
+	}
+	t.Cleanup(release)
 }
 
 // fakeSupervisor replaces every seam that leaves this process, and seeds the
@@ -1026,7 +1069,7 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	t.Setenv("CODEX_HOME", codexHome)
 	t.Setenv("OPENBOX_CONFIG", cfgPath)
 
-	seedCredentials(t)
+	seedCredentials(t, "codex")
 	a, out, errb := testApp(nil)
 
 	code := a.run([]string{"init", "--provider", "codex"})
@@ -1058,7 +1101,7 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if strings.Contains(string(rawCfg), "obx_test_k") || strings.Contains(string(rawCfg), "c2VlZA==") {
 		t.Errorf("dev config leaked a secret value:\n%s", rawCfg)
 	}
-	kv, err := devconfig.ParseEnvFile(filepath.Join(openboxHome, ".env"))
+	kv, err := devconfig.ParseEnvFile(filepath.Join(openboxHome, "codex", ".env"))
 	if err != nil {
 		t.Fatalf("read credential file: %v", err)
 	}
@@ -1147,9 +1190,41 @@ func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 	})
 }
 
-func seedCredentials(t *testing.T) {
+// seedCredentials writes a complete identity store for each named tool,
+// defaulting to claude-code. Identity is per tool now, so a test that runs
+// `--provider codex` has to say so or it seeds a store the command never
+// reads.
+func seedCredentials(t *testing.T, tools ...string) {
 	t.Helper()
-	envPath, err := devconfig.EnvFilePath()
+	if len(tools) == 0 {
+		tools = []string{defaultTestProvider}
+	}
+	if len(tools) > 1 && os.Getenv(devconfig.EnvConfigPath) != "" {
+		t.Fatal("seeding two tools under an OPENBOX_CONFIG pin would put both DIDs in one dev.json and the second would win; use isolateHomeOnly")
+	}
+	for _, tool := range tools {
+		seedToolCredentials(t, tool, testDIDFor(t, tool))
+	}
+}
+
+// testDIDFor gives each tool its own DID, so a test asserting on a spooled
+// event can tell which store answered.
+func testDIDFor(t *testing.T, tool string) string {
+	t.Helper()
+	switch tool {
+	case "claude-code":
+		return "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+	case "codex":
+		return "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c9999"
+	default:
+		t.Fatalf("no test DID for provider %q", tool)
+		return ""
+	}
+}
+
+func seedToolCredentials(t *testing.T, tool, did string) {
+	t.Helper()
+	envPath, err := devconfig.EnvFilePathFor(tool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1158,14 +1233,25 @@ func seedCredentials(t *testing.T) {
 		devconfig.EnvAgentPrivateKey: testSeedB64}); err != nil {
 		t.Fatal(err)
 	}
-	devPath, err := devconfig.DevConfigWritePath()
+	if err := devconfig.WriteConfig(seedDevConfigPath(t, tool), devconfig.Update{DID: did}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedDevConfigPath resolves dev.json exactly the way the command under test
+// will: through the OPENBOX_CONFIG pin when the fixture set one, else the
+// tool's own file. Resolving it any other way would seed a file the command
+// does not read, which is the quiet way a fixture stops proving anything.
+func seedDevConfigPath(t *testing.T, tool string) string {
+	t.Helper()
+	if p := os.Getenv(devconfig.EnvConfigPath); p != "" {
+		return p
+	}
+	p, err := devconfig.DevConfigWritePathFor(tool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(devPath, devconfig.Update{
-		DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"}); err != nil {
-		t.Fatal(err)
-	}
+	return p
 }
 
 // scriptedAuth drives `openbox auth` through its prompts, in the order they are

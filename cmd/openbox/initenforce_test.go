@@ -131,7 +131,7 @@ func TestInitStillRequiresAProviderAndNamesTheSupportedSet(t *testing.T) {
 // regression from the flag era.
 func TestCodexInstallsHooksOnlyWithoutError(t *testing.T) {
 	isolateHome(t)
-	seedCredentials(t)
+	seedCredentials(t, "codex")
 	a, out, errb := testApp(nil)
 	if code := a.run([]string{"init", "--provider", "codex"}); code != exitOK {
 		t.Fatalf("codex init exit = %d; stderr=%q", code, errb.String())

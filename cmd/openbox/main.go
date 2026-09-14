@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
@@ -124,6 +125,21 @@ func (a *app) runHook(args []string) (code int) {
 		return exitOK
 	}
 	if args[0] == "git" {
+		// A commit hook has no provider on argv, so the tool is read from the
+		// markers it leaves in the environment. Getting this wrong signs a
+		// commit with the wrong agent's key, so no marker means no bind and no
+		// attestation rather than a guess -- attestContext already reports
+		// ok=false when nothing resolves, and writeAttestation already logs the
+		// skip.
+		if p := attestProvider(a.getenv); p != "" {
+			release, err := devconfig.BindProvider(p)
+			if err != nil {
+				// Never abort a commit: the git engine is fail-open by contract.
+				logger.Printf("attestation identity unavailable: %v", err)
+			} else {
+				defer release()
+			}
+		}
 		obgit.SetAttestContext(attestContext)
 		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
 		return exitOK
@@ -134,12 +150,37 @@ func (a *app) runHook(args []string) (code int) {
 		logger.Printf("unknown hook provider %q (supported: %s, git)", args[0], strings.Join(provider.Supported(), ", "))
 		return exitOK
 	}
+	// After the name is known to be a real provider, so a typo cannot create a
+	// directory under ~/.openbox.
+	release, err := devconfig.BindProvider(args[0])
+	if err != nil {
+		logger.Printf("cannot resolve %s's identity store: %v", args[0], err)
+		return exitOK
+	}
+	defer release()
 	if len(args) < 2 {
 		logger.Printf("usage: openbox hook %s <event>", args[0])
 		return exitOK
 	}
+	a.warnIfUnconfigured(args[0], logger)
 	engine.RunHook(args[1], a.stdin, a.stdout, logger)
 	return exitOK
+}
+
+// warnIfUnconfigured names the fix once when the bound tool has no identity at
+// all. Under the no-legacy-fallback rule an upgraded machine governs nothing
+// until `init` runs again per tool, and the symptom is silence -- so the line
+// exists to be the answer to "why did governance stop".
+//
+// It never blocks: a hook that failed closed on a missing credential would
+// stop the developer working, which is a worse failure than not governing.
+// And it is a developer-facing notice, never an event; nothing here reaches
+// the spool or the enforcement sink.
+func (a *app) warnIfUnconfigured(name string, logger *log.Logger) {
+	if devconfig.ResolveDIDOrEmpty() != "" {
+		return
+	}
+	logger.Printf("no agent identity for %s on this machine; governance is inactive. Run `openbox init --provider %s`", name, name)
 }
 
 // runRewake is the background approval watcher (E9 §2.2), invoked by an
@@ -160,6 +201,15 @@ func (a *app) runRewake(args []string) (code int) {
 		fmt.Fprintf(a.stderr, "openbox rewake: unknown provider %q\n", args[0])
 		return exitOK
 	}
+	// Before RunRewake, which takes a config Pin as its first act: a Pin
+	// freezes the resolved config across a path change, so a bind inside one
+	// would be read through the previous tool's snapshot.
+	release, err := devconfig.BindProvider(args[0])
+	if err != nil {
+		fmt.Fprintf(a.stderr, "openbox rewake: cannot resolve %s's identity store: %v\n", args[0], err)
+		return exitOK
+	}
+	defer release()
 	rw, ok := engine.(provider.Rewaker)
 	if !ok {
 		return exitOK
@@ -202,6 +252,13 @@ func (a *app) runDevInit(args []string) int {
 	// the working directory itself.
 
 	a.migrateLegacyConfig()
+	// After the migration, which is org-level by construction, and before
+	// anything reads a credential.
+	release, err := devconfig.BindProvider(o.Provider)
+	if err != nil {
+		return a.errorf("cannot resolve %s's identity store: %v", o.Provider, err)
+	}
+	defer release()
 	if code := a.requireCredentials(); code != exitOK {
 		return code
 	}

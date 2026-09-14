@@ -64,7 +64,20 @@ func isolateHome(t *testing.T) string {
 	t.Setenv(devconfig.EnvHome, dir)
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
 	t.Setenv(devconfig.EnvDID, "")
+	bindProviderForTest(t, "claude-code")
 	return dir
+}
+
+// bindProviderForTest binds the tool whose identity store this package writes.
+// In production `openbox init --provider X` binds before devinit runs, so a
+// fixture that left this unbound would exercise a path no command takes.
+func bindProviderForTest(t *testing.T, tool string) {
+	t.Helper()
+	release, err := devconfig.BindProvider(tool)
+	if err != nil {
+		t.Fatalf("bind %s: %v", tool, err)
+	}
+	t.Cleanup(release)
 }
 
 func readCredentialFile(t *testing.T) map[string]string {
@@ -147,7 +160,17 @@ func TestConfigAppliedWhenInstallerAvailable(t *testing.T) {
 
 func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 	dir := isolateHome(t)
-	if err := devconfig.WriteEnvFile(filepath.Join(dir, ".env"), map[string]string{
+	// The tool's own store, not the org one: reuse is a strictly per-tool
+	// decision, so seeding ~/.openbox/.env here would seed a file this run
+	// never reads.
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "claude-code", ".env"); envPath != want {
+		t.Fatalf("credential file = %q, want the per-tool store %q", envPath, want)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
 		devconfig.EnvAPIKeyDirect:    "obx_test_existing",
 		devconfig.EnvAgentPrivateKey: "existingseed",
 	}); err != nil {

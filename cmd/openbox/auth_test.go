@@ -614,7 +614,7 @@ func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
 	if res.ConfigApplied {
 		t.Error("auth registered AND installed; init owns installation")
 	}
-	kv := readEnvFile(t, home)
+	kv := readEnvFile(t, filepath.Join(home, "claude-code"))
 	if kv[devconfig.EnvAPIKeyDirect] != "obx_minted" {
 		t.Errorf("minted credentials not written: %v", kv)
 	}

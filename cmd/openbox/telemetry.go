@@ -22,6 +22,16 @@ const (
 )
 
 func (a *app) runTelemetry(args []string) int {
+	// A lane daemon acts for exactly one tool for its whole life, and takes it
+	// from a compile-time constant rather than argv: this is the one bind site
+	// the environment cannot redirect. A daemon that cannot resolve its own
+	// identity must not come up half-governing.
+	release, err := devconfig.BindProvider(telemetrySpoolProvider)
+	if err != nil {
+		return a.errorf("cannot resolve %s's identity store: %v", telemetrySpoolProvider, err)
+	}
+	defer release()
+
 	fs := a.newFlagSet("telemetry")
 	addr := fs.String("addr", telemetry.DefaultAddr, "loopback listen address (host:port)")
 	grace := fs.Duration("shutdown-grace", 10*time.Second, "how long to let in-flight exports finish after a stop signal")

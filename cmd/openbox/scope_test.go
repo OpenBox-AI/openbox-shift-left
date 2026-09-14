@@ -68,7 +68,7 @@ func TestAFlagThatMovedOrWasRemovedIsRefused(t *testing.T) {
 
 func TestCodexInitSaysEverySessionIsGoverned(t *testing.T) {
 	isolateHome(t)
-	seedCredentials(t)
+	seedCredentials(t, "codex")
 	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex-home"))
 	a, out, errb := testApp(nil)
 	if code := a.run([]string{"init", "--provider", "codex"}); code != exitOK {

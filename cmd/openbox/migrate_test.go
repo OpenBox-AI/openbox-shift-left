@@ -12,6 +12,14 @@ import (
 
 // TestInitMigratesLegacyPostureBeforeWritingOverIt migration must happen
 // before THE first write, and only a command-level test can show it.
+//
+// What init writes over moved when identity went per tool: init's posture
+// write now lands in the tool's own dev.json, so the org file the migration
+// produces is no longer the file init overwrites. The migration still has to
+// run first -- init reads the org config for the coordinates it carries into
+// the tool's -- and the legacy posture still has to survive the trip, which is
+// what the assertions below are for. The final one is new: the org file is the
+// migration's output and nothing else's.
 func TestInitMigratesLegacyPostureBeforeWritingOverIt(t *testing.T) {
 	home := isolateHome(t)
 	t.Setenv(devconfig.EnvConfigPath, "")
@@ -27,11 +35,9 @@ func TestInitMigratesLegacyPostureBeforeWritingOverIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(legacyDir, "dev.json"), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteEnvFile(filepath.Join(home, ".env"), map[string]string{
-		devconfig.EnvAPIKeyDirect:    "obx_test_k",
-		devconfig.EnvAgentPrivateKey: testSeedB64}); err != nil {
-		t.Fatal(err)
-	}
+	// Through the same seam the command resolves: identity is per tool now, and
+	// the org-level files this used to name are not the ones init reads.
+	seedCredentials(t)
 
 	a, _, errb := testApp(nil)
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
@@ -53,6 +59,9 @@ func TestInitMigratesLegacyPostureBeforeWritingOverIt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(legacyDir, "dev.json")); err != nil {
 		t.Errorf("the legacy config was removed: %v", err)
+	}
+	if cfg.InstallGitHook {
+		t.Error("init wrote its posture into the org config; the tool's own dev.json is where that belongs")
 	}
 }
 

@@ -24,6 +24,16 @@ const (
 )
 
 func (a *app) runGateway(args []string) int {
+	// A lane daemon acts for exactly one tool for its whole life, and takes it
+	// from a compile-time constant rather than argv: this is the one bind site
+	// the environment cannot redirect. A daemon that cannot resolve its own
+	// identity must not come up half-governing.
+	release, err := devconfig.BindProvider(gatewaySpoolProvider)
+	if err != nil {
+		return a.errorf("cannot resolve %s's identity store: %v", gatewaySpoolProvider, err)
+	}
+	defer release()
+
 	fs := a.newFlagSet("gateway")
 	addr := fs.String("addr", gateway.DefaultAddr, "loopback listen address (host:port)")
 	upstream := fs.String("upstream", gateway.DefaultUpstream, "provider base URL to forward to")
