@@ -659,7 +659,8 @@ facts shape almost every row:
 
 | Claim | `:gateway:` | `:proxy:` | `:otel:` | Owner |
 |---|---|---|---|---|
-| Request / response body captured | E2 | **E1** | E1 | `internal/gateway/wired_test.go` · `TestCaptureReportsRedactedEvidence` (in process); `internal/cli/telemetryemit/sentinel_test.go` · `TestContentFieldsAreUnsetOnTheEvent` |
+| Request / response body captured | E2 | E2 | E1 | `cmd/openbox/transportwire_test.go` · `TestSpooledTransportEventReachesTheWire` — drives a model call through the real CONNECT and TLS chain and reads both bodies off the captured wire body; `internal/cli/telemetryemit/sentinel_test.go` · `TestContentFieldsAreUnsetOnTheEvent` |
+| A tool-telemetry call egresses no body | E2 | E2 | n/a | same test. Classified as carrying no content at the relay and again at the emitter, so both gates would have to stop agreeing |
 | Headers are no longer emitted | E1 | E1 | E1 | `cmd/openbox/transportcapture_test.go` · `TestTransportLaneRecordsThroughTheRealChain` |
 | Four token counts and the model id | **UNOWNED** | **UNOWNED** | E2 | `internal/cli/telemetryemit/sentinel_test.go` · `TestNoContentOnWireAtEitherPosture`. Neither in-path lane sets these fields at all, so there is nothing to own |
 | Credential fingerprint, one-way | E1 | E1 | E1 | `cmd/openbox/transportcapture_test.go` · `TestTransportLaneRecordsThroughTheRealChain` — checked both directions: the fingerprint is present, and the raw spooled bytes never carry the key |
@@ -677,11 +678,14 @@ facts shape almost every row:
 **Two gaps this axis made visible, neither of them new, both previously
 unsayable.**
 
-*No test grades a model call's body landing in `activity_input` or
-`activity_output` for `:proxy:` specifically.* `:gateway:` has that at E2, and
-the two lanes share the mapping code, so the behaviour is very likely right —
-but "likely right because it shares code" is exactly the reasoning this axis
-exists to stop being invisible. The proxy rows are printed E1.
+*The proxy lane's bodies are now graded on the wire* — that gap is closed. What
+replaced it is narrower and worth naming: the body-capture predicate the binary
+installs (`cmd/openbox/transport.go`) is still unexercised, because it is a
+redundant outer gate. A nil predicate captures everything at the relay, and the
+emitter classifies the path a second time when it builds the event, so removing
+the predicate changes nothing observable. Measured, not inferred: with the
+option dropped, a tool-telemetry call still spools no body. Four lines of
+production wiring that no test can currently tell apart from its own absence.
 
 *The four token counts and the model id have no owner on either in-path lane*,
 because neither sets them: only the telemetry lane, which is the governed tool
