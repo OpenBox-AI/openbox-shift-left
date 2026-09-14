@@ -239,10 +239,7 @@ func (f *Server) serveEvaluate(w http.ResponseWriter, r *http.Request, raw []byt
 		return
 	}
 	f.received++
-	// The nth call is counted on arrival, not on acceptance: a test saying
-	// "the second call fails" means the second request, and numbering by
-	// acceptances would renumber itself as soon as one of them did.
-	status, verdict := f.script.answer(f.received, rec.ToolUseID())
+	status, verdict := f.script.answer(rec.ToolUseID())
 	if status >= 200 && status < 300 {
 		// Only an accepted request is in the inbox. A refused attempt was not
 		// delivered, and counting it would make a redelivery after an outage

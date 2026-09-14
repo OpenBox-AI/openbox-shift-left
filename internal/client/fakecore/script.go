@@ -14,9 +14,6 @@ type Script struct {
 	Default string
 	// Verdicts maps a tool_use_id to the verdict JSON served for that call.
 	Verdicts map[string]string
-	// Status forces an HTTP status on the nth request (1-based),
-	// for the fail-closed and retry paths. Absent entries answer 200.
-	Status map[int]int
 	// AlwaysStatus, when non-zero, answers every request with this status.
 	AlwaysStatus int
 	// Delay holds each response, for the timeout paths.
@@ -36,17 +33,11 @@ func (s Script) withDefaults() Script {
 	return s
 }
 
-// answer picks the verdict for the nth request. n is 1-based and counts every
-// request that arrived, which is what a test scripting "the third call 500s"
-// means -- counting acceptances would renumber the schedule as soon as one
-// call was refused.
-func (s Script) answer(n int, toolUseID string) (int, string) {
+// answer picks the verdict and status for one request.
+func (s Script) answer(toolUseID string) (int, string) {
 	status := http.StatusOK
 	if s.AlwaysStatus != 0 {
 		status = s.AlwaysStatus
-	}
-	if st, ok := s.Status[n]; ok {
-		status = st
 	}
 	if v, ok := s.Verdicts[toolUseID]; ok && toolUseID != "" {
 		return status, v

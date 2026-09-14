@@ -52,11 +52,10 @@ func ExemptEverySingle() Grader {
 				}
 			}
 			var reasons []string
-			for id, n := range completes {
+			for id := range completes {
 				if starts[id] == 0 {
 					reasons = append(reasons, "completion with no start for "+id)
 				}
-				_ = n
 			}
 			return reasons
 		},

@@ -23,8 +23,6 @@ type Scenario struct {
 	// here rather than being read off the wire because EnforcementRecord
 	// carries no activity or tool id -- see PairingGrader.
 	Denied map[string]bool
-	// Status forces an HTTP status on the nth request (1-based).
-	Status map[int]int
 	// AlwaysStatus, when non-zero, answers every request with this status.
 	AlwaysStatus int
 	// Approval answers the approval poll. A scenario scripting
@@ -59,7 +57,7 @@ type Posture struct {
 
 // Script projects the scenario onto what the fake should answer.
 func (s Scenario) Script() Script {
-	return Script{Verdicts: s.Verdicts, Status: s.Status, AlwaysStatus: s.AlwaysStatus}
+	return Script{Verdicts: s.Verdicts, AlwaysStatus: s.AlwaysStatus}
 }
 
 // Grader is a predicate over (scenario, inbox) returning reasons, not a

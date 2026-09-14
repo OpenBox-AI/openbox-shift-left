@@ -228,11 +228,3 @@ func DroppedIDs(sc Scenario, event string) []string {
 	}
 	return ids
 }
-
-// Undeny clears the witness, for the control that proves the witness is
-// load-bearing.
-func Undeny(sc Scenario) Scenario {
-	sc.Denied = nil
-	sc.Name = sc.Name + "/no-witness"
-	return sc
-}
