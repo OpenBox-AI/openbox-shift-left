@@ -161,6 +161,7 @@ func TestResolveCredentials_RealEnvBeatsCredentialFile(t *testing.T) {
 }
 
 func TestResolveCredentials_EnvDisablesConfigContentCapture(t *testing.T) {
+	isolateConfig(t) // binds: a hook resolves its credentials under its own tool
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "dev.json")
 	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","content_capture":true}`), 0o600)

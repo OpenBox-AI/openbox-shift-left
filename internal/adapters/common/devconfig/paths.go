@@ -1,6 +1,7 @@
 package devconfig
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -115,6 +116,11 @@ func validateProviderName(name string) error {
 	return nil
 }
 
+// IdentityDirFor exposes one tool's identity directory, for the one caller
+// that needs the directory rather than a file in it: `uninstall`, which
+// removes each store's directory once it has deleted the files by name.
+func IdentityDirFor(tool string) (string, error) { return identityDirFor(tool) }
+
 // identityDirFor is the one join site for every per-tool identity path: the
 // org directory when tool is empty, else ~/.openbox/<tool>. It re-validates
 // because the explicit *For accessors take a caller-supplied name that never
@@ -133,12 +139,30 @@ func identityDirFor(tool string) (string, error) {
 	return filepath.Join(dir, tool), nil
 }
 
-// EnvFilePath is the bound tool's credential file, ~/.openbox/<tool>/.env, or
-// ~/.openbox/.env when nothing is bound. Note what is deliberately absent:
-// OPENBOX_CONFIG names a dev.json and has never shadowed this file, which is
-// why a per-tool .env stays per-tool even under an operator override.
+// ErrProviderUnbound is returned by EnvFilePath when nothing is bound.
+var ErrProviderUnbound = errors.New("no provider bound: this process has not said which tool it is acting for")
+
+// EnvFilePath is the bound tool's credential file, ~/.openbox/<tool>/.env.
+// Note what is deliberately absent: OPENBOX_CONFIG names a dev.json and has
+// never shadowed this file, which is why a per-tool .env stays per-tool even
+// under an operator override.
+//
+// Unbound it is an error, and that is a security control rather than
+// tidiness. Without it, any command that forgets to bind reads the org-level
+// .env -- a file that holds a credential authorizing agent creation across the
+// whole organization and no agent identity at all. Silently reading it is
+// exactly the cross-boundary read the per-tool split exists to make
+// impossible, and "returns something plausible" is how that bug would ship.
+//
+// A caller that legitimately wants a specific file says so: OrgEnvFilePath for
+// the org one, EnvFilePathFor(tool) for a named tool's. Never relax this to
+// make a test pass; bind, or name the file.
 func EnvFilePath() (string, error) {
-	return EnvFilePathFor(BoundProvider())
+	tool := BoundProvider()
+	if tool == "" {
+		return "", ErrProviderUnbound
+	}
+	return EnvFilePathFor(tool)
 }
 
 // OrgEnvFilePath is always ~/.openbox/.env, whatever is bound. The org control

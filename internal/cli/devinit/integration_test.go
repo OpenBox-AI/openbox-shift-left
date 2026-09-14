@@ -54,6 +54,7 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv(devconfig.EnvHome, home)
+	bindProviderForTest(t, "claude-code")
 	reg := backend.New(srv.URL, "obx_key_"+strings.Repeat("f", 48), "openbox-cli")
 	var out bytes.Buffer
 

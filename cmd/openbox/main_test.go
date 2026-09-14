@@ -28,6 +28,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -1346,7 +1347,15 @@ func TestDoctorSaysWhenThereAreNoCredentialsToCheckWith(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("doctor exit = %d:\n%s", code, out)
 	}
-	if !strings.Contains(out, "NOT CHECKED") || !strings.Contains(out, "openbox auth") {
-		t.Errorf("doctor does not name the remedy for absent credentials:\n%s", out)
+	// Per tool, and naming the command that fixes it. `auth` connects the
+	// organization and writes no agent credential, so pointing a reader there
+	// would send them somewhere that cannot resolve this.
+	if !strings.Contains(out, "NOT CHECKED") {
+		t.Errorf("doctor does not say the check was skipped:\n%s", out)
+	}
+	for _, tool := range provider.Supported() {
+		if !strings.Contains(out, "openbox init --provider "+tool) {
+			t.Errorf("doctor does not name the remedy for %s:\n%s", tool, out)
+		}
 	}
 }

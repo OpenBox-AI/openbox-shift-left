@@ -445,7 +445,44 @@ func ResolveControlToken() string {
 // when identity is incomplete; the caller logs it fail-open and exits 0
 // (INV-3).
 func ResolveCredentials() (Credentials, error) {
-	cfg, err := load()
+	tool := BoundProvider()
+	if tool == "" {
+		return Credentials{}, ErrProviderUnbound
+	}
+	envPath, err := EnvFilePath()
+	if err != nil {
+		return Credentials{}, err
+	}
+	// DefaultConfigPath, not DevConfigPathFor: the bound path honours
+	// OPENBOX_CONFIG, and an operator who pointed it at a file expects the
+	// running hook to read that file.
+	return resolveCredentialsFrom(tool, DefaultConfigPath(), envPath)
+}
+
+// ResolveCredentialsFor assembles one named tool's identity without binding,
+// for a caller that reports on every store in turn. Binding inside such a loop
+// is the one thing that could make every row a copy of the first, because a
+// held config pin freezes what the first read resolved.
+//
+// One field is deliberately ambient rather than per tool:
+// ContentCaptureEnabled is a posture question, resolved through the managed
+// layer, and a per-store answer for it would need a second posture resolver.
+// No caller of this function reads it; the enumerators want identity and
+// reachability.
+func ResolveCredentialsFor(tool string) (Credentials, error) {
+	cfgPath, err := DevConfigPathFor(tool)
+	if err != nil {
+		return Credentials{}, err
+	}
+	envPath, err := EnvFilePathFor(tool)
+	if err != nil {
+		return Credentials{}, err
+	}
+	return resolveCredentialsFrom(tool, cfgPath, envPath)
+}
+
+func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) {
+	cfg, err := Load(cfgPath)
 	if err != nil {
 		return Credentials{}, err
 	}
@@ -470,37 +507,22 @@ func ResolveCredentials() (Credentials, error) {
 		return Credentials{}, fmt.Errorf("no developer DID configured (run `openbox init`)")
 	}
 
-	secrets, envPath, err := loadSecretFile()
+	secrets, err := ParseEnvFile(envPath)
 	if err != nil {
 		return Credentials{}, err
 	}
 
 	c.APIKey = FirstNonEmpty(os.Getenv(EnvAPIKeyDirect), secrets[EnvAPIKeyDirect])
 	if c.APIKey == "" {
-		return Credentials{}, missingCredentialError("obx_ API key", EnvAPIKeyDirect, envPath)
+		return Credentials{}, missingCredentialError(tool, "obx_ API key", EnvAPIKeyDirect, envPath)
 	}
 
 	c.PrivateKeyB64 = resolvePrivateKey(secrets)
 	if c.PrivateKeyB64 == "" {
-		return Credentials{}, missingCredentialError("Ed25519 signing key", EnvAgentPrivateKey, envPath)
+		return Credentials{}, missingCredentialError(tool, "Ed25519 signing key", EnvAgentPrivateKey, envPath)
 	}
 
 	return c, nil
-}
-
-// loadSecretFile an unresolvable home or an unparseable file IS an error:
-// silently treating either as "no credentials" would send a user hunting for a
-// registration problem they do not have.
-func loadSecretFile() (map[string]string, string, error) {
-	path, err := EnvFilePath()
-	if err != nil {
-		return nil, "", err
-	}
-	kv, err := ParseEnvFile(path)
-	if err != nil {
-		return nil, path, err
-	}
-	return kv, path, nil
 }
 
 func resolvePrivateKey(secrets map[string]string) string {
@@ -536,13 +558,13 @@ func warnDeprecatedPrivateKeyName(alias string) {
 
 var deprecatedNameWarnOnce sync.Once
 
-func missingCredentialError(what, envName, envPath string) error {
+func missingCredentialError(tool, what, envName, envPath string) error {
 	where := "~/.openbox/<tool>/.env"
 	if envPath != "" {
 		where = envPath
 	}
 	remedy := "`openbox init --provider <tool>`"
-	if tool := BoundProvider(); tool != "" {
+	if tool != "" {
 		remedy = "`openbox init --provider " + tool + "`"
 	}
 	msg := fmt.Sprintf("no %s available: set %s, or run %s to write %s", what, envName, remedy, where)

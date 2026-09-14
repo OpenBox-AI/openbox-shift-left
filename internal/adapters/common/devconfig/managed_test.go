@@ -276,6 +276,7 @@ func TestResolveCredentials_HonoursALockedManagedContentCapture(t *testing.T) {
 	t.Setenv(EnvManagedConfig, managedPath)
 	t.Setenv(EnvConfigPath, userPath)
 	credsEnvForManagedTest(t, dir)
+	bindForTest(t, "claude-code")
 	t.Setenv(EnvContentCapture, "1") // the developer's escape hatch must NOT beat a lock
 
 	c, err := ResolveCredentials()
@@ -305,6 +306,7 @@ func TestResolveCredentials_UnlockedManagedContentCaptureIsOnlyADefault(t *testi
 	t.Setenv(EnvManagedConfig, managedPath)
 	t.Setenv(EnvConfigPath, userPath)
 	credsEnvForManagedTest(t, dir)
+	bindForTest(t, "claude-code")
 
 	c, err := ResolveCredentials()
 	if err != nil {

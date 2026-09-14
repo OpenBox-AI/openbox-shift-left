@@ -142,6 +142,17 @@ func inDirWithSettings(t *testing.T, settings map[string]any) string {
 	return out
 }
 
+// runDoctorHere runs doctor against whatever OPENBOX_HOME the caller already
+// set, for a case whose whole subject is what is in that home.
+func runDoctorHere(t *testing.T) (string, int) {
+	t.Helper()
+	nothingIsListening(t)
+	var out, errb bytes.Buffer
+	a := &app{stdout: &out, stderr: &errb, getenv: os.Getenv}
+	code := a.runDoctor(nil)
+	return out.String() + errb.String(), code
+}
+
 func runDoctorIn(t *testing.T, dir string) (string, int) {
 	t.Helper()
 	// doctor probes the lane ports to report coverage. Unpinned, that dials
@@ -159,8 +170,5 @@ func runDoctorIn(t *testing.T, dir string) (string, int) {
 	t.Cleanup(func() { os.Chdir(saved) })
 
 	t.Setenv("OPENBOX_HOME", t.TempDir())
-	var out, errb bytes.Buffer
-	a := &app{stdout: &out, stderr: &errb, getenv: os.Getenv}
-	code := a.runDoctor(nil)
-	return out.String() + errb.String(), code
+	return runDoctorHere(t)
 }

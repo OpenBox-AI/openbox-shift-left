@@ -1,6 +1,7 @@
 package devconfig
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,12 +78,14 @@ func TestPathsDeriveFromHome(t *testing.T) {
 		t.Fatalf("BoundProvider() = %q at the start of the unbound case; a bind leaked from another test", got)
 	}
 
-	env, err := EnvFilePath()
+	// Unbound, the credential file is not a question with an answer: see
+	// TestUnboundEnvFilePathIsAnError. The org one is reached by name.
+	env, err := OrgEnvFilePath()
 	if err != nil {
-		t.Fatalf("EnvFilePath(): %v", err)
+		t.Fatalf("OrgEnvFilePath(): %v", err)
 	}
 	if want := filepath.Join(dir, ".env"); env != want {
-		t.Fatalf("EnvFilePath() = %q, want %q", env, want)
+		t.Fatalf("OrgEnvFilePath() = %q, want %q", env, want)
 	}
 	dev, err := DevConfigWritePath()
 	if err != nil {
@@ -331,10 +334,15 @@ func TestBindRejectsAPathTraversalName(t *testing.T) {
 	}
 }
 
-// TestUnboundIdentityPathsAreTheOrgFiles the seam is inert until something
-// binds; phase 05 is what makes an unbound .env read an error, and until then
-// every existing caller must keep resolving exactly what it did before.
-func TestUnboundIdentityPathsAreTheOrgFiles(t *testing.T) {
+// TestUnboundEnvFilePathIsAnError the gate, and it is a security control
+// rather than tidiness. Without it a command that forgets to bind reads the
+// org-level .env -- which holds a credential authorizing agent creation across
+// the whole organization and no agent identity at all. "Returns something
+// plausible" is how that read would ship unnoticed.
+//
+// The release half matters as much as the bind: a command that finishes must
+// leave the process unable to resolve a credential by accident.
+func TestUnboundEnvFilePathIsAnError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(EnvHome, home)
 	t.Setenv(EnvConfigPath, "")
@@ -345,12 +353,66 @@ func TestUnboundIdentityPathsAreTheOrgFiles(t *testing.T) {
 	}
 	release()
 
-	env, err := EnvFilePath()
+	got, err := EnvFilePath()
+	if err == nil {
+		t.Fatalf("EnvFilePath() returned %q with nothing bound; it must refuse", got)
+	}
+	if !errors.Is(err, ErrProviderUnbound) {
+		t.Errorf("error = %v, want ErrProviderUnbound", err)
+	}
+	if got != "" {
+		t.Errorf("EnvFilePath() returned a path (%q) alongside its error", got)
+	}
+
+	// The named routes still answer, because a caller that knows which file it
+	// wants is not the failure this guards against.
+	org, err := OrgEnvFilePath()
+	if err != nil {
+		t.Fatalf("OrgEnvFilePath(): %v", err)
+	}
+	if want := filepath.Join(home, ".env"); org != want {
+		t.Fatalf("OrgEnvFilePath() = %q, want %q", org, want)
+	}
+	if got, err := EnvFilePathFor("codex"); err != nil || got != filepath.Join(home, "codex", ".env") {
+		t.Fatalf("EnvFilePathFor(codex) = %q (err %v)", got, err)
+	}
+}
+
+// TestAStrictReadCannotReachTheOrgEnvFile the hazard stated as the thing that
+// would undo it: the org file holds a fleet credential, and a bound read that
+// landed there would hand it to whatever asked.
+func TestAStrictReadCannotReachTheOrgEnvFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	t.Setenv(EnvConfigPath, "")
+
+	org, err := OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(org, map[string]string{EnvControlToken: "obx" + "_key_org"}); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := BindProvider("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	got, err := EnvFilePath()
 	if err != nil {
 		t.Fatalf("EnvFilePath(): %v", err)
 	}
-	if want := filepath.Join(home, ".env"); env != want {
-		t.Fatalf("EnvFilePath() = %q after release, want the org file %q", env, want)
+	if want := filepath.Join(home, "codex", ".env"); got != want {
+		t.Fatalf("EnvFilePath() = %q, want %q", got, want)
+	}
+	kv, err := ParseEnvFile(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := kv[EnvControlToken]; ok {
+		t.Error("a bound read reached the org control token")
 	}
 }
 

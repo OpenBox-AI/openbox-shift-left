@@ -21,6 +21,21 @@ import (
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+	bindForTest(t, "codex")
+}
+
+// bindForTest binds for the length of one case. Every production caller of
+// this adapter runs under `openbox hook codex`, which binds before anything
+// resolves a credential; a fixture that left this unbound would exercise a
+// path no command takes, and identity does not resolve at all without it.
+func bindForTest(t *testing.T, tool string) {
+	t.Helper()
+	release, err := devconfig.BindProvider(tool)
+	if err != nil {
+		t.Fatalf("bind %s: %v", tool, err)
+	}
+	t.Cleanup(release)
 }
 
 func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, updatedInput json.RawMessage) {

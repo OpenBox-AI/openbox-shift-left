@@ -525,3 +525,225 @@ func readSpoolTree(t *testing.T, dir string) string {
 	}
 	return b.String()
 }
+
+// TestDoctorListsEveryPerToolIdentity doctor is the in-product answer to "why
+// did governance stop", and under the no-fallback rule the answer is usually
+// "this tool has no store". One row per tool, each naming its own file and its
+// own DID.
+//
+// The two DIDs differing is the load-bearing assertion: a bind held across the
+// loop, or a config pin frozen on the first read, would report the first
+// tool's identity for every row and look entirely reasonable.
+func TestDoctorListsEveryPerToolIdentity(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvAPIKeyDirect, "")
+	t.Setenv(devconfig.EnvAgentPrivateKey, "")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "codex", testDIDFor(t, "codex"))
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	for _, tool := range []string{"claude-code", "codex"} {
+		if !strings.Contains(out, filepath.Join(home, tool, "dev.json")) {
+			t.Errorf("doctor does not name %s's own config:\n%s", tool, out)
+		}
+		if !strings.Contains(out, testDIDFor(t, tool)) {
+			t.Errorf("doctor does not report %s's DID:\n%s", tool, out)
+		}
+	}
+	// And the org row, which carries coordinates and no identity at all.
+	if !strings.Contains(out, "org") {
+		t.Errorf("doctor does not report the org-level config:\n%s", out)
+	}
+}
+
+// TestDoctorNamesTheSourceOfTheIdentityInEffect an exported variable outranks
+// every file doctor just printed, for every tool at once. Without this line a
+// reader comparing a dashboard to a dev.json is comparing the wrong two
+// things.
+func TestDoctorNamesTheSourceOfTheIdentityInEffect(t *testing.T) {
+	isolateHomeUnbound(t)
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+
+	t.Run("a file answers", func(t *testing.T) {
+		t.Setenv(devconfig.EnvDID, "")
+		out, _ := runDoctorHere(t)
+		if !strings.Contains(out, "each tool's own files") {
+			t.Errorf("doctor does not say the files are in effect:\n%s", out)
+		}
+	})
+
+	t.Run("an env var shadows every file", func(t *testing.T) {
+		const exported = "did:aip:99999999-9999-9999-9999-999999999999"
+		t.Setenv(devconfig.EnvDID, exported)
+		out, _ := runDoctorHere(t)
+		if !strings.Contains(out, devconfig.EnvDID) || !strings.Contains(out, "environment") {
+			t.Errorf("doctor does not name the variable that wins:\n%s", out)
+		}
+		if !strings.Contains(out, exported) {
+			t.Errorf("doctor does not report the DID actually in effect:\n%s", out)
+		}
+	})
+}
+
+// TestDoctorReportsPerStoreReachability one store working and one absent is a
+// normal machine, and a report that stopped at the first would hide whichever
+// one is broken.
+func TestDoctorReportsPerStoreReachability(t *testing.T) {
+	isolateHomeUnbound(t)
+	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvAPIKeyDirect, "")
+	t.Setenv(devconfig.EnvAgentPrivateKey, "")
+	t.Setenv("OPENBOX_ED25519_SEED", "")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+	// Only claude-code exists.
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	if !strings.Contains(out, "codex") || !strings.Contains(out, "NOT CHECKED") {
+		t.Errorf("doctor does not report the absent codex store:\n%s", out)
+	}
+	if !strings.Contains(out, "openbox init --provider codex") {
+		t.Errorf("the absent store does not name its remedy:\n%s", out)
+	}
+	// The absent one did not suppress the present one.
+	if !strings.Contains(out, testDIDFor(t, "claude-code")) {
+		t.Errorf("an absent store suppressed the store that exists:\n%s", out)
+	}
+}
+
+// TestUninstallRemovesEveryPerToolCredential `uninstall` promises it reverses
+// all of it, "including the credentials". With identity per tool that is three
+// files on a two-tool machine, and a command that deleted one would leave two
+// live signing seeds behind a report of success.
+func TestUninstallRemovesEveryPerToolCredential(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "codex", testDIDFor(t, "codex"))
+	orgEnv, err := devconfig.OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(orgEnv, map[string]string{
+		devconfig.EnvControlToken: "obx" + "_key_org"}); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+
+	for _, path := range []string{orgEnv,
+		filepath.Join(home, "claude-code", ".env"),
+		filepath.Join(home, "codex", ".env")} {
+		if !strings.Contains(out.String(), path) {
+			t.Errorf("the inventory does not list %s; the print is the only warning before deletion:\n%s", path, out.String())
+		}
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("%s survived uninstall (err=%v)", path, err)
+		}
+	}
+	// And the emptied directories, so nothing reads as a configured tool.
+	for _, tool := range []string{"claude-code", "codex"} {
+		if _, err := os.Stat(filepath.Join(home, tool)); !os.IsNotExist(err) {
+			t.Errorf("%s's identity directory survived (err=%v)", tool, err)
+		}
+	}
+}
+
+// TestFlushGatePassesWhenAnyStoreHasCredentials the flush delivers each tool's
+// spool under that tool's own identity, so one usable store makes flushing
+// worth attempting. Asking about a single store would print "flushing SKIPPED"
+// and destroy a backlog that could have gone.
+func TestFlushGatePassesWhenAnyStoreHasCredentials(t *testing.T) {
+	isolateHomeUnbound(t)
+	spool := t.TempDir()
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	if err := os.WriteFile(filepath.Join(spool, "pending.jsonl"),
+		[]byte(`{"event_type":"ToolCall","session_id":"s1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Credentials in codex's store only; claude-code has none.
+	seedToolCredentials(t, "codex", testDIDFor(t, "codex"))
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if strings.Contains(out.String(), "flushing SKIPPED") {
+		t.Errorf("the flush was skipped although a store has credentials:\n%s", out.String())
+	}
+}
+
+// TestTheFlushGateStillRefusesOnNothing the other half: with no store
+// anywhere, the command must say what it is about to destroy rather than
+// pretend it delivered.
+func TestTheFlushGateStillRefusesOnNothing(t *testing.T) {
+	isolateHomeUnbound(t)
+	clearAgentEnv(t)
+	spool := t.TempDir()
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	if err := os.WriteFile(filepath.Join(spool, "pending.jsonl"),
+		[]byte(`{"event_type":"ToolCall","session_id":"s1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "flushing SKIPPED") {
+		t.Errorf("with no credentials anywhere the flush must say so:\n%s", out.String())
+	}
+}
+
+// TestAuthRunsUnbound `auth` is an org command: it has no provider on argv and
+// binds nothing, which is exactly the shape the unbound gate refuses. Every
+// other auth case runs under a fixture that binds, so without this one a stray
+// EnvFilePath() left in auth.go would pass the whole suite and fail on the
+// first real `openbox auth`.
+func TestAuthRunsUnbound(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+
+	a, _, errb := testApp(nil)
+	scriptedAuth(t, a, "https://api.internal", "", testOrgToken)
+	if code := a.run([]string{"auth"}); code != exitOK {
+		t.Fatalf("auth exit = %d with nothing bound; stderr=%q", code, errb.String())
+	}
+	if got := devconfig.BoundProvider(); got != "" {
+		t.Errorf("auth left %q bound; it acts for the organization, not a tool", got)
+	}
+	kv, err := devconfig.ParseEnvFile(filepath.Join(home, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv[devconfig.EnvControlToken] != testOrgToken {
+		t.Errorf("auth did not write the org token: %v", kv)
+	}
+}
+
+// TestUninstallRunsUnbound the same guard for `uninstall`, which enumerates
+// every store by name and must never resolve one through a bind.
+func TestUninstallRunsUnbound(t *testing.T) {
+	isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+
+	a, _, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d with nothing bound; stderr=%q", code, errb.String())
+	}
+	if got := devconfig.BoundProvider(); got != "" {
+		t.Errorf("uninstall left %q bound", got)
+	}
+}

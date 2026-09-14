@@ -21,6 +21,8 @@ func setHookEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
+	t.Setenv(devconfig.EnvHome, dir)
+	bindForTest(t, "codex")
 	t.Setenv("OPENBOX_AGENT_DID", testDID)
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))

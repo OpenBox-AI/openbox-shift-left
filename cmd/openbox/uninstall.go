@@ -106,8 +106,12 @@ type uninstallInventory struct {
 	posture      []string
 	ownedDirs    []string
 	spools       []spoolState
-	envFile      string
-	managed      []string
+	// One credential file per governed tool, plus the org-level one that holds
+	// the control token. A single string here was right while a machine had one
+	// identity; leaving it would orphan every per-tool key and seed behind a
+	// command whose whole promise is that it reverses all of it.
+	envFiles []string
+	managed  []string
 	// unrecordedLane is a unit file or routed env key with no activation record
 	// behind it.
 	unrecordedLane bool
@@ -172,7 +176,7 @@ func (inv uninstallInventory) empty() bool {
 		}
 	}
 	return inv.pluginDir == "" && len(inv.lanes) == 0 && !inv.unrecordedLane &&
-		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && inv.envFile == "" && len(inv.spools) == 0
+		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && len(inv.envFiles) == 0 && len(inv.spools) == 0
 }
 
 func (a *app) uninstallInventory(home string) uninstallInventory {
@@ -209,6 +213,14 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 			inv.posture = appendUnique(inv.posture, p)
 		}
 	}
+	// And each tool's own config. These are posture, not credentials, so they
+	// are swept with the rest of posture -- but they live under ~/.openbox/<tool>/,
+	// which is never removed recursively, so they have to be named.
+	for _, name := range provider.Supported() {
+		if p, err := devconfig.DevConfigPathFor(name); err == nil && fileExists(p) {
+			inv.posture = appendUnique(inv.posture, p)
+		}
+	}
 	for _, path := range []string{hookflow.DefaultEnforcementPath(), hookflow.DefaultAdvisoryPath()} {
 		if path != "" && fileExists(path) {
 			inv.posture = appendUnique(inv.posture, path)
@@ -233,8 +245,15 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 			inv.spools = append(inv.spools, spoolState{dir: dir, backlog: b, discarded: d})
 		}
 	}
-	if p, err := devconfig.EnvFilePath(); err == nil && fileExists(p) {
-		inv.envFile = p
+	// Explicit accessors, never a bind: this is a loop, and a bind held across
+	// it would make every iteration read the first tool's store.
+	if p, err := devconfig.OrgEnvFilePath(); err == nil && fileExists(p) {
+		inv.envFiles = appendUnique(inv.envFiles, p)
+	}
+	for _, name := range provider.Supported() {
+		if p, err := devconfig.EnvFilePathFor(name); err == nil && fileExists(p) {
+			inv.envFiles = appendUnique(inv.envFiles, p)
+		}
 	}
 	// The org's, not ours: removing either silently downgrades a governed
 	// machine, and a root-owned file is not writable here anyway.
@@ -277,8 +296,8 @@ func (a *app) printInventory(inv uninstallInventory) {
 		fmt.Fprintf(a.stdout, "  spool          %s (%d undelivered event(s), %d already given up on)\n",
 			s.dir, s.backlog, s.discarded)
 	}
-	if inv.envFile != "" {
-		fmt.Fprintf(a.stdout, "  credentials    %s (deleted last, and its signing seed cannot be re-retrieved)\n", inv.envFile)
+	for _, p := range inv.envFiles {
+		fmt.Fprintf(a.stdout, "  credentials    %s (deleted last, and its signing seed cannot be re-retrieved)\n", p)
 	}
 	for _, p := range inv.managed {
 		fmt.Fprintf(a.stdout, "  kept           %s (your organization's, not OpenBox's)\n", p)
@@ -297,10 +316,11 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 	}
 	queued := sumBacklog(inv)
 	st.backlog += queued
-	if !a.haveCredentials() {
+	if !a.haveCredentials(inv) {
 		fmt.Fprintf(a.stdout, "\nflushing SKIPPED: no credentials on this machine, so nothing can be delivered.\n")
-		fmt.Fprintf(a.stdout, "  %d undelivered event(s) will be DESTROYED with the spool below. Run `openbox auth`\n", st.backlog)
-		fmt.Fprintf(a.stdout, "  and `openbox hook claude-code flush` first if that evidence matters.\n")
+		fmt.Fprintf(a.stdout, "  %d undelivered event(s) will be DESTROYED with the spool below. Run\n", st.backlog)
+		fmt.Fprintf(a.stdout, "  `openbox init --provider <tool>` and `openbox hook <tool> flush` first if that\n")
+		fmt.Fprintf(a.stdout, "  evidence matters.\n")
 		return
 	}
 	for _, name := range provider.Supported() {
@@ -339,16 +359,22 @@ func sumBacklog(inv uninstallInventory) int {
 
 // haveCredentials is requireCredentials' check without its refusal:
 // `uninstall` must never gate on a credential it is about to delete.
-func (a *app) haveCredentials() bool {
-	envPath, err := devconfig.EnvFilePath()
-	if err != nil {
-		return false
+//
+// Any store, not the bound one: the flush delivers each tool's spool with that
+// tool's own identity, so one usable store is enough to make flushing worth
+// attempting. Asking only about a single store would print "flushing SKIPPED"
+// and destroy a backlog that could have been delivered.
+func (a *app) haveCredentials(inv uninstallInventory) bool {
+	for _, path := range inv.envFiles {
+		kv, err := devconfig.ParseEnvFile(path)
+		if err != nil {
+			continue
+		}
+		if a.credentialsPresent(kv) {
+			return true
+		}
 	}
-	kv, err := devconfig.ParseEnvFile(envPath)
-	if err != nil {
-		return false
-	}
-	return a.credentialsPresent(kv)
+	return false
 }
 
 // removeHookSurfaces takes the gate out first, mirroring an install that
@@ -549,14 +575,39 @@ func (a *app) deletePath(st *uninstallState, path string, remove func(string) er
 // Keeping .env alone would preserve nothing retryable, because the spool is
 // already gone; so there is one rule, reported precisely.
 func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
-	if inv.envFile == "" {
+	if len(inv.envFiles) == 0 {
 		return
 	}
 	fmt.Fprintf(a.stdout, "\nRemoving credentials\n")
-	a.deletePath(st, inv.envFile, os.Remove)
-	fmt.Fprintf(a.stdout, "  the obx_ key and the Ed25519 signing seed in that file cannot be re-retrieved.\n")
-	fmt.Fprintf(a.stdout, "  `openbox auth` registers a NEW agent; it does not recover this one.\n")
+	for _, path := range inv.envFiles {
+		a.deletePath(st, path, os.Remove)
+	}
+	// By name first, directories after: a directory delete racing the
+	// credential delete is how a store survives an uninstall that reported
+	// success.
+	a.removeEmptyIdentityDirs(st)
+	fmt.Fprintf(a.stdout, "  the obx_ keys and Ed25519 signing seeds in those files cannot be re-retrieved.\n")
+	fmt.Fprintf(a.stdout, "  `openbox init --provider <tool>` registers a NEW agent; it does not recover these.\n")
+	fmt.Fprintf(a.stdout, "  The organization control token went with them; `openbox auth` takes a new one.\n")
 	fmt.Fprintf(a.stdout, "  This is an unlink, not a secure erase: the blocks are freed, not overwritten.\n")
+}
+
+// removeEmptyIdentityDirs takes each ~/.openbox/<tool>/ away once nothing is
+// left in it. Only when empty, and never recursively: the direction of error
+// in this command is over-keep, and a directory still holding something is
+// something this run did not account for.
+func (a *app) removeEmptyIdentityDirs(st *uninstallState) {
+	for _, name := range provider.Supported() {
+		dir, err := devconfig.IdentityDirFor(name)
+		if err != nil || !dirExists(dir) {
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) > 0 {
+			continue
+		}
+		a.deletePath(st, dir, os.Remove)
+	}
 }
 
 // reportUnrestorableRouting is the one residue this command cannot clear.

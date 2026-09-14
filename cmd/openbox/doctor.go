@@ -23,6 +23,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/managed"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
@@ -37,7 +38,7 @@ func (a *app) runDoctor(args []string) int {
 	fmt.Fprintf(a.stdout, "OpenBox developer-runtime posture\n\n")
 
 	fmt.Fprintf(a.stdout, "Identity\n")
-	fmt.Fprintf(a.stdout, "  developer  %s\n\n", withPresence(devconfig.DefaultConfigPath()))
+	a.reportIdentities()
 
 	fmt.Fprintf(a.stdout, "Enforcement\n")
 	flags := p.Flags()
@@ -218,6 +219,63 @@ func withPresence(path string) string {
 		return path + "  (present)"
 	}
 	return path + "  (absent)"
+}
+
+// reportIdentities prints one row per store: the org config, which carries the
+// coordinates every tool shares, and then each governed tool's own.
+//
+// This is the answer to "why did governance stop". A tool with no store is
+// governing nothing, silently, and the only in-product place that says so is
+// here -- so an absent row names the command that fixes it rather than just
+// reporting a missing file.
+//
+// It reads through the explicit per-tool accessors and never binds. A bind
+// held across these reads would be the one way every row could report the
+// first tool's identity, and the differing DIDs are what would stop showing
+// it.
+func (a *app) reportIdentities() {
+	orgPath, err := devconfig.DevConfigPathFor("")
+	if err == nil {
+		fmt.Fprintf(a.stdout, "  %-11s  %s  (URLs; no agent identity)\n", "org", withPresence(orgPath))
+	}
+	for _, name := range provider.Supported() {
+		cfgPath, err := devconfig.DevConfigPathFor(name)
+		if err != nil {
+			fmt.Fprintf(a.stdout, "  %-11s  unreadable: %v\n", name, err)
+			continue
+		}
+		cfg, _ := devconfig.Load(cfgPath)
+		switch {
+		case cfg.DID != "":
+			fmt.Fprintf(a.stdout, "  %-11s  %s  DID %s\n", name, cfgPath, cfg.DID)
+		default:
+			fmt.Fprintf(a.stdout, "  %-11s  %s  no agent; governing nothing. Run `openbox init --provider %s`\n",
+				name, withPresence(cfgPath), name)
+		}
+	}
+	a.reportIdentitySource()
+	fmt.Fprintln(a.stdout)
+}
+
+// reportIdentitySource names which source actually wins, because an exported
+// variable outranks every file above and a reader comparing a dashboard to a
+// dev.json would otherwise be comparing the wrong two things.
+func (a *app) reportIdentitySource() {
+	var shadowing []string
+	for _, name := range []string{devconfig.EnvDID, devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey} {
+		if a.getenv(name) != "" {
+			shadowing = append(shadowing, name)
+		}
+	}
+	if len(shadowing) == 0 {
+		fmt.Fprintf(a.stdout, "  %-11s  each tool's own files above\n", "in effect")
+		return
+	}
+	fmt.Fprintf(a.stdout, "  %-11s  %s (environment); this outranks every file above, for every tool\n",
+		"in effect", strings.Join(shadowing, ", "))
+	if did := a.getenv(devconfig.EnvDID); did != "" {
+		fmt.Fprintf(a.stdout, "  %-11s  every governed tool reports as %s\n", "", did)
+	}
 }
 
 // reportGateway four separate questions, kept separate on purpose.
@@ -551,12 +609,20 @@ func (a *app) reportBlockedHooks() {
 // the same reason -- a doctor that hangs tells you nothing at all.
 func (a *app) reportReachability() {
 	fmt.Fprintf(a.stdout, "\nControl plane\n")
+	// One line per store, and one store's failure never suppresses another's:
+	// a machine with claude-code working and codex uninstalled is a normal
+	// machine, and reporting only the first would hide whichever one is broken.
+	for _, name := range provider.Supported() {
+		a.reportStoreReachability(name)
+	}
+}
 
-	creds, err := devconfig.ResolveCredentials()
+func (a *app) reportStoreReachability(tool string) {
+	creds, err := devconfig.ResolveCredentialsFor(tool)
 	if err != nil {
-		fmt.Fprintf(a.stdout, "  reachable    NOT CHECKED; %v\n", err)
-		fmt.Fprintf(a.stdout, "               Run `openbox auth`. Until then the hooks fire, fail to resolve\n")
-		fmt.Fprintf(a.stdout, "               credentials, and fail open -- governing nothing, silently.\n")
+		fmt.Fprintf(a.stdout, "  %-11s NOT CHECKED; %v\n", tool, err)
+		fmt.Fprintf(a.stdout, "  %-11s Run `openbox init --provider %s`. Until then this tool's hooks fire,\n", "", tool)
+		fmt.Fprintf(a.stdout, "  %-11s fail to resolve credentials, and fail open -- governing nothing, silently.\n", "")
 		return
 	}
 
@@ -567,7 +633,7 @@ func (a *app) reportReachability() {
 		PrivateKeyB64: creds.PrivateKeyB64,
 	})
 	if err != nil {
-		fmt.Fprintf(a.stdout, "  reachable    NOT CHECKED; the local credentials are unusable: %v\n", err)
+		fmt.Fprintf(a.stdout, "  %-11s NOT CHECKED; the local credentials are unusable: %v\n", tool, err)
 		return
 	}
 
@@ -576,12 +642,12 @@ func (a *app) reportReachability() {
 	if err := c.Validate(ctx); err != nil {
 		// Status and guidance only. The error never carries the key, the seed,
 		// the nonce or the signature (INV-1).
-		fmt.Fprintf(a.stdout, "  reachable    NO; %v\n", err)
-		fmt.Fprintf(a.stdout, "               Events spool locally and deliver when this clears, so a short\n")
-		fmt.Fprintf(a.stdout, "               outage costs nothing. `openbox doctor` re-checks.\n")
+		fmt.Fprintf(a.stdout, "  %-11s NO; %v\n", tool, err)
+		fmt.Fprintf(a.stdout, "  %-11s Events spool locally and deliver when this clears, so a short\n", "")
+		fmt.Fprintf(a.stdout, "  %-11s outage costs nothing. `openbox doctor` re-checks.\n", "")
 		return
 	}
-	fmt.Fprintf(a.stdout, "  reachable    yes; authenticated as %s @ %s\n", creds.DID, creds.BaseURL)
+	fmt.Fprintf(a.stdout, "  %-11s reachable; authenticated as %s @ %s\n", tool, creds.DID, creds.BaseURL)
 }
 
 // doctorReachTimeout keeps the check short. Doctor is a report, and a report

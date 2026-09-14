@@ -14,6 +14,7 @@ func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
 	t.Setenv(EnvHome, t.TempDir())
+	bindForTest(t, "claude-code")
 	for _, name := range append([]string{EnvAPIKeyDirect, EnvAgentPrivateKey}, deprecatedPrivateKeyEnvNames...) {
 		t.Setenv(name, "")
 	}
@@ -24,6 +25,19 @@ func isolateConfig(t *testing.T) {
 		t.Setenv(name, "")
 		os.Unsetenv(name)
 	}
+}
+
+// bindForTest binds for the length of one case. Every production caller of
+// ResolveCredentials runs under a command that has already said which tool it
+// is acting for; a fixture that left this unbound would exercise a path no
+// command takes, and after the unbound gate it does not resolve at all.
+func bindForTest(t *testing.T, tool string) {
+	t.Helper()
+	release, err := BindProvider(tool)
+	if err != nil {
+		t.Fatalf("bind %s: %v", tool, err)
+	}
+	t.Cleanup(release)
 }
 
 func writeEnvFileForTest(t *testing.T, kv map[string]string) {
