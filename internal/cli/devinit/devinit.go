@@ -95,13 +95,6 @@ func truncate(s string, maxBytes int) string {
 	return s[:cut]
 }
 
-// Register is the credential half: register a developer agent (or recognize
-// that this machine already has credentials) and write the two secrets to
-// ~/.openbox/.env.
-func Register(ctx context.Context, o Options, d Deps) (*Result, provider.CredentialRef, error) {
-	return register(ctx, o, d)
-}
-
 // Run executes the onboarding flow.
 func Run(ctx context.Context, o Options, d Deps) (*Result, error) {
 	// Checked before registration so a missing flag fails immediately rather than

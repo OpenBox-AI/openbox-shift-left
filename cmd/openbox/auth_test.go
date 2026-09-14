@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
-	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
 var testSeedB64 = base64.StdEncoding.EncodeToString(make([]byte, 32))
@@ -35,29 +35,29 @@ func readDevJSON(t *testing.T, home string) devconfig.DevConfig {
 	return cfg
 }
 
-// TestBlankAgentIDShortCircuitsTheCredentialPrompts the DX target: a first run
-// with an org key exported completes with three Enters and one y. The DID, api
-// key and signing key must never be shown on the register path; registration
-// returns all three, so asking for them first is pure friction.
-func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
-	p := &prompt.Scripted{Answers: []string{"", "", "", "SHOULD-NOT-BE-READ", "SHOULD-NOT-BE-READ"}}
-	got, err := collectAuthFields(p, authFields{
-		backendURL: devconfig.DefaultBackendURL,
-		baseURL:    devconfig.DefaultBaseURL,
-	})
-	if err != nil {
-		t.Fatalf("collect: %v", err)
+// TestAuthPromptsTheOrgConnectionOnly `auth` is the org connection and
+// nothing else: two URLs and the token every tool shares. The agent id, DID,
+// API key and signing key prompts are gone with the registration they fed --
+// `init --provider <tool>` mints that tool's agent now -- so a script holding
+// exactly three answers must be exhausted, and a fourth prompt would fail the
+// run by running out of answers.
+func TestAuthPromptsTheOrgConnectionOnly(t *testing.T) {
+	home := isolateHome(t)
+	a, _, errb := testApp(nil)
+	p := scriptedAuth(t, a, "", "", "obx_key_"+strings.Repeat("f", 48))
+	// Registration is not merely unused here: it must be unreachable.
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
+		panic("auth registered an agent; init owns registration now")
 	}
-	if !got.register {
-		t.Fatal("a blank agent id must set register")
+
+	if code := a.run([]string{"auth"}); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
-	if got.did != "" || got.apiKey != "" || got.privateKey != "" {
-		t.Errorf("register path read credentials it should have skipped: %+v", got)
+	if p.Remaining() != 0 {
+		t.Errorf("Remaining = %d; auth asked fewer than its three questions", p.Remaining())
 	}
-	if p.Remaining() != 2 {
-		t.Errorf("Remaining = %d, want 2; the DID and secret prompts must not be shown", p.Remaining())
-	}
-	want := []string{"Backend URL (control plane)", "Core URL (data plane)", "Agent id (blank registers a new agent)"}
+	want := []string{"Backend URL (control plane)", "Core URL (data plane)",
+		"Organization control token (obx_key_… or JWT)"}
 	if len(p.Prompts) != len(want) {
 		t.Fatalf("prompts = %v, want %v", p.Prompts, want)
 	}
@@ -66,13 +66,51 @@ func TestBlankAgentIDShortCircuitsTheCredentialPrompts(t *testing.T) {
 			t.Errorf("prompt[%d] = %q, want %q", i, p.Prompts[i], want[i])
 		}
 	}
+	// Not one per-tool file: identity is init's to write, per tool.
+	for _, tool := range provider.Supported() {
+		if _, err := os.Stat(filepath.Join(home, tool)); !os.IsNotExist(err) {
+			t.Errorf("auth created %s's identity directory (err=%v)", tool, err)
+		}
+	}
+}
+
+// TestTheTokenPromptNeverEchoesAStoredValue the stored token prefills as
+// "there is one" and never as a value: Secret does not display what it holds,
+// which is the whole reason the token is asked for through it.
+func TestTheTokenPromptNeverEchoesAStoredValue(t *testing.T) {
+	isolateHome(t)
+	stored := "obx_key_" + strings.Repeat("e", 48)
+	orgEnv, err := devconfig.OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(orgEnv, map[string]string{devconfig.EnvControlToken: stored}); err != nil {
+		t.Fatal(err)
+	}
+
+	a, _, errb := testApp(nil)
+	p := scriptedAuth(t, a, "", "", "")
+	if code := a.run([]string{"auth"}); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
+	}
+	if strings.Contains(p.Out.String(), stored) {
+		t.Errorf("the stored token was offered as a prompt default:\n%s", p.Out.String())
+	}
+	// And a blank answer kept it, which is what makes a re-run to fix one URL safe.
+	kv, err := devconfig.ParseEnvFile(orgEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kv[devconfig.EnvControlToken] != stored {
+		t.Error("a blank answer erased the stored token")
+	}
 }
 
 // TestURLPromptsPrefillTheHostedDefaults both URL prompts prefill with the
 // hosted defaults, and accepting them writes those values rather than an empty
 // string.
 func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
-	p := &prompt.Scripted{Answers: []string{"", "", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"", "", ""}}
 	got, err := collectAuthFields(p, authFields{
 		backendURL: devconfig.DefaultBackendURL,
 		baseURL:    devconfig.DefaultBaseURL,
@@ -86,9 +124,6 @@ func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
 	if got.baseURL != devconfig.DefaultBaseURL {
 		t.Errorf("core URL = %q, want the hosted default", got.baseURL)
 	}
-	if got.register {
-		t.Error("an agent id was given; register must stay false")
-	}
 	if !strings.Contains(p.Out.String(), devconfig.DefaultBackendURL) {
 		t.Errorf("the backend prompt should show the default it will accept:\n%s", p.Out.String())
 	}
@@ -97,7 +132,7 @@ func TestURLPromptsPrefillTheHostedDefaults(t *testing.T) {
 // TestURLPromptsAcceptOverrides a self-hosted user must be able to override
 // either URL.
 func TestURLPromptsAcceptOverrides(t *testing.T) {
-	p := &prompt.Scripted{Answers: []string{"https://api.internal", "https://core.internal", "agent-1", "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"https://api.internal", "https://core.internal", ""}}
 	got, err := collectAuthFields(p, authFields{backendURL: devconfig.DefaultBackendURL, baseURL: devconfig.DefaultBaseURL})
 	if err != nil {
 		t.Fatal(err)
@@ -109,145 +144,17 @@ func TestURLPromptsAcceptOverrides(t *testing.T) {
 
 // TestBlankKeepsCurrentValues blank input keeps the current value, which is
 // what makes a re-run safe: pressing Enter through every field must not erase
-// a credential. Everything else, including both secrets, must survive an all-
-// Enter re-run.
+// the org token.
 func TestBlankKeepsCurrentValues(t *testing.T) {
-	current := authFields{backendURL: "https://api.internal", baseURL: "https://core.internal",
-		agentID: "agent-1", did: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-		apiKey: "obx_existing", privateKey: testSeedB64,
-	}
-	p := &prompt.Scripted{Answers: []string{"", "", "agent-1", "", "", ""}}
+	current := authFields{backendURL: "https://api.internal", baseURL: "https://core.internal"}
+	current.controlToken = "obx_key_" + strings.Repeat("f", 48)
+	p := &prompt.Scripted{Answers: []string{"", "", ""}}
 	got, err := collectAuthFields(p, current)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != current {
 		t.Errorf("blank input changed values:\n got %+v\nwant %+v", got, current)
-	}
-}
-
-// TestOrgKeyInTheAPIKeyFieldIsRejected the org/agent key mix-up cost hours of
-// debugging once. Pasting an obx_key_ into the api-key field must be rejected
-// by name.
-func TestOrgKeyInTheAPIKeyFieldIsRejected(t *testing.T) {
-	problem := validateAuthFields(authFields{
-		apiKey: "obx_key_" + strings.Repeat("f", 48), privateKey: testSeedB64,
-		did: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-	})
-	if problem == "" {
-		t.Fatal("an obx_key_ org key in the api-key field must be rejected")
-	}
-	for _, want := range []string{"ORGANIZATION key", devconfig.EnvControlToken, "obx_"} {
-		if !strings.Contains(problem, want) {
-			t.Errorf("rejection should mention %q:\n%s", want, problem)
-		}
-	}
-	if strings.Contains(problem, strings.Repeat("f", 48)) {
-		t.Errorf("rejection echoed the credential body:\n%s", problem)
-	}
-}
-
-func TestPrivateKeyValidation(t *testing.T) {
-	for _, tc := range []struct {
-		name, key, wantText string
-	}{
-		{name: "valid 32-byte seed", key: testSeedB64, wantText: ""},
-		{name: "not base64", key: "!!!not base64!!!", wantText: "not valid base64"},
-		{name: "wrong length", key: base64.StdEncoding.EncodeToString([]byte("short")), wantText: "decodes to 5 bytes"},
-		{name: "empty", key: "", wantText: "no signing key"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := privateKeyProblem(tc.key)
-			if tc.wantText == "" {
-				if got != "" {
-					t.Fatalf("valid key rejected: %s", got)
-				}
-				return
-			}
-			if !strings.Contains(got, tc.wantText) {
-				t.Errorf("problem = %q, want it to contain %q", got, tc.wantText)
-			}
-			if tc.key != "" && strings.Contains(got, tc.key) {
-				t.Errorf("validation echoed the key: %s", got)
-			}
-		})
-	}
-}
-
-func TestDIDShapeValidation(t *testing.T) {
-	base := authFields{apiKey: "obx_k", privateKey: testSeedB64}
-	for _, tc := range []struct {
-		did      string
-		wantFail bool
-	}{
-		{"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", false},
-		{"did:aip:not-a-uuid", true},
-		{"did:web:example.com", true},
-		{"3f2504e0-4f89-11d3-9a0c-0305e82c3301", true},
-		{"", true},
-	} {
-		f := base
-		f.did = tc.did
-		problem := validateAuthFields(f)
-		if tc.wantFail && problem == "" {
-			t.Errorf("DID %q should have been rejected", tc.did)
-		}
-		if !tc.wantFail && problem != "" {
-			t.Errorf("DID %q rejected: %s", tc.did, problem)
-		}
-	}
-}
-
-// TestRegisterPathSkipsValidation nothing is validated on the register path:
-// the server supplies all of it.
-func TestRegisterPathSkipsValidation(t *testing.T) {
-	if problem := validateAuthFields(authFields{register: true}); problem != "" {
-		t.Errorf("register path should need no local values, got: %s", problem)
-	}
-}
-
-func TestSummaryMasksSecrets(t *testing.T) {
-	home := isolateHome(t)
-	a, out, _ := testApp(nil)
-	const apiKey = "obx_live_SENSITIVEBODY_a91f"
-	a.printAuthSummary(authFields{
-		apiKey: apiKey, privateKey: testSeedB64,
-		agentID: "agent-1", did: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-		backendURL: devconfig.DefaultBackendURL, baseURL: devconfig.DefaultBaseURL,
-	}, filepath.Join(home, ".env"))
-
-	s := out.String()
-	if strings.Contains(s, "SENSITIVEBODY") {
-		t.Errorf("summary printed the api key body:\n%s", s)
-	}
-	if strings.Contains(s, testSeedB64) {
-		t.Errorf("summary printed the signing key:\n%s", s)
-	}
-	if !strings.Contains(s, "a91f") || !strings.Contains(s, "chars)") {
-		t.Errorf("summary should show a recognizable masked token:\n%s", s)
-	}
-	if !strings.Contains(s, "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301") || !strings.Contains(s, "agent-1") {
-		t.Errorf("summary should show the coordinates in full:\n%s", s)
-	}
-}
-
-// TestFingerprintIsOfThePublicKeyNotTheSeed the fingerprint is of the derived
-// public key.
-func TestFingerprintIsOfThePublicKeyNotTheSeed(t *testing.T) {
-	fp := publicKeyFingerprint(testSeedB64)
-	if !strings.HasPrefix(fp, "SHA256:") || !strings.Contains(fp, "public key") {
-		t.Errorf("fingerprint = %q", fp)
-	}
-	if strings.Contains(fp, testSeedB64) {
-		t.Errorf("fingerprint contains the seed: %q", fp)
-	}
-	other := make([]byte, 32)
-	other[0] = 1
-	if publicKeyFingerprint(base64.StdEncoding.EncodeToString(other)) == fp {
-		t.Error("two different seeds produced the same fingerprint")
-	}
-	if got := publicKeyFingerprint(""); got != "(none)" {
-		t.Errorf("empty seed = %q, want (none)", got)
 	}
 }
 
@@ -278,8 +185,7 @@ func TestAuthNeverTouchesPosture(t *testing.T) {
 
 	a, _, _ := testApp(nil)
 	if code := a.writeCoordinates(authFields{
-		did:     "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-		agentID: "agent-1", backendURL: "https://api.internal", baseURL: "https://core.internal",
+		backendURL: "https://api.internal", baseURL: "https://core.internal",
 	}); code != exitOK {
 		t.Fatalf("writeCoordinates exit = %d", code)
 	}
@@ -296,8 +202,13 @@ func TestAuthNeverTouchesPosture(t *testing.T) {
 		}
 	}
 	cfg := readDevJSON(t, home)
-	if cfg.AgentID != "agent-1" || cfg.BackendURL != "https://api.internal" || cfg.BaseURL != "https://core.internal" {
+	if cfg.BackendURL != "https://api.internal" || cfg.BaseURL != "https://core.internal" {
 		t.Errorf("coordinates not written: %+v", cfg)
+	}
+	// The agent id came off this write with registration: it identifies one
+	// tool's agent, and the org config is shared by all of them.
+	if cfg.AgentID != "" {
+		t.Errorf("auth wrote an agent id (%q) into the org config", cfg.AgentID)
 	}
 }
 
@@ -316,23 +227,30 @@ func TestAuthDoesNotTripTheEnforceDowngradeGuard(t *testing.T) {
 	}
 }
 
-// TestSecretsAndCoordinatesGoToDifferentFiles tHE split.
+// TestSecretsAndCoordinatesGoToDifferentFiles tHE split, with both halves
+// replaced: the secret is the org control token now and the coordinates are
+// the two URLs. The rule survived the replacement and is what it always was --
+// a coordinate in .env or a secret in dev.json reintroduces the stale-copy bug
+// that reverted a corrected DID on every install.
 func TestSecretsAndCoordinatesGoToDifferentFiles(t *testing.T) {
 	home := isolateHome(t)
 	a, _, _ := testApp(nil)
-	f := authFields{
-		apiKey: "obx_live_key", privateKey: testSeedB64,
-		did: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", agentID: "agent-1",
-		backendURL: "https://api.internal", baseURL: "https://core.internal",
+	token := "obx_key_" + strings.Repeat("f", 48)
+	f := authFields{backendURL: "https://api.internal", baseURL: "https://core.internal"}
+	f.controlToken = token
+
+	orgEnv, err := devconfig.OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if code := a.writeSecrets(filepath.Join(home, ".env"), f); code != exitOK {
+	if code := a.writeSecrets(orgEnv, f); code != exitOK {
 		t.Fatalf("writeSecrets exit = %d", code)
 	}
 	if code := a.writeCoordinates(f); code != exitOK {
 		t.Fatalf("writeCoordinates exit = %d", code)
 	}
 
-	envRaw, err := os.ReadFile(filepath.Join(home, ".env"))
+	envRaw, err := os.ReadFile(orgEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,90 +264,143 @@ func TestSecretsAndCoordinatesGoToDifferentFiles(t *testing.T) {
 			t.Errorf(".env carries the coordinate %s; secrets and coordinates must not share a file:\n%s", coord, envRaw)
 		}
 	}
-	for _, secret := range []string{"obx_live_key", testSeedB64} {
-		if strings.Contains(string(devRaw), secret) {
-			t.Errorf("dev.json leaked a secret value:\n%s", devRaw)
-		}
+	if strings.Contains(string(devRaw), token) {
+		t.Errorf("dev.json leaked the control token:\n%s", devRaw)
+	}
+	if !strings.Contains(string(devRaw), "https://api.internal") || !strings.Contains(string(devRaw), "https://core.internal") {
+		t.Errorf("the URLs were not written:\n%s", devRaw)
 	}
 	kv := readEnvFile(t, home)
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_live_key" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
-		t.Errorf("secrets not written: %v", kv)
+	if kv[devconfig.EnvControlToken] != token {
+		t.Errorf("the control token was not written: %v", kv)
 	}
 }
 
-// `init` structurally could not update credentials; the reuse path returned
-// before any write. Auth must overwrite unconditionally, so a second run with
-// different input leaves the second value on disk.
+// TestSecondRunOverwritesTheFirst `init` structurally could not update
+// credentials; the reuse path returned before any write. Auth must overwrite
+// unconditionally, so a second run with different input leaves the second
+// value on disk -- and a second run answering blank to everything must leave
+// the files byte-identical, which is the other half of the same contract and
+// the one a "keeps current" bug hides in.
 func TestSecondRunOverwritesTheFirst(t *testing.T) {
 	home := isolateHome(t)
-	a, _, _ := testApp(nil)
-	envPath := filepath.Join(home, ".env")
-	first := authFields{apiKey: "obx_first", privateKey: testSeedB64}
-	if code := a.writeSecrets(envPath, first); code != exitOK {
-		t.Fatal("first write failed")
+	orgEnv, err := devconfig.OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
 	}
-	other := make([]byte, 32)
-	other[0] = 9
-	second := authFields{apiKey: "obx_second", privateKey: base64.StdEncoding.EncodeToString(other)}
-	if code := a.writeSecrets(envPath, second); code != exitOK {
-		t.Fatal("second write failed")
+
+	runAuthWith := func(answers ...string) {
+		t.Helper()
+		a, _, errb := testApp(nil)
+		scriptedAuth(t, a, answers...)
+		if code := a.run([]string{"auth"}); code != exitOK {
+			t.Fatalf("auth exit = %d; stderr=%q", code, errb.String())
+		}
 	}
+
+	runAuthWith("https://api.one", "", "obx_key_"+strings.Repeat("1", 48))
+	runAuthWith("https://api.two", "", "obx_key_"+strings.Repeat("2", 48))
 	kv := readEnvFile(t, home)
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_second" {
-		t.Errorf("api key = %q, want the second value", kv[devconfig.EnvAPIKeyDirect])
+	if kv[devconfig.EnvControlToken] != "obx_key_"+strings.Repeat("2", 48) {
+		t.Error("the control token is not the second value")
 	}
-	if kv[devconfig.EnvAgentPrivateKey] != second.privateKey {
-		t.Errorf("signing key = %q, want the second value", kv[devconfig.EnvAgentPrivateKey])
+	cfg := readDevJSON(t, home)
+	if cfg.BackendURL != "https://api.two" {
+		t.Errorf("backend URL = %q, want the second value", cfg.BackendURL)
+	}
+
+	envBefore, err := os.ReadFile(orgEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devBefore, err := os.ReadFile(filepath.Join(home, "dev.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runAuthWith("", "", "")
+	envAfter, err := os.ReadFile(orgEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devAfter, err := os.ReadFile(filepath.Join(home, "dev.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(envBefore) != string(envAfter) {
+		t.Errorf("an all-blank re-run changed the credential file:\n%s\n---\n%s", envBefore, envAfter)
+	}
+	if string(devBefore) != string(devAfter) {
+		t.Errorf("an all-blank re-run changed the dev config:\n%s\n---\n%s", devBefore, devAfter)
 	}
 }
 
-// TestControlTokenWrittenOnlyWhenSupplied the org control token is a much
-// larger exposure than the agent seed, so it is only written when explicitly
-// supplied; never as a side effect.
-// TestTheControlTokenIsNeverPersisted. It is an ORG credential with fleet-wide
-// create and rotate authority, a much larger exposure than this agent's own
-// seed, and the only thing that read it from disk was the approver persona.
-// Registration still takes it from the environment, which is where a
-// credential that powerful belongs -- and the file it would have been written
-// to is plaintext.
-func TestTheControlTokenIsNeverPersisted(t *testing.T) {
+// TestTheControlTokenIsPersistedOrgLevelOnly inverts what this file used to
+// assert. The token WAS never persisted, because the only thing that read it
+// from disk was the approver persona and the file is plaintext. `auth` and
+// `init` are now two processes with nothing exported between them, so it has
+// to survive on disk -- and the exposure that argued against it is unchanged
+// and accepted (owner ruling O1).
+//
+// What is not negotiable is which file. This credential creates and rotates
+// agents across the whole organization; keeping it out of every per-tool store
+// is what stops one compromised tool store from being a fleet compromise, and
+// the negative half of this case is the enforcement of that, not the comment.
+func TestTheControlTokenIsPersistedOrgLevelOnly(t *testing.T) {
 	home := isolateHome(t)
-	a, _, _ := testApp(nil)
-	envPath := filepath.Join(home, ".env")
-	f := authFields{apiKey: "obx_k", privateKey: testSeedB64}
+	token := "obx_key_" + strings.Repeat("f", 48)
 
-	orgKey := "obx_key_" + strings.Repeat("f", 48)
-	// Supplied on stdin, which is the one path that ever wrote it.
-	if code := a.writeSecrets(envPath, f); code != exitOK {
-		t.Fatal("write failed")
+	a, _, errb := testApp(nil)
+	scriptedAuth(t, a, "", "", token)
+	if code := a.run([]string{"auth"}); code != exitOK {
+		t.Fatalf("auth exit = %d; stderr=%q", code, errb.String())
 	}
+
 	kv := readEnvFile(t, home)
-	if _, ok := kv[devconfig.EnvControlToken]; ok {
-		t.Error("the org control token was persisted to the credential file")
+	if kv[devconfig.EnvControlToken] != token {
+		t.Errorf("the org control token was not persisted to the org credential file: %v", kv)
 	}
-	for k, v := range kv {
-		if strings.Contains(v, orgKey) {
-			t.Errorf("the org control token reached %s under key %q", envPath, k)
+	for _, agentKey := range []string{devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey} {
+		if _, ok := kv[agentKey]; ok {
+			t.Errorf("auth wrote %s; agent credentials are init's, per tool", agentKey)
 		}
 	}
-	// The agent's own credentials still land, or auth has done nothing.
-	if kv[devconfig.EnvAPIKeyDirect] == "" || kv[devconfig.EnvAgentPrivateKey] == "" {
-		t.Errorf("auth did not write the agent's own credentials: %v", kv)
+	// And nowhere else. Not a per-tool store, and not the dev config.
+	for _, tool := range provider.Supported() {
+		perTool, err := devconfig.EnvFilePathFor(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(perTool); !os.IsNotExist(err) {
+			t.Errorf("auth created %s (err=%v); the control token must never reach a per-tool store", perTool, err)
+		}
+	}
+	devRaw, err := os.ReadFile(filepath.Join(home, "dev.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(devRaw), token) {
+		t.Errorf("the control token reached dev.json:\n%s", devRaw)
+	}
+	// It is resolvable from the file by a later process, which is the whole
+	// point of persisting it.
+	t.Setenv(devconfig.EnvControlToken, "")
+	if got := devconfig.ResolveControlToken(); got != token {
+		t.Error("the persisted token does not resolve back from the org file")
 	}
 }
 
 // TestEnvShadowWarningNamesTheRightFile a real env var beats both files, so
 // writing while one is exported produces a config that silently has no effect.
+// Three pairs, because auth writes three things now: warning about a variable
+// that shadows a file this run did not touch sends somebody unsetting a
+// variable that is doing no harm.
 func TestEnvShadowWarningNamesTheRightFile(t *testing.T) {
 	home := isolateHome(t)
 	envPath := filepath.Join(home, ".env")
 	devPath := filepath.Join(home, "dev.json")
 
 	for _, tc := range []struct{ varName, wantFile string }{
-		{devconfig.EnvAPIKeyDirect, envPath},
-		{devconfig.EnvAgentPrivateKey, envPath},
-		{devconfig.EnvDID, devPath},
-		{devconfig.EnvAgentID, devPath},
+		{devconfig.EnvControlToken, envPath},
 		{devconfig.EnvBaseURL, devPath},
 		{devconfig.EnvBackendURL, devPath},
 	} {
@@ -445,17 +416,31 @@ func TestEnvShadowWarningNamesTheRightFile(t *testing.T) {
 			}
 		})
 	}
+	// And not about anything auth no longer writes.
+	for _, gone := range []string{devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, devconfig.EnvDID, devconfig.EnvAgentID} {
+		a, _, errb := testApp(map[string]string{gone: "set"})
+		a.warnShadowedByEnv(envPath)
+		if strings.Contains(errb.String(), gone) {
+			t.Errorf("auth warned that %s shadows a file it does not write:\n%s", gone, errb.String())
+		}
+	}
 }
 
 // TestEnvShadowStillWrites warn, never refuse: exporting these in CI is a
 // documented pattern.
 func TestEnvShadowStillWrites(t *testing.T) {
 	home := isolateHome(t)
-	a, _, _ := testApp(map[string]string{devconfig.EnvAPIKeyDirect: "obx_from_env"})
-	if code := a.writeSecrets(filepath.Join(home, ".env"), authFields{apiKey: "obx_written", privateKey: testSeedB64}); code != exitOK {
+	a, _, _ := testApp(map[string]string{devconfig.EnvControlToken: "obx_key_from_env"})
+	orgEnv, err := devconfig.OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := authFields{}
+	f.controlToken = "obx_key_written"
+	if code := a.writeSecrets(orgEnv, f); code != exitOK {
 		t.Fatal("a shadowed field must still be written")
 	}
-	if readEnvFile(t, home)[devconfig.EnvAPIKeyDirect] != "obx_written" {
+	if readEnvFile(t, home)[devconfig.EnvControlToken] != "obx_key_written" {
 		t.Error("the file should hold what auth wrote, regardless of the environment")
 	}
 }
@@ -548,14 +533,18 @@ func TestAuthTakesNoFlagAtAll(t *testing.T) {
 func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 	isolateHome(t)
 	a, out, errb := testApp(nil)
-	scriptedAuth(t, a, "", "", "agent-1",
-		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64)
+	scriptedAuth(t, a, "", "", "obx_key_"+strings.Repeat("f", 48))
 	if code := a.run([]string{"auth"}); code != exitOK {
 		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
 	}
 	s := out.String()
 	if !strings.Contains(s, "openbox init") {
 		t.Errorf("success output should name `openbox init`:\n%s", s)
+	}
+	// Each tool carries its own agent now, so the next step is per tool and the
+	// output has to say so or a second tool is silently ungoverned.
+	if !strings.Contains(s, "once per tool") {
+		t.Errorf("success output should say init is run per tool:\n%s", s)
 	}
 	// One install governs the whole machine, so telling somebody to repeat it per
 	// project would send them doing work that does nothing.
@@ -567,102 +556,4 @@ func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 			t.Errorf("success output still describes per-project scope (%q):\n%s", gone, s)
 		}
 	}
-}
-
-// TestRegisterWithoutAnOrgKeyExplainsWhatIsNeeded registering needs an org
-// credential, and the error must say which kind.
-func TestRegisterWithoutAnOrgKeyExplainsWhatIsNeeded(t *testing.T) {
-	isolateHome(t)
-	a, _, errb := testApp(nil)
-	_, _, code := a.registerForAuth(authFields{backendURL: "https://api.internal"})
-	if code != exitError {
-		t.Fatalf("exit = %d, want an error with no control token", code)
-	}
-	s := errb.String()
-	if !strings.Contains(s, devconfig.EnvControlToken) {
-		t.Errorf("error must name the credential it needs:\n%s", s)
-	}
-	if !strings.Contains(s, "obx_key_") {
-		t.Errorf("error must say which KIND of key (an org key):\n%s", s)
-	}
-	if !strings.Contains(s, "agent id") {
-		t.Errorf("error must offer the alternative; give an existing agent id:\n%s", s)
-	}
-}
-
-// TestRegisterWritesCredentialsButInstallsNothing registration must reach
-// devinit.Register; NOT devinit.Run; because Run also invokes the provider
-// installer and auth must never install hooks.
-func TestRegisterWritesCredentialsButInstallsNothing(t *testing.T) {
-	home := isolateHome(t)
-	a, out, errb := testApp(map[string]string{devconfig.EnvControlToken: "obx_key_" + strings.Repeat("f", 48)})
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		return &fakeReg{reg: &backend.Registration{
-			AgentID: "srv-agent", DID: "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-			APIKey: "obx_minted", PrivateKey: testSeedB64,
-		}}
-	}
-	res, ref, code := a.registerForAuth(authFields{
-		backendURL: "https://api.internal", baseURL: "https://core.internal",
-	})
-	if code != exitOK {
-		t.Fatalf("exit = %d; stderr=%q", code, errb.String())
-	}
-	if !res.Registered || ref.AgentID != "srv-agent" {
-		t.Fatalf("registration result = %+v ref = %+v", res, ref)
-	}
-	if res.ConfigApplied {
-		t.Error("auth registered AND installed; init owns installation")
-	}
-	kv := readEnvFile(t, filepath.Join(home, "claude-code"))
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_minted" {
-		t.Errorf("minted credentials not written: %v", kv)
-	}
-	if strings.Contains(out.String(), "obx_minted") || strings.Contains(out.String(), testSeedB64) {
-		t.Errorf("a minted secret reached stdout:\n%s", out.String())
-	}
-}
-
-// TestAgentIDPromptNeverPrefills the agent-id prompt must NOT pre-fill, even
-// when dev.json holds an id.
-func TestAgentIDPromptNeverPrefills(t *testing.T) {
-	const onFile = "83bb12af-1a76-4ebd-9e9a-989afc40720a"
-
-	t.Run("Enter registers, even with an id on file", func(t *testing.T) {
-		p := &prompt.Scripted{Answers: []string{"", "", "", "SHOULD-NOT-BE-READ"}}
-		got, err := collectAuthFields(p, authFields{agentID: onFile, did: "did:aip:x"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !got.register {
-			t.Fatal("blank must register; that is what the prompt says it does")
-		}
-		if got.agentID != "" {
-			t.Errorf("agentID = %q, want it cleared for registration", got.agentID)
-		}
-	})
-
-	t.Run("the stored id is not shown as a default", func(t *testing.T) {
-		p := &prompt.Scripted{Answers: []string{"", "", "", "SHOULD-NOT-BE-READ"}}
-		if _, err := collectAuthFields(p, authFields{agentID: onFile}); err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(p.Out.String(), onFile) {
-			t.Errorf("the stored agent id was offered as a prompt default:\n%s", p.Out.String())
-		}
-	})
-
-	t.Run("typing an id reuses that agent", func(t *testing.T) {
-		p := &prompt.Scripted{Answers: []string{"", "", onFile, "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_k", testSeedB64}}
-		got, err := collectAuthFields(p, authFields{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got.register {
-			t.Error("an explicit agent id must not register")
-		}
-		if got.agentID != onFile {
-			t.Errorf("agentID = %q, want %q", got.agentID, onFile)
-		}
-	})
 }

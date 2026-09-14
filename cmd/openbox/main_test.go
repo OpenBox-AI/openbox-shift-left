@@ -848,11 +848,13 @@ func TestUnknownProviderAndMissingProvider(t *testing.T) {
 	}
 }
 
-// TestAuth_PersistsAgentIDAndBackendURL coordinate persistence moved from
-// `init` to `auth` : `auth` writes agent_id / backend_url / base_url to
-// dev.json, they survive a re-run, and the resolvers read them back with the
-// environment unset.
-func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
+// TestAuth_PersistsTheBackendURL coordinate persistence moved from `init` to
+// `auth`: `auth` writes backend_url / base_url to the org dev.json, they
+// survive a re-run, and the resolvers read them back with the environment
+// unset. The agent id came off this list when identity went per tool -- it
+// names one tool's agent, and this file is shared by all of them, so `init`
+// writes it into the tool's own config instead.
+func TestAuth_PersistsTheBackendURL(t *testing.T) {
 	home := isolateHome(t)
 	t.Setenv("OPENBOX_AGENT_ID", "")
 	t.Setenv("OPENBOX_BACKEND_URL", "")
@@ -860,9 +862,8 @@ func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
 	run := func(when string) {
 		t.Helper()
 		a, _, errb := testApp(nil)
-		// backend, core, agent id, DID, API key, signing key.
-		scriptedAuth(t, a, "https://backend.acme", "", "agent-123",
-			"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_test_k", testSeedB64)
+		// backend, core, org control token.
+		scriptedAuth(t, a, "https://backend.acme", "", "obx_key_"+strings.Repeat("f", 48))
 		code := a.run([]string{"auth"})
 		if code != exitOK {
 			t.Fatalf("%s: auth exit = %d; stderr=%q", when, code, errb.String())
@@ -871,14 +872,11 @@ func TestAuth_PersistsAgentIDAndBackendURL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: read dev config: %v", when, err)
 		}
-		if !strings.Contains(string(raw), `"agent_id": "agent-123"`) {
-			t.Errorf("%s: dev.json missing agent_id:\n%s", when, raw)
-		}
 		if !strings.Contains(string(raw), `"backend_url": "https://backend.acme"`) {
 			t.Errorf("%s: dev.json missing backend_url:\n%s", when, raw)
 		}
-		if got := devconfig.ResolveAgentID(); got != "agent-123" {
-			t.Errorf("%s: ResolveAgentID() = %q, want agent-123", when, got)
+		if strings.Contains(string(raw), `"agent_id"`) {
+			t.Errorf("%s: auth wrote an agent id into the org config:\n%s", when, raw)
 		}
 		if got := devconfig.ResolveBackendURL(); got != "https://backend.acme" {
 			t.Errorf("%s: ResolveBackendURL() = %q, want https://backend.acme", when, got)
@@ -901,8 +899,7 @@ func TestAuth_PersistsBaseURLForASelfHostedCore(t *testing.T) {
 			t.Setenv(k, v)
 		}
 		a, _, errb := testApp(env)
-		scriptedAuth(t, a, "", coreURL, "agent-1",
-			"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_test_k", testSeedB64)
+		scriptedAuth(t, a, "", coreURL, "obx_key_"+strings.Repeat("f", 48))
 		if code := a.run([]string{"auth"}); code != exitOK {
 			t.Fatalf("auth exit = %d; stderr=%q", code, errb.String())
 		}
@@ -1254,8 +1251,10 @@ func seedDevConfigPath(t *testing.T, tool string) string {
 	return p
 }
 
-// scriptedAuth drives `openbox auth` through its prompts, in the order they are
-// asked: backend URL, core URL, agent id, DID, API key, signing key. A blank
+// scriptedAuth drives `openbox auth` through its prompts, in the order they
+// are asked: backend URL, core URL, organization control token. Three, not
+// six: the agent id, DID, API key and signing key prompts went with the
+// registration they fed, which `init --provider <tool>` owns now. A blank
 // answer keeps whatever was prefilled, which is how a re-run that changes one
 // URL is safe.
 func scriptedAuth(t *testing.T, a *app, answers ...string) *prompt.Scripted {
