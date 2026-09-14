@@ -47,7 +47,7 @@ relay's upstream dial substituted (`internal/gateway/gatewaytest`) and no socket
 anywhere. That proves the bytes the relay forwards and captures, the mapping,
 the gate and the caps; it proves nothing about bind, listen, TLS to a real
 socket, the OTLP HTTP intake, or what core stores. Those live only in the
-dormant `test/46-otel-lane.sh` and `47-transport.sh`.
+live stack these lanes have never been run against.
 
 - **`:proxy:` (transport)**; a CONNECT to the allowlisted host is TLS-terminated
   with a project CA and served by the existing gateway relay, and the evidence
@@ -264,9 +264,9 @@ a **finding**, not an absence.
 
 **The two ⬜ columns are the honest centre of this table.** Desktop and OAuth
 coverage is the reason both lanes were built, and neither has been confirmed
-against a real client; the desktop cell is intent, and only
-`test/46-otel-lane.sh` and `47-transport.sh` can turn it into a measurement. Do
-not read "built for it" as "covers it".
+against a real client; the desktop cell is intent, and only a run against a
+live stack and a real desktop client can turn it into a measurement. Nothing in
+this repository can. Do not read "built for it" as "covers it".
 
 **The desktop app is still not routed, and that is now visible instead of
 silent.** Observed live: the desktop process holds **direct** `:443` connections
@@ -558,3 +558,143 @@ and starts unlatched, and core re-evaluates that run's first gated call
 against the same policies, so a policy that halted the previous run halts
 this one on the same condition. This is not "clearing" a halt — nothing is
 removed; the new run simply has no latch of its own yet.
+
+## 5. Evidence: what is proven, and by what
+
+The matrices above say what each provider *supplies*. They do not say what
+proves any of it works, and for most of this document's life nothing did: across
+§1's rows exactly one cited a test, as prose inside a cell.
+
+This section is that axis. It follows the same epistemics as the per-hook marker
+above — **an uncited claim is downgraded**, and a class is never inferred.
+
+**The ladder.** It is the repository's own rule made countable: asserting a
+struct is not asserting the wire, and asserting the wire is not asserting the
+receiving type.
+
+| Class | Means |
+|---|---|
+| **E0** | prose. No test. |
+| **E1** | a unit fixture: a Go struct, an in-process value, a builder called directly, or a file read locally. |
+| **E2** | exercised end to end against a fake control plane, **and graded on the artifact the claim is about** — the captured outbound request body for a claim about what is *reported*, the rendered decision or the on-disk state for a claim about what the binary *did*. |
+| **E3** | needs a live stack. **Nothing in this repository can reach it.** |
+
+Two things follow from the ladder that are easy to misread. A real HTTP round
+trip does not by itself make a claim E2: a test that round-trips and then
+inspects only a local struct is still E1. And E2 is the ceiling here — with the
+shell suite retired, **nothing in this repository observes the far end of the
+wire**. Every E3 row below is printed rather than omitted, because a claim with
+no evidence is the one a reader most needs to see.
+
+### 5a. Lifecycle claims (§1)
+
+| Claim | Class | Owner |
+|---|---|---|
+| `SessionStarted` reaches the wire | E2 | `cmd/openbox/main_test.go` · `TestHookEndToEndSmoke` |
+| `PromptSubmitted` reaches the wire, redacted | E2 | `internal/adapters/claude-code/content_conformance_test.go` · `TestContentCaptureConformance` |
+| `ToolCall` maps to `ActivityStarted` | E2 | `internal/adapters/claude-code/conformance_parity_test.go` · `TestWire_ToolEventsAreActivityPairs` |
+| `ToolResult` maps to `ActivityCompleted` | E2 | `internal/adapters/claude-code/conformance_parity_test.go` · `TestWire_ToolEventsAreActivityPairs` |
+| `SessionEnded` reaches the wire | E2 | `internal/adapters/claude-code/usage_test.go` · `TestFinops_NoContentOnWire` |
+| `CommitCreated` payload shape | E1 | `internal/client/payload_lifecycle_test.go` · `TestLifecycle_CommitLineageSurvivesSignal` |
+| `CommitCreated` is emitted when a commit happens | **E0** | **no owner.** The trailer stamp is tested; the emission is not. A real gap, printed rather than omitted. |
+| `Deploy` payload shape | E1 | `internal/client/payload_lifecycle_test.go` · `TestLifecycle_DeployLineageSurvivesSignal` |
+| `SubagentStarted`, `PermissionDenied`, `APIError` reach the wire | E2 | `internal/adapters/claude-code/enforce_conformance_test.go` · `TestEnforcementConformance` |
+| The 21 v1.8 signal classes each carry `signal_args` and no `activity_id` | E2 | `internal/adapters/claude-code/content_conformance_test.go` · `TestContentCaptureConformance` |
+| The same 21 classes map correctly in process | E1 | `internal/adapters/claude-code/mapper_signals_test.go` · `TestMap_21SignalClasses` |
+| `ConfigChange` is gated, and `source:policy_settings` never is | E2 | `internal/adapters/claude-code/configchange_test.go` · `TestRunHook_ConfigChange_PolicySettingsNeverGated` |
+| Codex's five core types reach the spool from the real binary | E1 | `cmd/openbox/main_test.go` · `TestCodexUnifiedBinaryObserveE2E` |
+| Core accepts, stores or deduplicates any of the above | **E3** | needs a live stack. Since the shell suite was retired this is owned entirely by the closed side. |
+
+### 5b. Governance claims (the evals)
+
+Named by claim, and enumerable: `go test -run TestGovernanceEval -v ./cmd/openbox/`.
+
+| Claim | Class | Owner |
+|---|---|---|
+| A call that ran is reported exactly twice; one blocked before it ran, exactly once | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEval` |
+| Pairing survives a retry that repeats the same arguments | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEval` |
+| A declared denial must agree with what the binary rendered | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalTheWitnessMustBeCorroborated` |
+| Nothing is lost between stdin and the wire | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` |
+| A call's label is the tool that was invoked, on both halves | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` |
+| One call, one row of each kind | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` |
+| Each verdict reaches its own local effect | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalVerdictBranches` |
+| A HALT refuses the rest of the run without asking again | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalHaltLatchesTheRestOfTheRun` |
+| An approval unanswered denies, rejected denies, granted proceeds | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalApproval` |
+| The failure policy runs after the evaluation, never before | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalFailClosed` |
+| A gate outage reports the call exactly once, not twice and not never | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalGateOutageReportsTheCallOnce` |
+| Content leaves only when capture is on, and only in a content field | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalContentGateBothDirections` |
+| A secret is rewritten before it reaches either the disk or the wire | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalRedactionRunsBeforeAttachment` |
+| A wrongly signed request is refused, and the event is not discarded | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalRejectsAWrongKey` |
+| The spooled event and the wire body have separate validators | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalTwoObjectsTwoValidators` |
+| Every grader can actually fail | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalMutations` |
+| A renamed or wrong-typed `metadata` key is caught | E1 | `internal/conformance/conformance_test.go` · `TestInvalidSamplesRejected` |
+| A turn's thinking is gated with the rest of the content | E1 | `internal/adapters/claude-code/content_conformance_test.go` · `TestContentCaptureConformance` |
+
+**The graders behind those rows**, each a predicate that returns reasons rather
+than a verdict, and each executed against its own deliberate mutation so that it
+has been watched failing: `pairing`, `completeness`, `activity-type`,
+`delivery-once`, `signal-args`, `content-gate`, `redaction`. Two further
+graders, `reference/parity` and `reference/exempt-all`, are the *wrong* answers
+kept executable — they are not evidence, they are what proves the fixtures still
+tell the two hard cases apart.
+
+Thinking sits at E1 on purpose: reaching it needs a `transcript_path` fixture
+the native hook payload has no slot for, so no scenario here can produce one.
+
+### 5c. Model-call lane claims (§1b)
+
+The lane table's claims split by lane, so the class does too. Two structural
+facts shape almost every row:
+
+- **`internal/gateway`'s emitter is an in-process interface**, so no test in that
+  package constructs a client and a fake control plane. Its capture,
+  decompression and latency tests are therefore E1 however thorough they are —
+  and `:proxy:` reuses that exact relay (`TestProductionHandlerIsTheGatewayRelay`),
+  so the same evidence covers both lanes and neither reaches the wire through it.
+- **The only lane evidence graded on a wire body lives in `internal/cli/gatewayemit`**,
+  whose tests are parametrized over the lanes.
+
+| Claim | `:gateway:` | `:proxy:` | `:otel:` | Owner |
+|---|---|---|---|---|
+| Request / response body captured | E2 | **E1** | E1 | `internal/gateway/wired_test.go` · `TestCaptureReportsRedactedEvidence` (in process); `internal/cli/telemetryemit/sentinel_test.go` · `TestContentFieldsAreUnsetOnTheEvent` |
+| Headers are no longer emitted | E1 | E1 | E1 | `cmd/openbox/transportcapture_test.go` · `TestTransportLaneRecordsThroughTheRealChain` |
+| Four token counts and the model id | **UNOWNED** | **UNOWNED** | E2 | `internal/cli/telemetryemit/sentinel_test.go` · `TestNoContentOnWireAtEitherPosture`. Neither in-path lane sets these fields at all, so there is nothing to own |
+| Credential fingerprint, one-way | E1 | E1 | E1 | `cmd/openbox/transportcapture_test.go` · `TestTransportLaneRecordsThroughTheRealChain` — checked both directions: the fingerprint is present, and the raw spooled bytes never carry the key |
+| `br` response body decompressed | E1 | E1 | n/a | `internal/gateway/decodebody_test.go` · `TestBrotliResponseRelaysCompressedAndCapturesDecoded` |
+| `gzip` response body decompressed | E1 | E1 | n/a | `internal/gateway/decodebody_test.go` · `TestGzippedResponseRelaysCompressedAndCapturesDecoded` |
+| `zstd` / `deflate` yield a marker naming the encoding | E1 | E1 | n/a | `internal/gateway/decodebody_test.go` · `TestUnknownContentEncodingYieldsAMarkerNamingIt` |
+| Relayed call latency | E1 | E1 | E1 | `internal/gateway/capture_test.go` · `TestCompleteCarriesTheMeasuredCall`; `internal/cli/telemetryemit/mapper_test.go` · `TestDurationDerivesTheTurnWindow` |
+| Paired `ActivityStarted` / `ActivityCompleted` | E2 | E2 | E1 | `internal/cli/gatewayemit/lane_test.go` · `TestLaneNamesMatchTheActivityIDNamespaces` |
+| A token-count probe is told apart and dropped | E2 | E2 | n/a | `internal/cli/gatewayemit/pathclass_test.go` · `TestAProbeIsClassifiedAndNotSpooled` |
+| Refusal is written but dormant | E0 | E1 | E0 | `internal/transport/proxy_test.go` · `TestTheGateIsNotWired` |
+| The three lanes never share an `activity_id` | E2 | E2 | E2 | `internal/cli/gatewayemit/lane_test.go` · `TestTheLanesAreDisjoint` |
+| Terminal CLI / desktop / OAuth coverage | E0 | E0 | E0 | field observation, not a test. §1b's two ⬜ columns are the honest centre of that table |
+| Core accepts, stores or deduplicates any of it | E3 | E3 | E3 | needs a live stack |
+
+**Two gaps this axis made visible, neither of them new, both previously
+unsayable.**
+
+*No test grades a model call's body landing in `activity_input` or
+`activity_output` for `:proxy:` specifically.* `:gateway:` has that at E2, and
+the two lanes share the mapping code, so the behaviour is very likely right —
+but "likely right because it shares code" is exactly the reasoning this axis
+exists to stop being invisible. The proxy rows are printed E1.
+
+*The four token counts and the model id have no owner on either in-path lane*,
+because neither sets them: only the telemetry lane, which is the governed tool
+reporting its own call, carries them. That is a property of the design rather
+than a missing test, and the row says so instead of reading as an oversight.
+
+**On the dormancy row.** `TestTheGateIsNotWired` parses `proxy.go` and fails the
+build if it ever calls the gate or refusal functions. It is E1 by the ladder —
+no wire is involved — but note what it does that no tier here captures: for a
+claim that a path is *not* wired, a static check over the source is exhaustive
+where a test can only sample. It is the strongest possible evidence for that
+particular shape of claim, and it is stronger than the `:gateway:` and `:otel:`
+rows beside it, which rest on the absence of a mechanism rather than on a check
+that the absence holds.
+
+**What none of these prove.** That the control plane accepts the wire, stores a
+row, or keeps two rows apart; that a socket binds, that TLS terminates against a
+real listener, that the OTLP protobuf path decodes, or that an attestation
+verifies. Each is E3 and each is now owned entirely by the closed side.

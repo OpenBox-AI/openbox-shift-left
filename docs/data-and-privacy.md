@@ -770,4 +770,4 @@ containing a synthetic AWS key and runs a shell command carrying a marker, both
 sourced from files so neither appears in the prompt, and then asserting what
 reached the control plane. It has **not** been run against a live stack, so
 treat it as written rather than as evidence. See
-[`docs/test/e2e.md`](test/e2e.md) § capture.
+[what is proven, and by what](coverage.md).

@@ -6,8 +6,8 @@ import (
 )
 
 // This is the one assertion that would have caught every defect in this repair.
-// The live suite DOES assert pairing (test/20-capture.sh), but filters every
-// query to TOOL activity types, so the llm_completion rows sat outside it.
+// Pairing was already being checked elsewhere, but only over TOOL activity
+// types, so the llm_completion rows sat outside every query that looked at it.
 //
 // The invariant: every activity that RAN carries exactly two rows, one
 // ActivityStarted and one ActivityCompleted. A tool blocked before it ran

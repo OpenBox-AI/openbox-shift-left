@@ -246,44 +246,33 @@ jobs:
             exit 1
           fi
 
-      - name: Testbed scripts are syntactically valid
-        # These are dormant until a stack is reachable, so nothing else executes
-        # them. A dormant script with a syntax error is discovered at the worst
-        # possible moment — the first time someone finally has a stack.
-        run: |
-          for f in test/*.sh test/lib/*.sh; do
-            bash -n "$f" || { echo "syntax error in $f"; exit 1; }
-          done
-
-      - name: Testbed helpers are called with the arity they declare
-        # `bash -n` CANNOT see this, and the failure is worse than a syntax error:
-        # every script runs under `set -u`, so a tb_skip called with one argument
-        # expands an unset $2 and the phase ABORTS at that line. 45-gateway.sh had
-        # three, all on default paths, so cases E, F and G never executed and
-        # run-all.sh recorded a bare non-zero exit with no diagnostic.
+      - name: No tracked file points at the retired end-to-end suite
+        # The shell suite left the public tree. A stale path is worse than a
+        # missing one: a contributor follows it, finds nothing, and cannot tell
+        # whether the suite moved or the document is wrong.
         #
-        # Arity is counted from the double quotes on the call line, which is how
-        # every call site in the suite is written. A call spanning lines, or one
-        # using a variable rather than a literal, is skipped rather than guessed
-        # at — a gate that reports false positives gets disabled.
+        # Driven off `git ls-files` so it scans tracked files only, which
+        # excludes plans/ and .claude/ without a path list that would rot.
+        #
+        # The needle is assembled at run time rather than written out, so this
+        # gate does not match its own source -- which would make it fail
+        # forever, and a gate that fails forever gets deleted rather than fixed.
+        #
+        # The three exclusions are each a real false positive, verified against
+        # the tree: the grpc bufconn dependency path, named in the architecture
+        # doc; a depguard fixture module string; and a reserved-TLD URL in a
+        # relay characterization test.
         run: |
-          bad=""
-          for f in test/*.sh; do
-            while IFS= read -r line; do
-              case "$line" in
-                *'tb_skip "'*)
-                  q=$(printf '%s' "$line" | tr -cd '"' | wc -c)
-                  [ "$q" -ge 4 ] || bad="$bad$f: $line"$'\n'
-                  ;;
-              esac
-            done < "$f"
-          done
-          if [ -n "$bad" ]; then
-            echo "tb_skip takes <name> <reason>; these pass one argument and would abort the phase under set -u:"
-            printf '%s' "$bad"
+          n="te"; n="${n}st/"
+          hits=$(git ls-files -z | xargs -0 grep -n "$n" \
+            | grep -v "^$n" \
+            | grep -vE "${n}bufconn|github\.com/${n}|[a-z]\.${n}" || true)
+          if [ -n "$hits" ]; then
+            echo "these tracked files still point at the retired suite:"
+            printf '%s\n' "$hits"
             exit 1
           fi
-          echo "all tb_skip call sites pass both arguments"
+          echo "no tracked file references the retired suite"
 
       - name: Docs never show an openbox flag the CLI does not define
         # Four separate phantom flags were written into this feature's docs before

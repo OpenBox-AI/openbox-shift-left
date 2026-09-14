@@ -77,6 +77,21 @@ Separately, a span describes work nested *inside* an activity, and for a model
 call `llm_completion` **is** the activity -- so nesting one would represent the same
 call twice. See mapping.md §2.
 
+**What core stores under `metadata` is not what this client sent under it.**
+The stored object is a *union* of the wire's `metadata` and the flattened
+`span`, and `span.invocation_id` is renamed to `tool_use_id` on the way. Reading
+a stored row as the wire's own shape will mislead in both directions: a key that
+is absent here may be present there, and one named here may be named differently
+there.
+
+The schema also no longer takes `metadata` on trust. It was `{"type": "object"}`
+with nothing else -- closed at the root, wide open one level down -- so a mapper
+that renamed or dropped a structural key validated clean. It is now a closed
+union of the keys the producers in this repository actually emit, which is what
+makes a rename a validation failure rather than a silent change. INV-1 and INV-2
+are still enforced by `contentMetadataKeys` in code; the schema constrains
+membership and types, deliberately not credential shapes.
+
 Two fields changed egress behaviour with it, and neither is a loss:
 
 - `span.credential_fingerprint` moved to `metadata.credential_fingerprint`, still
@@ -96,7 +111,7 @@ See mapping.md §3 for where every field lands.
 
 One glossary entry per INV, collecting the wording seven other sites cite
 without defining (`docs/mapping.md`, `docs/architecture.md`, `docs/coverage.md`,
-`docs/test/e2e.md`, `internal/provider/provider.go`,
+`internal/provider/provider.go`,
 `internal/cli/devinit/devinit.go`, `internal/cli/gatewayemit/emitter_test.go`).
 Where two sites paraphrased the same INV differently, the stricter wording
 below wins.

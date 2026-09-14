@@ -350,6 +350,15 @@ prevent, so the limits are documented as first-class:
   install itself unavoidable is the fleet's job, not this tool's.
 - **Commit attribution is an inferred claim** unless the pipeline fetches the
   signed attestation note; then it is cryptographically verified.
+- **Nothing here observes the far end of the wire.** The governance evals prove
+  what this binary put on the wire, what it rendered to the coding agent and
+  what it left on disk — offline, with no stack. They cannot prove that the
+  control plane accepts any of it, stores a row, or keeps two rows apart, nor
+  that a socket binds or an attestation verifies. Those claims are printed as
+  unproven rather than omitted in
+  [what is proven, and by what](docs/coverage.md); since the live-stack suite
+  was retired they are owned entirely by the closed side.
+
 - **Enforcement prevents mistakes, not motivated bypass**, for two independent
   reasons. The hook lives in the developer's own config until the provider's
   managed configuration is deployed (`deployments/managed/`); and every gated
@@ -441,7 +450,7 @@ string — but they are not commands you type, so they are not listed above.
 | [Event contract](docs/dev-event-contract.md) | the normalized event schema in `api/`, its lifecycle types, and the INV-2 content gate |
 | [Wire mapping](docs/mapping.md) | how each field lands in core's columns |
 | [Provider coverage](docs/coverage.md) | what each provider's native surface does and does not supply, and the bounded non-goals |
-| [End-to-end tests](docs/test/e2e.md) | `test/`; a mock-free suite against a real stack |
+| [What is proven, and by what](docs/coverage.md) | the claim register, and the evidence class behind each claim |
 
 **One-time migration note**, not current authority:
 [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) — what
@@ -456,12 +465,22 @@ one Go module, laid out per `golang-standards/project-layout`:
 ```bash
 go build ./...                      # everything, from the root
 go test -race -count=1 ./...        # -count=1 is required; see internal/depguard
-./test/run-all.sh                   # the end-to-end suite (needs a local OpenBox stack)
+go test -run TestGovernanceEval -v ./cmd/openbox/   # the governance evals, listed by claim
 ```
 
 Anything provider-agnostic belongs in `internal/adapters/common/`. The
-end-to-end suite needs an OpenBox stack it can reach; `test/00-preflight.sh`
-tells you whether the one you have is healthy enough to trust the results.
+governance evals need nothing: they drive the real hook entrypoint against an
+in-process fake control plane, so they run offline, on any machine, with no
+stack to stand up.
+
+**What they do not prove.** They grade what this binary put on the wire, what it
+rendered to the coding agent and what it left on disk. They say nothing about
+what the control plane does with any of it — that it accepts the wire, stores a
+row, or deduplicates one — nor about binding a socket, TLS to a real listener,
+or verifying an attestation. Those need a live stack, nothing in this repository
+observes the far end of the wire, and
+[what is proven, and by what](docs/coverage.md) names each of them as unproven
+rather than omitting it. The claim is detection, not prevention.
 
 ## License
 

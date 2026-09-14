@@ -146,7 +146,7 @@ last-wins, with a parse error that echoes the offending line.
 go build ./... && go vet ./...   # everything, from the root, one module
 go test -race -count=1 ./...     # -count=1 is required: see internal/depguard
 GOOS=windows GOARCH=amd64 go build ./... && GOOS=linux GOARCH=arm64 go build ./...
-./test/run-all.sh                # end to end, needs a local OpenBox stack
+go test -run TestGovernanceEval -v ./cmd/openbox/   # the governance evals, by claim
 ```
 
 `-count=1` is not optional: the conformance guard shells out to `go list`, whose

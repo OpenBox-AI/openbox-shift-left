@@ -809,9 +809,9 @@ exactly:
 ## 7. What a live run must confirm
 
 Everything above about how the control plane ingests these events was
-established by reading its source, and reading is not running. `test/run-all.sh`
-carries the assertions; the suite has not been run against a live stack, so the
-row behaviour in section 5 is derived rather than observed.
+established by reading its source, and reading is not running. Nothing in this
+repository observes the far end of the wire, so the row behaviour in section 5
+is derived rather than observed.
 
 Until it runs, none of the following is asserted as fact.
 

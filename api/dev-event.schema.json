@@ -183,7 +183,7 @@
       "pattern": "^[\\x21-\\x7e]+$"
     },
     "metadata": {
-      "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
+      "description": "Additive per-type key/values. NOT verbatim at the far end: core stores a UNION of this object and the flattened `span`, renaming `invocation_id` to `tool_use_id` on the way, so a stored `metadata` and this one are not the same shape. Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`); those two are enforced by `contentMetadataKeys` in code, and only partly here.",
       "type": "object",
       "properties": {
         "tool_name": {

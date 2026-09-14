@@ -451,7 +451,7 @@ list). Specific to setup:
 
 | | Status |
 |---|---|
-| macOS, Linux | unit-tested, and the CLI driven by hand; the end-to-end suite (`test/`) has **not been run** against a live stack for this flow |
+| macOS, Linux | unit-tested, the governance evals green offline, and the CLI driven by hand; **nothing here has been run against a live stack** for this flow |
 | Windows | **build-verified only**; CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
 | A managed-settings mandate | **not verifiable by us**; it needs a deployment in a real fleet. `openbox doctor` reports whether one is in force and whether it allows this machine's hooks to run |
 | Credential at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows |

@@ -76,7 +76,6 @@ is the part that stops a directory quietly becoming a junk drawer.
 | `docs/` | design and user documents | anything a program parses |
 | `init/` | **illustrative** copies of the supervisor units, and only that | a `go:embed`, or anything treated as authoritative. `internal/cli/laneservice` renders the real ones |
 | `internal/` | every package this repo does not publish; which is all of them | a package meant for external import. Publishing one reopens the `/pkg` question |
-| `test/` | the mock-free end-to-end suite (shell), see [e2e](test/e2e.md) | Go tests. Those live beside the code they test |
 | `tools/` | supporting dev instruments; `corpusfixture`, `refusal-injector` | anything the release builds. `tools/` is not a release surface |
 
 `install.sh` and `.github/workflows/` stay at the repository root deliberately:
@@ -342,7 +341,7 @@ Being precise here is part of the product.
     (phase 09). Two limits on that: the export was **JSON**, while production is
     configured for `http/protobuf`; so **no test drives the protobuf decoder, which
     is the only path real traffic takes**; and the real client has never exported
-    to this lane at all. The dormant `test/46-otel-lane.sh` and `47-transport.sh`
+    to this lane at all. A live stack and a real desktop client
     are what would change that.
   - **The desktop and OAuth coverage these lanes were built for is
     unconfirmed.**
@@ -649,10 +648,12 @@ alignment. Alignment for those turns comes from the hook path or not at all.
 
 ## Verification
 
-`test/` is a mock-free end-to-end suite: it drives real headless sessions
-against a real local OpenBox and asserts what arrived; including the content
-gate in both directions: with capture on, the tool command, the file body, the
-tool output and the turn's thinking all egress; with capture off, none of them
+The governance evals drive the real entrypoint -- `openbox hook claude-code
+<Event>`, the native payload on stdin -- against an in-process fake control
+plane, and grade what the binary put on the wire, what it rendered to the coding
+agent and what it left on disk. They cover the content gate in both directions:
+with capture on, the tool command, the file body and the tool output all egress;
+with capture off, none of them
 do. The thinking half is asymmetric on purpose; presence is a skip when the
 session produced no block (no prompt can make a model think a chosen phrase),
 while absence is strict, because absence needs no cooperation from a model.
@@ -662,4 +663,4 @@ event", which was the retired metadata-only posture; an unconditional, structura
 tool content had no field to land in. That decision retired it. What replaces it
 is a gate plus a redaction plus a cap, none of them structural, which is why the
 suite asserts the closed direction as explicitly as the open one. See
-[end-to-end tests](test/e2e.md).
+[what is proven, and by what](coverage.md).
