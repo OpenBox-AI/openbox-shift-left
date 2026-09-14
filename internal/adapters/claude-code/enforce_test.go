@@ -1162,7 +1162,7 @@ func TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator(t *testing.T)
 
 	runConfigHook(t, configPayload("cc-spy", "policy_settings", "/etc/claude/policy.json"))
 
-	if got := *hits; got != 0 {
+	if got := hits.Hits(); got != 0 {
 		t.Errorf("policy_settings made %d /evaluate call(s), want 0: the gate must never run for this "+
 			"source, not merely produce no visible output", got)
 	}

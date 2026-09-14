@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
@@ -112,7 +113,13 @@ type Server struct {
 func New(t TB, s Script) *Server {
 	t.Helper()
 	seed := make([]byte, ed25519.SeedSize)
-	if _, err := rand.Read(seed); err != nil {
+	if s.SeedB64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(s.SeedB64)
+		if err != nil || len(decoded) != ed25519.SeedSize {
+			t.Fatalf("fakecore: Script.SeedB64 is not a %d-byte base64 seed", ed25519.SeedSize)
+		}
+		seed = decoded
+	} else if _, err := rand.Read(seed); err != nil {
 		t.Fatalf("fakecore: generate seed: %v", err)
 	}
 	priv := ed25519.NewKeyFromSeed(seed)
@@ -190,12 +197,27 @@ func (f *Server) serveEvaluate(w http.ResponseWriter, r *http.Request, raw []byt
 		return
 	}
 	rec := Received{Headers: r.Header.Clone(), Raw: raw, Body: body}
+	// The wire contract is checked at the door, so a malformed body is a
+	// refusal rather than a row a later grader has to notice. Core would
+	// refuse it too.
+	if reasons := checkWireShape(body); len(reasons) > 0 {
+		f.reject(w, http.StatusBadRequest, "wire shape: "+strings.Join(reasons, "; "))
+		return
+	}
 
 	f.mu.Lock()
 	f.inbox = append(f.inbox, rec)
 	status, verdict := f.script.answer(len(f.inbox), rec.ToolUseID())
+	delay := f.script.Delay
 	f.mu.Unlock()
 
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, verdict)

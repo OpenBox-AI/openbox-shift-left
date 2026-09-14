@@ -17,27 +17,38 @@ const (
 	WireActivityCompleted = "ActivityCompleted"
 )
 
-// PairingGrader holds the binary to: every activity that RAN carries exactly
-// two delivered rows, one started and one completed, checked per activity_id.
+// activityTypeLLMCompletion labels a model turn's activity pair. Turns carry
+// no tool_use_id because there is no tool call to identify, so they are the
+// one legitimate class of activity row without one.
+const activityTypeLLMCompletion = "llm_completion"
+
+// PairingGrader holds the binary to: every call that RAN is reported twice,
+// once started and once completed; every call blocked before it ran is
+// reported once.
 //
 // Never by parity. A session's started+completed total is legitimately odd --
-// a tool blocked at PreToolUse never ran, so no PostToolUse could fire and
-// fabricating a completion for it would be worse than the asymmetry. Measured
-// on a live 809-event session: parity over its 647 started+completed rows is
-// odd and would reject a healthy session; per activity_id it names the three
-// genuinely single-sided calls.
+// a tool denied at PreToolUse never ran, so no PostToolUse could fire and
+// fabricating a completion would be worse than the asymmetry. Measured on a
+// live 809-event session: parity over its 647 started+completed rows is odd
+// and would reject a healthy session.
 //
-// The exemption needs a witness, and the wire cannot supply one: the
-// enforcement ledger records the denial but carries no activity or tool id, so
-// a grader reading only the inbox must either exempt every single-sided start
-// (after which a dropped PostToolUse wrongly passes) or exempt none (parity
-// again). The witness is therefore the scenario's own Denied set, joined to
-// the wire through metadata.tool_use_id -- which the mapper writes
-// structurally, so it survives content_capture:false.
+// Keyed per invocation (tool_use_id), NOT per activity_id. activity_id is
+// derived from the call's arguments alone, so a retry that repeats the same
+// arguments deliberately resolves to the same activity_id -- that is what lets
+// an approved request be consumed by its retry, and it is pinned by
+// TestApprovalRetry_NewInvocationIDSameArgsSharesActivityID. Counting rows per
+// activity_id would call that healthy session a double delivery. What the two
+// halves of ONE invocation must do is agree on an activity_id, and that is
+// asserted instead.
 //
-// A declared denial is not a silencer. Denied says the call produced ONE row,
-// so declaring a call denied that in fact completed is itself a reason:
-// marking every call denied does not buy silence, it buys failures.
+// The single-sided exemption needs a witness the wire cannot supply: a denied
+// call's row was sent BEFORE the verdict existed -- it is the evaluation
+// request -- so it cannot mark itself denied, and the enforcement ledger
+// carries no activity or tool id. The scenario declares it. But a declaration
+// is not trusted: it must agree with the decision the binary actually rendered
+// on stdout, which is a different surface produced by a different code path.
+// So declaring a call denied that was not denied is a failure, and declaring
+// every call denied buys failures rather than silence.
 func PairingGrader() Grader {
 	return Grader{
 		Name:   "pairing",
@@ -47,95 +58,150 @@ func PairingGrader() Grader {
 }
 
 type activityGroup struct {
-	started   int
-	completed int
-	toolUseID string
-	toolName  string
+	started     int
+	completed   int
+	toolName    string
+	activityIDs map[string]bool
 }
 
-func checkPairing(sc Scenario, inbox []Received) []string {
-	groups := map[string]*activityGroup{}
-	var order []string
-	for _, r := range inbox {
-		et := r.EventType()
-		if et != WireActivityStarted && et != WireActivityCompleted {
+func newGroup() *activityGroup { return &activityGroup{activityIDs: map[string]bool{}} }
+
+func (g *activityGroup) add(r Received) {
+	if r.EventType() == WireActivityStarted {
+		g.started++
+	} else {
+		g.completed++
+	}
+	if g.toolName == "" {
+		g.toolName = r.metaString("tool_name")
+	}
+	if id := r.ActivityID(); id != "" {
+		g.activityIDs[id] = true
+	}
+}
+
+func (g *activityGroup) ids() string {
+	out := make([]string, 0, len(g.activityIDs))
+	for id := range g.activityIDs {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return strings.Join(out, ", ")
+}
+
+func checkPairing(sc Scenario, run Run) []string {
+	byCall := map[string]*activityGroup{}     // tool_use_id -> rows
+	byActivity := map[string]*activityGroup{} // activity_id -> rows, for turns
+	var callOrder, activityOrder []string
+	var reasons []string
+
+	for _, r := range run.Inbox {
+		if et := r.EventType(); et != WireActivityStarted && et != WireActivityCompleted {
+			continue
+		}
+		if id := r.ToolUseID(); id != "" {
+			g, ok := byCall[id]
+			if !ok {
+				g = newGroup()
+				byCall[id] = g
+				callOrder = append(callOrder, id)
+			}
+			g.add(r)
+			continue
+		}
+		// No tool_use_id. A model turn legitimately has none; anything else
+		// has lost its join key, and grading it would grade the fallback path
+		// production does not take.
+		if at, _ := r.Body["activity_type"].(string); at != activityTypeLLMCompletion {
+			reasons = append(reasons, fmt.Sprintf(
+				"activity %s (activity_type %q): no metadata.tool_use_id on the wire, so no scenario input can be joined to it",
+				r.ActivityID(), at))
 			continue
 		}
 		id := r.ActivityID()
-		g, ok := groups[id]
+		g, ok := byActivity[id]
 		if !ok {
-			g = &activityGroup{}
-			groups[id] = g
-			order = append(order, id)
+			g = newGroup()
+			byActivity[id] = g
+			activityOrder = append(activityOrder, id)
 		}
-		if et == WireActivityStarted {
-			g.started++
-		} else {
-			g.completed++
-		}
-		// Either half may carry them; take the first non-empty.
-		if g.toolUseID == "" {
-			g.toolUseID = r.ToolUseID()
-		}
-		if g.toolName == "" {
-			g.toolName = r.metaString("tool_name")
-		}
+		g.add(r)
 	}
-	sort.Strings(order)
 
-	var reasons []string
-	for _, id := range order {
-		g := groups[id]
-		// A tool activity with no tool_use_id would be graded through
-		// pairKey's ToolCallStartKey fallback -- a path production does not
-		// take, because every native tool payload carries the id. Grading it
-		// would be grading the fallback.
-		if g.toolName != "" && g.toolUseID == "" {
-			reasons = append(reasons, fmt.Sprintf(
-				"activity %s (tool %s): no metadata.tool_use_id on the wire, so the scenario cannot be joined to it",
-				id, g.toolName))
-			continue
-		}
+	sort.Strings(callOrder)
+	sort.Strings(activityOrder)
 
-		denied := sc.Denied[g.toolUseID] && g.toolUseID != ""
-		switch {
-		case denied && g.completed > 0:
+	for _, tu := range callOrder {
+		reasons = append(reasons, checkOneCall(sc, run, tu, byCall[tu])...)
+	}
+	for _, id := range activityOrder {
+		g := byActivity[id]
+		if g.started != 1 || g.completed != 1 {
 			reasons = append(reasons, fmt.Sprintf(
-				"activity %s (tool %s, tool_use_id %s): the scenario says it was blocked before it ran, but %d ActivityCompleted row(s) were delivered",
-				id, g.toolName, g.toolUseID, g.completed))
-		case denied && g.started != 1:
-			reasons = append(reasons, fmt.Sprintf(
-				"activity %s (tool %s): blocked before it ran, so it must carry exactly 1 ActivityStarted; got %d",
-				id, g.toolName, g.started))
-		case denied:
-			// One started row, no completion: the correct shape for a call
-			// that never ran.
-		case g.started == 1 && g.completed == 1:
-			// Paired.
-		case g.completed > 0 && g.started == 0:
-			reasons = append(reasons, fmt.Sprintf(
-				"activity %s (tool %s): %d ActivityCompleted row(s) with no ActivityStarted",
-				id, g.toolName, g.completed))
-		case g.started > 0 && g.completed == 0:
-			reasons = append(reasons, fmt.Sprintf(
-				"activity %s (tool %s, tool_use_id %s): ActivityStarted with no ActivityCompleted, and the scenario does not list it as blocked before it ran",
-				id, g.toolName, g.toolUseID))
-		default:
-			// Distinct calls can share an activity_id when they share a tool,
-			// file and operation id (activityPairKey), so this reason can mean
-			// a collision rather than a duplicate delivery. Either way the
-			// stated invariant -- exactly two rows -- does not hold for it.
-			reasons = append(reasons, fmt.Sprintf(
-				"activity %s (tool %s): %d ActivityStarted and %d ActivityCompleted rows; want exactly one of each",
-				id, g.toolName, g.started, g.completed))
+				"model turn %s: %d started and %d completed rows; a turn is one pair",
+				id, g.started, g.completed))
 		}
 	}
 	return reasons
 }
 
-// Drop removes every payload for a hook event. It is a function over the
-// payload list rather than a second fixture file, so the mutation is visible
-// in the diff instead of hidden between two near-identical JSON blobs.
+func checkOneCall(sc Scenario, run Run, toolUseID string, g *activityGroup) []string {
+	var reasons []string
+	label := fmt.Sprintf("call %s (tool %s)", toolUseID, g.toolName)
+
+	// The two halves of one invocation must land on one activity_id, or the
+	// pair is torn and the timeline shows two half-rows instead of one call.
+	if len(g.activityIDs) > 1 {
+		reasons = append(reasons, fmt.Sprintf(
+			"%s: its rows carry %d different activity_ids (%s); one call's halves must pair onto one row",
+			label, len(g.activityIDs), g.ids()))
+	}
+
+	declaredDenied := sc.Denied[toolUseID]
+	observed, sawDecision := run.DecisionFor(toolUseID)
+
+	// The declaration and the rendered decision are two independently produced
+	// surfaces. They must agree, or one of them is wrong and the exemption
+	// below would be resting on a fiction.
+	switch {
+	case declaredDenied && (!sawDecision || observed.Verb != "deny"):
+		reasons = append(reasons, fmt.Sprintf(
+			"%s: the scenario says it was blocked before it ran, but the binary rendered %q to the coding agent",
+			label, observed.Verb))
+	case !declaredDenied && sawDecision && observed.Verb == "deny":
+		reasons = append(reasons, fmt.Sprintf(
+			"%s: the binary denied it, but the scenario does not list it as blocked before it ran",
+			label))
+	}
+
+	if declaredDenied {
+		if g.completed > 0 {
+			reasons = append(reasons, fmt.Sprintf(
+				"%s: blocked before it ran, yet %d ActivityCompleted row(s) were delivered",
+				label, g.completed))
+		}
+		if g.started != 1 {
+			reasons = append(reasons, fmt.Sprintf(
+				"%s: blocked before it ran, so it must be reported exactly once; got %d ActivityStarted row(s)",
+				label, g.started))
+		}
+		return reasons
+	}
+
+	if g.started != 1 || g.completed != 1 {
+		reasons = append(reasons, fmt.Sprintf(
+			"%s: %d ActivityStarted and %d ActivityCompleted rows; a call that ran is reported exactly once each, and the scenario does not list it as blocked before it ran",
+			label, g.started, g.completed))
+	}
+	return reasons
+}
+
+// Drop removes every payload for a hook event and reports which calls lost a
+// half. It is a function over the payload list rather than a second fixture
+// file, so the mutation is visible in the diff instead of hidden between two
+// near-identical JSON blobs -- and the returned ids let the meta-test require
+// that a grader NAMES what the mutation took, which it can only do by
+// noticing.
 func Drop(sc Scenario, event string) Scenario {
 	kept := make([]HookPayload, 0, len(sc.Payloads))
 	for _, p := range sc.Payloads {
@@ -149,9 +215,22 @@ func Drop(sc Scenario, event string) Scenario {
 	return sc
 }
 
-// Undeny clears the witness. Used by the meta-test to prove the witness is
-// load-bearing: without it the grader has to choose between exempting every
-// single-sided start and rejecting healthy sessions.
+// DroppedIDs reports the tool_use_ids that lose a payload when event is
+// dropped from sc.
+func DroppedIDs(sc Scenario, event string) []string {
+	var ids []string
+	for _, p := range sc.Payloads {
+		if p.Event == event {
+			if id := p.ToolUseID(); id != "" {
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+// Undeny clears the witness, for the control that proves the witness is
+// load-bearing.
 func Undeny(sc Scenario) Scenario {
 	sc.Denied = nil
 	sc.Name = sc.Name + "/no-witness"

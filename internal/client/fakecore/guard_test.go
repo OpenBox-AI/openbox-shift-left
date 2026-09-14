@@ -86,3 +86,52 @@ func isRepoRoot(dir string) bool {
 	}
 	return strings.Contains(string(b), "module github.com/openbox-ai/openbox-shift-left")
 }
+
+// TestFakecoreKeepsItsImportWall is the structural half of "the fixture is the
+// oracle".
+//
+// A grader that computed its expectation with the same function production
+// uses would agree with production by construction -- a renamed key, a torn
+// pair, a mis-tagged struct field would move the answer and the expectation
+// together, and the grader would confirm the bug rather than catch it. The
+// wall makes that unreachable rather than merely discouraged: fakecore may
+// reach the standard library and the in-memory transport, and nothing else.
+//
+// What it costs is that vocabulary has to be restated here -- the four wire
+// types, the forbidden keys. That restatement IS the oracle doing its job.
+// What it must never buy back is a derivation: an activity id, a pair key, an
+// approval key.
+func TestFakecoreKeepsItsImportWall(t *testing.T) {
+	const allowed = "github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		// The wall applies to the package's own source. A guard test names
+		// repository paths as data, which is not an import.
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			line = strings.TrimSpace(line)
+			i := strings.Index(line, `"github.com/openbox-ai/openbox-shift-left/`)
+			if i < 0 {
+				continue
+			}
+			path := strings.Trim(line[i:], `"`)
+			if path == allowed {
+				continue
+			}
+			t.Errorf("%s imports %s. fakecore is the oracle: reaching into the code it grades would let a renamed key or a broken derivation move the expectation and the answer together. Restate the contract here instead.", e.Name(), path)
+		}
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
@@ -239,7 +238,7 @@ func TestRunHook_ConfigChange_HaltLatchesAndReplays(t *testing.T) {
 		t.Fatal("the session must be latched after an emitted session halt")
 	}
 
-	before := atomic.LoadInt32(hits)
+	before := hits.Hits()
 	out2, _ := runConfigHook(t, configPayload("cc-halt-1", "local_settings", "/repo/.claude/settings.local.json"))
 	var got2 userPromptSubmitOutput
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out2)), &got2); err != nil {
@@ -248,7 +247,7 @@ func TestRunHook_ConfigChange_HaltLatchesAndReplays(t *testing.T) {
 	if got2.Continue == nil || *got2.Continue {
 		t.Errorf("replayed halt = %+v, want continue:false again", got2)
 	}
-	if after := atomic.LoadInt32(hits); after != before {
+	if after := hits.Hits(); after != before {
 		t.Errorf("latched session made %d further /evaluate calls, want 0 (the latch is the decided state)", after-before)
 	}
 }

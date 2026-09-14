@@ -5,13 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"log"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,24 +283,19 @@ func TestInstalledHookTimeoutMatchesWhatIsRegistered(t *testing.T) {
 	}
 }
 
-func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Duration) (url string, hits *int32) {
+// serveEvaluate delegates to the shared fake core rather than standing up a
+// fourth mock. The fake verifies the AIP signature against the same fixed test
+// identity evalCreds installs, so every call site here now proves its request
+// was signed as well as what it answered.
+func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Duration) (url string, srv *fakecore.Server) {
 	t.Helper()
-	var n int32
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&n, 1)
-		if delay > 0 {
-			select {
-			case <-time.After(delay):
-			case <-r.Context().Done():
-				return
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(verdictJSON))
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL, &n
+	f := fakecore.New(t, fakecore.Script{
+		Default:      verdictJSON,
+		AlwaysStatus: status,
+		Delay:        delay,
+		SeedB64:      testPrivateKeyB64,
+	})
+	return f.URL(), f
 }
 
 func serveVerdict(t *testing.T, verdictJSON string) {
@@ -330,8 +323,8 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 		ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
 	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
 
-	if atomic.LoadInt32(hits) != 1 {
-		t.Fatalf("/evaluate hits = %d, want 1", atomic.LoadInt32(hits))
+	if hits.Hits() != 1 {
+		t.Fatalf("/evaluate hits = %d, want 1", hits.Hits())
 	}
 	if dec.FailOpen {
 		t.Error("a real BLOCK from core must be hookflow.FailOpen=false")
@@ -374,8 +367,8 @@ func TestEscalateTier2_NoCredentials(t *testing.T) {
 	if !dec.FailOpen {
 		t.Error("missing credentials must degrade to a fail-open decision")
 	}
-	if atomic.LoadInt32(hits) != 0 {
-		t.Errorf("no /evaluate call should be made without credentials; hits=%d", atomic.LoadInt32(hits))
+	if hits.Hits() != 0 {
+		t.Errorf("no /evaluate call should be made without credentials; hits=%d", hits.Hits())
 	}
 }
 
@@ -440,8 +433,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if !strings.Contains(reason, "tier2 exec policy") || !strings.Contains(reason, "t2-pol") {
 			t.Errorf("reason = %q, want the T2 policy reason + id", reason)
 		}
-		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1", atomic.LoadInt32(hits))
+		if hits.Hits() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1", hits.Hits())
 		}
 		if strings.Contains(out, "rm -rf") {
 			t.Errorf("stdout leaked the command (INV-2): %q", out)
@@ -457,8 +450,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if out := run(benignBash); strings.TrimSpace(out) != "" {
 			t.Errorf("a real T2 ALLOW must proceed (empty stdout); got %q", out)
 		}
-		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1", atomic.LoadInt32(hits))
+		if hits.Hits() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1", hits.Hits())
 		}
 	})
 
@@ -475,8 +468,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if !strings.Contains(reason, "edit policy") {
 			t.Errorf("reason = %q, want the server's policy reason", reason)
 		}
-		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1 for Edit", atomic.LoadInt32(hits))
+		if hits.Hits() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1 for Edit", hits.Hits())
 		}
 	})
 
@@ -520,8 +513,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
 			t.Fatalf("tier2=0 must not suppress the verdict; permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}
-		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want 1; the opt-out is ignored", atomic.LoadInt32(hits))
+		if hits.Hits() != 1 {
+			t.Errorf("/evaluate hits = %d, want 1; the opt-out is ignored", hits.Hits())
 		}
 	})
 

@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,16 +38,18 @@ func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, upda
 	return o.HookSpecificOutput.PermissionDecision, o.HookSpecificOutput.PermissionDecisionReason, o.HookSpecificOutput.UpdatedInput
 }
 
+// serveVerdict delegates to the shared fake core. The function stays local
+// because the two adapters install credentials under different env names, and
+// unifying that is Codex work this change does not carry -- but the server
+// behind it is now the one fake, which is what stopped the enforcement path
+// drifting per adapter.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(verdictJSON))
-	}))
-	t.Cleanup(srv.Close)
-	t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
+	seedB64 := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	f := fakecore.New(t, fakecore.Script{Default: verdictJSON, SeedB64: seedB64})
+	t.Setenv("OPENBOX_BASE_URL", f.URL()) // loopback http allowed (INV-1 guard)
 	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
-	t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("OPENBOX_ED25519_SEED", seedB64)
 }
 
 func TestResolveEnforce_Codex(t *testing.T) {

@@ -25,10 +25,23 @@ type Scenario struct {
 	Denied map[string]bool
 	// Status forces an HTTP status on the nth accepted request (1-based).
 	Status map[int]int
+	// Posture is the run's configuration. Empty fields take the suite
+	// default, which a bool could not express.
+	Posture Posture
 	// Provenance says where the payloads came from: recorded from a real
 	// session (with the date), or authored. A field on the scenario, never a
 	// key inside a native payload, which would change the shape under test.
 	Provenance string
+}
+
+// Posture holds the environment knobs a scenario varies. Strings, not bools:
+// these are env values and "" genuinely means "say nothing and take the
+// default", which is a third state a bool cannot carry.
+type Posture struct {
+	Enforce        string // "0" | "1"
+	FailClosed     string // "0" | "1"
+	ContentCapture string // "0" | "1"
+	ApprovalHoldMS string
 }
 
 // Script projects the scenario onto what the fake should answer.
@@ -39,15 +52,15 @@ func (s Scenario) Script() Script {
 // Grader is a predicate over (scenario, inbox) returning reasons, not a
 // boolean: a grader that says only "false" cannot be acted on.
 //
-// Check reads the SCENARIO for its expectation and the inbox for what
-// happened. An expectation read out of the same inbox it is checking is an
-// identity, not a property.
+// Check reads the SCENARIO for its expectation and the Run for what happened.
+// An expectation read out of the same inbox it is checking is an identity, not
+// a property.
 //
 // Mutate returns the scenario that must make this grader fail. Every grader
 // ships one and the suite executes it, because a grader nobody has watched
 // fail is not yet a grader.
 type Grader struct {
 	Name   string
-	Check  func(Scenario, []Received) []string
+	Check  func(Scenario, Run) []string
 	Mutate func(Scenario) Scenario
 }

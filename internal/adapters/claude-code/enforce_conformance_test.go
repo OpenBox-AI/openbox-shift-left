@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"time"
@@ -118,8 +117,8 @@ func TestEnforcementConformance(t *testing.T) {
 		if out := run(t, benign); strings.TrimSpace(out) != "" {
 			t.Errorf("fail-closed must NOT block a real allow; got %q", out)
 		}
-		if atomic.LoadInt32(hits) != 1 {
-			t.Errorf("/evaluate hits = %d, want 1; the allow must come from the server", atomic.LoadInt32(hits))
+		if hits.Hits() != 1 {
+			t.Errorf("/evaluate hits = %d, want 1; the allow must come from the server", hits.Hits())
 		}
 	})
 
@@ -664,7 +663,7 @@ func TestSessionHaltConformance(t *testing.T) {
 			t.Fatal("the session must be latched after an emitted session halt")
 		}
 
-		before := atomic.LoadInt32(hits)
+		before := hits.Hits()
 		got2 := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s1", "echo two")))
 		if !stopped(got2.Continue) || got2.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
 			t.Errorf("latched PreToolUse render = %+v, want continue:false + deny", got2)
@@ -673,7 +672,7 @@ func TestSessionHaltConformance(t *testing.T) {
 		if !stopped(gotP.Continue) || gotP.Decision != ccPromptDecisionBlock {
 			t.Errorf("latched UserPromptSubmit render = %+v, want continue:false + decision:block", gotP)
 		}
-		if after := atomic.LoadInt32(hits); after != before {
+		if after := hits.Hits(); after != before {
 			t.Errorf("latched session made %d further /evaluate calls, want 0; the latch is the decided state", after-before)
 		}
 
@@ -728,9 +727,9 @@ func TestSessionHaltConformance(t *testing.T) {
 		if _, halted := hookflow.SessionHalted("halt-s3"); halted {
 			t.Error("a BLOCK must not latch the session")
 		}
-		before := atomic.LoadInt32(hits)
+		before := hits.Hits()
 		_ = run(t, "UserPromptSubmit", promptPayload("halt-s3", "second ask"))
-		if after := atomic.LoadInt32(hits); after != before+1 {
+		if after := hits.Hits(); after != before+1 {
 			t.Errorf("un-latched session made %d further calls, want exactly 1", after-before)
 		}
 	})
