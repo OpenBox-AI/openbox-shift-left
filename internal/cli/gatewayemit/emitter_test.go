@@ -283,8 +283,8 @@ func TestTheWarningReturnsAfterTheInterval(t *testing.T) {
 	}
 }
 
-// TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart.
-func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
+// TestDIDIsResolvedLazilySoInitTakesEffectWithoutARestart.
+func TestDIDIsResolvedLazilySoInitTakesEffectWithoutARestart(t *testing.T) {
 	em, spool, warnings := newTestEmitter(t)
 	did := ""
 	em.DID = func() string { return did }
@@ -293,7 +293,10 @@ func TestDIDIsResolvedLazilySoAuthTakesEffectWithoutARestart(t *testing.T) {
 	if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
 		t.Fatal("spooled an event with no DID; nothing could have attributed it")
 	}
-	if !strings.Contains(warnings.String(), "openbox auth") {
+	// `init --provider`, not `auth`: identity is per tool and auth no longer
+	// writes one, so the old remedy would send a reader somewhere that cannot
+	// fix a lane recording nothing.
+	if !strings.Contains(warnings.String(), "openbox init --provider") {
 		t.Errorf("the warning does not name the remedy: %q", warnings.String())
 	}
 

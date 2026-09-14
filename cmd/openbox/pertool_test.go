@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -428,4 +430,98 @@ func TestIdentityDirsComeFromSupported(t *testing.T) {
 			t.Errorf("%s dev config = %q, want %q", name, cfg, want)
 		}
 	}
+}
+
+// TestGatewayLaneStampsTheFileDID closes the gap the bind test above cannot
+// reach. Every other lane capture test exports OPENBOX_AGENT_DID, which
+// outranks every store -- so until this case there was nothing anywhere
+// proving a relayed model call carries the DID from the tool's own file rather
+// than one the test handed it. Two stores are seeded distinctly, neither is
+// exported, and the record has to carry the lane's own tool's DID.
+func TestGatewayLaneStampsTheFileDID(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Request-Id", "req_file_did")
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"type":"message","role":"assistant","content":[]}`)
+	}))
+	defer upstream.Close()
+
+	isolateHomeOnly(t)
+	spool := t.TempDir()
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	t.Setenv("OPENBOX_REALTIME", "0")
+	// The whole point: no exported DID, so the file is the only source.
+	t.Setenv(devconfig.EnvDID, "")
+	seedCredentials(t, "claude-code", "codex")
+	// Bind the other tool first, so the claude-code DID below cannot be the
+	// fixture's own doing.
+	bindProviderForTest(t, "codex")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan net.Addr, 1)
+	done := make(chan int, 1)
+	a, _, errb := testApp(nil)
+	a.gatewayCtx = ctx
+	a.gatewayReady = func(addr net.Addr) { ready <- addr }
+	go func() {
+		done <- a.runGateway([]string{"--addr", "127.0.0.1:0", "--upstream", upstream.URL, "--elected"})
+	}()
+
+	var addr net.Addr
+	select {
+	case addr = <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("gateway never bound a listener; stderr: %s", errb.String())
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, "http://"+addr.String()+"/v1/messages",
+		strings.NewReader(`{"model":"claude-opus-4"}`))
+	req.Header.Set("X-Claude-Code-Session-Id", "file-did-session")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("relay: %v", err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runGateway did not return")
+	}
+
+	raw := readSpoolTree(t, spool)
+	if raw == "" {
+		t.Fatal("the relayed call spooled nothing")
+	}
+	if want := testDIDFor(t, gatewaySpoolProvider); !strings.Contains(raw, want) {
+		t.Errorf("the spooled record does not carry %s's file DID %s:\n%s", gatewaySpoolProvider, want, raw)
+	}
+	if other := testDIDFor(t, "codex"); strings.Contains(raw, other) {
+		t.Errorf("the gateway lane stamped codex's DID:\n%s", raw)
+	}
+}
+
+// readSpoolTree concatenates every spooled line under dir; the lane picks its
+// own subdirectory, so naming one here would couple this case to that choice.
+func readSpoolTree(t *testing.T, dir string) string {
+	t.Helper()
+	var b strings.Builder
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		b.Write(raw)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk spool: %v", err)
+	}
+	return b.String()
 }

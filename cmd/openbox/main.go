@@ -177,10 +177,24 @@ func (a *app) runHook(args []string) (code int) {
 // And it is a developer-facing notice, never an event; nothing here reaches
 // the spool or the enforcement sink.
 func (a *app) warnIfUnconfigured(name string, logger *log.Logger) {
-	if devconfig.ResolveDIDOrEmpty() != "" {
+	if devconfig.ResolveDIDOrEmpty() == "" {
+		logger.Printf("no agent identity for %s on this machine; governance is inactive. Run `openbox init --provider %s`", name, name)
 		return
 	}
-	logger.Printf("no agent identity for %s on this machine; governance is inactive. Run `openbox init --provider %s`", name, name)
+	// A DID alone is not an identity. A half-written store, a restored backup
+	// or a hand-deleted credential file all leave the DID behind, and every
+	// gated call then fails to resolve and fails open -- silently, which is the
+	// state this line exists to explain. Stat, never parse: the hot path does
+	// zero secret I/O (INV-1), and existence is the whole question.
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		logger.Printf("cannot resolve %s's credential file: %v; governance is inactive", name, err)
+		return
+	}
+	if _, err := os.Stat(envPath); err != nil {
+		logger.Printf("%s has a DID but no credential file at %s; governance is inactive. Run `openbox init --provider %s`",
+			name, envPath, name)
+	}
 }
 
 // runRewake is the background approval watcher (E9 §2.2), invoked by an
@@ -252,6 +266,15 @@ func (a *app) runDevInit(args []string) int {
 	// the working directory itself.
 
 	a.migrateLegacyConfig()
+
+	// Read the org config BEFORE the bind, and not a line later: after it this
+	// resolves the tool's own config, which on a first install is absent. These
+	// two URLs are the organization's, `auth` writes them once, and `init`
+	// carries them into each tool's config -- a per-tool store does not inherit
+	// them, because one file is loaded, not merged over another.
+	orgCfg, _ := devconfig.Load(devconfig.DefaultConfigPath())
+	o.BackendURL, o.BaseURL = orgCfg.BackendURL, orgCfg.BaseURL
+
 	// After the migration, which is org-level by construction, and before
 	// anything reads a credential.
 	release, err := devconfig.BindProvider(o.Provider)
@@ -259,11 +282,25 @@ func (a *app) runDevInit(args []string) int {
 		return a.errorf("cannot resolve %s's identity store: %v", o.Provider, err)
 	}
 	defer release()
-	if code := a.requireCredentials(); code != exitOK {
+	plan, code := a.requireCredentials()
+	if code != exitOK {
 		return code
 	}
 
 	d := devinit.Deps{Installer: inst, Out: a.stdout}
+	if !plan.reuse {
+		adopted, code := a.adoptExistingAgent(o.Provider)
+		if code != exitOK {
+			return code
+		}
+		if !adopted {
+			// Wired on this branch only. A registrar present on the reuse path
+			// would make an offline re-run one refactor away from a network call,
+			// and the reuse path is the one that has to work on a plane.
+			d.Registrar = a.newRegistrar(
+				firstNonEmptyStr(o.BackendURL, devconfig.DefaultBackendURL), plan.token, "openbox-cli")
+		}
+	}
 	res, runErr := devinit.Run(context.Background(), o, d)
 	if runErr != nil {
 		return a.errorf("%v", runErr)

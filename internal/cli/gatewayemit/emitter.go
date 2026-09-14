@@ -199,8 +199,8 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 
 	did := e.developerDID()
 	if did == "" {
-		e.vlog("  capture: SKIPPED; no developer DID configured (run `openbox auth`)")
-		e.warnThrottled(&e.lastNoDIDWarn, "openbox gateway: no developer DID configured, so relayed model calls are NOT being recorded. Run `openbox auth`; no restart is needed.")
+		e.vlog("  capture: SKIPPED; no developer DID configured (run `openbox init --provider claude-code`)")
+		e.warnThrottled(&e.lastNoDIDWarn, "openbox gateway: no developer DID configured, so relayed model calls are NOT being recorded. Run `openbox init --provider claude-code`; no restart is needed.")
 		return
 	}
 

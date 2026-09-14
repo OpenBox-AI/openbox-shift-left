@@ -315,3 +315,107 @@ func TestUnknownProviderRejected(t *testing.T) {
 		t.Fatal("expected error for empty provider")
 	}
 }
+
+// TestDefaultAgentNameIsToolScoped a machine holds one agent per governed
+// tool, and two agents cannot share a name in an org -- so a name that omitted
+// the tool would collide with itself on the second `init`, and the collision
+// surfaces as a halt naming an agent the developer has never heard of.
+func TestDefaultAgentNameIsToolScoped(t *testing.T) {
+	cc := defaultAgentName("claude-code")
+	cx := defaultAgentName("codex")
+	if !strings.HasPrefix(cc, "claude-code-") {
+		t.Errorf("claude-code name = %q, want it to start with the tool", cc)
+	}
+	if !strings.HasPrefix(cx, "codex-") {
+		t.Errorf("codex name = %q, want it to start with the tool", cx)
+	}
+	if cc == cx {
+		t.Fatal("two tools derived the same default agent name")
+	}
+	for _, name := range []string{cc, cx} {
+		if !strings.Contains(name, "@") {
+			t.Errorf("name %q carries no host part", name)
+		}
+		if strings.HasPrefix(name, "openbox-dev-") {
+			t.Errorf("name %q still uses the machine-wide shape", name)
+		}
+	}
+}
+
+// TestNilRegistrarIsANamedError the caller wires a registrar on the register
+// branch only, so a nil one here is a wiring defect. It used to be a nil
+// dereference, which surfaced as a stack trace from a path where every other
+// failure is a sentence.
+func TestNilRegistrarIsANamedError(t *testing.T) {
+	isolateHome(t)
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatalf("Run with no registrar and no store returned no error (res=%+v)", res)
+	}
+	if !strings.Contains(err.Error(), "registrar") {
+		t.Errorf("error = %v, want it to name the missing registrar", err)
+	}
+}
+
+// TestReuseNeverFiresFromTheOrgStore the no-fallback rule, stated as the thing
+// that could silently undo it. A complete agent identity at the org level is
+// exactly what an upgraded machine has, and reading it here would make one
+// tool's install decide it is already registered because a previous, tool-less
+// install was -- then install hooks that sign as that agent.
+func TestReuseNeverFiresFromTheOrgStore(t *testing.T) {
+	dir := isolateHome(t)
+	if err := devconfig.WriteEnvFile(filepath.Join(dir, ".env"), map[string]string{
+		devconfig.EnvAPIKeyDirect:    "obx_org_level_key",
+		devconfig.EnvAgentPrivateKey: "orgseed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "claude-code")); !os.IsNotExist(err) {
+		t.Fatalf("the fixture already has a per-tool store; this case would prove nothing (err=%v)", err)
+	}
+
+	reg := &fakeRegistrar{reg: validReg()}
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Reused {
+		t.Fatal("the reuse branch fired from the org-level store")
+	}
+	if !res.Registered || reg.createCalls != 1 {
+		t.Errorf("want a fresh registration, got %+v (creates=%d)", res, reg.createCalls)
+	}
+}
+
+// TestTheDuplicateNameHaltNamesTheCauseAndTheRemedy (owner ruling V4.) This
+// halt is what an upgraded machine hits when its old agent still exists in the
+// org under a name this install would reuse, and the remedy it used to give --
+// re-run `auth` and paste the agent id -- is a route that no longer exists.
+// A halt that names a dead route is worse than one that names none.
+func TestTheDuplicateNameHaltNamesTheCauseAndTheRemedy(t *testing.T) {
+	isolateHome(t)
+	name := defaultAgentName("claude-code")
+	reg := &fakeRegistrar{
+		reg:    validReg(),
+		byName: map[string]*backend.AgentSummary{name: {ID: "old-9", DID: "did:aip:old"}},
+	}
+	_, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("a name already taken in the org must halt, not mint a second agent")
+	}
+	msg := err.Error()
+	for _, want := range []string{name, "old-9", "did:aip:old", "openbox init --provider claude-code", "adopt"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the halt does not name %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "openbox auth") {
+		t.Errorf("the halt still offers `openbox auth`, which no longer registers anything:\n%s", msg)
+	}
+	if reg.createCalls != 0 {
+		t.Errorf("Create was called %d times after the halt", reg.createCalls)
+	}
+}

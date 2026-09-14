@@ -210,14 +210,15 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-// TestInitIsOfflineAndNeedsNoToken. `init` registers no agent and makes no
-// control-plane call, so a machine with credentials already on it must install
-// with an empty environment. testApp's registrar seam panics if anything
-// reaches for one, which is what makes "offline" an assertion rather than a
-// claim.
+// TestInitIsOfflineAndNeedsNoToken. `init` registers an agent for a tool that
+// has none, but a tool that already has one must install with an empty
+// environment and no control-plane call at all -- that is the re-run, and it
+// has to work on a plane. testApp's registrar seam panics if anything reaches
+// for one, which is what makes "offline" an assertion rather than a claim.
 func TestInitIsOfflineAndNeedsNoToken(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
+	t.Setenv(devconfig.EnvControlToken, "")
 	a, out, errb := testApp(nil) // empty env; the registrar seam panics if touched
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
 		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
@@ -227,11 +228,14 @@ func TestInitIsOfflineAndNeedsNoToken(t *testing.T) {
 	}
 }
 
-// `init` no longer needs a control token at all; it makes no control-plane
-// call. What it needs is credentials already on the machine, and when they are
-// absent it must exit non-zero naming `auth` and install nothing.
+// TestInitWithoutCredentialsRefusesAndInstallsNothing the refusal narrowed
+// when `init` learned to register: it fires only when the tool has NEITHER a
+// store NOR an organization token to make one with. Either alone is now a
+// working install, so a test that seeded neither and called that "no
+// credentials" would stop distinguishing the refusal from the register branch.
 func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
 	home := isolateHome(t)
+	t.Setenv(devconfig.EnvControlToken, "")
 	a, _, errb := testApp(nil)
 	code := a.run([]string{"init", "--provider", "claude-code"})
 	if code != exitError {
@@ -252,18 +256,40 @@ func TestInitWithoutCredentialsRefusesAndInstallsNothing(t *testing.T) {
 	}
 }
 
-// `init` must not accept a control token as a way to register, either: the
-// registration path is gone from it entirely.
-func TestInitDoesNotRegisterEvenWithAnOrgKey(t *testing.T) {
-	isolateHome(t)
-	a, _, errb := testApp(map[string]string{"OPENBOX_CONTROL_TOKEN": "obx_key_x"})
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar {
-		t.Error("init reached the registrar; registration belongs to `openbox auth`")
-		return &fakeReg{}
-	}
-	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
-		t.Fatalf("exit = %d, want an error (no credentials); stderr=%q", code, errb.String())
-	}
+// TestInitRegistersOnlyWhenTheToolHasNoIdentity inverts what this file used to
+// assert. `init` registers now, and the question that decides it is the tool's
+// own store -- not the environment, not the org file, not another tool. Both
+// halves are asserted together because satisfying one by breaking the other is
+// the easy mistake: a run that always registers orphans an agent on every
+// re-init, and a run that never registers is the state before this work.
+func TestInitRegistersOnlyWhenTheToolHasNoIdentity(t *testing.T) {
+	t.Run("no store: registers once", func(t *testing.T) {
+		isolateHome(t)
+		t.Setenv(devconfig.EnvControlToken, testOrgToken)
+		clearAgentEnv(t)
+		reg := &countingReg{byName: map[string]*backend.AgentSummary{}}
+		a, _, errb := testApp(nil)
+		a.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
+		a.newPrompt = declineAdopt(t)
+		if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+			t.Fatalf("exit = %d; stderr=%q", code, errb.String())
+		}
+		if reg.creates != 1 {
+			t.Errorf("Create called %d times, want 1", reg.creates)
+		}
+	})
+
+	t.Run("store present: never reaches the registrar", func(t *testing.T) {
+		isolateHome(t)
+		seedCredentials(t)
+		t.Setenv(devconfig.EnvControlToken, testOrgToken)
+		a, _, errb := testApp(nil)
+		a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+		a.newPrompt = panicPrompt(t)
+		if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+			t.Fatalf("exit = %d; stderr=%q", code, errb.String())
+		}
+	})
 }
 
 // What replaces it is the contract below; the flag that selected a backend

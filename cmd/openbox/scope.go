@@ -12,26 +12,53 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
+// credentialPlan is what requireCredentials decided: reuse the tool's own
+// store, or register a new agent with the org token it resolved. It is a
+// decision, not a state, which is why it is returned rather than re-derived --
+// asking the same question twice is how the register branch ends up running
+// against a store that was present after all.
+type credentialPlan struct {
+	reuse bool
+	token string // the org control token; set on the register branch only
+}
+
 // requireCredentials it must not half-install: a bundle installed against no
 // identity produces hooks that fire, fail to resolve credentials, and fail
 // open silently; an install that looks finished and governs nothing.
-func (a *app) requireCredentials() int {
+//
+// Three outcomes, not two, since `init` became the command that mints an
+// agent. The tool's own store is complete, so this run is offline and touches
+// no credential. Or it is not, and an org token can create one. Or it is not
+// and there is no token, which is the only refusal left -- and it names both
+// routes to a token, because a user who skipped `auth` and a user whose token
+// is only in their environment reach it the same way.
+func (a *app) requireCredentials() (credentialPlan, int) {
 	envPath, err := devconfig.EnvFilePath()
 	if err != nil {
-		return a.errorf("%v", err)
+		return credentialPlan{}, a.errorf("%v", err)
 	}
 	kv, err := devconfig.ParseEnvFile(envPath)
 	if err != nil {
-		return a.errorf("%v", err)
+		return credentialPlan{}, a.errorf("%v", err)
 	}
 	if a.credentialsPresent(kv) {
-		return exitOK
+		return credentialPlan{reuse: true}, exitOK
 	}
-	return a.errorf("no credentials on this machine; run `openbox auth` first.\n"+
-		"  `init` installs hooks and writes posture; it never registers an agent or writes a\n"+
-		" credential. Nothing was installed.\n"+
-		"  Expected %s and %s in %s, or as environment variables.",
-		devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
+
+	token := devconfig.ResolveControlToken()
+	if token == "" {
+		return credentialPlan{}, a.errorf(
+			"no agent identity for this tool, and no organization credential to register one with.\n"+
+				"  Nothing was installed.\n"+
+				"  Run `openbox auth` (it stores the token), or export %s, then re-run.\n"+
+				"  An existing agent works too: with the token set, `init` offers to adopt one.\n"+
+				"  Expected %s and %s in %s, or as environment variables.",
+			devconfig.EnvControlToken, devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
+	}
+	if problem := controlTokenProblem(token); problem != "" {
+		return credentialPlan{}, a.errorf("%s\n  Nothing was installed.", problem)
+	}
+	return credentialPlan{token: token}, exitOK
 }
 
 // printGovernedScope states what this install governs, in the terms a reader
@@ -99,9 +126,10 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 	return func() {
 		fmt.Fprintf(a.stderr, "Usage: openbox init --provider <%s>\n\n",
 			strings.Join(provider.Supported(), "|"))
-		fmt.Fprintf(a.stderr, "Installs the tool's hooks, the model-call lanes it supports, and posture.\n")
-		fmt.Fprintf(a.stderr, "Run `openbox auth` first; this command never reads, writes or prompts for a\n")
-		fmt.Fprintf(a.stderr, "credential.\n\n")
+		fmt.Fprintf(a.stderr, "Registers this tool's agent, then installs its hooks, the model-call lanes it\n")
+		fmt.Fprintf(a.stderr, "supports, and posture. Run `openbox auth` first to connect the organization.\n")
+		fmt.Fprintf(a.stderr, "Run this once per tool: each carries its own agent identity, in its own\n")
+		fmt.Fprintf(a.stderr, "~/.openbox/<tool>/ store. A tool that already has one is reused offline.\n\n")
 		if f := fs.Lookup("provider"); f != nil {
 			fmt.Fprintf(a.stderr, "  -%s\n        %s\n", f.Name, f.Usage)
 		}
@@ -110,7 +138,7 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 		fmt.Fprintf(a.stderr, "two postures that remain per-machine are environment variables, not flags:\n")
 		fmt.Fprintf(a.stderr, "  OPENBOX_ENFORCE=false            observe only, for this run\n")
 		fmt.Fprintf(a.stderr, "  OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks\n")
-		fmt.Fprintf(a.stderr, "Removal is `openbox uninstall`. Credentials are `openbox auth`.\n")
+		fmt.Fprintf(a.stderr, "Removal is `openbox uninstall`. The organization connection is `openbox auth`.\n")
 	}
 }
 

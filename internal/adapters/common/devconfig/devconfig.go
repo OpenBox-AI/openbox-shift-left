@@ -537,11 +537,15 @@ func warnDeprecatedPrivateKeyName(alias string) {
 var deprecatedNameWarnOnce sync.Once
 
 func missingCredentialError(what, envName, envPath string) error {
-	where := "~/.openbox/.env"
+	where := "~/.openbox/<tool>/.env"
 	if envPath != "" {
 		where = envPath
 	}
-	msg := fmt.Sprintf("no %s available: set %s, or run `openbox auth` to write %s", what, envName, where)
+	remedy := "`openbox init --provider <tool>`"
+	if tool := BoundProvider(); tool != "" {
+		remedy = "`openbox init --provider " + tool + "`"
+	}
+	msg := fmt.Sprintf("no %s available: set %s, or run %s to write %s", what, envName, remedy, where)
 	if envPath == "" {
 		msg += fmt.Sprintf(" (no home directory could be resolved; set %s to an absolute path)", EnvHome)
 	}
@@ -549,11 +553,11 @@ func missingCredentialError(what, envName, envPath string) error {
 	case "darwin":
 		msg += "\n  upgrading an existing install? credentials used to live in your keychain and are not migrated:" +
 			"\n    security find-generic-password -s ai.openbox.dev -a '<org>/<provider>/api_key' -w" +
-			"\n  paste those into `openbox auth`; if they are lost, leave the agent id blank there to register anew"
+			"\n  " + remedy + " offers to adopt an existing agent; paste them there. If they are lost, decline and it registers anew"
 	case "linux":
 		msg += "\n  upgrading an existing install? credentials used to live in libsecret and are not migrated:" +
 			"\n    secret-tool lookup service ai.openbox.dev account '<org>/<provider>/api_key'" +
-			"\n  paste those into `openbox auth`; if they are lost, leave the agent id blank there to register anew"
+			"\n  " + remedy + " offers to adopt an existing agent; paste them there. If they are lost, decline and it registers anew"
 	}
 	return errors.New(msg)
 }

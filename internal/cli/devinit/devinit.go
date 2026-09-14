@@ -1,6 +1,6 @@
 // Package devinit registers a developer agent, captures its once-shown
-// credentials into ~/.openbox/.env, and delegates the tool's native config to
-// the provider installer. Invariants enforced here: - INV-1: the obx_ key and
+// credentials into that tool's ~/.openbox/<tool>/.env, and delegates the
+// tool's native config to the provider installer. Invariants enforced here: - INV-1: the obx_ key and
 // signing key are written only to the credential file and never printed,
 // logged, or placed on an argv. Output shows the file path, never a value.
 package devinit
@@ -11,8 +11,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/user"
+	"runtime"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -71,17 +74,41 @@ type Result struct {
 	ConfigApplied bool // provider installer ran
 }
 
-func defaultAgentName() string {
+// defaultAgentName names the agent after the tool it governs and the machine
+// it runs on. The tool half is what makes it a default at all now: a machine
+// holds one agent per governed tool, two agents cannot share a name in an org,
+// and a name that omitted the tool would collide with itself on the second
+// `init`.
+//
+// The host half reads scutil on darwin because os.Hostname() there returns
+// whatever DHCP most recently handed out -- it changes with the network, and
+// produced agent names carrying a stale IP address. Any failure falls back to
+// os.Hostname(): this is only a default, Options.AgentName overrides it, and
+// nothing about registration may block on an exec.
+func defaultAgentName(tool string) string {
 	u := "user"
 	if cu, err := user.Current(); err == nil && cu.Username != "" {
 		u = cu.Username
 	}
+	name := fmt.Sprintf("%s-%s@%s", tool, u, localHostName())
+	return truncate(name, 255)
+}
+
+func localHostName() string {
+	if runtime.GOOS == "darwin" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if out, err := exec.CommandContext(ctx, "scutil", "--get", "LocalHostName").Output(); err == nil {
+			if h := strings.TrimSpace(string(out)); h != "" {
+				return h
+			}
+		}
+	}
 	h, err := os.Hostname()
 	if err != nil || h == "" {
-		h = "host"
+		return "host"
 	}
-	name := fmt.Sprintf("openbox-dev-%s@%s", u, h)
-	return truncate(name, 255)
+	return h
 }
 
 func truncate(s string, maxBytes int) string {
@@ -116,7 +143,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 	name := o.AgentName
 	if name == "" {
-		name = defaultAgentName()
+		name = defaultAgentName(o.Provider)
 	}
 	icon := o.Icon
 	if icon == "" {
@@ -142,12 +169,29 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// Losing it disables that check silently.
 		res.AgentID = devconfig.ResolveAgentID()
 		ref.AgentID = res.AgentID
-		fmt.Fprintf(d.Out, "This machine already has credentials in %s; reusing them (DID %s).\n",
-			credentialFileLabel(), didOrNone(did))
-		fmt.Fprintf(d.Out, "  Nothing was registered. A machine holds ONE agent identity: if these belong to a\n")
-		fmt.Fprintf(d.Out, "  different org or tool than you intended, `openbox auth` overwrites them, and\n")
-		fmt.Fprintf(d.Out, "  `openbox doctor` shows which identity is in effect.\n")
+		fmt.Fprintf(d.Out, "%s already has credentials in %s; reusing them (DID %s).\n",
+			o.Provider, credentialFileLabel(), didOrNone(did))
+		fmt.Fprintf(d.Out, "  Nothing was registered. This store belongs to %s alone; another tool has its\n", o.Provider)
+		fmt.Fprintf(d.Out, "  own agent and its own DID. `openbox doctor` lists every store and says which\n")
+		fmt.Fprintf(d.Out, "  identity is in effect for each.\n")
+		// Reuse is a file test, so a key that was revoked server-side still looks
+		// like a complete store and this run never goes online to find out. That
+		// makes deleting the file the whole rotation procedure, and a reader who
+		// is not told will look for a flag that does not exist.
+		fmt.Fprintf(d.Out, "  Rotating a key? Delete %s and re-run this command; it will offer to adopt\n", credentialFileLabel())
+		fmt.Fprintf(d.Out, "  the agent so the DID stays the same.\n")
 		return res, ref, nil
+	}
+
+	// Reaching here means the tool has no usable store, so this run must
+	// register -- and the caller wires a Registrar only on that branch. A nil
+	// one is a wiring defect, and naming it beats dereferencing it: the panic
+	// this replaces surfaced as a stack trace from a hook path where every
+	// other failure is a sentence.
+	if d.Registrar == nil {
+		return res, ref, fmt.Errorf(
+			"no registrar wired: init reached the registration branch for %s with no control-plane "+
+				"client. This is a build or wiring bug, not a configuration problem", o.Provider)
 	}
 
 	// Unconditional now. The escape hatch was --force, which registered a
@@ -163,14 +207,17 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	if existing != nil {
 		res.AgentID, res.DID = existing.ID, existing.DID
 		return res, ref, fmt.Errorf(
-			"a developer agent named %q already exists in this org (id %s, DID %s) but this machine holds "+
-				"no credentials for it.\n"+
+			"a developer agent named %q already exists in this org (id %s, DID %s) but %s holds "+
+				"no credentials for it on this machine.\n"+
+				"  Most likely this machine registered it before, and its store was deleted or moved; "+
+				"the other cause is a second machine reporting the same user and host name.\n"+
 				"  Its API key and signing key were shown once, at registration, and are not stored "+
 				"server-side -- so if they are lost, that agent's identity cannot be recovered at all.\n"+
-				"  If you still have them, re-run `openbox auth` and give the agent id %s.\n"+
-				"  If you do not: delete that agent in the dashboard and re-run. That mints a NEW DID, "+
+				"  If you still have them, re-run `openbox init --provider %s` and answer yes when it "+
+				"offers to adopt an existing agent; it takes the id %s, the DID, the key and the seed.\n"+
+				"  If you do not: delete %q in the dashboard and re-run. That mints a NEW DID, "+
 				"so work attributed to the old one stays attached to the old one.",
-			name, existing.ID, existing.DID, existing.ID)
+			name, existing.ID, existing.DID, o.Provider, o.Provider, existing.ID, name)
 	}
 
 	req := backend.CreateAgentRequest{

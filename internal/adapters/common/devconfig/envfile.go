@@ -10,15 +10,19 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const envFileHeader = `# OpenBox credentials for this machine; written by ` + "`openbox auth`" + `.
+const envFileHeader = `# OpenBox credentials, written by ` + "`openbox init --provider <tool>`" + `.
+# One store per governed tool, at ~/.openbox/<tool>/.env. The org-level
+# ~/.openbox/.env holds the organization control token instead, and that one is
+# written by ` + "`openbox auth`" + `.
 #
 # PLAINTEXT. 0600 on macOS/Linux; on Windows 0600 is a no-op and other local
 # accounts can read this file. Anything running as you can read the
 # signing key below and sign governance events as this agent.
 #
 # This is the ONLY copy. OpenBox shows the API key and signing key once, at
-# registration, and does not store them. If you lose this file, re-issue with
-# ` + "`openbox auth`" + ` again; leaving the agent id blank there registers a new agent.
+# registration, and does not store them. If you lose this file, re-run
+# ` + "`openbox init --provider <tool>`" + `; it registers a new agent, or offers to
+# adopt an existing one if you still have its key and seed.
 #
 # DO NOT COMMIT THIS FILE. Sourcing it is never required; the tools read it
 # directly. A real environment variable always wins over a value here.

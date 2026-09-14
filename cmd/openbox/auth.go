@@ -198,4 +198,10 @@ func (a *app) printAuthNextSteps() {
 	fmt.Fprintf(a.stdout, "  lane it supports. One run governs every session on this machine, in any\n")
 	fmt.Fprintf(a.stdout, "  directory; there is no scope to choose and nothing to repeat per project.\n")
 	fmt.Fprintf(a.stdout, "  Run it once per tool: each carries its own agent identity.\n")
+	// The URLs written above are the organization's, and `init` copies them into
+	// each tool's own config -- one file is loaded, never merged over another.
+	// So a re-run that corrects a URL has no runtime effect until every already
+	// installed tool re-runs init, and a person who is not told that will watch
+	// a corrected core URL change nothing.
+	fmt.Fprintf(a.stdout, "  Already installed? Re-run it for each tool to pick up a changed URL.\n")
 }

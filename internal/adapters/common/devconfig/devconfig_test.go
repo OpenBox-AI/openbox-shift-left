@@ -255,8 +255,35 @@ func TestResolveCredentials_MissingSecret(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when no api key source is configured")
 	}
-	if !strings.Contains(err.Error(), "openbox auth") {
-		t.Errorf("error = %q, want it to name `openbox auth`", err)
+	// The remedy moved with the credential: `auth` connects the organization and
+	// writes no agent key, so pointing a user there would send them somewhere
+	// that cannot fix this.
+	if !strings.Contains(err.Error(), "openbox init --provider") {
+		t.Errorf("error = %q, want it to name `openbox init --provider`", err)
+	}
+	if strings.Contains(err.Error(), "openbox auth") {
+		t.Errorf("error still names `openbox auth`, which no longer writes an agent credential: %q", err)
+	}
+}
+
+// TestTheMissingCredentialRemedyNamesTheBoundTool a message that says
+// "<tool>" when it could say "codex" makes the reader do the substitution, and
+// this one is read exactly when the machine is already not working.
+func TestTheMissingCredentialRemedyNamesTheBoundTool(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(EnvDID, testDID)
+	release, err := BindProvider("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	_, err = ResolveCredentials()
+	if err == nil {
+		t.Fatal("expected an error when no api key source is configured")
+	}
+	if !strings.Contains(err.Error(), "openbox init --provider codex") {
+		t.Errorf("error = %q, want it to name the bound tool", err)
 	}
 }
 
