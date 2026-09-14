@@ -7,9 +7,15 @@
   "timestamp": "2026-08-28T09:22:33Z",
   "started_at": "2026-08-28T09:22:29Z",
   "ended_at": "2026-08-28T09:22:33Z",
-  "tool": { "name": "claude-code", "kind": "shell" },
+  "tool": {
+    "name": "claude-code",
+    "kind": "shell"
+  },
   "proxy_request_id": "px-4f2a9c1e7b30",
   "model": "claude-opus-4-8",
-  "tokens": { "input": 990, "output": 210, "total": 1200 },
-  "metadata": { "provider": "claude-code", "producer": "transport" }
+  "tokens": {
+    "input": 990,
+    "output": 210,
+    "total": 1200
+  }
 }

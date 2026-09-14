@@ -1,17 +1,17 @@
 {
   "schema_version": "1.9",
-  "event_id": "evt-0006",
-  "event_type": "SessionEnded",
+  "event_id": "evt-content-7",
+  "event_type": "TaskCreated",
   "openbox_session_id": "sess-abc123",
   "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
-  "timestamp": "2026-07-07T12:30:00Z",
-  "ended_at": "2026-07-07T12:30:00Z",
+  "timestamp": "2026-09-07T12:00:00Z",
   "tool": {
     "name": "claude-code",
     "kind": "shell"
   },
   "metadata": {
-    "reason": "clear",
-    "evidence_state": "complete"
+    "task_id": "task-1",
+    "teammate_name": "reviewer",
+    "task_description": "Review PR #42 for security issues"
   }
 }

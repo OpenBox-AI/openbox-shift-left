@@ -5,11 +5,38 @@
   "openbox_session_id": "sess-abc123",
   "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
   "timestamp": "2026-07-07T12:00:00Z",
-  "tool": { "name": "claude-code", "kind": "shell" },
+  "tool": {
+    "name": "claude-code",
+    "kind": "shell"
+  },
   "metadata": {
     "provider": "claude-code",
-    "tool_version": "2.1.200",
-    "repo": "openbox-ai/openbox-shift-left",
-    "cwd": "/home/dev/openbox-shift-left"
+    "source": "startup",
+    "model": "claude-opus-4-8",
+    "cwd": "/home/dev/openbox-shift-left",
+    "permission_mode": "default",
+    "posture": {
+      "enforce": true,
+      "fail_closed": false,
+      "secret_detection": true,
+      "content_capture": true,
+      "findings": false,
+      "telemetry": true,
+      "finops": true,
+      "realtime_flush": true,
+      "adapter": "claude-code",
+      "decision_authority": "control_plane",
+      "failure_policy": "fail_open",
+      "config_source": {
+        "enforce": "default",
+        "fail_closed": "default",
+        "secret_detection": "default",
+        "content_capture": "default",
+        "findings": "default",
+        "telemetry": "default",
+        "finops": "default",
+        "realtime_flush": "default"
+      }
+    }
   }
 }

@@ -184,7 +184,536 @@
     },
     "metadata": {
       "description": "Additive per-type key/values. Lands verbatim in core payload's `metadata` (json.RawMessage). Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`).",
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "description": "PermissionRequest's own tool_name (v1.8); not the redundant ToolCall/ToolResult copy of tool.name, which the adapter does not emit into metadata."
+        },
+        "provider": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "description": "Meaning is per event type (session source, directory-add source, config-change source, model-switch source); kept as a plain string here because those vocabularies differ."
+        },
+        "model": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "permission_mode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "plan",
+            "acceptEdits",
+            "auto",
+            "dontAsk",
+            "bypassPermissions"
+          ]
+        },
+        "account_email": {
+          "type": "string"
+        },
+        "account_org_uuid": {
+          "type": "string"
+        },
+        "posture": {
+          "description": "Session posture snapshot (SessionStarted only, when the adapter resolved one). The 8 flags are always all present; the rest are omitted when the adapter could not determine them or the value looked secret-shaped.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enforce",
+            "fail_closed",
+            "secret_detection",
+            "content_capture",
+            "findings",
+            "telemetry",
+            "finops",
+            "realtime_flush"
+          ],
+          "properties": {
+            "enforce": {
+              "type": "boolean"
+            },
+            "fail_closed": {
+              "type": "boolean"
+            },
+            "secret_detection": {
+              "type": "boolean"
+            },
+            "content_capture": {
+              "type": "boolean"
+            },
+            "findings": {
+              "type": "boolean"
+            },
+            "telemetry": {
+              "type": "boolean"
+            },
+            "finops": {
+              "type": "boolean"
+            },
+            "realtime_flush": {
+              "type": "boolean"
+            },
+            "adapter": {
+              "type": "string"
+            },
+            "adapter_version": {
+              "type": "string"
+            },
+            "provider_version": {
+              "type": "string"
+            },
+            "decision_authority": {
+              "type": "string",
+              "enum": [
+                "control_plane"
+              ]
+            },
+            "failure_policy": {
+              "type": "string",
+              "enum": [
+                "fail_open",
+                "fail_closed"
+              ]
+            },
+            "provider_managed": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "unknown"
+              ]
+            },
+            "config_source": {
+              "description": "Where each posture flag's value came from.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enforce": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "fail_closed": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "secret_detection": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "content_capture": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "findings": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "telemetry": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "finops": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "realtime_flush": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "prompt_id": {
+          "type": "string"
+        },
+        "prompt_source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "sdk",
+            "system",
+            "loop_wakeup",
+            "schedule_wakeup",
+            "poll_event",
+            "task_notification"
+          ]
+        },
+        "prompt_source_inferred": {
+          "const": true
+        },
+        "agent_id": {
+          "type": "string"
+        },
+        "agent_type": {
+          "type": "string"
+        },
+        "subagent_type": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "is_interrupt": {
+          "type": "boolean"
+        },
+        "pair_recovered": {
+          "const": true
+        },
+        "error_type": {
+          "type": "string",
+          "enum": [
+            "authentication_failed",
+            "oauth_org_not_allowed",
+            "billing_error",
+            "rate_limit",
+            "overloaded",
+            "invalid_request",
+            "model_not_found",
+            "server_error",
+            "max_output_tokens",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "clear",
+            "resume",
+            "logout",
+            "prompt_input_exit",
+            "bypass_permissions_disabled",
+            "other"
+          ]
+        },
+        "evidence_state": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "degraded"
+          ]
+        },
+        "evidence_undelivered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_discarded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Meaning is per event type (Setup: init|maintenance; Pre/PostCompact: manual|auto)."
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "memory_type": {
+          "type": "string",
+          "enum": [
+            "User",
+            "Project",
+            "Local",
+            "Managed"
+          ]
+        },
+        "load_reason": {
+          "type": "string",
+          "enum": [
+            "session_start",
+            "nested_traversal",
+            "path_glob_match",
+            "include",
+            "compact"
+          ]
+        },
+        "trigger_file_path": {
+          "type": "string"
+        },
+        "parent_file_path": {
+          "type": "string"
+        },
+        "globs": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet. Capped at 32 by the adapter (maxInstructionGlobs)."
+        },
+        "expansion_type": {
+          "type": "string",
+          "enum": [
+            "slash_command",
+            "mcp_prompt"
+          ]
+        },
+        "command_name": {
+          "type": "string"
+        },
+        "command_source": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "turn_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "batch_tool_use_ids": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet. Capped at 64 by the adapter (maxBatchToolUseIDs)."
+        },
+        "notification_type": {
+          "type": "string",
+          "enum": [
+            "permission_prompt",
+            "idle_prompt",
+            "auth_success",
+            "elicitation_dialog",
+            "elicitation_url_dialog",
+            "elicitation_complete",
+            "elicitation_response",
+            "agent_needs_input",
+            "agent_completed",
+            "quota_auto_resume_fired",
+            "quota_auto_resume_stale",
+            "quota_auto_resume_disabled"
+          ]
+        },
+        "notification_title": {
+          "type": "string",
+          "x-content-gated": true
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "teammate_name": {
+          "type": "string"
+        },
+        "team_name": {
+          "type": "string"
+        },
+        "task_description": {
+          "type": "string",
+          "x-content-gated": true
+        },
+        "old_cwd": {
+          "type": "string"
+        },
+        "new_cwd": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "change",
+            "add",
+            "unlink"
+          ]
+        },
+        "worktree_path": {
+          "type": "string"
+        },
+        "from_model": {
+          "type": "string"
+        },
+        "to_model": {
+          "type": "string"
+        },
+        "requested_model": {
+          "type": "string"
+        },
+        "cache_ttl": {
+          "type": "string",
+          "enum": [
+            "5m",
+            "1h"
+          ]
+        },
+        "pricing": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "catalog",
+            "default"
+          ]
+        },
+        "context_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt_cache_warm": {
+          "type": "boolean"
+        },
+        "estimated_cache_write_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mcp_server_name": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "form",
+            "url"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "elicitation_id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "decline",
+            "cancel"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "root_session_id": {
+          "type": "string"
+        },
+        "query_source": {
+          "type": "string",
+          "description": "Telemetry-lane classifier: which query produced a relayed model call (e.g. background|conversation). Absent means unclassified."
+        },
+        "usage_scope": {
+          "const": "session"
+        },
+        "commit_sha": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "deploy_id": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "deploy_did": {
+          "type": "string"
+        },
+        "attribution_status": {
+          "type": "string",
+          "enum": [
+            "attributed",
+            "inferred",
+            "unattributed"
+          ]
+        },
+        "session_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet. Each element is a session-claim object (session_id, source, commit, verified, reason?, attestation?)."
+        },
+        "verified_session_ids": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet."
+        },
+        "scope_walked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attribution_reason": {
+          "type": "string",
+          "enum": [
+            "no-trailer",
+            "trailer-stripped",
+            "non-agent"
+          ]
+        },
+        "attribution_note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,

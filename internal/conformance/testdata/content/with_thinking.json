@@ -7,7 +7,10 @@
   "timestamp": "2026-07-07T12:00:21Z",
   "started_at": "2026-07-07T12:00:04Z",
   "ended_at": "2026-07-07T12:00:21Z",
-  "tool": { "name": "claude-code", "kind": "shell" },
+  "tool": {
+    "name": "claude-code",
+    "kind": "shell"
+  },
   "turn_index": 0,
   "model": "claude-opus-4-8",
   "tokens": {
@@ -21,5 +24,7 @@
     "output": "I refactored the spool; all 11 modules are green.",
     "thinking": "The spool writer is called from two hooks, so the lock has to be held across the rename, not just the write."
   },
-  "metadata": { "provider": "claude-code", "turn_index": 0 }
+  "metadata": {
+    "turn_index": 0
+  }
 }
