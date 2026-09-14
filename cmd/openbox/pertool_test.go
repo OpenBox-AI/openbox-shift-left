@@ -926,3 +926,61 @@ func TestUninstallRemovesAnInterruptedOrgTokenWrite(t *testing.T) {
 		t.Errorf("the inventory did not list it before deleting it:\n%s", out.String())
 	}
 }
+
+// TestResidueIsFoundUnderAHomeWithGlobMetacharacters a home path is not a
+// pattern, and matching it as one fails the quiet way: filepath.Glob over a
+// directory whose name contains `[`, `*` or `?` returns zero matches and NO
+// error, so the credential sweep would report success having looked nowhere.
+//
+// OPENBOX_HOME takes any absolute path and $HOME can legally contain those
+// characters, so this is reachable without anybody doing anything strange --
+// and what it loses is a readable signing seed.
+func TestResidueIsFoundUnderAHomeWithGlobMetacharacters(t *testing.T) {
+	requireUnbound(t)
+	base := t.TempDir()
+	home := filepath.Join(base, "ho[me]*")
+	if err := os.MkdirAll(filepath.Join(home, "claude-code"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvHome, home)
+	t.Setenv(devconfig.EnvConfigPath, "")
+
+	residue := filepath.Join(home, "claude-code", ".env-4242424242.tmp")
+	if err := os.WriteFile(residue, []byte("OPENBOX_API_KEY='${OPENBOX_REDACTED_SECRET_ASSIGNMENT}'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := interruptedCredentialWrites("claude-code")
+	if len(got) != 1 || got[0] != residue {
+		t.Fatalf("residue sweep returned %v, want [%s]; a path is not a pattern", got, residue)
+	}
+}
+
+// TestResidueSweepIgnoresWhatItDoesNotOwn the store directory is OpenBox's,
+// but the sweep deletes what it names, so it must name only the shape the
+// atomic write produces.
+func TestResidueSweepIgnoresWhatItDoesNotOwn(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	dir := filepath.Join(home, "claude-code")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".env", "dev.json", "env-1.tmp", ".env-1.tmp.bak", ".environment.tmp", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := interruptedCredentialWrites("claude-code"); len(got) != 0 {
+		t.Errorf("the sweep claimed files it does not own: %v", got)
+	}
+
+	want := filepath.Join(dir, ".env-777.tmp")
+	if err := os.WriteFile(want, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := interruptedCredentialWrites("claude-code")
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("sweep = %v, want exactly [%s]", got, want)
+	}
+}

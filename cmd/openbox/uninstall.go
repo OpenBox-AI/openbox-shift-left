@@ -296,16 +296,30 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 // os.CreateTemp is handed in envfile.go, and nothing else writes that shape.
 // An empty tool names the org-level directory, whose residue holds the
 // organization control token.
+//
+// Read and filter rather than filepath.Glob, because a directory path is not a
+// pattern and matching it as one fails silently. A home holding `[`, `*` or `?`
+// -- which OPENBOX_HOME accepts and $HOME can legally contain -- makes Glob
+// return zero matches and no error, so this would have reported success having
+// looked nowhere. What it would lose is a readable signing seed.
 func interruptedCredentialWrites(tool string) []string {
 	dir, err := devconfig.IdentityDirFor(tool)
 	if err != nil {
 		return nil
 	}
-	matches, err := filepath.Glob(filepath.Join(dir, ".env-*.tmp"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
 	}
-	return matches
+	var found []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, ".env-") || !strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		found = append(found, filepath.Join(dir, name))
+	}
+	return found
 }
 
 func (a *app) printInventory(inv uninstallInventory) {
