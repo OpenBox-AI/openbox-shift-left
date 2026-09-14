@@ -596,7 +596,8 @@ no evidence is the one a reader most needs to see.
 | `ToolResult` maps to `ActivityCompleted` | E2 | `internal/adapters/claude-code/conformance_parity_test.go` · `TestWire_ToolEventsAreActivityPairs` |
 | `SessionEnded` reaches the wire | E2 | `internal/adapters/claude-code/usage_test.go` · `TestFinops_NoContentOnWire` |
 | `CommitCreated` payload shape | E1 | `internal/client/payload_lifecycle_test.go` · `TestLifecycle_CommitLineageSurvivesSignal` |
-| `CommitCreated` is emitted when a commit happens | **E0** | **no owner.** The trailer stamp is tested; the emission is not. A real gap, printed rather than omitted. |
+| `CommitCreated` is emitted when a commit happens | **E0** | **nothing emits it, by design.** The type is reserved -- the wire mapping exists and no adapter produces it (`internal/client/event.go`). A commit's binding is resolved server-side at push against the real pushed SHA, because git hooks are local and never travel; the lineage that does reach the wire is `Deploy`, from the git action. Not a missing test. |
+| `Deploy` reaches the wire with its metadata | E2 | `internal/actions/openbox-git-action/deploy_wire_test.go` · `TestDeployProjectsItsWholeMetadataIntoSignalArgs` -- posts through the real client to a fake core and grades the captured body |
 | `Deploy` payload shape | E1 | `internal/client/payload_lifecycle_test.go` · `TestLifecycle_DeployLineageSurvivesSignal` |
 | `SubagentStarted`, `PermissionDenied`, `APIError` reach the wire | E2 | `internal/adapters/claude-code/enforce_conformance_test.go` · `TestEnforcementConformance` |
 | The 21 v1.8 signal classes each carry `signal_args` and no `activity_id` | E2 | `internal/adapters/claude-code/content_conformance_test.go` · `TestContentCaptureConformance` |
