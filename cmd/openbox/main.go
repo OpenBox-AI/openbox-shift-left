@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
@@ -297,6 +299,7 @@ func (a *app) runDevInit(args []string) int {
 	}
 
 	d := devinit.Deps{Installer: inst, Out: a.stdout}
+	var tokenFrom string
 	if !plan.reuse {
 		// Adopt first, and before the token check: pasting an agent's own key
 		// needs no organization credential, and requiring one locked out the
@@ -306,10 +309,11 @@ func (a *app) runDevInit(args []string) int {
 			return code
 		}
 		if !adopted {
-			token, code := a.requireControlToken()
+			token, tokenSource, code := a.requireControlToken()
 			if code != exitOK {
 				return code
 			}
+			tokenFrom = tokenSource
 			// Wired on this branch only. A registrar present on the reuse path
 			// would make an offline re-run one refactor away from a network call,
 			// and the reuse path is the one that has to work on a plane.
@@ -325,6 +329,17 @@ func (a *app) runDevInit(args []string) int {
 	}
 	res, runErr := devinit.Run(context.Background(), o, d)
 	if runErr != nil {
+		// Naming the credential's source belongs here rather than in devinit,
+		// which never resolved it. It matters on exactly one failure: the
+		// backend refusing the token. The environment outranks the org file, so
+		// a stale export in a long-lived shell beats every `openbox auth` and
+		// every hand edit -- and a refusal that names only the backend sends its
+		// reader to change the file again, which cannot work.
+		var apiErr *backend.APIError
+		if tokenFrom != "" && errors.As(runErr, &apiErr) &&
+			(apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden) {
+			return a.errorf("%v\n  The token it sent came from %s.", runErr, tokenFrom)
+		}
 		return a.errorf("%v", runErr)
 	}
 

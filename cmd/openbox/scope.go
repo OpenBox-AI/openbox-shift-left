@@ -47,11 +47,11 @@ func (a *app) requireCredentials() (credentialPlan, int) {
 
 // requireControlToken is the register branch's own gate, and the only refusal
 // `init` has left.
-func (a *app) requireControlToken() (string, int) {
+func (a *app) requireControlToken() (token, source string, code int) {
 	envPath, _ := devconfig.EnvFilePath()
-	token := devconfig.ResolveControlToken()
+	token, source = devconfig.ResolveControlTokenWithSource()
 	if token == "" {
-		return "", a.errorf(
+		return "", "", a.errorf(
 			"no agent identity for this tool, and no organization credential to register one with.\n"+
 				"  Nothing was installed.\n"+
 				"  Run `openbox auth` (it stores the token), or export %s, then re-run.\n"+
@@ -61,9 +61,9 @@ func (a *app) requireControlToken() (string, int) {
 			devconfig.EnvControlToken, devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
 	}
 	if problem := controlTokenProblem(token); problem != "" {
-		return "", a.errorf("%s\n  Nothing was installed.", problem)
+		return "", "", a.errorf("%s\n  Nothing was installed.\n  That token came from %s.", problem, source)
 	}
-	return token, exitOK
+	return token, source, exitOK
 }
 
 // printGovernedScope states what this install governs, in the terms a reader

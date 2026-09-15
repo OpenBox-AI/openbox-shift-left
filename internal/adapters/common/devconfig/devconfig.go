@@ -426,18 +426,37 @@ func ResolveBackendURL() string {
 // reads OrgEnvFilePath, not EnvFilePath, so a fleet credential planted in a
 // tool's own .env cannot be served to a bound process (INV-1).
 func ResolveControlToken() string {
+	tok, _ := ResolveControlTokenWithSource()
+	return tok
+}
+
+// ResolveControlTokenWithSource is the same resolution, and additionally names
+// where the value came from: the environment variable, or the org file's path.
+// Empty source means nothing configured one.
+//
+// The source is worth carrying because the precedence is invisible and
+// surprising in exactly one direction. An exported OPENBOX_CONTROL_TOKEN is
+// correct and deliberate -- it is how one CI run overrides the machine -- but a
+// stale one left in a long-lived shell also silently outranks every `openbox
+// auth` and every hand edit of the file, and a refusal that names only the
+// backend sends its reader to change the file over and over. Whatever prints
+// that refusal should say which of the two it actually sent.
+func ResolveControlTokenWithSource() (token, source string) {
 	if v := os.Getenv(EnvControlToken); v != "" {
-		return v
+		return v, "the " + EnvControlToken + " environment variable"
 	}
 	path, err := OrgEnvFilePath()
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	kv, err := ParseEnvFile(path)
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	return kv[EnvControlToken]
+	if v := kv[EnvControlToken]; v != "" {
+		return v, path
+	}
+	return "", ""
 }
 
 // ResolveCredentials assembles Credentials from the environment, the

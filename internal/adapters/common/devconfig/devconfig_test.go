@@ -624,3 +624,55 @@ func TestCredentialResolutionReportsAnUnresolvablePath(t *testing.T) {
 		t.Fatalf("ResolveCredentials() error = %v, want it to name %s rather than report a missing credential", err, EnvHome)
 	}
 }
+
+// TestTheTokenSourceIsNameable the environment outranks the org file, which is
+// correct and is how a CI job overrides one run -- but it also means a stale
+// `export OPENBOX_CONTROL_TOKEN=…` left in a long-lived shell silently beats
+// every `openbox auth` and every hand edit of the file. Measured on a real
+// machine: a developer re-ran auth twice and edited the file in vim, and each
+// attempt was refused by the backend, because a token exported twelve days
+// earlier was the one being sent. Nothing printed said where the token came
+// from, so the file was the only thing they could think to change.
+func TestTheTokenSourceIsNameable(t *testing.T) {
+	isolateConfig(t)
+	org, err := OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(org, map[string]string{EnvControlToken: "obx_key_from_the_file"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(EnvControlToken, "")
+	tok, src := ResolveControlTokenWithSource()
+	if tok != "obx_key_from_the_file" {
+		t.Fatalf("token = %q, want the file's", tok)
+	}
+	if src != org {
+		t.Errorf("source = %q, want the org file path %q", src, org)
+	}
+
+	t.Setenv(EnvControlToken, "obx_key_from_the_env")
+	tok, src = ResolveControlTokenWithSource()
+	if tok != "obx_key_from_the_env" {
+		t.Fatalf("token = %q, want the environment to win", tok)
+	}
+	if !strings.Contains(src, EnvControlToken) || !strings.Contains(src, "environment") {
+		t.Errorf("source = %q, want it to name the environment variable", src)
+	}
+
+	// And with nothing anywhere, there is no source to name.
+	t.Setenv(EnvControlToken, "")
+	if err := os.Remove(org); err != nil {
+		t.Fatal(err)
+	}
+	if tok, src = ResolveControlTokenWithSource(); tok != "" || src != "" {
+		t.Errorf("with no token configured, got %q from %q", tok, src)
+	}
+
+	// The one-value form stays the same question, so the two cannot drift.
+	t.Setenv(EnvControlToken, "obx_key_again")
+	if got := ResolveControlToken(); got != "obx_key_again" {
+		t.Errorf("ResolveControlToken() = %q, want it to agree with the sourced form", got)
+	}
+}
