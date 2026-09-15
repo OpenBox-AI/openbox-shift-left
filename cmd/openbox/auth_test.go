@@ -400,7 +400,6 @@ func TestEnvShadowWarningNamesTheRightFile(t *testing.T) {
 	devPath := filepath.Join(home, "dev.json")
 
 	for _, tc := range []struct{ varName, wantFile string }{
-		{devconfig.EnvControlToken, envPath},
 		{devconfig.EnvBaseURL, devPath},
 		{devconfig.EnvBackendURL, devPath},
 	} {
@@ -416,6 +415,26 @@ func TestEnvShadowWarningNamesTheRightFile(t *testing.T) {
 			}
 		})
 	}
+	// The control token inverted with its precedence: the file wins now, so the
+	// warning must say the export is being ignored rather than that it wins.
+	// A warning pointing the wrong way is worse than none -- it sends its reader
+	// to unset a variable that is already inert, and leaves the real cause of a
+	// later refusal unexplained.
+	t.Run(devconfig.EnvControlToken, func(t *testing.T) {
+		a, _, errb := testApp(map[string]string{devconfig.EnvControlToken: "set"})
+		a.warnShadowedByEnv(envPath)
+		s := errb.String()
+		if !strings.Contains(s, devconfig.EnvControlToken) || !strings.Contains(s, envPath) {
+			t.Errorf("warning does not name the variable and the file:\n%s", s)
+		}
+		if !strings.Contains(s, "IGNORED") {
+			t.Errorf("warning does not say the export is ignored:\n%s", s)
+		}
+		if strings.Contains(s, "so it overrides what was just written") {
+			t.Errorf("warning still claims the environment wins:\n%s", s)
+		}
+	})
+
 	// And not about anything auth no longer writes.
 	for _, gone := range []string{devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, devconfig.EnvDID, devconfig.EnvAgentID} {
 		a, _, errb := testApp(map[string]string{gone: "set"})

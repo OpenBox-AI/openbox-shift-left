@@ -25,7 +25,9 @@ const envFileHeader = `# OpenBox credentials, written by ` + "`openbox init --pr
 # adopt an existing one if you still have its key and seed.
 #
 # DO NOT COMMIT THIS FILE. Sourcing it is never required; the tools read it
-# directly. A real environment variable always wins over a value here.
+# directly. A real environment variable wins over a value here -- except for
+# OPENBOX_CONTROL_TOKEN, which this file wins for, so that a forgotten export
+# cannot override what ` + "`openbox auth`" + ` just wrote.
 `
 
 // ParseEnvFile reads a dotenv file into a map. Several behaviours differ from the

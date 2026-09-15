@@ -168,18 +168,25 @@ func (a *app) writeCoordinates(f authFields) int {
 	return exitOK
 }
 
-// warnShadowedByEnv a real env var beats both files, so writing while one is
-// exported produces a config that silently has no effect; the user changes a
-// credential, sees success, and observes no change in behaviour.
+// warnShadowedByEnv an exported variable and a file that disagree produce a
+// run whose behaviour does not match what was just written, in one direction or
+// the other. Both directions are worth a line, and they are not the same line.
 //
-// Three pairs, not six: `auth` no longer writes an agent key, seed, DID or
-// agent id, and warning that a variable shadows a file this run did not touch
-// would send somebody unsetting a variable that is doing no harm.
+// The URLs are shadowed the usual way: the variable wins, so the file this run
+// wrote will not be used until it is unset.
+//
+// The control token goes the other way, and the warning has to say so or it
+// sends its reader to unset a variable that is already being ignored -- or
+// worse, leaves them believing an export they forgot is still in force. Saying
+// nothing is not an option either: a developer who exported it deliberately for
+// this run needs to know it did not take.
+//
+// Two pairs plus one inversion, not six: `auth` no longer writes an agent key,
+// seed, DID or agent id, and warning about a file this run did not touch would
+// send somebody unsetting a variable that is doing no harm.
 func (a *app) warnShadowedByEnv(envPath string) {
-	type shadow struct{ name, file string }
 	devPath, _ := devconfig.DevConfigWritePath()
-	for _, s := range []shadow{
-		{devconfig.EnvControlToken, envPath},
+	for _, s := range []struct{ name, file string }{
 		{devconfig.EnvBaseURL, devPath},
 		{devconfig.EnvBackendURL, devPath},
 	} {
@@ -189,6 +196,12 @@ func (a *app) warnShadowedByEnv(envPath string) {
 		fmt.Fprintf(a.stderr, "warning: %s is set in this environment, so it overrides what was just written to %s.\n"+
 			"         The file is correct; this shell will not use it. Unset the variable to use the file.\n",
 			s.name, s.file)
+	}
+	if a.getenv(devconfig.EnvControlToken) != "" {
+		fmt.Fprintf(a.stderr, "warning: %s is also set in this environment, and it is being IGNORED.\n"+
+			"         %s now takes precedence for it, so the token just written is the one\n"+
+			"         `openbox init` will send. Unset the variable if you meant to use it.\n",
+			devconfig.EnvControlToken, envPath)
 	}
 }
 

@@ -431,30 +431,36 @@ func ResolveControlToken() string {
 }
 
 // ResolveControlTokenWithSource is the same resolution, and additionally names
-// where the value came from: the environment variable, or the org file's path.
+// where the value came from: the org file's path, or the environment variable.
 // Empty source means nothing configured one.
 //
-// The source is worth carrying because the precedence is invisible and
-// surprising in exactly one direction. An exported OPENBOX_CONTROL_TOKEN is
-// correct and deliberate -- it is how one CI run overrides the machine -- but a
-// stale one left in a long-lived shell also silently outranks every `openbox
-// auth` and every hand edit of the file, and a refusal that names only the
-// backend sends its reader to change the file over and over. Whatever prints
-// that refusal should say which of the two it actually sent.
+// This is the one credential the org file outranks the environment for, and the
+// exception is deliberate. Every other value here is resolved fresh on the hot
+// path, where an exported variable is a legitimate per-run override. The
+// control token is not: it is handed between two commands in two processes --
+// `auth` writes it, `init` reads it -- and while the environment won, an export
+// could silently break that handoff. The export that does it is rarely a
+// deliberate one. Measured: a GUI editor launched four weeks earlier carried one
+// in its environment, so every terminal it spawned inherited a stale token,
+// `auth` wrote the right one, `init` sent the old one, and nothing the developer
+// could do to the file changed what was sent. A setup flow whose second command
+// ignores what its first command just wrote is not a flow.
+//
+// The environment is still the fallback, which is what keeps the two routes that
+// depend on it working: a CI image that never runs `auth` has no file at all,
+// and a developer who declines the token prompt to keep it off disk leaves none
+// in the file either. Only the both-present case changed, and that is the case
+// that was doing the harm.
 func ResolveControlTokenWithSource() (token, source string) {
+	if path, err := OrgEnvFilePath(); err == nil {
+		if kv, err := ParseEnvFile(path); err == nil {
+			if v := kv[EnvControlToken]; v != "" {
+				return v, path
+			}
+		}
+	}
 	if v := os.Getenv(EnvControlToken); v != "" {
 		return v, "the " + EnvControlToken + " environment variable"
-	}
-	path, err := OrgEnvFilePath()
-	if err != nil {
-		return "", ""
-	}
-	kv, err := ParseEnvFile(path)
-	if err != nil {
-		return "", ""
-	}
-	if v := kv[EnvControlToken]; v != "" {
-		return v, path
 	}
 	return "", ""
 }

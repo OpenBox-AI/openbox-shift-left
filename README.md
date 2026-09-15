@@ -247,10 +247,13 @@ field list, and what changed when, is in
 ~/.codex/hooks.json               the Codex hooks (user-wide)
 ```
 
-Secrets and settings never share a file. A real environment variable always
-outranks every file — for every tool at once — which is how CI provisions a
-machine without writing anything to disk. `OPENBOX_HOME` relocates the whole
-`~/.openbox` directory. The full inventory, including lane logs and service
+Secrets and settings never share a file. A real environment variable outranks
+every file — for every tool at once — which is how CI provisions a machine
+without writing anything to disk. The **organization control token is the one
+exception**: `~/.openbox/.env` wins for it, and the variable is the fallback
+used when the file holds none, so a forgotten `export` cannot override what
+`openbox auth` just wrote. `OPENBOX_HOME` relocates the whole `~/.openbox`
+directory. The full inventory, including lane logs and service
 units, is in [Getting started](docs/getting-started.md#where-your-credentials-live-and-what-that-costs).
 
 ## Known limitations

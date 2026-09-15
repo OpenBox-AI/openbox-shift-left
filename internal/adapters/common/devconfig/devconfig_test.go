@@ -567,9 +567,14 @@ func TestControlTokenComesFromTheOrgFileWhenTheEnvIsEmpty(t *testing.T) {
 		t.Fatalf("ResolveControlToken() = %q, want the value in the org .env", got)
 	}
 
+	// Inverted with the contract: the org file now outranks the environment for
+	// this one credential, because `auth` writes it and `init` reads it in a
+	// separate process, and a stale export silently broke that handoff. See
+	// TestTheOrgFileOutranksAStaleExportForTheControlToken for why, and for the
+	// fallback that keeps the CI and keep-it-off-disk routes working.
 	t.Setenv(EnvControlToken, "obx_key_from_the_env")
-	if got := ResolveControlToken(); got != "obx_key_from_the_env" {
-		t.Fatalf("ResolveControlToken() = %q, want the environment to outrank the file", got)
+	if got := ResolveControlToken(); got != "obx_key_from_the_file" {
+		t.Fatalf("ResolveControlToken() = %q, want the file to outrank the environment", got)
 	}
 }
 
@@ -652,10 +657,15 @@ func TestTheTokenSourceIsNameable(t *testing.T) {
 		t.Errorf("source = %q, want the org file path %q", src, org)
 	}
 
+	// The environment is the fallback now, so it is named only when the file has
+	// nothing to offer.
+	if err := os.Remove(org); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(EnvControlToken, "obx_key_from_the_env")
 	tok, src = ResolveControlTokenWithSource()
 	if tok != "obx_key_from_the_env" {
-		t.Fatalf("token = %q, want the environment to win", tok)
+		t.Fatalf("token = %q, want the environment when no file has one", tok)
 	}
 	if !strings.Contains(src, EnvControlToken) || !strings.Contains(src, "environment") {
 		t.Errorf("source = %q, want it to name the environment variable", src)
@@ -663,9 +673,6 @@ func TestTheTokenSourceIsNameable(t *testing.T) {
 
 	// And with nothing anywhere, there is no source to name.
 	t.Setenv(EnvControlToken, "")
-	if err := os.Remove(org); err != nil {
-		t.Fatal(err)
-	}
 	if tok, src = ResolveControlTokenWithSource(); tok != "" || src != "" {
 		t.Errorf("with no token configured, got %q from %q", tok, src)
 	}
@@ -675,4 +682,65 @@ func TestTheTokenSourceIsNameable(t *testing.T) {
 	if got := ResolveControlToken(); got != "obx_key_again" {
 		t.Errorf("ResolveControlToken() = %q, want it to agree with the sourced form", got)
 	}
+}
+
+// TestTheOrgFileOutranksAStaleExportForTheControlToken the control token is
+// handed between two commands: `auth` writes it, `init` reads it, in separate
+// processes. While the environment outranked the file, an export could silently
+// break that handoff -- and the export that does it is rarely a deliberate one.
+// Measured on a real machine: a GUI editor launched four weeks earlier held one
+// in its environment, so every integrated terminal it spawned inherited a stale
+// token, `auth` wrote the correct one, `init` sent the stale one, and no amount
+// of re-running `auth` or editing the file could change what was sent.
+//
+// So the file wins when it has a token. The environment is not ignored: it is
+// the fallback, which keeps the two routes that depend on it working -- a CI
+// image that never runs `auth` has no file, and a developer who declines the
+// token prompt to keep it off disk leaves none in the file either.
+func TestTheOrgFileOutranksAStaleExportForTheControlToken(t *testing.T) {
+	isolateConfig(t)
+	org, err := OrgEnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("the file wins when it has one", func(t *testing.T) {
+		if err := WriteEnvFile(org, map[string]string{EnvControlToken: "obx_key_from_the_file"}); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(EnvControlToken, "obx_key_stale_from_a_shell")
+		tok, src := ResolveControlTokenWithSource()
+		if tok != "obx_key_from_the_file" {
+			t.Errorf("token = %q, want the file's; a stale export must not beat what `auth` just wrote", tok)
+		}
+		if src != org {
+			t.Errorf("source = %q, want %q", src, org)
+		}
+	})
+
+	t.Run("the environment is the fallback, not ignored", func(t *testing.T) {
+		if err := os.Remove(org); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(EnvControlToken, "obx_key_from_the_env")
+		tok, src := ResolveControlTokenWithSource()
+		if tok != "obx_key_from_the_env" {
+			t.Errorf("token = %q, want the environment when no file has one", tok)
+		}
+		if !strings.Contains(src, EnvControlToken) {
+			t.Errorf("source = %q, want it to name the variable", src)
+		}
+	})
+
+	t.Run("a file with no token falls through to the environment", func(t *testing.T) {
+		// What `auth` leaves when the token prompt is answered blank: the file
+		// exists and holds no token, which must not shadow an export.
+		if err := WriteEnvFile(org, map[string]string{"OPENBOX_SOMETHING_ELSE": "x"}); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(EnvControlToken, "obx_key_from_the_env")
+		if tok, _ := ResolveControlTokenWithSource(); tok != "obx_key_from_the_env" {
+			t.Errorf("token = %q, want the environment; an empty file must not shadow it", tok)
+		}
+	})
 }

@@ -85,8 +85,13 @@ Permissions to grant the key, by what you intend to run:
 export OPENBOX_CONTROL_TOKEN=obx_key_…
 ```
 
-It is read from the environment and never accepted as a flag, so it cannot leak
-through your shell history or `ps`.
+It is never accepted as a flag, so it cannot leak through your shell history or
+`ps`. Note the precedence, which is the reverse of every other value here:
+`~/.openbox/.env` wins for the control token and this variable is the fallback.
+That is deliberate — `auth` writes the token and `init` reads it in a separate
+process, and while the variable won, a forgotten `export` in a long-lived shell
+(or in a GUI editor's environment, which every terminal it spawns inherits)
+silently overrode every `auth` run, with nothing saying why.
 
 ## 3. Connect your organization
 
@@ -127,7 +132,9 @@ one is provisioned directly. All three routes are read in preference to anything
 
 ```bash
 # 1. Export the org token and let init register each tool's agent. The one to
-#    reach for: it is the only route that mints an identity.
+#    reach for: it is the only route that mints an identity. It applies when
+#    ~/.openbox/.env holds no token of its own -- that file wins for this one
+#    value, so a machine that has run `auth` uses what `auth` wrote.
 export OPENBOX_CONTROL_TOKEN=obx_key_…
 openbox init --provider claude-code
 openbox init --provider codex

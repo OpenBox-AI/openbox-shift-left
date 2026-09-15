@@ -93,13 +93,22 @@ without writing anything to disk:
 
 ```
 secrets       OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY  env var > ~/.openbox/<tool>/.env
-org secret    OPENBOX_CONTROL_TOKEN                       env var > ~/.openbox/.env
 coordinates   OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …      env var > <tool>/dev.json > default
+org secret    OPENBOX_CONTROL_TOKEN                       ~/.openbox/.env > env var
 ```
 
 An exported variable outranks **every** store at once: one `OPENBOX_AGENT_DID`
 makes every governed tool report the same identity. `openbox doctor` names which
 source is actually in effect for exactly this reason.
+
+**The organization control token is the one exception, and it runs the other
+way.** It is the only value handed between two commands in two processes —
+`openbox auth` writes it, `openbox init` reads it — so the file wins and the
+variable is the fallback for when the file holds none. That keeps both routes
+that need the variable working (a CI image that never runs `auth` has no file at
+all; declining the token prompt leaves none in it) while stopping a forgotten
+export from silently overriding every `auth` you run. `auth` says so when it
+finds one set.
 
 Secrets and non-secrets never share a file, and no value lives in two places.
 
