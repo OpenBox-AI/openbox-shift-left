@@ -52,10 +52,12 @@ connection and nothing else:
   `openbox uninstall` sweeps the ones OpenBox writes beside their target
   (`~/.openbox/**/.env-*.tmp`) and lists them before deleting them. The other
   atomic writes on this machine — the activation record, the tools' own
-  settings files — stage through the system temp directory on macOS and Linux
-  (`$TMPDIR`, per-user, `0700`), which `uninstall` does not enumerate. Those
-  hold displaced configuration rather than an OpenBox credential, but if your
-  own settings carried a key, check there after a crash.
+  settings files — stage elsewhere: through the system temp directory
+  (`$TMPDIR`, per-user, `0700`) when it shares a volume with your home, and
+  otherwise beside the target under a name carrying no `.tmp` suffix. Neither
+  is enumerated by `uninstall`. Those hold displaced configuration rather than
+  an OpenBox credential, but if your own settings carried a key, check both
+  places after a crash.
 
 What that means for evidence: a signed event or commit attestation proves
 **origin-of-config**, a machine holding this agent's key produced it, not

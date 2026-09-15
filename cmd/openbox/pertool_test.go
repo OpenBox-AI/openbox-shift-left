@@ -1087,3 +1087,120 @@ func TestTheKeptSummaryNamesWhatSurvived(t *testing.T) {
 		t.Errorf("the Done block does not name the directory that survived:\n%s", s[i:])
 	}
 }
+
+// TestFlushGatePassesOnAnEnvironmentOnlyIdentity a machine provisioned purely
+// through exported variables is the documented CI route and has no `.env`
+// anywhere. The flush gate used to ask `credentialsPresent` unconditionally,
+// which answers yes for that machine; when the gate became a loop over the
+// inventoried files, a machine with none stopped asking the question at all --
+// so `uninstall` printed "no credentials on this machine, so nothing can be
+// delivered" and destroyed a backlog it could have delivered.
+func TestFlushGatePassesOnAnEnvironmentOnlyIdentity(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	spool := t.TempDir()
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	if err := os.WriteFile(filepath.Join(spool, "pending.jsonl"),
+		[]byte(`{"event_type":"ToolCall","session_id":"s1"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The identity is entirely in the environment; no credential file exists.
+	t.Setenv(devconfig.EnvAPIKeyDirect, "obx"+"_from_the_environment")
+	t.Setenv(devconfig.EnvAgentPrivateKey, testSeedB64)
+	t.Setenv(devconfig.EnvDID, testDIDFor(t, "claude-code"))
+	for _, tool := range []string{"claude-code", "codex"} {
+		if _, err := os.Stat(filepath.Join(home, tool, ".env")); !os.IsNotExist(err) {
+			t.Fatalf("the fixture has a credential file for %s; this case would prove nothing", tool)
+		}
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if strings.Contains(out.String(), "flushing SKIPPED") {
+		t.Errorf("the flush was skipped on a machine whose identity is exported:\n%s", out.String())
+	}
+}
+
+// TestAKeptDirDoesNotBlameFilesOpenBoxWrote when a delete fails, the file
+// survives and the directory sweep finds it. Reporting it as a file "OpenBox
+// did not put there" is false about provenance, and points the operator at
+// stray third-party contamination when what actually happened is a delete this
+// command already warned about on stderr.
+func TestAKeptDirDoesNotBlameFilesOpenBoxWrote(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the directory permission this case relies on")
+	}
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+
+	// A directory whose entries cannot be unlinked: the cheapest deterministic
+	// way to make os.Remove fail for a reason other than "not there".
+	dir := filepath.Join(home, "claude-code")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	a, out, errb := testApp(nil)
+	code := a.run([]string{"uninstall"})
+	if code != exitError {
+		t.Fatalf("uninstall exit = %d; a failed delete must be reported as a failure\n%s", code, out.String())
+	}
+	if !strings.Contains(errb.String(), dir) {
+		t.Fatalf("the failed delete was not warned about at all:\n%s", errb.String())
+	}
+	if strings.Contains(out.String(), "OpenBox did not put there") {
+		t.Errorf("uninstall blamed its own undeleted files on somebody else:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "could not be deleted") {
+		t.Errorf("the kept line does not say why the directory survived:\n%s", out.String())
+	}
+}
+
+// TestDoctorDoesNotFlagDriftWhenBothResolveTheSame a tool config written
+// before this field existed, or by hand, carries no base_url at all -- and an
+// absent value resolves to the same built-in default the org may have written
+// explicitly. Comparing the stored strings calls that drift and prints an
+// empty value at the operator.
+func TestDoctorDoesNotFlagDriftWhenBothResolveTheSame(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvBaseURL, "")
+	t.Setenv(devconfig.EnvBackendURL, "")
+	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
+
+	// The org names the default explicitly; the tool names nothing.
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
+		BaseURL: devconfig.DefaultBaseURL}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
+		DID: testDIDFor(t, "claude-code")}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d:\n%s", code, out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "core URL differs from org") {
+			t.Errorf("doctor called two values that resolve identically a drift:\n%s", line)
+		}
+	}
+
+	// And a tool that really is on a different core still reports, or the
+	// suppression has swallowed the case the line exists for.
+	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
+		BaseURL: "https://core.internal"}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = runDoctorHere(t)
+	if !strings.Contains(out, "core URL differs from org") {
+		t.Errorf("doctor stopped reporting a tool left on the default core:\n%s", out)
+	}
+}

@@ -44,7 +44,13 @@ type uninstallState struct {
 	hookFailed []hookFailure // surfaces this run could not clean
 	laneFailed bool          // a lane whose deactivate conflicted: still routed, still running
 	kept       []string      // org-owned files, reported and left
-	backlog    int           // events in the spool that no flush could deliver
+	// Paths this run tried to delete and could not, for a reason other than
+	// their already being gone. Without it the identity-directory sweep finds
+	// them still sitting there and reports them as files OpenBox never wrote,
+	// which is the wrong diagnosis and sends the operator looking for
+	// contamination instead of a delete to retry.
+	undeleted []string
+	backlog   int // events in the spool that no flush could deliver
 	// keepPriorRecord is true when the showThinkingSummaries restore did not
 	// run to completion this pass -- the settings file would not parse, so
 	// removeHookSurfaces never reached the restore call, or the restore
@@ -442,6 +448,15 @@ func sumBacklog(inv uninstallInventory) int {
 // attempting. Asking only about a single store would print "flushing SKIPPED"
 // and destroy a backlog that could have been delivered.
 func (a *app) haveCredentials(inv uninstallInventory) bool {
+	// The environment first, and unconditionally: an exported identity is
+	// complete on its own and is the documented CI route, so a machine with no
+	// credential file anywhere still has something to flush with. Asking only
+	// about inventoried files meant a machine with none never asked at all, and
+	// this command destroyed a deliverable backlog while printing that it had
+	// no credentials to deliver it with.
+	if a.credentialsPresent(nil) {
+		return true
+	}
 	for _, path := range inv.envFiles {
 		kv, err := devconfig.ParseEnvFile(path)
 		if err != nil {
@@ -642,6 +657,7 @@ func (a *app) deletePath(st *uninstallState, path string, remove func(string) er
 		}
 		fmt.Fprintf(a.stderr, "warning: could not delete %s: %v\n", path, err)
 		st.failed = true
+		st.undeleted = appendUnique(st.undeleted, path)
 		return
 	}
 	fmt.Fprintf(a.stdout, "  deleted        %s\n", path)
@@ -691,12 +707,38 @@ func (a *app) removeEmptyIdentityDirs(st *uninstallState) {
 			continue
 		}
 		if len(entries) > 0 {
-			fmt.Fprintf(a.stdout, "  kept           %s (%d file(s) OpenBox did not put there; delete it by hand)\n",
-				dir, len(entries))
+			fmt.Fprintf(a.stdout, "  kept           %s (%s)\n", dir, keptDirReason(st, dir, entries))
 			st.kept = appendUnique(st.kept, dir)
 			continue
 		}
 		a.deletePath(st, dir, os.Remove)
+	}
+}
+
+// keptDirReason says why a store directory survived, and the distinction
+// matters: "files OpenBox did not put there" tells the operator to look for
+// contamination, which is the wrong thing to do when what actually happened is
+// that this run tried to delete its own file and could not. That failure is
+// already a warning on stderr; saying something different about it on stdout
+// would leave two accounts of one cause, one of them false.
+func keptDirReason(st *uninstallState, dir string, entries []os.DirEntry) string {
+	failed := 0
+	for _, e := range entries {
+		for _, p := range st.undeleted {
+			if p == filepath.Join(dir, e.Name()) {
+				failed++
+				break
+			}
+		}
+	}
+	switch {
+	case failed == len(entries):
+		return fmt.Sprintf("%d file(s) could not be deleted; see the warnings above", failed)
+	case failed > 0:
+		return fmt.Sprintf("%d of %d file(s) could not be deleted; see the warnings above, then delete the rest by hand",
+			failed, len(entries))
+	default:
+		return fmt.Sprintf("%d file(s) OpenBox did not put there; delete it by hand", len(entries))
 	}
 }
 

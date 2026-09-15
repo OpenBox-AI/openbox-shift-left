@@ -274,8 +274,17 @@ func (a *app) reportIdentities() {
 // Only a difference is printed. A line on every row, for every healthy
 // machine, is one people learn to skip.
 func (a *app) reportURLDrift(name string, org, tool devconfig.DevConfig) {
+	// Resolved values, not the stored strings. A config written before these
+	// fields existed, or by hand, carries no URL at all -- and an absent value
+	// resolves to the same built-in default the org may have written out in
+	// full, so comparing what is on disk calls that a drift and prints an empty
+	// string at the operator.
 	for _, f := range []struct{ label, env, org, tool string }{
-		{"core URL", devconfig.EnvBaseURL, org.BaseURL, tool.BaseURL},
+		{"core URL", devconfig.EnvBaseURL,
+			devconfig.FirstNonEmpty(org.BaseURL, devconfig.DefaultBaseURL),
+			devconfig.FirstNonEmpty(tool.BaseURL, devconfig.DefaultBaseURL)},
+		// No default for the backend: an unset one resolves to nothing, so an
+		// org value against an empty tool value is a real difference.
 		{"backend URL", devconfig.EnvBackendURL, org.BackendURL, tool.BackendURL},
 	} {
 		if f.org == "" || f.org == f.tool {
