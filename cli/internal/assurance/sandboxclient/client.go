@@ -253,11 +253,17 @@ type ProjectRunSpec struct {
 // service observed. The evidence is typed, which is the whole point: the lane's
 // previous source for this was gateway log text.
 type ProjectRunResult struct {
-	ExitCode        int             `json:"exit_code"`
-	Stdout          []byte          `json:"stdout"`
-	Stderr          []byte          `json:"stderr"`
-	Timeout         string          `json:"timeout"`
-	SandboxEvidence json.RawMessage `json:"sandbox_evidence"`
+	ExitCode int `json:"exit_code"`
+	// Base64 on the wire, which Go's []byte decodes natively. The names carry
+	// the encoding because the service refuses to pretend raw bytes are text.
+	Stdout []byte `json:"stdout_base64"`
+	Stderr []byte `json:"stderr_base64"`
+	// Timeout distinguishes a proven process timeout from one that was merely
+	// compatible with the evidence.
+	Timeout string `json:"timeout"`
+	// Omitted entirely when the provider observed nothing, so absence here is
+	// "no evidence recorded", never "no violations occurred".
+	SandboxEvidence json.RawMessage `json:"sandbox_evidence,omitempty"`
 }
 
 func (client *Client) projectRun(operation map[string]any, timeout time.Duration) (map[string]json.RawMessage, string, error) {
@@ -286,6 +292,15 @@ func (client *Client) projectRun(operation map[string]any, timeout time.Duration
 
 // Begin starts one run from the caller's own image.
 func (client *Client) Begin(spec ProjectRunSpec, deadline time.Duration) (runID string, token string, err error) {
+	// The service's lists and maps are closed, not nullable: Go's nil marshals
+	// to null, which fails to decode as an empty collection and costs a
+	// response frame to discover.
+	if spec.Environment == nil {
+		spec.Environment = map[string]string{}
+	}
+	if spec.Providers == nil {
+		spec.Providers = []string{}
+	}
 	fields, kind, err := client.projectRun(map[string]any{
 		"operation":   "begin_project_run",
 		"spec":        spec,
@@ -479,14 +494,17 @@ func mustOperationID() string {
 // place that needs it.
 func newCertPool() *x509.CertPool { return x509.NewCertPool() }
 
-// DefaultOutputLimits are the ceilings the evaluation lane uses. Stated rather
-// than defaulted server-side, because a caller that does not know its own
-// output budget cannot know whether a truncated result is complete.
+// DefaultOutputLimits are the service's own process ceilings.
+//
+// Stated by the caller rather than defaulted server-side, because a caller that
+// does not know its own output budget cannot know whether a truncated result is
+// complete. Asking for more than the ceiling is refused at prepare, so these
+// sit exactly at it rather than above it.
 func DefaultOutputLimits() OutputLimits {
 	return OutputLimits{
-		StdoutBytes:   8 << 20,
-		StderrBytes:   8 << 20,
-		CombinedBytes: 12 << 20,
+		StdoutBytes:   1 << 20,
+		StderrBytes:   1 << 20,
+		CombinedBytes: 2 << 20,
 		ChunkBytes:    64 << 10,
 	}
 }

@@ -130,7 +130,10 @@ func TestLiveProjectRunRoundTrip(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit code = %d", result.ExitCode)
 	}
-	if string(result.SandboxEvidence) == "" {
-		t.Error("typed sandbox evidence was absent")
+	if got := string(result.Stdout); got != "openbox-live-proof\n" {
+		t.Fatalf("stdout = %q, want the command's own output", got)
 	}
+	// Evidence is omitted when the provider recorded none, so its absence under
+	// a deny-network policy with no egress attempted is correct, not a gap.
+	t.Logf("sandbox evidence: %q", string(result.SandboxEvidence))
 }
