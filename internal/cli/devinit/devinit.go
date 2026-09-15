@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/user"
@@ -215,6 +216,25 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	// and the message has to say what it costs rather than name a flag.
 	existing, err := d.Registrar.FindByName(ctx, name)
 	if err != nil {
+		// A rejected credential is not an outage, and saying so sends the
+		// operator to wait for connectivity they already have. The backend
+		// answered; what it rejected is the organization token, and by far the
+		// most common reason is that the token belongs to a different
+		// deployment than the backend URL being used -- `auth` takes both and
+		// validates neither against each other. The URL comes with the error,
+		// so the message can name the host the token was actually offered to.
+		var apiErr *backend.APIError
+		if errors.As(err, &apiErr) && (apiErr.StatusCode == http.StatusUnauthorized ||
+			apiErr.StatusCode == http.StatusForbidden) {
+			return res, ref, fmt.Errorf(
+				"the OpenBox organization rejected this machine's credential (agent/list failed: %w).\n"+
+					"  The backend answered, so this is not an outage; the token was refused by it.\n"+
+					"  Most often the token and the backend URL belong to different deployments:\n"+
+					"  check that the organization token came from the dashboard of the backend named\n"+
+					"  above, then re-run `openbox auth` to correct either, or export "+
+					"%s for one run.",
+				err, devconfig.EnvControlToken)
+		}
 		return res, ref, fmt.Errorf(
 			"could not check for an existing agent named %q (agent/list failed: %w); "+
 				"re-run when the OpenBox org is reachable",

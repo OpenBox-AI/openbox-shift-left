@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -417,5 +418,88 @@ func TestTheDuplicateNameHaltNamesTheCauseAndTheRemedy(t *testing.T) {
 	}
 	if reg.createCalls != 0 {
 		t.Errorf("Create was called %d times after the halt", reg.createCalls)
+	}
+}
+
+// TestARejectedCredentialIsNotReportedAsAnOutage a 401 means the backend
+// answered, so telling the operator to "re-run when the OpenBox org is
+// reachable" is advice that can never work: they will wait for connectivity
+// they already have. What actually produced it is a credential that does not
+// belong to the backend being contacted -- most often an organization token
+// for one deployment sent to another, because `auth` accepted the hosted URL
+// defaults for a self-hosted org.
+//
+// Measured on a real machine: the same production client and the same token
+// return 200 against the org's own backend and this exact 401 against the
+// hosted default. Neither the key nor the network was at fault, and the
+// message named neither the real cause nor the host it had contacted.
+func TestARejectedCredentialIsNotReportedAsAnOutage(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		isolateHome(t)
+		reg := &fakeRegistrar{findErr: &backend.APIError{
+			StatusCode: status,
+			Body:       `{"status":` + strconv.Itoa(status) + `,"message":"Invalid API key"}`,
+			URL:        "https://api.openbox.ai/agent/list?all=true",
+		}}
+		_, err := Run(context.Background(), Options{Provider: "claude-code"},
+			Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		if err == nil {
+			t.Fatalf("HTTP %d did not fail the run", status)
+		}
+		msg := err.Error()
+
+		if strings.Contains(msg, "reachable") {
+			t.Errorf("HTTP %d reported as an outage; the backend answered:\n%s", status, msg)
+		}
+		// The one fact that makes this self-diagnosable, and the one the old
+		// message omitted: which backend was actually contacted.
+		if !strings.Contains(msg, "https://api.openbox.ai") {
+			t.Errorf("HTTP %d does not name the backend it contacted:\n%s", status, msg)
+		}
+		for _, want := range []string{"openbox auth", "OPENBOX_CONTROL_TOKEN"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("HTTP %d does not name %q as the place to fix it:\n%s", status, want, msg)
+			}
+		}
+		if reg.createCalls != 0 {
+			t.Errorf("a rejected credential still reached agent/create")
+		}
+	}
+}
+
+// TestAnUnreachableBackendStillReadsAsAnOutage the other half. Removing the
+// outage wording for a 401 must not remove it for the case it was written
+// for, or the next person to lose their network is told to check a key.
+func TestAnUnreachableBackendStillReadsAsAnOutage(t *testing.T) {
+	isolateHome(t)
+	reg := &fakeRegistrar{findErr: errors.New("dial tcp 10.0.0.1:443: connect: connection refused")}
+	_, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err == nil {
+		t.Fatal("a dial failure did not fail the run")
+	}
+	if !strings.Contains(err.Error(), "reachable") {
+		t.Errorf("a genuine outage lost its wording:\n%s", err)
+	}
+}
+
+// TestABackendErrorNamesTheHostItCameFrom every non-2xx carries the URL that
+// produced it, so no caller has to reconstruct which deployment answered.
+// Minting an agent against one backend while posting its events to another is
+// the failure this makes visible, and it is otherwise invisible until a 401
+// arrives much later with nothing naming a URL.
+func TestABackendErrorNamesTheHostItCameFrom(t *testing.T) {
+	e := &backend.APIError{StatusCode: 401, Body: `{"message":"Invalid API key"}`,
+		URL: "https://api.openbox.ai/agent/list?all=true"}
+	msg := e.Error()
+	if !strings.Contains(msg, "https://api.openbox.ai/agent/list?all=true") {
+		t.Errorf("APIError does not name its URL: %s", msg)
+	}
+	if !strings.Contains(msg, "401") || !strings.Contains(msg, "Invalid API key") {
+		t.Errorf("APIError lost its status or body: %s", msg)
+	}
+	// An error built without a URL must still read cleanly.
+	if got := (&backend.APIError{StatusCode: 500, Body: "boom"}).Error(); strings.Contains(got, "()") {
+		t.Errorf("a URL-less APIError reads badly: %s", got)
 	}
 }

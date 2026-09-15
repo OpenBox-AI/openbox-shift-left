@@ -28,10 +28,20 @@ import (
 type APIError struct {
 	StatusCode int
 	Body       string
+	// URL is the absolute endpoint that produced this response. It is carried
+	// because the most common control-plane failure is not a broken request but
+	// a right request sent to the wrong deployment -- an organization token for
+	// one backend reaching another, which answers 401 with nothing naming a
+	// host. Every message built from this error then names the host for free.
+	URL string
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("backend returned HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
+	if e.URL == "" {
+		return fmt.Sprintf("backend returned HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
+	}
+	return fmt.Sprintf("backend returned HTTP %d from %s: %s",
+		e.StatusCode, e.URL, strings.TrimSpace(e.Body))
 }
 
 // Client talks to the openbox-backend control plane.
@@ -286,7 +296,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &APIError{StatusCode: resp.StatusCode, Body: string(respBody)}
+		return &APIError{StatusCode: resp.StatusCode, Body: string(respBody), URL: c.BaseURL + path}
 	}
 	if out != nil {
 		if err := json.Unmarshal(respBody, out); err != nil {
