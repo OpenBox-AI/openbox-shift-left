@@ -52,7 +52,7 @@ func (a *app) runProjectVerify(args []string) int {
 		if err := runfs.RecheckCommittedManifest(root, discriminator); err != nil {
 			return a.errorf("project verify: %v", err)
 		}
-		fmt.Fprintln(a.stdout, "project observation verified: ai.openbox.project-observation/v2")
+		fmt.Fprintln(a.stdout, "project observation verified: ai.openbox.project-observation/v1")
 		fmt.Fprintf(a.stdout, "  pack_digest: %s\n", digest)
 	case runfs.SecurityReportPackSchema:
 		pack, verifyErr := securityreport.Verify(root)

@@ -50,5 +50,5 @@ observation pack was generated or claimed. Live qualification requires the
 owner to commit the backend change, rebuild the backend image so `/version`
 contains the clean 40-character commit, supply the existing exact-scope
 organization credential, and rerun the public evaluator. The retained
-`2026-08-26-phase-02-public-mastra-observation-03` pack remains superseded
+`2026-08-26-phase-02-public-mastra-observation-03` (evidence retired; see RETIRED-OBSERVATION-PACKS.md) pack remains superseded
 collection evidence and is not a Phase 3 input.

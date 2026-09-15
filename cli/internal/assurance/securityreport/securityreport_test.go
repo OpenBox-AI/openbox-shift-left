@@ -22,7 +22,7 @@ import (
 
 // The v2 observation fixture's sealed digest. Pinned so a fixture regenerated
 // without updating the candidates that cite it fails loudly.
-const observationFixtureDigest = "sha256:65fdca32ce7d0c5d11a64acddc21ab4c6198642dd4a7fcd815e71eb214592c0f"
+const observationFixtureDigest = "sha256:59f77363771c943265fbfadef517ec1ff7c30b7537d7771c2c4301a50913cb9c"
 
 const pinnedSARIFSchemaSHA256 = "c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e"
 
@@ -64,7 +64,7 @@ func TestPrepareAcceptsBothInstalledHostMastraCandidates(t *testing.T) {
 	observationPath := mastraObservation(t)
 	for _, name := range []string{"2026-08-27-phase-03-installed-claude-candidate.json", "2026-08-27-phase-03-installed-codex-candidate.json"} {
 		t.Run(name, func(t *testing.T) {
-			candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates", name))
+			candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates", name))
 			prepared, err := Prepare(observationPath, candidate, filepath.Join(t.TempDir(), "report-pack"))
 			if err != nil {
 				t.Fatalf("Prepare: %v", err)
@@ -77,7 +77,7 @@ func TestPrepareAcceptsBothInstalledHostMastraCandidates(t *testing.T) {
 }
 
 func TestPrepareAndRenderAcceptHonestInconclusiveResult(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	source, err := os.ReadFile(filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestPrepareAndRenderAcceptHonestInconclusiveResult(t *testing.T) {
 }
 
 func TestPrepareRejectsUnsafeCandidateFilesAndJSONShapes(t *testing.T) {
-	source, err := os.ReadFile(filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	source, err := os.ReadFile(filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestAuthoritativeCandidateValidatorRejectsForgedOrDishonestAuthority(t *tes
 }
 
 func TestFinalizeSealsVerifiesAndRendersOffline(t *testing.T) {
-	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	output := filepath.Join(t.TempDir(), "report-pack")
 	prepared, err := Prepare(mastraObservation(t), candidate, output)
 	if err != nil {
@@ -401,7 +401,7 @@ func TestFinalizeSealsVerifiesAndRendersOffline(t *testing.T) {
 }
 
 func TestFinalizeIsByteStableForIdenticalInputs(t *testing.T) {
-	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	root := t.TempDir()
 	outputs := []string{filepath.Join(root, "report-a"), filepath.Join(root, "report-b")}
 	verified := make([]*VerifiedPack, 0, len(outputs))
@@ -441,7 +441,7 @@ func TestFinalizeIsByteStableForIdenticalInputs(t *testing.T) {
 }
 
 func TestVerifyRejectsAnyProjectionMutation(t *testing.T) {
-	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	output := filepath.Join(t.TempDir(), "report-pack")
 	prepared, err := Prepare(mastraObservation(t), candidate, output)
 	if err != nil {
@@ -471,7 +471,7 @@ func TestVerifyRejectsAnyProjectionMutation(t *testing.T) {
 }
 
 func TestFinalizeDoesNotReplaceTargetCreatedAfterOfflinePreflight(t *testing.T) {
-	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	prepared, err := Prepare(mastraObservation(t), candidate, filepath.Join(t.TempDir(), "report-pack"))
 	if err != nil {
 		t.Fatal(err)
@@ -523,7 +523,7 @@ func TestSARIFMatchesPinnedOfficialSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
+	candidate := privateCandidateCopy(t, filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-candidates/2026-08-27-phase-03-installed-codex-candidate.json"))
 	prepared, err := Prepare(mastraObservation(t), candidate, filepath.Join(t.TempDir(), "report"))
 	if err != nil {
 		t.Fatal(err)
@@ -617,7 +617,7 @@ func privateCandidateCopy(t *testing.T, source string) string {
 // tests mutate committed evidence to make themselves pass.
 func mastraObservation(t *testing.T) string {
 	t.Helper()
-	source := filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation-v2")
+	source := filepath.Join(repoRoot(t), "cli/internal/assurance/testdata/observation")
 	destination := filepath.Join(t.TempDir(), "observation")
 	if err := os.Mkdir(destination, 0o700); err != nil {
 		t.Fatal(err)

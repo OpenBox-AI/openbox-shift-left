@@ -3,7 +3,7 @@
 ## Public success evidence
 
 The public command sealed
-[`2026-08-26-phase-02-public-mastra-observation-03`](2026-08-26-phase-02-public-mastra-observation-03)
+[`2026-08-26-phase-02-public-mastra-observation-03`](2026-08-26-phase-02-public-mastra-observation-03) (evidence retired; see RETIRED-OBSERVATION-PACKS.md)
 from `ai.openbox/mastra-conformance:local` at immutable local image ID
 `sha256:e13c1e89b1daa897f319402d1b0642c329f471c663665142e05aa3fc6f110dc6`.
 

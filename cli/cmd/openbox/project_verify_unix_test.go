@@ -48,7 +48,7 @@ func TestProjectVerifyCommandChecksFinalizedPackObjects(t *testing.T) {
 }
 
 func TestProjectVerifyCommandChecksRetainedObservationPack(t *testing.T) {
-	source, err := filepath.Abs(filepath.Join("..", "..", "internal", "assurance", "testdata", "observation-v2"))
+	source, err := filepath.Abs(filepath.Join("..", "..", "internal", "assurance", "testdata", "observation"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,8 +57,8 @@ func TestProjectVerifyCommandChecksRetainedObservationPack(t *testing.T) {
 	if code := a.run([]string{"project", "verify", root}); code != exitOK {
 		t.Fatalf("exit=%d stderr=%q", code, errOut.String())
 	}
-	want := "project observation verified: ai.openbox.project-observation/v2\n" +
-		"  pack_digest: sha256:65fdca32ce7d0c5d11a64acddc21ab4c6198642dd4a7fcd815e71eb214592c0f\n"
+	want := "project observation verified: ai.openbox.project-observation/v1\n" +
+		"  pack_digest: sha256:59f77363771c943265fbfadef517ec1ff7c30b7537d7771c2c4301a50913cb9c\n"
 	if out.String() != want || errOut.Len() != 0 {
 		t.Fatalf("stdout=%q stderr=%q", out.String(), errOut.String())
 	}

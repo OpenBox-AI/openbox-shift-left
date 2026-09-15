@@ -1,6 +1,6 @@
 # Project security report contracts
 
-Phase 4 consumes one verified `ai.openbox.project-observation/v2` pack and one
+Phase 4 consumes one verified `ai.openbox.project-observation/v1` pack and one
 untrusted `ai.openbox.project-security-analysis/v1` candidate. It captures a
 bounded GET-only target posture, deterministically maps validated issues to
 inert OpenBox recommendations, and seals the exact report pack described by

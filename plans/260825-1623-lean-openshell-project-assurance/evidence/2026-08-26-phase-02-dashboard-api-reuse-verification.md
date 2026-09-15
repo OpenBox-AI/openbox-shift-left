@@ -18,7 +18,7 @@
 ## Corrected live pack
 
 The public evaluator sealed
-`2026-08-26-phase-02-public-mastra-dashboard-observation-04` from
+`2026-08-26-phase-02-public-mastra-dashboard-observation-04` (evidence retired; see RETIRED-OBSERVATION-PACKS.md) from
 `ai.openbox/mastra-conformance:local` at image ID
 `sha256:e13c1e89b1daa897f319402d1b0642c329f471c663665142e05aa3fc6f110dc6`.
 

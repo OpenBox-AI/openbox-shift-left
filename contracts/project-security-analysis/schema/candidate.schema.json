@@ -21,7 +21,7 @@
       "additionalProperties": false,
       "required": ["schema", "pack_digest"],
       "properties": {
-        "schema": { "const": "ai.openbox.project-observation/v2" },
+        "schema": { "const": "ai.openbox.project-observation/v1" },
         "pack_digest": { "$ref": "#/$defs/digest" }
       }
     },

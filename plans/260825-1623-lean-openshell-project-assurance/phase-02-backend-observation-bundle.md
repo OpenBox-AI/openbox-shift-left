@@ -177,7 +177,7 @@ no-replacement transaction.
 | OS-02-05 | verified | Observation-only backend endpoint/build-tuple dependencies and the control crawl are removed; backend source is unchanged, contracts/tests use dashboard APIs, and the regenerated Mastra pack contains only the corrected request sequence. |
 
 No task is active. The corrected live evidence is
-`evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04`.
+`evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04` (evidence retired; see evidence/RETIRED-OBSERVATION-PACKS.md).
 
 ## Test and acceptance plan
 

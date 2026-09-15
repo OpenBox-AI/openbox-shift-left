@@ -19,7 +19,7 @@ the Phase 4 finalizer.
 
 Phase 1 and Phase 2 are verified prerequisites. The authorized MVP analysis
 input is the corrected dashboard-API Mastra pack at
-`evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04`. It must
+`evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04` (evidence retired; see evidence/RETIRED-OBSERVATION-PACKS.md). It must
 pass the public observation verifier before either qualifying host reads it. A
 second developer image remains post-MVP backlog.
 

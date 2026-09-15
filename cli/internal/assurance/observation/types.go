@@ -9,22 +9,23 @@ import (
 )
 
 const (
-	// /v2 because the evidence source changed, not because the format was
-	// tidied. A pack whose isolation evidence comes from a typed provider
-	// record means something different from one whose evidence was gateway log
-	// text, and reusing the v1 identity for it would be the same mistake that
-	// left three earlier packs unreadable under their own label.
+	// One version, because there is one evidence source. The sandbox service is
+	// the only way this lane runs anything, so a second identifier would
+	// distinguish nothing.
 	//
-	// There is no v1 reader. Packs sealed under v1 are historical artifacts,
-	// not verifiable evidence, by explicit decision.
-	Schema                = "ai.openbox.project-observation/v2"
-	BackendSchema         = "ai.openbox.project-observation.backend/v2"
-	RunSchema             = "ai.openbox.project-observation.run/v2"
-	EffectsSchema         = "ai.openbox.project-observation.effects/v2"
-	BehaviorSchema        = "ai.openbox.project-observation.behavior/v2"
-	CoverageSchema        = "ai.openbox.project-observation.coverage/v2"
-	ManifestSchema        = "ai.openbox.project-observation.manifest/v2"
-	SandboxEvidenceSchema = "ai.openbox.project-observation.sandbox-evidence/v2"
+	// Reusing /v1 is safe only because no artifact claiming it survives: the
+	// packs sealed before the sandbox cutover were removed rather than left to
+	// collide with this shape. Same label, different meaning is precisely what
+	// made three of them unreadable under their own identifier, and keeping
+	// them while relabelling would have rebuilt that trap deliberately.
+	Schema                = "ai.openbox.project-observation/v1"
+	BackendSchema         = "ai.openbox.project-observation.backend/v1"
+	RunSchema             = "ai.openbox.project-observation.run/v1"
+	EffectsSchema         = "ai.openbox.project-observation.effects/v1"
+	BehaviorSchema        = "ai.openbox.project-observation.behavior/v1"
+	CoverageSchema        = "ai.openbox.project-observation.coverage/v1"
+	ManifestSchema        = "ai.openbox.project-observation.manifest/v1"
+	SandboxEvidenceSchema = "ai.openbox.project-observation.sandbox-evidence/v1"
 	ExactBackendURL       = "http://127.0.0.1:3000"
 	PageSize              = 100
 	MaxPages              = 100

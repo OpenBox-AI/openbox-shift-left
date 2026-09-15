@@ -62,7 +62,7 @@ func buildProjections(prepared *Prepared, posture *targetposture.Posture) (Proje
 	return projections, postureBytes, nil
 }
 
-const observationSchema = "ai.openbox.project-observation/v2"
+const observationSchema = "ai.openbox.project-observation/v1"
 
 func reportLimitations(result string) []string {
 	limitations := []string{
