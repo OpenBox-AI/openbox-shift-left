@@ -4,6 +4,7 @@ package sandboxclient
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,6 +26,17 @@ func liveConfig(t *testing.T) Config {
 		t.Fatalf("load agent.env: %v", err)
 	}
 	return config
+}
+
+// providersFromEnv attaches named providers. A policy that binds a credential
+// to a provider needs that provider attached to the sandbox, or the gateway
+// refuses the create.
+func providersFromEnv() []string {
+	names := os.Getenv("OPENBOX_SANDBOX_LIVE_PROVIDERS")
+	if names == "" {
+		return nil
+	}
+	return strings.Split(names, ",")
 }
 
 func TestLiveNegotiationReportsWhatTheServiceSupports(t *testing.T) {
@@ -98,7 +110,7 @@ func TestLiveProjectRunRoundTrip(t *testing.T) {
 		PolicyDocument: policy,
 		ExpectedPolicy: identity,
 		Environment:    map[string]string{"OPENBOX_EVALUATION_ID": runID},
-		Providers:      nil,
+		Providers:      providersFromEnv(),
 	}
 
 	begunID, token, err := client.Begin(spec, 5*time.Minute)
