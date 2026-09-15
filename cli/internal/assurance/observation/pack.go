@@ -15,7 +15,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/runfs"
 )
 
-var payloadOrder = []string{"run.json", "backend.json", "openshell.jsonl", "effects.json", "behavior.json", "coverage.json"}
+// The evidence payload is the sandbox's own typed isolation record. It
+// replaced openshell.jsonl, which was the gateway's log text wrapped one line
+// per JSON object — evidence that had to be parsed back out of prose, and whose
+// model-route claim rested on substring matching.
+var payloadOrder = []string{"run.json", "backend.json", "sandbox-evidence.json", "effects.json", "behavior.json", "coverage.json"}
 
 type Pack struct {
 	Payloads map[string][]byte
@@ -23,13 +27,13 @@ type Pack struct {
 }
 
 type PackInput struct {
-	ExecutionJSON []byte
-	OpenShellLog  []byte
-	Snapshot      *Snapshot
-	Backend       *Result
-	Window        Window
-	Effects       map[string]any
-	FinalizedAt   time.Time
+	ExecutionJSON   []byte
+	SandboxEvidence []byte
+	Snapshot        *Snapshot
+	Backend         *Result
+	Window          Window
+	Effects         map[string]any
+	FinalizedAt     time.Time
 }
 
 func Assemble(input PackInput) (*Pack, error) {
@@ -59,11 +63,7 @@ func Assemble(input PackInput) (*Pack, error) {
 	if err != nil {
 		return nil, err
 	}
-	expectedModel := ""
-	if model, ok := input.Effects["model_route"].(map[string]any); ok {
-		expectedModel, _ = model["model"].(string)
-	}
-	openshellBytes, openshellRecords, modelRoute, err := canonicalOpenShell(input.OpenShellLog, expectedModel)
+	evidenceBytes, evidenceObserved, err := canonicalSandboxEvidence(input.SandboxEvidence)
 	if err != nil {
 		return nil, err
 	}
@@ -76,19 +76,19 @@ func Assemble(input PackInput) (*Pack, error) {
 	if modelEffect == nil {
 		modelEffect = map[string]any{}
 	}
+	// The model route is no longer observable. Its only evidence was a
+	// substring in the gateway's log, and the lane no longer reads that log —
+	// nor should it, since a log line is not a receipt. It stays `missing`
+	// until the model relay issues one of its own, which is honest: missing
+	// means nobody looked successfully, never that no call was made.
 	modelEffect["status"] = "missing"
-	modelEffect["matching_receipts"] = modelRoute.Count
-	if modelRoute.Count == 1 {
-		modelEffect["status"] = "observed"
-		modelEffect["source"] = map[string]any{"file": "openshell.jsonl", "record_ordinal": modelRoute.Ordinal}
-		modelEffect["observed_at"] = modelRoute.Timestamp
-	}
+	modelEffect["matching_receipts"] = 0
 	effects["model_route"] = modelEffect
 	effectsBytes, err := artifact.CanonicalJSON(effects)
 	if err != nil {
 		return nil, err
 	}
-	behaviorEntries := behaviorFromInput(input, openshellRecords, effects, modelRoute)
+	behaviorEntries := behaviorFromInput(input, evidenceObserved, effects)
 	behaviorBytes, err := artifact.CanonicalJSON(map[string]any{"schema": BehaviorSchema, "entries": behaviorEntries})
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func Assemble(input PackInput) (*Pack, error) {
 		"schema": CoverageSchema,
 		"channels": []any{
 			map[string]any{"id": "coverage:backend_lifecycle", "name": "backend_lifecycle", "status": "observed", "authority": "backend", "records": len(input.Backend.Events)},
-			map[string]any{"id": "coverage:openshell_runtime", "name": "openshell_runtime", "status": statusForCount(len(openshellRecords)), "authority": "openshell", "records": len(openshellRecords)},
+			map[string]any{"id": "coverage:sandbox_isolation", "name": "sandbox_isolation", "status": statusForEvidence(evidenceObserved), "authority": "sandbox", "records": evidenceRecordCount(evidenceObserved)},
 			map[string]any{"id": "coverage:safe_sink", "name": "safe_sink", "status": effectStatus(effects, "safe_sink"), "authority": "independent_receipt"},
 			map[string]any{"id": "coverage:retrieval_poison", "name": "retrieval_poison", "status": "missing", "authority": "independent_receipt"},
 			map[string]any{"id": "coverage:model_route", "name": "model_route", "status": effectStatus(effects, "model_route"), "authority": "model_receipt"},
@@ -109,15 +109,12 @@ func Assemble(input PackInput) (*Pack, error) {
 		return nil, err
 	}
 	payloads := map[string][]byte{
-		"run.json": runBytes, "backend.json": backendBytes, "openshell.jsonl": openshellBytes,
+		"run.json": runBytes, "backend.json": backendBytes, "sandbox-evidence.json": evidenceBytes,
 		"effects.json": effectsBytes, "behavior.json": behaviorBytes, "coverage.json": coverageBytes,
 	}
 	descriptors := make([]map[string]any, 0, len(payloadOrder))
 	for _, name := range payloadOrder {
 		media := "application/json"
-		if name == "openshell.jsonl" {
-			media = "application/x-ndjson"
-		}
 		descriptors = append(descriptors, map[string]any{"path": name, "media_type": media, "bytes": len(payloads[name]), "sha256": artifact.DigestBytes(payloads[name]).String()})
 	}
 	descriptorBytes, err := artifact.CanonicalJSON(descriptors)
@@ -139,59 +136,46 @@ func Assemble(input PackInput) (*Pack, error) {
 	return pack, nil
 }
 
-type modelRouteObservation struct {
-	Count, Ordinal int
-	Timestamp      string
-}
-
-type openShellRecord struct {
-	Ordinal           int    `json:"ordinal"`
-	Source            string `json:"source"`
-	Channel           string `json:"channel"`
-	OriginalTimestamp string `json:"original_timestamp"`
-	Timestamp         string `json:"timestamp"`
-	Message           string `json:"message"`
-	Canonical         []byte `json:"-"`
-}
-
-func canonicalOpenShell(content []byte, expectedModel string) ([]byte, []openShellRecord, modelRouteObservation, error) {
-	lines := bytes.Split(content, []byte("\n"))
-	var output bytes.Buffer
-	records := make([]openShellRecord, 0, len(lines))
-	var route modelRouteObservation
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-		if strings.Contains(string(line), "obx_") || strings.Contains(string(line), "-----BEGIN PRIVATE KEY-----") {
-			return nil, nil, route, errors.New("observation: OpenShell log contains credential material")
-		}
-		ordinal := len(records) + 1
-		message := string(line)
-		originalTimestamp, timestamp := openShellTimestamp(message)
-		channel := "unknown"
-		parts := strings.Split(message, "] [")
-		if len(parts) > 1 {
-			channel = strings.TrimPrefix(parts[1], "[")
-		}
-		record, err := artifact.CanonicalJSON(map[string]any{"ordinal": ordinal, "source": "openshell", "channel": channel, "original_timestamp": originalTimestamp, "timestamp": timestamp, "message": message})
-		if err != nil {
-			return nil, nil, route, err
-		}
-		records = append(records, openShellRecord{Ordinal: ordinal, Source: "openshell", Channel: channel, OriginalTimestamp: originalTimestamp, Timestamp: timestamp, Message: message, Canonical: record})
-		output.Write(record)
-		output.WriteByte('\n')
-		if expectedModel != "" && strings.Contains(message, "API:INFERENCE") && strings.Contains(message, "Success "+expectedModel+" via ") && strings.Contains(message, "POST\\u{20}/v1/chat/completions") {
-			route.Count++
-			route.Ordinal = ordinal
-			route.Timestamp = timestamp
-		}
+// canonicalSandboxEvidence canonicalizes the provider's isolation record.
+//
+// Absent evidence is represented as an explicit empty object rather than an
+// empty file, because the pack must distinguish "the provider recorded
+// nothing" from "this payload was never written". The first is a real
+// observation; the second is a broken pack.
+func canonicalSandboxEvidence(content []byte) ([]byte, bool, error) {
+	if len(bytes.TrimSpace(content)) == 0 {
+		canonical, err := artifact.CanonicalJSON(map[string]any{"schema": SandboxEvidenceSchema, "observed": false})
+		return canonical, false, err
 	}
-	return output.Bytes(), records, route, nil
+	if bytes.Contains(content, []byte("obx_")) || bytes.Contains(content, []byte("-----BEGIN PRIVATE KEY-----")) {
+		return nil, false, errors.New("observation: sandbox evidence contains credential material")
+	}
+	var decoded any
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		return nil, false, errors.New("observation: sandbox evidence is not valid JSON")
+	}
+	canonical, err := artifact.CanonicalJSON(map[string]any{
+		"schema": SandboxEvidenceSchema, "observed": true, "evidence": decoded,
+	})
+	return canonical, true, err
 }
 
-func behaviorFromInput(input PackInput, openshell []openShellRecord, effects map[string]any, modelRoute modelRouteObservation) []map[string]any {
-	entries := make([]map[string]any, 0, len(input.Backend.Events)+len(openshell)+2)
+func statusForEvidence(observed bool) string {
+	if observed {
+		return "observed"
+	}
+	return "missing"
+}
+
+func evidenceRecordCount(observed bool) int {
+	if observed {
+		return 1
+	}
+	return 0
+}
+
+func behaviorFromInput(input PackInput, evidenceObserved bool, effects map[string]any) []map[string]any {
+	entries := make([]map[string]any, 0, len(input.Backend.Events)+3)
 	for _, event := range input.Backend.Events {
 		entries = append(entries, map[string]any{
 			"id": event.ID, "type": event.Type,
@@ -206,25 +190,17 @@ func behaviorFromInput(input PackInput, openshell []openShellRecord, effects map
 			"correlation": map[string]any{"run_id": input.Window.EvaluationID}, "source": map[string]any{"file": "effects.json", "record": "safe_sink"},
 		})
 	}
-	if modelRoute.Count == 1 {
+	// One entry, not one per log line: the sandbox reports its isolation
+	// decisions as a single typed record, so the behavior index cites that
+	// record rather than a line number inside prose.
+	if evidenceObserved {
 		entries = append(entries, map[string]any{
-			"id": "model_route:" + input.Window.EvaluationID, "type": "ModelInvocation", "timestamp": modelRoute.Timestamp, "authority": "model_receipt",
-			"correlation": map[string]any{"run_id": input.Window.EvaluationID}, "source": map[string]any{"file": "effects.json", "record": "model_route"},
+			"id": "sandbox_evidence:" + input.Window.EvaluationID, "type": "SandboxIsolation", "authority": "sandbox",
+			"correlation": map[string]any{"run_id": input.Window.EvaluationID},
+			"source":      map[string]any{"file": "sandbox-evidence.json", "record": "evidence"},
 		})
 	}
-	for _, record := range openshell {
-		entry := map[string]any{
-			"id":   fmt.Sprintf("openshell:%d:%s", record.Ordinal, artifact.DigestBytes(record.Canonical).String()),
-			"type": "OpenShellObservation", "authority": "openshell",
-			"correlation": map[string]any{"run_id": input.Window.EvaluationID},
-			"source":      map[string]any{"file": "openshell.jsonl", "record_ordinal": record.Ordinal},
-		}
-		if record.Timestamp != "" {
-			entry["timestamp"] = record.Timestamp
-		}
-		entries = append(entries, entry)
-	}
-	authorityOrder := map[string]int{"backend": 0, "independent_receipt": 1, "model_receipt": 2, "openshell": 3}
+	authorityOrder := map[string]int{"backend": 0, "independent_receipt": 1, "model_receipt": 2, "sandbox": 3}
 	sort.SliceStable(entries, func(i, j int) bool {
 		leftTime, _ := entries[i]["timestamp"].(string)
 		rightTime, _ := entries[j]["timestamp"].(string)
@@ -304,17 +280,22 @@ func Validate(pack *Pack) error {
 			return errors.New("observation: backend evidence reconciliation failed")
 		}
 	}
-	openshellLines := bytes.Split(bytes.TrimSuffix(pack.Payloads["openshell.jsonl"], []byte("\n")), []byte("\n"))
-	for index, line := range openshellLines {
-		canonical, err := artifact.CanonicalizeJSON(line)
-		var record struct {
-			Ordinal int    `json:"ordinal"`
-			Source  string `json:"source"`
-		}
-		if err != nil || !bytes.Equal(canonical, line) || json.Unmarshal(line, &record) != nil || record.Ordinal != index+1 || record.Source != "openshell" {
-			return errors.New("observation: OpenShell record reconciliation failed")
-		}
+	// The evidence payload is one canonical document, verified as such. There
+	// are no per-line records to reconcile any more, which removes the only
+	// place this validator parsed provider prose.
+	evidenceCanonical, evidenceErr := artifact.CanonicalizeJSON(pack.Payloads["sandbox-evidence.json"])
+	if evidenceErr != nil || !bytes.Equal(evidenceCanonical, pack.Payloads["sandbox-evidence.json"]) {
+		return errors.New("observation: sandbox evidence is not canonical")
 	}
+	var evidenceDocument struct {
+		Schema   string `json:"schema"`
+		Observed bool   `json:"observed"`
+	}
+	if json.Unmarshal(pack.Payloads["sandbox-evidence.json"], &evidenceDocument) != nil || evidenceDocument.Schema != SandboxEvidenceSchema {
+		return errors.New("observation: sandbox evidence reconciliation failed")
+	}
+	evidenceObserved := evidenceDocument.Observed
+
 	var effects struct {
 		SafeSink struct {
 			Status           string `json:"status"`
@@ -331,10 +312,6 @@ func Validate(pack *Pack) error {
 			Status           string `json:"status"`
 			Model            string `json:"model"`
 			MatchingReceipts int    `json:"matching_receipts"`
-			Source           struct {
-				File          string `json:"file"`
-				RecordOrdinal int    `json:"record_ordinal"`
-			} `json:"source"`
 		} `json:"model_route"`
 		Core struct {
 			Status              string `json:"status"`
@@ -349,10 +326,11 @@ func Validate(pack *Pack) error {
 		(effects.Core.Status == "observed") != (effects.Core.MatchingValidations > 0 && effects.Core.GovernanceEvents > 0) {
 		return errors.New("observation: contradictory effect receipts")
 	}
+	// A model-route observation would now need a receipt from the model relay.
+	// Until that exists the status is `missing`, and claiming `observed`
+	// without a citable receipt is refused rather than trusted.
 	if effects.Model.Status == "observed" {
-		if effects.Model.Source.File != "openshell.jsonl" || effects.Model.Source.RecordOrdinal < 1 || effects.Model.Source.RecordOrdinal > len(openshellLines) || !bytes.Contains(openshellLines[effects.Model.Source.RecordOrdinal-1], []byte("API:INFERENCE")) || !bytes.Contains(openshellLines[effects.Model.Source.RecordOrdinal-1], []byte("Success "+effects.Model.Model+" via ")) {
-			return errors.New("observation: model receipt does not resolve to its OpenShell authority")
-		}
+		return errors.New("observation: model receipt has no authority to resolve against")
 	}
 	var run struct {
 		EvaluationID string          `json:"evaluation_id"`
@@ -362,15 +340,6 @@ func Validate(pack *Pack) error {
 		return errors.New("observation: effect correlation does not match the run")
 	}
 
-	openshellRecords := make([]openShellRecord, 0, len(openshellLines))
-	for _, line := range openshellLines {
-		var record openShellRecord
-		if json.Unmarshal(line, &record) != nil {
-			return errors.New("observation: invalid OpenShell behavior source")
-		}
-		record.Canonical = append([]byte(nil), line...)
-		openshellRecords = append(openshellRecords, record)
-	}
 	latestEvents := map[string]Event{}
 	for _, entry := range backend.Entries {
 		if !strings.Contains(entry.Path, "/logs/chronological?") {
@@ -403,16 +372,9 @@ func Validate(pack *Pack) error {
 	if json.Unmarshal(pack.Payloads["effects.json"], &effectsMap) != nil {
 		return errors.New("observation: invalid effect behavior source")
 	}
-	modelRoute := modelRouteObservation{Count: effects.Model.MatchingReceipts, Ordinal: effects.Model.Source.RecordOrdinal}
-	if modelRoute.Count == 1 {
-		if modelRoute.Ordinal < 1 || modelRoute.Ordinal > len(openshellRecords) {
-			return errors.New("observation: model behavior source is invalid")
-		}
-		modelRoute.Timestamp = openshellRecords[modelRoute.Ordinal-1].Timestamp
-	}
 	expectedBehavior, canonicalErr := artifact.CanonicalJSON(map[string]any{
 		"schema":  BehaviorSchema,
-		"entries": behaviorFromInput(PackInput{Backend: &Result{Events: events}, Window: Window{EvaluationID: run.EvaluationID}}, openshellRecords, effectsMap, modelRoute),
+		"entries": behaviorFromInput(PackInput{Backend: &Result{Events: events}, Window: Window{EvaluationID: run.EvaluationID}}, evidenceObserved, effectsMap),
 	})
 	if canonicalErr != nil || !bytes.Equal(expectedBehavior, pack.Payloads["behavior.json"]) {
 		return errors.New("observation: behavior index cannot be reconstructed exactly")
@@ -421,7 +383,7 @@ func Validate(pack *Pack) error {
 		"schema": CoverageSchema,
 		"channels": []any{
 			map[string]any{"id": "coverage:backend_lifecycle", "name": "backend_lifecycle", "status": "observed", "authority": "backend", "records": len(events)},
-			map[string]any{"id": "coverage:openshell_runtime", "name": "openshell_runtime", "status": statusForCount(len(openshellRecords)), "authority": "openshell", "records": len(openshellRecords)},
+			map[string]any{"id": "coverage:sandbox_isolation", "name": "sandbox_isolation", "status": statusForEvidence(evidenceObserved), "authority": "sandbox", "records": evidenceRecordCount(evidenceObserved)},
 			map[string]any{"id": "coverage:safe_sink", "name": "safe_sink", "status": effects.SafeSink.Status, "authority": "independent_receipt"},
 			map[string]any{"id": "coverage:retrieval_poison", "name": "retrieval_poison", "status": effects.Retrieval.Status, "authority": "independent_receipt"},
 			map[string]any{"id": "coverage:model_route", "name": "model_route", "status": effects.Model.Status, "authority": "model_receipt"},
@@ -485,13 +447,7 @@ func validatePackSchemas(pack *Pack) error {
 			return err
 		}
 	}
-	lines := bytes.Split(bytes.TrimSuffix(pack.Payloads["openshell.jsonl"], []byte("\n")), []byte("\n"))
-	for index, line := range lines {
-		if err := validateSchema(OpenShellRecordSchema, line); err != nil {
-			return fmt.Errorf("observation: OpenShell record %d: %w", index+1, err)
-		}
-	}
-	return nil
+	return validateSchema(SandboxEvidenceSchema, pack.Payloads["sandbox-evidence.json"])
 }
 
 // PackDigest returns the manifest-declared digest after successful validation.

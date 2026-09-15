@@ -18,6 +18,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/observation"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/runfs"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
 var manifestDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -29,8 +30,6 @@ type runState struct {
 	policy              []byte
 	policyWritten       bool
 	process             CommandResult
-	openShellLog        CommandResult
-	logTailCaptured     bool
 	relay               *coreRelay
 	effectRelay         *effectRelay
 	registryStarted     bool
@@ -40,6 +39,8 @@ type runState struct {
 	publishedReference  string
 	immutableReference  string
 	sandboxMayExist     bool
+	sandboxRunID        string
+	sandboxResult       *sandboxclient.ProjectRunResult
 	observationClient   *observation.Client
 	observationSnapshot *observation.Snapshot
 	observationResult   *observation.Result
@@ -174,11 +175,11 @@ func (state *runState) publishOutput(success bool, dependencies Dependencies) er
 		effect = state.effectRelay.Receipt()
 	}
 	pack, err := observation.Assemble(observation.PackInput{
-		ExecutionJSON: execution,
-		OpenShellLog:  combinedLog(state.openShellLog),
-		Snapshot:      state.observationSnapshot,
-		Backend:       state.observationResult,
-		Window:        state.observationWindow,
+		ExecutionJSON:   execution,
+		SandboxEvidence: state.sandboxEvidence(),
+		Snapshot:        state.observationSnapshot,
+		Backend:         state.observationResult,
+		Window:          state.observationWindow,
 		Effects: map[string]any{
 			"safe_sink":        map[string]any{"status": statusForReceipt(effect.MatchingReceipts), "attempts": effect.Attempts, "matching_receipts": effect.MatchingReceipts, "evaluation_id": state.prepared.evaluationID, "matched_at": effect.MatchedAt.Format(time.RFC3339Nano)},
 			"retrieval_poison": map[string]any{"status": "missing", "matching_receipts": 0},
@@ -230,10 +231,9 @@ func (state *runState) initializeRecord(started time.Time) {
 	record.Image.WorkingDir = state.prepared.image.Config.WorkingDir
 	record.Argv = append([]string(nil), state.prepared.argv...)
 	record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
-	record.OpenShell.CLIVersion = OpenShellVersion
-	record.OpenShell.GatewayVersion = state.prepared.openShellGateway
-	record.OpenShell.DriverVersion = state.prepared.openShellDriver
-	record.OpenShell.Provider = OpenBoxProvider
+	record.Sandbox.Service = state.prepared.sandboxService
+	record.Sandbox.Capability = state.prepared.sandboxCapability
+	record.Sandbox.Provider = OpenBoxProvider
 	record.Inference.Provider = InferenceProvider
 	record.Inference.Model = InferenceModel
 	record.Inference.ModelDigest = InferenceModelDigest
@@ -291,30 +291,9 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 		state.prepared.environmentNames = environmentInventory(state.prepared.environment)
 		state.record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 		state.phase(dependencies, "safe_effect_sink_started")
-		state.policy, err = buildPolicy(state.prepared.applicationRoot, state.prepared.argv[0], relay.Port(), effectRelay.Port())
-	} else {
-		state.policy, err = buildPolicy(state.prepared.applicationRoot, state.prepared.argv[0], relay.Port())
 	}
-	if err != nil {
-		return &classifiedError{class: "policy_failure", err: err}
-	}
-	if err := state.workspace.WritePrivateFile("policy.json", state.policy); err != nil {
-		return &classifiedError{class: "output_failure", err: err}
-	}
-	state.policyWritten = true
-
-	state.phase(dependencies, "sandbox_creating")
-	state.sandboxMayExist = true
-	commandErr := state.runSandbox(ctx, dependencies)
-	logErr := state.captureLogs(ctx, dependencies)
-	if logErr == nil {
-		state.phase(dependencies, "logs_captured")
-	}
-	if commandErr != nil {
+	if commandErr := state.runThroughSandbox(ctx, dependencies); commandErr != nil {
 		return commandErr
-	}
-	if logErr != nil {
-		return logErr
 	}
 	receipt := relay.Receipt()
 	if receipt.MatchingValidations < 1 || receipt.GovernanceEvents < 1 {
@@ -348,193 +327,6 @@ func loadInferenceModel(ctx context.Context, client HTTPDoer) error {
 		return errors.New("project evaluate: Ollama returned an invalid model load receipt")
 	}
 	return nil
-}
-
-func (state *runState) runSandbox(ctx context.Context, dependencies Dependencies) error {
-	command := state.sandboxCreateCommand()
-	processContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	process, err := dependencies.Commands.Start(processContext, command)
-	if err != nil {
-		if ctx.Err() != nil {
-			return &classifiedError{class: contextClassification(ctx.Err()), err: errors.New("project evaluate: interrupted before attached OpenShell execution started")}
-		}
-		return &classifiedError{class: "sandbox_create_failure", err: errors.New("project evaluate: start attached OpenShell sandbox create failed")}
-	}
-	resultChannel := make(chan CommandResult, 1)
-	go func() { resultChannel <- process.Wait() }()
-	readyDeadline := dependencies.Clock.Now().Add(90 * time.Second)
-	ready := false
-	for !ready {
-		select {
-		case result := <-resultChannel:
-			state.process = result
-			state.record.CommandExitCode = intPointer(result.ExitCode)
-			state.phase(dependencies, "command_exited")
-			if ctx.Err() != nil {
-				return &classifiedError{class: contextClassification(ctx.Err()), err: errors.New("project evaluate: interrupted while waiting for sandbox readiness")}
-			}
-			return failf("sandbox_pre_ready_error", "project evaluate: attached command exited before sandbox Ready with status %d", result.ExitCode)
-		default:
-		}
-		phase, exists, phaseErr := state.sandboxPhase(ctx, dependencies)
-		if phaseErr == nil && exists {
-			switch phase {
-			case "Provisioning":
-			case "Ready":
-				ready = true
-				state.phase(dependencies, "ready")
-			case "Error":
-				cancel()
-				state.process = <-resultChannel
-				state.record.CommandExitCode = intPointer(state.process.ExitCode)
-				return fail("sandbox_pre_ready_error", "project evaluate: sandbox entered Error before Ready")
-			default:
-				return failf("sandbox_phase_error", "project evaluate: unexpected sandbox phase %q before Ready", phase)
-			}
-		} else if phaseErr != nil && !isNotFound(phaseErr) {
-			return &classifiedError{class: "sandbox_status_failure", err: phaseErr}
-		}
-		if dependencies.Clock.Now().After(readyDeadline) {
-			cancel()
-			state.process = <-resultChannel
-			state.record.CommandExitCode = intPointer(state.process.ExitCode)
-			return fail("readiness_timeout", "project evaluate: sandbox did not become Ready within 90 seconds")
-		}
-		if err := dependencies.Clock.Sleep(ctx, 250*time.Millisecond); err != nil {
-			cancel()
-			state.process = <-resultChannel
-			state.record.CommandExitCode = intPointer(state.process.ExitCode)
-			return &classifiedError{class: contextClassification(err), err: errors.New("project evaluate: interrupted while waiting for sandbox readiness")}
-		}
-	}
-
-	executionDeadline := dependencies.Clock.Now().Add(180 * time.Second)
-	logContext, logCancel := context.WithCancel(ctx)
-	logProcess, logStartErr := dependencies.Commands.Start(logContext, Command{Name: "openshell", Args: []string{
-		"logs", "--tail", "--source", "all", state.prepared.sandboxName,
-	}})
-	if logStartErr != nil {
-		logCancel()
-		return fail("log_collection_failure", "project evaluate: start live OpenShell log collection failed")
-	}
-	logResultChannel := make(chan CommandResult, 1)
-	go func() { logResultChannel <- logProcess.Wait() }()
-	state.logTailCaptured = true
-	defer func() {
-		logCancel()
-		state.openShellLog = <-logResultChannel
-	}()
-	for {
-		select {
-		case result := <-resultChannel:
-			state.process = result
-			state.record.CommandExitCode = intPointer(result.ExitCode)
-			state.phase(dependencies, "command_exited")
-			if ctx.Err() != nil {
-				return &classifiedError{class: contextClassification(ctx.Err()), err: errors.New("project evaluate: interrupted while image command was running")}
-			}
-			if result.ExitCode != 0 {
-				return failf("command_nonzero", "project evaluate: image command exited with status %d", result.ExitCode)
-			}
-			return nil
-		default:
-		}
-		if dependencies.Clock.Now().After(executionDeadline) {
-			cancel()
-			state.process = <-resultChannel
-			state.record.CommandExitCode = intPointer(state.process.ExitCode)
-			return fail("command_timeout", "project evaluate: image command exceeded 180 seconds")
-		}
-		if err := dependencies.Clock.Sleep(ctx, 250*time.Millisecond); err != nil {
-			cancel()
-			state.process = <-resultChannel
-			state.record.CommandExitCode = intPointer(state.process.ExitCode)
-			return &classifiedError{class: contextClassification(err), err: errors.New("project evaluate: interrupted while image command was running")}
-		}
-	}
-}
-
-func (state *runState) sandboxCreateCommand() Command {
-	args := []string{
-		"sandbox", "create",
-		"--name", state.prepared.sandboxName,
-		"--from", state.immutableReference,
-		"--policy", filepath.Join(state.workspace.Root(), "policy.json"),
-		"--provider", OpenBoxProvider,
-		"--no-auto-providers", "--no-tty", "--no-keep",
-		"--cpu", "2", "--memory", "2Gi",
-		"--label", "ai.openbox.evaluation-id=" + state.prepared.evaluationID,
-	}
-	for _, name := range sortedEnvironmentNames(state.prepared.environment) {
-		if name == "OPENBOX_API_KEY" {
-			continue
-		}
-		args = append(args, "--env", name+"="+state.prepared.environment[name])
-	}
-	args = append(args, "--")
-	args = append(args, state.prepared.argv...)
-	return Command{Name: "openshell", Args: args}
-}
-
-func (state *runState) captureLogs(ctx context.Context, dependencies Dependencies) error {
-	if state.logTailCaptured {
-		return nil
-	}
-	logContext, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	result, err := dependencies.Commands.Run(logContext, Command{Name: "openshell", Args: []string{"logs", "--source", "all", state.prepared.sandboxName}})
-	state.openShellLog = result
-	if err != nil {
-		return fail("log_collection_failure", "project evaluate: OpenShell log collection failed")
-	}
-	return nil
-}
-
-func (state *runState) sandboxPhase(ctx context.Context, dependencies Dependencies) (string, bool, error) {
-	result, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"sandbox", "get", state.prepared.sandboxName, "-o", "json"}})
-	if err != nil {
-		return "", false, fmt.Errorf("project evaluate: inspect sandbox: %w: %s", err, boundedDiagnostic(result.Stderr))
-	}
-	phase := findPhase(result.Stdout)
-	if phase == "" {
-		return "", true, errors.New("project evaluate: sandbox JSON has no phase")
-	}
-	return phase, true, nil
-}
-
-func findPhase(content []byte) string {
-	var value any
-	if json.Unmarshal(content, &value) != nil {
-		return ""
-	}
-	return findPhaseValue(value)
-}
-
-func findPhaseValue(value any) string {
-	switch typed := value.(type) {
-	case map[string]any:
-		if phase, ok := typed["phase"].(string); ok {
-			return phase
-		}
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			if phase := findPhaseValue(typed[key]); phase != "" {
-				return phase
-			}
-		}
-	case []any:
-		for _, child := range typed {
-			if phase := findPhaseValue(child); phase != "" {
-				return phase
-			}
-		}
-	}
-	return ""
 }
 
 func (state *runState) startRegistry(ctx context.Context, dependencies Dependencies) error {
@@ -676,20 +468,15 @@ func (state *runState) cleanup(dependencies Dependencies) error {
 		closeCancel()
 	}
 	if state.sandboxMayExist {
-		state.record.Cleanup.SandboxDeleteAttempted = true
-		_, deleteErr := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"sandbox", "delete", state.prepared.sandboxName}})
-		absent := state.waitSandboxAbsent(ctx, dependencies)
-		state.record.Cleanup.SandboxAbsent = absent
-		if deleteErr != nil && !absent {
-			cleanupErrors = append(cleanupErrors, errors.New("exact sandbox delete failed"))
-		}
-		if !absent {
-			cleanupErrors = append(cleanupErrors, errors.New("exact sandbox remains after cleanup"))
+		if err := state.deleteSandbox(dependencies); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
 		} else {
 			state.phase(dependencies, "sandbox_deleted")
 		}
 	} else {
-		state.record.Cleanup.SandboxAbsent = state.labelAbsent(ctx, dependencies)
+		// Nothing was begun, so nothing is owed. Absence is true by
+		// construction rather than by a probe that could lie.
+		state.record.Cleanup.SandboxAbsent = true
 	}
 	if state.registryTag != "" {
 		_, _ = dependencies.Commands.Run(ctx, Command{Name: "docker", Args: []string{"image", "rm", state.registryTag}})
@@ -730,37 +517,10 @@ func (state *runState) cleanup(dependencies Dependencies) error {
 	if !state.record.Cleanup.OllamaModelUnloaded {
 		cleanupErrors = append(cleanupErrors, errors.New("Granite model remains loaded"))
 	}
-	if !state.labelAbsent(ctx, dependencies) {
-		cleanupErrors = append(cleanupErrors, errors.New("matching evaluation sandbox remains"))
-		state.record.Cleanup.SandboxAbsent = false
-	}
+	// The label sweep is gone with the CLI. The service owns the run's
+	// identity and answers absence directly, so a second probe by selector
+	// would only be this lane guessing at state it no longer holds.
 	return errors.Join(cleanupErrors...)
-}
-
-func (state *runState) waitSandboxAbsent(ctx context.Context, dependencies Dependencies) bool {
-	deadline := dependencies.Clock.Now().Add(50 * time.Second)
-	for {
-		_, exists, err := state.sandboxPhase(ctx, dependencies)
-		if err != nil && isNotFound(err) {
-			return true
-		}
-		if err == nil && !exists {
-			return true
-		}
-		if dependencies.Clock.Now().After(deadline) {
-			return false
-		}
-		if dependencies.Clock.Sleep(ctx, 250*time.Millisecond) != nil {
-			return false
-		}
-	}
-}
-
-func (state *runState) labelAbsent(ctx context.Context, dependencies Dependencies) bool {
-	result, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{
-		"sandbox", "list", "--selector", "ai.openbox.evaluation-id=" + state.prepared.evaluationID, "-o", "json",
-	}})
-	return err == nil && jsonArrayEmpty(result.Stdout)
 }
 
 func dockerObjectAbsent(ctx context.Context, runner CommandRunner, args []string) bool {
@@ -807,10 +567,9 @@ func (state *runState) finishRecord() {
 		state.record.Effects.SafeSinkAttempts = receipt.Attempts
 		state.record.Effects.SafeSinkMatching = receipt.MatchingReceipts
 	}
-	state.record.Logs.ProcessStdout = digestRecord(state.process.Stdout, state.process.StdoutTruncated)
-	state.record.Logs.ProcessStderr = digestRecord(state.process.Stderr, state.process.StderrTruncated)
-	openShellBytes := combinedLog(state.openShellLog)
-	state.record.Logs.OpenShell = digestRecord(openShellBytes, state.openShellLog.StdoutTruncated || state.openShellLog.StderrTruncated || combinedLogSize(state.openShellLog) > maxCaptureBytes)
+	state.record.Logs.ProcessStdout = digestRecord(state.sandboxStdout(), false)
+	state.record.Logs.ProcessStderr = digestRecord(state.sandboxStderr(), false)
+	state.record.Logs.SandboxEvidence = digestRecord(state.sandboxEvidence(), false)
 }
 
 func (state *runState) writeOutput() error {
@@ -829,7 +588,7 @@ func (state *runState) writeOutput() error {
 	if err := state.workspace.WritePrivateFile("process.stderr", state.process.Stderr); err != nil {
 		return err
 	}
-	if err := state.workspace.WritePrivateFile("openshell.log", combinedLog(state.openShellLog)); err != nil {
+	if err := state.workspace.WritePrivateFile("sandbox-evidence.json", state.sandboxEvidence()); err != nil {
 		return err
 	}
 	execution, err := json.Marshal(state.record)

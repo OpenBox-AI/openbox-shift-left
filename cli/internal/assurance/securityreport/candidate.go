@@ -181,7 +181,7 @@ func validateCandidate(pack *observation.Pack, content []byte) (Candidate, []byt
 }
 
 func validateEvidence(pack *observation.Pack, issue CandidateIssue, behavior map[string]behaviorRecord, coverage map[string]coverageRecord) ([]ObservedFact, *Action, error) {
-	roles := map[string]string{"backend": "semantic_behavior", "independent_receipt": "external_effect", "openshell": "runtime_context", "model_receipt": "model_route"}
+	roles := map[string]string{"backend": "semantic_behavior", "independent_receipt": "external_effect", "sandbox": "runtime_context", "model_receipt": "model_route"}
 	seen := make(map[string]bool)
 	facts := make([]ObservedFact, 0, len(issue.Evidence))
 	var action *Action

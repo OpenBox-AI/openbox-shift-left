@@ -41,7 +41,7 @@ var reportInventory = []struct {
 }{
 	{"observation/run.json", "application/json"},
 	{"observation/backend.json", "application/json"},
-	{"observation/openshell.jsonl", "application/x-ndjson"},
+	{"observation/sandbox-evidence.json", "application/json"},
 	{"observation/effects.json", "application/json"},
 	{"observation/behavior.json", "application/json"},
 	{"observation/coverage.json", "application/json"},
@@ -88,7 +88,7 @@ func Finalize(ctx context.Context, prepared *Prepared, input RuntimeInput, depen
 		return Result{}, err
 	}
 	files := make(map[string][]byte, len(reportInventory))
-	for _, name := range []string{"run.json", "backend.json", "openshell.jsonl", "effects.json", "behavior.json", "coverage.json"} {
+	for _, name := range []string{"run.json", "backend.json", "sandbox-evidence.json", "effects.json", "behavior.json", "coverage.json"} {
 		files["observation/"+name] = append([]byte(nil), prepared.Observation.Payloads[name]...)
 	}
 	files["observation/manifest.json"] = append([]byte(nil), prepared.Observation.Manifest...)
@@ -238,7 +238,7 @@ func Verify(path string) (*VerifiedPack, error) {
 	if err := verifyDirectory(observationRoot, 0o500); err != nil {
 		return nil, err
 	}
-	if err := exactEntries(observationRoot, []string{"backend.json", "behavior.json", "coverage.json", "effects.json", "manifest.json", "openshell.jsonl", "run.json"}); err != nil {
+	if err := exactEntries(observationRoot, []string{"backend.json", "behavior.json", "coverage.json", "effects.json", "manifest.json", "sandbox-evidence.json", "run.json"}); err != nil {
 		return nil, err
 	}
 	files := make(map[string][]byte, len(reportInventory))

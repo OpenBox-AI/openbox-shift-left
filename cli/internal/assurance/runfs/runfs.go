@@ -477,7 +477,7 @@ func (workspace *Workspace) FinalizeObservation(payloads map[string][]byte, mani
 }
 
 var observationPayloadNames = []string{
-	"run.json", "backend.json", "openshell.jsonl", "effects.json", "behavior.json", "coverage.json",
+	"run.json", "backend.json", "sandbox-evidence.json", "effects.json", "behavior.json", "coverage.json",
 }
 
 func exactObservationPayloadNames(payloads map[string][]byte) bool {

@@ -9,7 +9,7 @@ import (
 
 const (
 	AuditPackSchema          = "openbox.audit-pack/v1"
-	ObservationPackSchema    = "ai.openbox.project-observation/v1"
+	ObservationPackSchema    = "ai.openbox.project-observation/v2"
 	SecurityReportPackSchema = "ai.openbox.project-security-report/v1"
 )
 

@@ -18,7 +18,7 @@ func TestAssembleFinalizeAndReadExactObservation(t *testing.T) {
 	now := time.Date(2026, 8, 26, 6, 0, 0, 0, time.UTC)
 	execution, _ := json.Marshal(map[string]any{
 		"schema": "old", "evaluation_id": "ev-one", "agent_id": "450999ca-ae2a-409c-8a26-d00a71132440", "started_at": now, "completed_at": now, "duration_ms": 1,
-		"image": map[string]any{}, "argv": []any{}, "environment_names": []any{}, "openshell": map[string]any{}, "inference": map[string]any{}, "phases": []any{},
+		"image": map[string]any{}, "argv": []any{}, "environment_names": []any{}, "sandbox": map[string]any{"service": "svc", "capability": "project_run_v2", "provider": "obx-openbox-local"}, "inference": map[string]any{}, "phases": []any{},
 		"core": map[string]any{}, "effects": map[string]any{}, "exit_classification": "success", "logs": map[string]any{}, "coverage_limitations": []any{}, "cleanup": map[string]any{},
 	})
 	entries := []Entry{
@@ -28,7 +28,7 @@ func TestAssembleFinalizeAndReadExactObservation(t *testing.T) {
 	}
 	backend := &Result{OrganizationID: "openbox.ai", Session: Session{ID: "ecfd94a0-e4c6-4ae8-96b2-72fc20f5e19a"}, Entries: entries}
 	snapshot := &Snapshot{OrganizationID: "openbox.ai", Backend: BackendIdentity{URL: ExactBackendURL, APIContract: DashboardActivityContract}, Entries: entries}
-	pack, err := Assemble(PackInput{ExecutionJSON: execution, OpenShellLog: []byte("ready\ncleaned\n"), Snapshot: snapshot, Backend: backend, Window: Window{EvaluationID: "ev-one", StartedAt: now, Deadline: now.Add(time.Minute)}, Effects: map[string]any{
+	pack, err := Assemble(PackInput{ExecutionJSON: execution, SandboxEvidence: []byte(`{"egress_decisions":[]}`), Snapshot: snapshot, Backend: backend, Window: Window{EvaluationID: "ev-one", StartedAt: now, Deadline: now.Add(time.Minute)}, Effects: map[string]any{
 		"safe_sink":        map[string]any{"status": "observed", "attempts": 1, "matching_receipts": 1, "evaluation_id": "ev-one", "matched_at": now.Format(time.RFC3339Nano)},
 		"retrieval_poison": map[string]any{"status": "missing", "matching_receipts": 0},
 		"model_route":      map[string]any{"provider": "openai-compatible-provider", "model": "granite4.1:3b", "model_digest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"},
@@ -138,30 +138,9 @@ func validateContractSchemas(t *testing.T, pack *Pack) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	compiler := jsonschema.NewCompiler()
-	document, err := os.Open(filepath.Join(root, "openshell-record.schema.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := jsonschema.UnmarshalJSON(document)
-	document.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := compiler.AddResource("openshell-record.schema.json", decoded); err != nil {
-		t.Fatal(err)
-	}
-	schema, err := compiler.Compile("openshell-record.schema.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(pack.Payloads["openshell.jsonl"])), "\n") {
-		var value any
-		if json.Unmarshal([]byte(line), &value) != nil {
-			t.Fatal("invalid generated JSONL")
-		}
-		if err := schema.Validate(value); err != nil {
-			t.Fatal(err)
-		}
+	// The evidence payload is one document now, so it is validated as one
+	// rather than line by line.
+	if err := validateSchema(SandboxEvidenceSchema, pack.Payloads["sandbox-evidence.json"]); err != nil {
+		t.Fatalf("sandbox evidence: %v", err)
 	}
 }

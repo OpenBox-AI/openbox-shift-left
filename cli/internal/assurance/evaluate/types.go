@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
 const (
@@ -26,6 +28,20 @@ const (
 	ollamaTagsURL              = "http://127.0.0.1:11434/api/tags"
 	ollamaGenerateURL          = "http://127.0.0.1:11434/api/generate"
 	maxCaptureBytes      int64 = 8 << 20
+
+	// sandboxNegotiationTimeout bounds the one read-only question asked before
+	// anything is mutated. Short on purpose: an unreachable service is a
+	// not_runnable answer, not something to wait out.
+	sandboxNegotiationTimeout = 10 * time.Second
+	// sandboxBeginDeadline covers image preparation, which on a cold cache
+	// includes the gateway pulling and converting the image.
+	sandboxBeginDeadline = 5 * time.Minute
+	sandboxReadyDeadline = 5 * time.Minute
+	sandboxExecDeadline  = 4 * time.Minute
+	sandboxDeleteTimeout = 60 * time.Second
+	// sandboxCommandTimeout is the guest-side ceiling, in seconds, and is the
+	// same 180s budget the CLI path allowed the image command.
+	sandboxCommandTimeout uint16 = 180
 )
 
 var reservedEnvironment = map[string]string{
@@ -86,13 +102,37 @@ type Clock interface {
 	Sleep(context.Context, time.Duration) error
 }
 
+// SandboxClient is the evaluation lane's only path to a sandbox.
+//
+// It replaces the `openshell` CLI outright. The lane used to shell out and
+// parse stdout — including scraping human-readable provider fields after
+// stripping ANSI escapes — which made this repo a second owner of the OpenShell
+// contract, pinned to a different version than the sandbox service and with no
+// test holding the two together. kb/sandbox.md already forbade that: Shift Left
+// must not shell out to the OpenShell CLI in the supported path, and must see
+// only typed operations.
+type SandboxClient interface {
+	Capabilities(timeout time.Duration) ([]string, error)
+	Begin(spec sandboxclient.ProjectRunSpec, deadline time.Duration) (string, string, error)
+	WaitReady(runID, token string, expected sandboxclient.PolicyIdentity, deadline time.Duration) (string, error)
+	Exec(runID, token string, argv []string, commandTimeout uint16, limits sandboxclient.OutputLimits, deadline time.Duration) (*sandboxclient.ProjectRunResult, error)
+	Delete(runID string, deadline time.Duration) error
+	WaitDeleted(runID string, deadline time.Duration) error
+}
+
 // Dependencies contains every effectful evaluator seam in one value.
 type Dependencies struct {
-	Commands CommandRunner
-	Clock    Clock
-	Random   io.Reader
-	Listen   func(network, address string) (net.Listener, error)
-	HTTP     HTTPDoer
+	// Sandbox is the run boundary. Nil means the lane cannot execute, which is
+	// a preflight failure rather than a silent fallback to anything else.
+	Sandbox SandboxClient
+	// SandboxTemplateFromConfig records which deployment answered, for the run
+	// record. It is the service's identity, never the workload's.
+	SandboxTemplateFromConfig string
+	Commands                  CommandRunner
+	Clock                     Clock
+	Random                    io.Reader
+	Listen                    func(network, address string) (net.Listener, error)
+	HTTP                      HTTPDoer
 	// InferenceHTTP carries the longer model-load budget. The preflight requires
 	// the model to be UNLOADED, so every load is cold: a 2 GB model read from
 	// cold storage exceeds HTTP's short budget while a warm reload takes about a
@@ -114,6 +154,9 @@ func (d Dependencies) inferenceHTTP() HTTPDoer {
 	return d.HTTP
 }
 
+// SystemDependencies wires the real seams. The sandbox client is attached
+// separately by SystemSandbox, because it needs a provisioned service and its
+// absence must surface as a preflight failure rather than a nil panic.
 func SystemDependencies() Dependencies {
 	return Dependencies{
 		Commands: systemCommandRunner{},
@@ -144,4 +187,20 @@ type Result struct {
 	EvaluationID string
 	Output       string
 	Succeeded    bool
+}
+
+// SystemSandbox attaches the real sandbox client, reading the boundary contract
+// that `obs provision` published.
+func SystemSandbox(dependencies Dependencies, agentEnvPath string) (Dependencies, error) {
+	config, err := sandboxclient.LoadConfig(agentEnvPath)
+	if err != nil {
+		return dependencies, err
+	}
+	client, err := sandboxclient.New(config)
+	if err != nil {
+		return dependencies, err
+	}
+	dependencies.Sandbox = client
+	dependencies.SandboxTemplateFromConfig = config.AssetBundle.Template
+	return dependencies, nil
 }

@@ -14,8 +14,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/runfs"
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
 func TestParseEnvironment(t *testing.T) {
@@ -134,61 +136,45 @@ func TestValidateImageUsesStandardOCICommand(t *testing.T) {
 	}
 }
 
-func TestPolicyIsCanonicalAndNarrow(t *testing.T) {
-	first, err := buildPolicy("/app", "/usr/local/bin/node", 49152)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, _ := buildPolicy("/app", "/usr/local/bin/node", 49152)
-	if !bytes.Equal(first, second) {
-		t.Fatal("policy bytes changed")
-	}
-	var policy map[string]any
-	if err := json.Unmarshal(first, &policy); err != nil {
-		t.Fatal(err)
+// The policy the sandbox service validates is YAML meeting its floor, not the
+// CLI path's JSON. These are the properties that decide what the image may do.
+func TestSandboxPolicyMeetsTheFloorAndBindsCredentialsByProvider(t *testing.T) {
+	first := buildSandboxPolicy("/usr/local/bin/node", 49152, 49153)
+	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", 49152, 49153)) {
+		t.Fatal("policy bytes changed between identical renders")
 	}
 	text := string(first)
-	for _, required := range []string{"host.openshell.internal", `"allowed_ips":["192.168.127.254/32"]`, "obx-openbox-local", "/usr/local/bin/node", "/api/v1/auth/validate", "/api/v1/governance/evaluate", "/api/v1/governance/approval"} {
+	for _, required := range []string{
+		"read_write:\n    - /sandbox", // the floor admits exactly one writable root
+		"run_as_user: sandbox",        // a name, never uid 1000
+		"host.openshell.internal",
+		"credential_binding:\n          provider: obx-openbox-local",
+		"/api/v1/auth/validate",
+		"/api/v1/governance/evaluate",
+		"/api/v1/governance/approval",
+		"- /app", "- /var/log", // declared so enrichment has nothing to add
+	} {
 		if !strings.Contains(text, required) {
-			t.Fatalf("policy missing %q: %s", required, text)
+			t.Fatalf("policy missing %q:\n%s", required, text)
 		}
 	}
-	for _, forbidden := range []string{"inference.local", "**", `"access":"full"`} {
+	// A credential must never be renderable into the document.
+	for _, forbidden := range []string{"obx_", "OPENBOX_API_KEY", "access: full", "**"} {
 		if strings.Contains(text, forbidden) {
-			t.Fatalf("policy contains %q: %s", forbidden, text)
+			t.Fatalf("policy contains %q:\n%s", forbidden, text)
 		}
 	}
 }
 
-func TestSandboxCreateCommandIsAttachedAndDirect(t *testing.T) {
-	workspace, err := runfs.Create(filepath.Join(t.TempDir(), "output"))
+// The run identity is the gateway's, not this lane's: sbx-<15 hex> is 19
+// characters, which is OpenShell's MAX_ROUTABLE_NAME_LEN.
+func TestRunIdentityFitsTheGatewayNameLimit(t *testing.T) {
+	id, err := sandboxclient.NewRunID()
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := &runState{
-		prepared: &prepared{
-			sandboxName: "obx-eval-one", evaluationID: "ev-one",
-			argv: []string{"/usr/local/bin/node", "/app/index.mjs"},
-			environment: map[string]string{
-				"OPENBOX_URL":    "http://host.openshell.internal:49152",
-				"OPENAI_API_KEY": "unused",
-				"Z_VALUE":        "last",
-			},
-		},
-		workspace:          workspace,
-		immutableReference: "127.0.0.1:49153/ai.openbox/evaluation@sha256:" + strings.Repeat("b", 64),
-	}
-	command := state.sandboxCreateCommand()
-	joined := strings.Join(command.Args, " ")
-	for _, required := range []string{"--no-auto-providers", "--no-tty", "--no-keep", "--cpu 2", "--memory 2Gi", "-- /usr/local/bin/node /app/index.mjs"} {
-		if !strings.Contains(joined, required) {
-			t.Fatalf("missing %q: %s", required, joined)
-		}
-	}
-	for _, forbidden := range []string{"--detach", "--forward", "--upload", " sandbox exec ", "provider create", "Dockerfile"} {
-		if strings.Contains(joined, forbidden) {
-			t.Fatalf("forbidden %q: %s", forbidden, joined)
-		}
+	if len(id) != 19 || !strings.HasPrefix(id, "sbx-") {
+		t.Fatalf("run id = %q", id)
 	}
 }
 
@@ -245,6 +231,7 @@ func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 	}, Dependencies{
 		Commands: runner, Clock: realClock{}, Random: bytes.NewReader(bytes.Repeat([]byte{0x2a}, 12)),
 		Listen: net.Listen, HTTP: client, GOOS: "darwin", GOARCH: "arm64",
+		Sandbox: newFakeSandbox(), SandboxTemplateFromConfig: "example.invalid/base@sha256:" + strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -266,7 +253,7 @@ func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 			t.Fatalf("%s mode=%o", entry.Name(), info.Mode().Perm())
 		}
 	}
-	want := []string{".incomplete", "execution.json", "openshell.log", "policy.json", "process.stderr", "process.stdout"}
+	want := []string{".incomplete", "execution.json", "policy.yaml", "process.stderr", "process.stdout", "sandbox-evidence.json"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("entries=%v want=%v", names, want)
 	}
@@ -309,13 +296,17 @@ func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
 	tests := []struct {
 		name           string
-		configure      func(*lifecycleRunner, *lifecycleHTTP)
+		configure      func(*lifecycleRunner, *lifecycleHTTP, *fakeSandbox)
 		classification string
 	}{
-		{name: "registry refusal", configure: func(_ *lifecycleRunner, client *lifecycleHTTP) { client.manifestStatus = http.StatusBadRequest }, classification: "registry_refusal"},
-		{name: "pre-ready Error", configure: func(runner *lifecycleRunner, _ *lifecycleHTTP) { runner.phaseError = true }, classification: "sandbox_pre_ready_error"},
-		{name: "command nonzero", configure: func(runner *lifecycleRunner, _ *lifecycleHTTP) { runner.commandExit = 7 }, classification: "command_nonzero"},
-		{name: "cleanup overrides success", configure: func(runner *lifecycleRunner, _ *lifecycleHTTP) { runner.cleanupTagStays = true }, classification: "cleanup_failure"},
+		{name: "registry refusal", configure: func(_ *lifecycleRunner, client *lifecycleHTTP, _ *fakeSandbox) {
+			client.manifestStatus = http.StatusBadRequest
+		}, classification: "registry_refusal"},
+		{name: "readiness refused", configure: func(_ *lifecycleRunner, _ *lifecycleHTTP, sandbox *fakeSandbox) {
+			sandbox.readyErr = errors.New("policy mismatch")
+		}, classification: "readiness_failure"},
+		{name: "command nonzero", configure: func(_ *lifecycleRunner, _ *lifecycleHTTP, sandbox *fakeSandbox) { sandbox.exitCode = 7 }, classification: "command_nonzero"},
+		{name: "cleanup overrides success", configure: func(runner *lifecycleRunner, _ *lifecycleHTTP, _ *fakeSandbox) { runner.cleanupTagStays = true }, classification: "cleanup_failure"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -327,10 +318,12 @@ func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
 			output := filepath.Join(parent, "record")
 			runner := newLifecycleRunner()
 			client := &lifecycleHTTP{agentID: "c59e95b6-2a4e-44a7-8c43-b69bfa77667e"}
-			test.configure(runner, client)
+			sandbox := newFakeSandbox()
+			test.configure(runner, client, sandbox)
 			result, err := Run(context.Background(), Input{Image: "example:local", EnvFile: envFile, OpenBoxAgent: client.agentID, Output: output}, Dependencies{
 				Commands: runner, Clock: realClock{}, Random: bytes.NewReader(bytes.Repeat([]byte{0x31}, 12)),
 				Listen: net.Listen, HTTP: client, GOOS: "darwin", GOARCH: "arm64",
+				Sandbox: sandbox, SandboxTemplateFromConfig: "example.invalid/base@sha256:" + strings.Repeat("a", 64),
 			})
 			if err == nil || result.Succeeded {
 				t.Fatalf("result=%+v err=%v", result, err)
@@ -584,4 +577,100 @@ func (client *lifecycleHTTP) Do(request *http.Request) (*http.Response, error) {
 		status = http.StatusNotFound
 	}
 	return &http.Response{StatusCode: status, Header: headers, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+}
+
+// fakeSandbox stands in for the sandbox service.
+//
+// It answers the six typed operations the lane uses and nothing else, which is
+// the point: the lane can no longer reach a sandbox by any other route, so a
+// fake at this seam covers the whole boundary.
+type fakeSandbox struct {
+	capabilities []string
+	beginErr     error
+	readyErr     error
+	execErr      error
+	exitCode     int
+	evidence     []byte
+	deleted      bool
+	absent       bool
+	environment  map[string]string
+}
+
+func newFakeSandbox() *fakeSandbox {
+	return &fakeSandbox{
+		capabilities: []string{sandboxclient.ProjectRunCapability},
+		evidence:     []byte(`{"egress_decisions":[]}`),
+		absent:       true,
+	}
+}
+
+func (fake *fakeSandbox) Capabilities(time.Duration) ([]string, error) {
+	return fake.capabilities, nil
+}
+
+func (fake *fakeSandbox) Begin(spec sandboxclient.ProjectRunSpec, _ time.Duration) (string, string, error) {
+	if fake.beginErr != nil {
+		return "", "", fake.beginErr
+	}
+	// The credential must never reach the service. Asserting it here rather
+	// than only in the policy test keeps the guarantee on the live path.
+	if _, present := spec.Environment["OPENBOX_API_KEY"]; present {
+		return "", "", errors.New("fake sandbox: caller sent a credential in the environment")
+	}
+	fake.environment = spec.Environment
+	return spec.RunID, "token-created", nil
+}
+
+func (fake *fakeSandbox) WaitReady(runID, _ string, _ sandboxclient.PolicyIdentity, _ time.Duration) (string, error) {
+	if fake.readyErr != nil {
+		return "", fake.readyErr
+	}
+	return "token-ready", nil
+}
+
+func (fake *fakeSandbox) Exec(_, _ string, _ []string, _ uint16, _ sandboxclient.OutputLimits, _ time.Duration) (*sandboxclient.ProjectRunResult, error) {
+	if fake.execErr != nil {
+		return nil, fake.execErr
+	}
+	// Stand in for the guest's SDK traffic. The lane's success predicate is
+	// that the relay observed a matching validation and a governance event, so
+	// a fake that never calls it would only ever prove the failure path.
+	fake.callCoreRelay()
+	return &sandboxclient.ProjectRunResult{
+		ExitCode: fake.exitCode, Stdout: []byte("ok\n"), SandboxEvidence: fake.evidence,
+	}, nil
+}
+
+// callCoreRelay reaches the relay the way the guest would, through the URL the
+// policy admits — rewritten to loopback because there is no guest here.
+func (fake *fakeSandbox) callCoreRelay() {
+	base := strings.Replace(fake.environment["OPENBOX_URL"], "host.openshell.internal", "127.0.0.1", 1)
+	if base == "" {
+		return
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	if response, err := client.Get(base + "/api/v1/auth/validate"); err == nil {
+		response.Body.Close()
+	}
+	body := strings.NewReader(`{"evaluation_id":"` + fake.environment["OPENBOX_EVALUATION_ID"] + `"}`)
+	request, err := http.NewRequest(http.MethodPost, base+"/api/v1/governance/evaluate", body)
+	if err != nil {
+		return
+	}
+	request.Header.Set("content-type", "application/json")
+	if response, err := client.Do(request); err == nil {
+		response.Body.Close()
+	}
+}
+
+func (fake *fakeSandbox) Delete(string, time.Duration) error {
+	fake.deleted = true
+	return nil
+}
+
+func (fake *fakeSandbox) WaitDeleted(string, time.Duration) error {
+	if fake.absent {
+		return nil
+	}
+	return errors.New("fake sandbox: still present")
 }

@@ -46,12 +46,14 @@ type executionRecord struct {
 	} `json:"image"`
 	Argv             []string `json:"argv"`
 	EnvironmentNames []string `json:"environment_names"`
-	OpenShell        struct {
-		CLIVersion     string `json:"cli_version"`
-		GatewayVersion string `json:"gateway_version"`
-		DriverVersion  string `json:"driver_version"`
-		Provider       string `json:"provider"`
-	} `json:"openshell"`
+	// Sandbox records WHICH boundary ran the workload, not how it was reached.
+	// The lane no longer knows OpenShell versions or driver tuples, because it
+	// no longer talks to OpenShell — the service owns that and attests it.
+	Sandbox struct {
+		Service    string `json:"service"`
+		Capability string `json:"capability"`
+		Provider   string `json:"provider"`
+	} `json:"sandbox"`
 	Inference struct {
 		Provider    string `json:"provider"`
 		Model       string `json:"model"`
@@ -76,7 +78,11 @@ type executionRecord struct {
 	Logs               struct {
 		ProcessStdout logRecord `json:"process_stdout"`
 		ProcessStderr logRecord `json:"process_stderr"`
-		OpenShell     logRecord `json:"openshell"`
+		// SandboxEvidence is the provider's own typed isolation record —
+		// egress decisions and violation categories — not a gateway log. It is
+		// absent when the provider recorded none, which means "nothing was
+		// observed", never "nothing happened".
+		SandboxEvidence logRecord `json:"sandbox_evidence"`
 	} `json:"logs"`
 	CoverageLimitations []string      `json:"coverage_limitations"`
 	Cleanup             cleanupRecord `json:"cleanup"`

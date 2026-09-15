@@ -25,7 +25,7 @@ var schemaDefinitions = [...]schemaDefinition{
 	{name: "manifest.schema.json", id: ManifestSchema},
 	{name: "run.schema.json", id: RunSchema},
 	{name: "backend.schema.json", id: BackendSchema},
-	{name: "openshell-record.schema.json", id: OpenShellRecordSchema},
+	{name: "sandbox-evidence.schema.json", id: SandboxEvidenceSchema},
 	{name: "effects.schema.json", id: EffectsSchema},
 	{name: "behavior.schema.json", id: BehaviorSchema},
 	{name: "coverage.schema.json", id: CoverageSchema},

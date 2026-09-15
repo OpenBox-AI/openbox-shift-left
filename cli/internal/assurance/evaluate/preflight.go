@@ -15,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
 var (
@@ -40,18 +42,18 @@ type dockerImage struct {
 }
 
 type prepared struct {
-	input            Input
-	evaluationID     string
-	sandboxName      string
-	registryName     string
-	output           string
-	image            dockerImage
-	argv             []string
-	environment      map[string]string
-	environmentNames []string
-	applicationRoot  string
-	openShellGateway string
-	openShellDriver  string
+	input             Input
+	evaluationID      string
+	sandboxName       string
+	registryName      string
+	output            string
+	image             dockerImage
+	argv              []string
+	environment       map[string]string
+	environmentNames  []string
+	applicationRoot   string
+	sandboxService    string
+	sandboxCapability string
 }
 
 func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prepared, error) {
@@ -120,7 +122,7 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if _, err := inspectImage(ctx, dependencies.Commands, RegistryImage); err != nil {
 		return nil, fmt.Errorf("project evaluate: required registry image is not preloaded: %w", err)
 	}
-	if err := preflightOpenShell(ctx, dependencies, result); err != nil {
+	if err := preflightSandbox(dependencies, result); err != nil {
 		return nil, err
 	}
 	if err := preflightLocalServices(ctx, dependencies); err != nil {
@@ -331,79 +333,37 @@ func validateEnvironmentURL(value string) error {
 	return errors.New("contains a non-local URL")
 }
 
-func preflightOpenShell(ctx context.Context, dependencies Dependencies, result *prepared) error {
-	version, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"--version"}})
-	if err != nil || strings.TrimSpace(string(version.Stdout)) != "openshell "+OpenShellVersion {
-		return fmt.Errorf("project evaluate: OpenShell CLI must be exactly %s", OpenShellVersion)
+// preflightSandbox negotiates with the sandbox service instead of interrogating
+// OpenShell.
+//
+// What this replaced was seven `openshell` CLI invocations whose answers were
+// parsed out of human-readable output — version strings compared literally,
+// provider fields scraped after stripping ANSI escapes, a driver tuple matched
+// by equality. Every one of those was this repo asserting facts about a
+// component it does not own. The service owns them now, and the only question
+// left is the one a caller may legitimately ask: will you run this for me.
+//
+// A deployment that does not advertise the capability is not runnable. There is
+// no fallback to the CLI, by design: two paths to the same sandbox is how the
+// contracts drifted in the first place.
+func preflightSandbox(dependencies Dependencies, result *prepared) error {
+	if dependencies.Sandbox == nil {
+		return errors.New("project evaluate: no sandbox service is configured; run `obs provision` and retry")
 	}
-	statusResult, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"status", "-o", "json"}})
+	capabilities, err := dependencies.Sandbox.Capabilities(sandboxNegotiationTimeout)
 	if err != nil {
-		return errors.New("project evaluate: active OpenShell Gateway is unavailable")
+		return fmt.Errorf("project evaluate: sandbox service is unreachable: %w", err)
 	}
-	var status struct {
-		Status         string `json:"status"`
-		Version        string `json:"version"`
-		Server         string `json:"server"`
-		Authentication struct {
-			Status   string `json:"status"`
-			Provider string `json:"provider"`
-		} `json:"authentication"`
+	for _, capability := range capabilities {
+		if capability == sandboxclient.ProjectRunCapability {
+			result.sandboxService = dependencies.SandboxTemplateFromConfig
+			result.sandboxCapability = capability
+			return nil
+		}
 	}
-	if json.Unmarshal(statusResult.Stdout, &status) != nil || status.Status != "connected" ||
-		status.Version != OpenShellVersion || status.Authentication.Status != "authenticated" ||
-		status.Authentication.Provider != "mTLS transport" || !strings.HasPrefix(status.Server, "https://localhost:") {
-		return errors.New("project evaluate: active local mTLS OpenShell Gateway failed preflight")
-	}
-	infoResult, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"gateway", "info", "-o", "json"}})
-	if err != nil {
-		return errors.New("project evaluate: cannot inspect OpenShell Gateway drivers")
-	}
-	var info struct {
-		Status         string `json:"status"`
-		Version        string `json:"version"`
-		ComputeDrivers []struct {
-			Name         string `json:"name"`
-			Capabilities struct {
-				DriverName    string `json:"driver_name"`
-				DriverVersion string `json:"driver_version"`
-			} `json:"capabilities"`
-		} `json:"compute_drivers"`
-	}
-	if json.Unmarshal(infoResult.Stdout, &info) != nil || info.Status != "healthy" || info.Version != OpenShellVersion || len(info.ComputeDrivers) != 1 ||
-		info.ComputeDrivers[0].Name != "vm" || info.ComputeDrivers[0].Capabilities.DriverName != "openshell-driver-vm" ||
-		info.ComputeDrivers[0].Capabilities.DriverVersion != OpenShellVersion {
-		return errors.New("project evaluate: OpenShell Gateway/VM driver tuple must be exactly 0.0.111")
-	}
-	result.openShellGateway = info.Version
-	result.openShellDriver = info.ComputeDrivers[0].Capabilities.DriverVersion
-
-	provider, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"provider", "get", OpenBoxProvider}})
-	providerText := ansiPattern.ReplaceAllString(string(append(provider.Stdout, provider.Stderr...)), "")
-	if err != nil || outputField(providerText, "Name") != OpenBoxProvider ||
-		outputField(providerText, "Type") != "openbox-local" ||
-		outputField(providerText, "Credential keys") != "OPENBOX_API_KEY" || outputField(providerText, "Config keys") != "<none>" {
-		return errors.New("project evaluate: obx-openbox-local must exist with only OPENBOX_API_KEY and no config")
-	}
-	modelProvider, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"provider", "get", InferenceProvider}})
-	modelProviderText := ansiPattern.ReplaceAllString(string(append(modelProvider.Stdout, modelProvider.Stderr...)), "")
-	if err != nil || outputField(modelProviderText, "Name") != InferenceProvider ||
-		outputField(modelProviderText, "Type") != "openai" ||
-		outputField(modelProviderText, "Credential keys") != "OPENAI_API_KEY" ||
-		outputField(modelProviderText, "Config keys") != "OPENAI_BASE_URL" {
-		return errors.New("project evaluate: local Ollama OpenShell provider is not preconfigured")
-	}
-	inference, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{"inference", "get"}})
-	inferenceText := strings.ToLower(ansiPattern.ReplaceAllString(string(append(inference.Stdout, inference.Stderr...)), ""))
-	if err != nil || !strings.Contains(inferenceText, InferenceProvider) || !strings.Contains(inferenceText, strings.ToLower(InferenceModel)) {
-		return errors.New("project evaluate: OpenShell inference route must already select local Ollama granite4.1:3b")
-	}
-	list, err := dependencies.Commands.Run(ctx, Command{Name: "openshell", Args: []string{
-		"sandbox", "list", "--selector", "ai.openbox.evaluation-id=" + result.evaluationID, "-o", "json",
-	}})
-	if err != nil || !jsonArrayEmpty(list.Stdout) {
-		return errors.New("project evaluate: generated evaluation label is already in use")
-	}
-	return nil
+	return fmt.Errorf(
+		"project evaluate: sandbox service does not offer %s (offers %v); provision with OPENBOX_PROJECT_RUN_V2=1",
+		sandboxclient.ProjectRunCapability, capabilities)
 }
 
 func outputField(content, name string) string {

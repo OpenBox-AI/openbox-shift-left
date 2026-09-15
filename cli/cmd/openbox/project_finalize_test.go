@@ -34,8 +34,8 @@ func TestProjectFinalizeExactFlagsAndSuccessOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := readableObservationPack(t, filepath.Join(root, "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04"))
-	sourceCandidate := filepath.Join(root, "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-27-phase-03-installed-codex-candidate.json")
+	observation := readableObservationPack(t, filepath.Join(root, "cli/internal/assurance/testdata/observation-v2"))
+	sourceCandidate := filepath.Join(root, "cli/internal/assurance/testdata/observation-v2-candidates/2026-08-27-phase-03-installed-codex-candidate.json")
 	content, err := os.ReadFile(sourceCandidate)
 	if err != nil {
 		t.Fatal(err)

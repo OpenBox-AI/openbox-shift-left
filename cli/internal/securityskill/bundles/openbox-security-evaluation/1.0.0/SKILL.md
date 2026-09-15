@@ -9,7 +9,7 @@ metadata:
 
 # OpenBox security evaluation
 
-Analyze exactly one sealed `ai.openbox.project-observation/v1` pack and publish
+Analyze exactly one sealed `ai.openbox.project-observation/v2` pack and publish
 one untrusted `ai.openbox.project-security-analysis/v1` issue candidate. This is
 offline post-run reasoning. It does not run the project, call OpenBox services,
 inspect credentials, map controls, recommend changes, or finalize a report.

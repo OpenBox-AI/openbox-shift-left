@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	observationManifestSchema    = "ai.openbox.project-observation.manifest/v1"
+	observationManifestSchema    = "ai.openbox.project-observation.manifest/v2"
 	securityReportManifestSchema = "ai.openbox.project-security-report.manifest/v1"
 )
 

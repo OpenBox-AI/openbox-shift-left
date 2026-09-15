@@ -1,6 +1,6 @@
 # Project observation contract
 
-`ai.openbox.project-observation/v1` is a separate, sensitive local observation
+`ai.openbox.project-observation/v2` is a separate, sensitive local observation
 pack. It does not extend or migrate `openbox.audit-pack/v1`.
 
 The sealed root contains `run.json`, `backend.json`, `openshell.jsonl`,
