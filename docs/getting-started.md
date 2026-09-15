@@ -1,26 +1,35 @@
 # Getting started
 
-Governance for your Claude Code or Codex sessions. Two commands to set up, then
-nothing to run and no environment variables to keep set; unless you opt into
-[governing the model call itself](#governing-the-model-call-itself), which adds
-a local daemon and one environment variable.
+This guide takes one developer machine from nothing to governed. It assumes
+your organization already runs an OpenBox platform and that you have a login
+to its dashboard. If you have never met this project, read the
+[README](../README.md) first: it defines the handful of terms used below —
+*governed*, *hook*, *agent*, *control token*, *posture*, *lane* — in one table.
+
+Two commands do the setup. After them there is nothing to keep running and no
+environment variable to keep set.
 
 ```
 openbox auth                     connect your organization; two URLs and the control token
 openbox init --provider <tool>   register that tool's agent, install the hooks
 ```
 
-`auth` runs first, once. `init` runs once **per governed tool**: each carries
-its own agent identity. Each command fails with a pointer to the other if you
-get the order wrong.
+`auth` runs first, once. `init` runs once **per tool you govern** — each tool
+gets its own agent. Run them out of order and each one tells you which to run
+instead.
 
-Examples use `--provider claude-code`; substitute `--provider codex` and most
-steps are the same. Codex differs in four ways worth knowing up front
-(`internal/adapters/codex/README.md`): it asks you to trust new hooks via
-`/hooks` before they run, it maps an approval-required verdict to a deny rather
-than a prompt, it cannot wake a session, so a late approval decision reaches you
-through the findings channel. Its hooks live at `~/.codex/hooks.json`, which is
-user-wide, the same place every provider's now go.
+## Before you start
+
+- [ ] The OpenBox platform is running and you know its two URLs (or you use
+      the hosted service, whose defaults are already filled in).
+- [ ] You have an **organization control token** from the dashboard, under
+      **Organization → API Keys**. It starts with `obx_key_`. [Section 2](#2-get-the-right-credential)
+      explains which key that is and why the other one will not work.
+- [ ] You are on **macOS or Linux**. Windows compiles but is not yet tested end
+      to end; see [What is not verified](#what-is-not-verified).
+- [ ] **Claude Code** or **Codex** is installed. Examples below use Claude
+      Code; Codex is the same two commands with `--provider codex`, and its
+      differences are collected in [Using Codex instead](#using-codex-instead).
 
 ## 1. Install the engine
 
@@ -206,7 +215,8 @@ That command:
   *same* path is collapsed. It also sweeps a superseded OpenBox entry out of the
   current directory's own settings file, so nothing registers the same gate
   twice. Either way the command prints what it removed;
-- Writes your posture to `~/.openbox/dev.json`;
+- Writes this tool's posture and identity to `~/.openbox/claude-code/dev.json`
+  (the org-level `~/.openbox/dev.json` keeps only the two URLs);
 - **Claude Code only:** sets `showThinkingSummaries: true` in that same user
   settings file, so a thinking block arrives with the model's own reasoning
   summary instead of an empty one. Whatever was there before -- absent,
@@ -215,8 +225,37 @@ That command:
   `openbox uninstall`. There is no per-key opt-out; undoing it means
   uninstalling.
 
-It never reads, writes or prompts for a credential. If none is present it stops
-and points you back at `auth`, installing nothing.
+Before any of that, it settles this tool's **identity**, in this order:
+
+1. **This tool already has an agent** (`~/.openbox/claude-code/.env` exists and
+   is complete) → it is reused, offline, with no call to the platform. This is
+   the normal re-run.
+2. **No store yet, but you are at a terminal** → it asks whether to **adopt** an
+   existing agent. Answer yes and paste that agent's id, DID, API key and signing
+   key; the DID stays the same. This is how you rotate a key or move an agent to
+   a new machine, and it needs no organization token.
+3. **No store, and you declined (or there is no terminal)** → it registers a
+   **new** agent with your organization control token, from `auth` or from
+   `OPENBOX_CONTROL_TOKEN`, and writes the credentials it is given. If there is
+   no token either, it stops, installs nothing, and names both ways to get one.
+
+Registration mints a new DID. Work attributed to an old agent stays with the old
+agent, so adopt when you can.
+
+### Using Codex instead
+
+Same two commands with `--provider codex`. Its hooks live in `~/.codex/hooks.json`,
+user-wide like Claude Code's, and it gets its own agent in `~/.openbox/codex/`.
+Four things differ, and each is deliberate (`internal/adapters/codex/README.md`):
+
+- Codex asks you to **trust new hooks** with `/hooks` inside the tool before it
+  will run them. Until you do, nothing is governed and nothing says so.
+- An approval-required verdict is mapped to a **deny**, because Codex has no
+  prompt to hand it to.
+- Codex **cannot wake a session**, so a late approval decision reaches you
+  through the findings channel instead.
+- There are **no model-call lanes** for Codex. `init` says so rather than
+  reporting a service it did not install.
 
 ### Two defaults you should know
 

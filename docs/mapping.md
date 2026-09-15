@@ -1,5 +1,11 @@
 # Mapping; normalized dev event → base-SDK unified wire model (openbox-core `/evaluate`)
 
+> **Who this is for.** Someone integrating with or operating the OpenBox
+> platform who needs to know exactly how a field this program emits lands in
+> core's tables. It assumes you have read [Architecture](architecture.md) and
+> the [event contract](dev-event-contract.md). Nothing here is needed to set a
+> machine up.
+
 **Contract:** [`schema/dev-event.schema.json`](../api/dev-event.schema.json);
 the version is `x-schema-version` in that file, which is the authority; this
 document tracks it. **Wire model:** the **base SDK's** `EventType` set,

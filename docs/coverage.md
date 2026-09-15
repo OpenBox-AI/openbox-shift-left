@@ -7,14 +7,16 @@ Admin API; OpenAI Codex hooks + `notify` + Usage/Cost API). This is the
 reference an adapter author
 implements `emit` against.
 
-**Adapter status (keep this line current; report the adapter status line was a stale-doc
-finding):** Claude Code and Codex adapters are **shipped**, observe + default-on
-enforce + default-on usage capture; each adapter's `Capabilities` is the
-authoritative per-provider profile and this document must agree with it. The
-**Cursor** column below is a *surface survey*, not shipped support is
-unbuilt. Last reconciled 2026-08-26 against
-`internal/adapters/claude-code/capabilities.go` and
-`internal/adapters/codex/capabilities.go`.
+> **Who this is for.** Someone writing or reviewing an adapter, or deciding
+> whether a governance claim holds for a given tool. If you are setting a
+> machine up, you want [Getting started](getting-started.md); if you want the
+> overall shape first, [Architecture](architecture.md). Everything below assumes
+> both.
+
+**Adapter status:** Claude Code and Codex are **shipped**; Cursor is a surface
+survey, not shipped support. Each adapter's `Capabilities` — in
+`internal/adapters/<tool>/capabilities.go` — is the authoritative per-provider
+profile, and this document must agree with it.
 
 **One producer is not an adapter at all.** The local gateway (contract v1.5) emits a `TurnCompleted` for each relayed model call without going through
 any provider adapter or hook; it observes the HTTP exchange itself. It is Claude

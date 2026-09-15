@@ -1,254 +1,165 @@
 # OpenBox Shift-Left
 
-**Governance for the coding agents your developers already use.**
+**Governance for the AI coding tools your developers already use.**
 
-OpenBox governs agents at runtime. This extends the same pipeline one step
-earlier, to Claude Code, OpenAI Codex and the other agentic tools that *write*
-the code, so you can answer, for any commit or deploy:
+If your team uses [Claude Code](https://claude.com/claude-code) or [OpenAI
+Codex](https://openai.com/codex) to write code, this project lets your
+organization see and control what those tools do — which commands they ran,
+which files they changed, which prompts were sent, what it cost, and whether
+each action was allowed. It plugs into an OpenBox platform you already run; it
+is not a platform of its own.
 
-> **who produced this, with which tools and prompts, at what cost; and was it allowed?**
+It is one small program, `openbox`, that you install on a developer's machine.
+Two commands set it up. After that there is nothing to keep running.
 
-One static binary. Two commands to set up. No second dashboard. The default
-install runs no daemon and proxies nothing; governing the *model call* itself is
-opt-in and does both ([the local gateway](#governing-the-model-call-itself)).
+- **You want to install it** → start with [Quickstart](#quickstart) below.
+- **You want to understand it first** → read [How it works](#how-it-works),
+  then [Architecture](docs/architecture.md).
+- **You want to know what it sends about you** → [Data and
+  privacy](docs/data-and-privacy.md).
+
+## Words you will meet
+
+You do not need to know OpenBox internals to use this, but a few terms come up
+in every command and message. They are defined here once.
+
+| Term | What it means here |
+|---|---|
+| **OpenBox platform** | The two servers your organization already runs. The **backend** (control plane) holds agents, policies and approvals. The **core** (data plane) receives events. Each has a URL. |
+| **Governed** | A coding tool session is *governed* when `openbox` is watching it: recording what it does, and asking the platform for permission before risky actions. |
+| **Hook** | A small program the coding tool runs at fixed moments — before a command, after a file edit, when a session starts. `openbox` installs itself as those hooks. That is the whole mechanism. |
+| **Agent** | How the platform identifies one governed tool on one machine. Each tool you govern gets its own agent, with its own **DID** (a unique id) and its own signing key. |
+| **Organization control token** | A key that belongs to your *organization*, not to one agent. It is what registers new agents. It looks like `obx_key_…`. You get it from the dashboard. |
+| **Posture** | The settings in effect on one machine: is enforcement on, is content being sent, what happens when the platform is unreachable. `openbox doctor` prints it. |
+| **Lane** | An optional extra that also records the *model calls* a tool makes (the actual requests to Anthropic), which hooks alone cannot see. Installed automatically on Claude Code. Explained in [Getting started](docs/getting-started.md#governing-the-model-call-itself). |
 
 ## Quickstart
 
-**1. Install the engine.** CLI, hook engine and git hook in one no-cgo static
-binary.
+### Before you start
+
+You need:
+
+- An **OpenBox platform** already running, hosted or self-hosted, and the
+  URLs of its backend and core. (If you use the hosted service, the defaults
+  are already right and you can press Enter through those prompts.)
+- An **organization control token** from the dashboard: **Organization → API
+  Keys**. It must be able to create and read agents. It starts with
+  `obx_key_`. If you have a key starting with `obx_` and no `key_`, that is an
+  *agent* key — the wrong one for setup. [Getting started §2](docs/getting-started.md#2-get-the-right-credential)
+  explains the difference.
+- A machine running **macOS or Linux** with **Claude Code** or **Codex**
+  installed. Windows builds but is not yet tested end to end.
+
+### 1. Install the program
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
 ```
 
-**2. Connect your organization.** `openbox auth` asks for three things and
-stores them. The URLs prefill with sensible defaults or your current values, so
-a first run is mostly pressing Enter. It registers nothing and writes no agent
-credential — that is step 3's job, once per tool.
+This downloads one prebuilt binary, checks its hash, and puts it in
+`~/.local/bin`. No Go toolchain, no dependencies. Check it worked:
+
+```bash
+openbox version
+```
+
+### 2. Connect your organization
 
 ```bash
 openbox auth
 ```
 
+It asks three questions. Press Enter to accept a default.
+
 ```
 Backend URL (control plane)   [https://api.openbox.ai]:
 Core URL (data plane)         [https://core.openbox.ai]:
-Organization control token (obx_key_… or JWT):   ← masked
+Organization control token (obx_key_… or JWT):   ← paste; it is not echoed
+```
 
-  ✓ wrote ~/.openbox/.env       (0600; plaintext;)
-  ✓ wrote ~/.openbox/dev.json   (URLs; no secrets)
+You should see:
+
+```
+✓ wrote ~/.openbox/.env       (0600; plaintext;)
+✓ wrote ~/.openbox/dev.json   (URLs; no secrets)
 
 Next: openbox init --provider <claude-code|codex>
 ```
 
-The token is masked as you type and **no flag ever takes a secret value**, so
-nothing lands in your shell history. It is persisted so `init` can use it in a
-later process; it can **create and rotate agents across your whole
-organization**, so read [Credentials](docs/credentials-and-secrets.md) before
-deciding whether to let it sit on disk — exporting `OPENBOX_CONTROL_TOKEN` for
-one `init` run instead works and writes nothing. Re-run `auth` any time.
+This step **registers nothing**. It only tells this machine where your
+platform is and stores the token so the next step can use it. Run it again any
+time to change a URL; a blank answer keeps what is stored.
 
-**3. Govern this machine, once per tool.** `openbox init --provider <tool>`
-registers that tool's own agent, then installs the hooks. It governs **every
-session on this machine, in any directory**, and it **enforces**; blocking,
-ask-for-approval and secret redaction are on by default, on tool calls and on
-submitted prompts alike, and a HALT verdict ends the whole session, not just the
-call. Blocking and approval come from OpenBox, so they need it reachable; secret
-redaction is local and does not.
+> **Self-hosting?** Answer *both* URL prompts with your own hosts. The backend
+> cannot tell this program where your core is, so leaving one at its default
+> sends events to the hosted service and fails later with a confusing 401.
 
-Each governed tool carries its **own agent identity**, in its own
-`~/.openbox/<tool>/` store, so run it once for each tool you use. A tool that
-already has an agent is reused offline and no control-plane call is made. If you
-already have an agent and still hold its key and seed, `init` offers to **adopt**
-it instead of registering a new one.
+### 3. Govern this machine — once per tool
 
 ```bash
 openbox init --provider claude-code
 ```
 
-Want telemetry without enforcement? `OPENBOX_ENFORCE=false`, per run; nothing is
-persisted either way. Note that enforcement acts on *your org's policy*, so
-until your org publishes one nothing is blocked and you get observability
-regardless; with one diagnosed exception, documented in
-[What this does not prove](#known-limitations).
+You should see it register an agent, then install:
 
-**4. Use `claude` as normal.** Nothing to run and no runtime environment to keep
-set. The install brings up the model-call lanes for you
-([below](#governing-the-model-call-itself)).
+```
+Registered developer agent "claude-code-<you>@<host>"
+  id:    …
+  DID:   did:aip:…
+  tier:  … (trust …)
+Credentials written to ~/.openbox/claude-code/.env (0600); values are not printed (INV-1).
+Wrote claude-code native config (no secrets inline; the hook reads ~/.openbox/claude-code/.env at runtime).
+
+Governed: EVERY SESSION on this machine, in any directory.
+```
+
+That one command created this tool's agent on your platform, saved its
+credentials, and installed the hooks into your **user-wide** settings
+(`~/.claude/settings.json`). From now on every Claude Code session on this
+machine, in any folder, is governed — including sessions that were already
+open, because the tool watches that file.
+
+Also using Codex? Run it again with `--provider codex`. **Each tool gets its
+own agent**, so run `init` once for each tool you use. Running it a second time
+for the same tool is safe: it sees the existing agent and reuses it, offline.
+
+### 4. Use your tools as normal
 
 ```bash
-openbox doctor      # the posture in effect, and whether core is reachable
+claude
 ```
 
-→ **[Getting started](docs/getting-started.md)** for self-hosted, approvals,
-upgrading an existing install, and troubleshooting.
+Nothing to start, no environment variables to keep set. To check what is in
+effect at any time:
 
-### Two URLs, two planes
-
-The **backend** is the control plane (agents, policy, approvals) and defaults to
-`https://api.openbox.ai`. The **core** is the data plane (where events go) and
-defaults to `https://core.openbox.ai`. Both defaults are the hosted service.
-
-The control plane cannot tell the CLI where your core is, so **if you self-host,
-set both explicitly**. Accept one default and override the other and your events
-go to the hosted core, which surfaces much later as a 401 that reads as a broken
-install.
-
-## Scope: what "governed" means
-
-One install, and **every session on this machine is governed**, in any
-directory. There is no scope to choose.
-
-The hook entries go into your user-wide settings file —
-`~/.claude/settings.json` for Claude Code, `~/.codex/hooks.json` for Codex — and
-take effect **immediately**: the tool watches that file, so sessions already
-running are governed too. There is nothing to restart, and absence of events is
-therefore evidence about the work rather than about the scope.
-
-Re-running `init` is safe and idempotent. It removes any redundant OpenBox entry
-— one left at a different engine path, or one of ours registered twice — and
-sweeps any superseded entry out of the current project's own settings file, so
-nothing fires twice. Hooks you added yourself are preserved byte for byte.
-
-**Activation and mandate are separate tiers.** The install above is complete on
-its own; nothing is pending. A *mandate* — governance the developer cannot
-remove — is managed settings deployed by an administrator, with
-`allowManagedHooksOnly`. See [`deployments/managed/`](deployments/managed/).
-`openbox doctor` reports whether such a policy is in force, and whether it
-allows this machine's own hooks to run at all.
-
-## Governing the model call itself
-
-Hooks see what the agent *does*. No hook carries the model request, so hooks
-alone leave the model call unobserved. The install closes that on Claude Code:
-`init` brings up every model-call lane the provider supports under
-launchd/systemd (macOS and Linux; no Windows packaging yet), proves each one is
-listening, and only then points the tool's settings at it. There is no flag to
-turn them on, because there is one right answer.
-
-- **The transport lane** is an in-path CONNECT proxy. One allowlisted host,
-  `api.anthropic.com`, is TLS-terminated with a CA generated on your machine;
-  everything else is blind-tunnelled untouched. A call that names a session is
-  captured as governance evidence — request and response headers and bodies,
-  plus a one-way fingerprint of the credential that paid for it. A call that
-  names none is relayed and recorded nowhere, because a lane will not invent a
-  session.
-- **The telemetry lane** runs a loopback OTLP receiver and points Claude Code's
-  own OpenTelemetry export at it. It carries **no content at all**: a model id,
-  four token counts, a duration and one request id; no cost, which the server
-  derives. Because it is the governed tool reporting its own calls, it is
-  *suppressible by the thing it observes* — the weakest claim in this product,
-  adopted because it is the only lane whose design reaches the desktop app at
-  all.
-
-A third lane, an `ANTHROPIC_BASE_URL` gateway, is no longer installed. The
-transport relay sees what it saw without needing the tool to honour a base URL,
-so `init` **retires** a gateway an older install left behind, and says so. It
-survives as `openbox gateway`, a foreground process, and in the election below,
-because a machine still routed to one must not read as a machine with no lane.
-
-Exactly one lane emits per model call, decided by where your settings actually
-route model calls (transport > gateway > telemetry). That is not a preference:
-the lanes' event ids are deliberately disjoint so nothing dedupes them, which
-means two lanes emitting would both store and **double every token count**.
-`openbox doctor` names the elected producer and warns when the elected lane has
-nothing listening.
-
-**Terminal CLI versus desktop app.** What is measured is the base-URL path
-(2026-08-27, not inferred): with a gateway listening and configured, `claude` in
-a terminal produced `POST /v1/messages` lines and captured events, while a
-desktop-app session produced nothing at all. The CLI reads `ANTHROPIC_BASE_URL`
-from `~/.claude/settings.json`; the desktop app routes through its own
-[third-party inference
-configuration](https://claude.com/docs/third-party/claude-desktop/gateway) and
-ignores that file. The transport lane does not depend on that base URL, and
-reaching the desktop app is why it and the telemetry lane exist — but neither
-has been measured against the desktop app, so that coverage is intent, not
-measurement.
-
-Four things to know:
-
-- **The claim is detection, not prevention.** A developer can unset one
-  environment variable. That is *visible*, and the signal is the `activity_id`
-  namespace: a session carrying hook-derived turns (`<session>:turn:<n>`) and
-  none from a lane (`:gateway:`, `:otel:`, `:proxy:`) had no lane watching its
-  model calls. `openbox doctor` reports the exposure, but it is not stopped.
-  Prevention is your MDM's job: [the MDM recipe](docs/gateway-mdm-recipe.md).
-- **They capture, they do not yet refuse.** The refusal path is written and
-  tested but nothing calls it, on either in-path lane, deliberately: the status
-  code a refusal should use is unprobed, and a wrong one silently disables a
-  Claude Code capability for the rest of the session.
-- **They are verified by replay, not by running.** Real recorded model calls run
-  through the shipped code on a host that cannot open a socket. That proves the
-  bytes, the mapping, the gate and the caps; it proves nothing about bind,
-  listen, TLS to a real socket, or what the control plane stores. **No stack has
-  ever received an event from either lane.**
-- **The transport lane installs a certificate authority on your machine**, and
-  cannot chain through a corporate proxy. The CA is generated locally, never
-  transmitted, and name-constrained to that single host, so a leak cannot mint a
-  certificate for anything else; it has no more protection than your credentials
-  do, and anything running as you can read it. `openbox uninstall` deletes it.
-  The relay clears the proxy environment variables it would otherwise inherit,
-  because a relay that inherits its own address dials itself until sockets run
-  out.
-
-## Where things live
-
-```
-~/.openbox/.env          the organization control token (0600, never commit)
-  dev.json      the organization's coordinates; backend and core URLs
-  <tool>/.env   that tool's agent; API key, signing key (0600, never commit)
-  <tool>/dev.json  that tool's posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
-                    ── only on a machine that ran an older gateway install ──
-  gateway.log   the daemon's stdio; the only place it says it is recording nothing
-  gateway-prior-env.json   the ANTHROPIC_BASE_URL the install displaced, so
-                           a removal can put your own relay back
-                    ── the two lanes every install brings up ──
-  telemetry.log, transport.log   the same, per lane
-  activation.json  per lane: the env keys we wrote, and the values that were there
-                   first, so a removal restores them key by key (0600)
-  transport-ca.pem, transport-ca.key   the transport lane's CA and its private key; generated here, never sent, name-constrained to one host, and
-                   readable by anything running as you. `openbox uninstall` deletes both
-~/.claude/settings.json                  the hooks that govern EVERY session, plus the lane env keys
-<project>/.claude/settings.local.json    swept by init; only a pre-user-scope install leaves one
-~/Library/LaunchAgents/ai.openbox.{gateway,telemetry,transport}.plist   lane units (macOS)
-~/.config/systemd/user/openbox-{gateway,telemetry,transport}.service     lane units (Linux)
-~/.claude/plugins/openbox-observe/       the plugin bundle + engine copy
-<os-config-dir>/openbox/                 runtime state: spool, audit logs
-                                         (~/.config on Linux, ~/Library/Application Support
-                                          on macOS, %AppData% on Windows; NOT relocated
-                                          by OPENBOX_HOME; OPENBOX_SPOOL_DIR moves the spool)
+```bash
+openbox doctor
 ```
 
-Secrets and non-secrets never share a file, and no value lives in two places. A
-real environment variable always wins, so CI can override anything without
-touching disk. `OPENBOX_HOME` relocates the configuration directory.
+It prints one identity row per tool, every posture setting and where its value
+came from, whether this machine can reach and authenticate to your platform,
+and — if something is silently not working — why.
 
+**That is the whole setup.** For self-hosted details, approvals, upgrading an
+older install, key rotation and troubleshooting, continue to
+**[Getting started](docs/getting-started.md)**.
+
+### Two things to know before you rely on it
+
+**It enforces by default.** Blocking, ask-for-approval and local secret
+redaction are on from the first session. But enforcement acts on *your
+organization's policy*, so until your organization publishes one, nothing is
+blocked — you get observability either way. To observe only for one run:
+
+```bash
+OPENBOX_ENFORCE=false claude
 ```
-secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var > ~/.openbox/<tool>/.env
-org secret   OPENBOX_CONTROL_TOKEN                        env var > ~/.openbox/.env
-coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var > <tool>/dev.json > default
-```
 
-An exported variable outranks every store at once, for every tool; `openbox
-doctor` names which source is actually in effect.
-
----
-
----
-
-## What you get
-
-| | |
-|---|---|
-| **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
-| **Per-turn finops** | which model spent how many tokens, per turn; the same signal the agent runtime reports, on by default |
-| **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy; **on by default** |
-| **Human approval** | a risky call pauses the session; a reviewer answers from the dashboard |
-| **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits |
-| **Lineage** | `session → commit → deploy`, with a signed commit attestation |
-| **Evidence** | each session reports its own effective posture, so the control plane never has to trust the endpoint's word |
-| **Model-call capture** | the request the tool actually sent the model, and the response; via an opt-in local relay, Claude Code only. Two further opt-in lanes exist for the calls that relay cannot see, both verified by replay and **never run against a live stack** |
+**It fails open by default.** Every risky action is decided by your platform.
+If the platform cannot be reached, the action proceeds and the outage never
+blocks your work. The trade is that enforcement depends on reachability. An
+organization that needs it to survive an outage sets `fail_closed: true` in
+`~/.openbox/<tool>/dev.json` — and accepts that an outage then blocks work.
 
 ## How it works
 
@@ -262,235 +173,181 @@ doctor` names which source is actually in effect.
                                               (AIP-signed, same endpoint as agent runtime)
 ```
 
-A single static binary is the whole runtime: the CLI, the hook engine and the
-git hook. **OpenBox decides every gated tool call**; the hook asks `/evaluate`
-and waits for the verdict before the tool runs. There is one policy
-implementation, on the server; nothing evaluates policy on your machine. The
-hook path adds no daemon and no socket (a bounded outbound call is not a
-resident process); the opt-in [gateway](#governing-the-model-call-itself) is a
-resident process, which is why it is a separate flag rather than part of the
-default install.
+From the top:
 
-That is a trade, and it cuts both ways: enforcement now depends on reaching
-OpenBox, and under the default `fail_closed:false` a gated call proceeds when it
-cannot. What it buys is that an org whose policy is hand-written rego is
-enforced at all; the local evaluator this replaced could not evaluate rego, so
-those gates silently opened.
+1. **The coding tool calls a hook** at each fixed moment: a session starts, a
+   prompt is submitted, a command is about to run, a file was just edited.
+2. **The hook is `openbox`.** It turns the tool's native event into one
+   normalized shape that is the same for every tool.
+3. **Secrets are removed locally, first.** Anything that looks like a key or
+   token is redacted on your machine before a byte leaves it. This is the only
+   step that never needs the platform.
+4. **Risky actions ask the platform.** Before a gated action runs, the hook
+   sends it to your platform's `/evaluate` endpoint and waits for the verdict:
+   allow, deny, hold for a human, or redact. There is no local copy of the
+   policy — the platform is the only decider.
+5. **Everything else is recorded and sent shortly after.** Events go to a
+   local spool and are delivered within a couple of seconds, so a slow or
+   absent platform never delays your tool.
+6. **Commits are linked to sessions.** A git hook stamps each commit with the
+   session that made it and attaches a signed note, so a deploy can be traced
+   back to a session, a tool and a prompt.
 
-The one thing still decided locally is **secret redaction**: it must run before
-content leaves the machine.
-
-Telemetry is unaffected; spooled and delivered off the hot path in
-near-real-time (a detached, debounced flusher drains the spool within ~2s of
-each tool call; SessionEnd remains the completeness safety net), so a slow or
-absent OpenBox never delays an event.
-
-Everything provider-agnostic lives in one engine; each tool adds only a thin
-adapter behind one SPI. Adding a tool is an adapter, not a fork. →
+Everything provider-agnostic lives in one engine; each coding tool is a thin
+adapter on top. Adding a tool is an adapter, not a fork. →
 **[Architecture](docs/architecture.md)**
+
+## What you get
+
+| | |
+|---|---|
+| **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
+| **Per-turn cost** | which model spent how many tokens, per turn |
+| **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your organization's policy |
+| **Human approval** | a risky call pauses the session; a reviewer answers from the dashboard |
+| **Lineage** | `session → commit → deploy`, with a signed commit attestation |
+| **Evidence** | each session reports its own effective posture, so the platform never has to trust the endpoint's word |
+| **Model-call capture** | on Claude Code, the requests the tool actually sent the model, via the lanes |
 
 ## Provider support
 
-| Provider | Telemetry | Enforcement | Approvals | Model calls | Scope | Org mandate |
-|---|---|---|---|---|---|---|
-| **Claude Code** | shipped; hooks + durable spool | deny · hold · redact | full, incl. waking a session on a late decision | three opt-in lanes (gateway, telemetry, transport), capture only, one elected per call | project or global | managed settings |
-| **Codex** | shipped; hooks + durable spool | deny · hold · redact | deny + findings channel | not built | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
-| **Cursor** | not built | n/a | n/a | n/a | n/a | Team hooks available |
+| Provider | Telemetry | Enforcement | Approvals | Model calls | Org mandate |
+|---|---|---|---|---|---|
+| **Claude Code** | shipped | deny · hold · redact | full, incl. waking a session on a late decision | via lanes, capture only | managed settings |
+| **Codex** | shipped | deny · hold · redact | deny + findings channel | not built | `requirements.toml` / MDM |
+| **Cursor** | not built | — | — | — | — |
 
-The two providers also send **different amounts of content under one posture**:
-Claude Code captures tool input, tool output, the failure detail and the turn's
-thinking; Codex captures none of them. Stated rather than averaged, in
-[coverage.md](docs/coverage.md) §3.
-
-Two capabilities are provider-independent and work with any tool: OpenBox
-registration and the git-trailer commit binding; so lineage and cost tracking
-still apply where no adapter exists.
+The two shipped providers send **different amounts of content** under the same
+settings; Claude Code captures tool input, output and the model's thinking,
+Codex captures none of them. The per-provider detail is in
+[Provider coverage](docs/coverage.md).
 
 ## What leaves your machine
 
-Two things are **on by default**, and both are opt-out:
+By default, and each one can be turned off:
 
-- **Prompt content**; your prompts are sent, and so is **the assistant's reply
-  text**, one message per turn, scanned for secrets and redacted locally first
-  (`content_capture: false` to stop);
-- **Token usage**; four token counts and the model id per turn (`finops: false`
-  to stop).
+- **Prompt text and the assistant's replies and thinking**, scanned for secrets
+  and redacted locally first. `content_capture: false` stops all of it.
+- **Tool commands, file contents and tool output**, under the same switch.
+- **Token counts and the model id** per turn. `finops: false` stops these.
 
-Two of those lines used to read the other way, and both changed in August 2026:
+Everything is redacted locally before it is sent, and the platform sees at most
+the first 64KB of any body. Your credentials are never transmitted. The exact
+field list, and what changed when, is in
+**[Data and privacy](docs/data-and-privacy.md)**.
 
-- **Tool commands, file bodies and tool output now ride ordinary telemetry**,
-  not only a gated call. They still ride a gated call too, OpenBox decides every
-  gated call now and cannot decide on content it cannot see, but "never on
-  observe events" is no longer true.
-- **The assistant's thinking is captured**; the turn's thinking blocks,
-  concatenated in file order, under the same switch. This goes further than
-  Anthropic's own telemetry: their OpenTelemetry export redacts extended
-  thinking unconditionally, and no hook carries it, so the session transcript is
-  the only source.
+## Where things live
 
-With the opt-in [gateway](#governing-the-model-call-itself) there is a third and
-much larger class: **the whole model request and response**, which includes the
-system prompt, the full message history and every tool definition. Same
-`content_capture` switch, same redaction, same cap; and one more limit worth
-knowing: a body the provider sent **compressed is not captured at all**, because
-redaction cannot inspect bytes it cannot read, so a marker is stored in its
-place.
+```
+~/.openbox/.env                   the organization control token       (0600, never commit)
+~/.openbox/dev.json               your organization's backend and core URLs
+~/.openbox/<tool>/.env            that tool's agent key and signing key   (0600, never commit)
+~/.openbox/<tool>/dev.json        that tool's posture and identity (DID, agent id, URLs)
+~/.claude/settings.json           the Claude Code hooks (user-wide) and lane settings
+~/.codex/hooks.json               the Codex hooks (user-wide)
+```
 
-Everything above is gated on `content_capture`, scanned for secrets and redacted
-locally before it is sent, and the server sees at most the first 64KB of any
-body. Credentials are never transmitted; the gateway relays yours to the
-provider untouched and stores only a one-way fingerprint of it.
+Secrets and settings never share a file. A real environment variable always
+outranks every file — for every tool at once — which is how CI provisions a
+machine without writing anything to disk. `OPENBOX_HOME` relocates the whole
+`~/.openbox` directory. The full inventory, including lane logs and service
+units, is in [Getting started](docs/getting-started.md#where-your-credentials-live-and-what-that-costs).
 
-The exact field list is in **[Data and privacy](docs/data-and-privacy.md)**.
-
-## Known Limitations
+## Known limitations
 
 A governance tool that overstates its guarantees is the failure it exists to
-prevent, so the limits are documented as first-class:
+prevent, so the limits are stated as plainly as the features.
 
-- **Your credentials sit in a plaintext file.** `~/.openbox/.env` is `0600` on
-  macOS/Linux, but anything running as you, including the coding agent under
-  governance, can read your signing key and sign events as you. On Windows
-  `0600` is a no-op and other local accounts can read it. Attestation therefore
-  proves origin-of-config, not tamper-resistance against the developer.
-- **Coverage is per machine, and installing is the developer's own step.** One
-  `init` governs every session on that machine, in any directory, immediately;
-  but a machine that never ran it produces no events at all, so absence of
-  events is evidence only about the machines you know are installed. Making the
-  install itself unavoidable is the fleet's job, not this tool's.
-- **Commit attribution is an inferred claim** unless the pipeline fetches the
-  signed attestation note; then it is cryptographically verified.
-- **Nothing here observes the far end of the wire.** The governance evals prove
-  what this binary put on the wire, what it rendered to the coding agent and
-  what it left on disk — offline, with no stack. They cannot prove that the
-  control plane accepts any of it, stores a row, or keeps two rows apart, nor
-  that a socket binds or an attestation verifies. Those claims are printed as
-  unproven rather than omitted in
-  [what is proven, and by what](docs/coverage.md); since the live-stack suite
-  was retired they are owned entirely by the closed side.
+- **Your credentials sit in a plaintext file.** `0600` on macOS and Linux; on
+  Windows that is a no-op. Anything running as you — including the coding agent
+  under governance — can read the signing key. So a signed event proves *a
+  machine holding this agent's key produced it*, not that the developer could
+  not have tampered with it. The organization control token is stored the same
+  way, and it has the largest blast radius on the machine. Details:
+  [Credentials](docs/credentials-and-secrets.md).
+- **Coverage is per machine, and installing is the developer's own step.** A
+  machine that never ran `init` produces no events at all. Making the install
+  unavoidable is a fleet job: [`deployments/managed/`](deployments/managed/).
+- **Enforcement prevents mistakes, not motivated bypass.** The hooks live in
+  the developer's own settings until an administrator deploys managed settings,
+  and under the default `fail_closed: false` blocking one hostname disables
+  enforcement for that machine.
+- **The lanes detect a bypass; they do not stop one.** Unsetting one
+  environment variable is enough. What you get is a visible, attributable hole
+  in the record and an `openbox doctor` warning. Prevention needs your MDM:
+  [the recipe](docs/gateway-mdm-recipe.md).
+- **The lanes have never run against a live platform.** They are verified by
+  replaying real recorded traffic through the shipped code. Their reason for
+  existing — reaching the Claude desktop app — is intent, not measurement.
+- **Secret redaction is keyword-driven.** A high-entropy value that does not
+  match a known shape is invisible to it. Content policy sees at most the first
+  64KB of any body.
+- **Windows is build-verified, not runtime-verified.**
 
-- **Enforcement prevents mistakes, not motivated bypass**, for two independent
-  reasons. The hook lives in the developer's own config until the provider's
-  managed configuration is deployed (`deployments/managed/`); and every gated
-  call now asks the control plane, so under the default `fail_closed:false`
-  blocking one hostname disables enforcement for that machine. An org that needs
-  enforcement to survive a developer who does not want it must set
-  `fail_closed`, and accept that a control-plane outage then blocks work.
-- **A control-plane HALT is applied even when no policy authored it.** Core can
-  express an operational failure, its record of a session gone terminal while
-  the session was still live, as a HALT verdict with no policy id, and the
-  client applies it, even in an org that has published no policy. A HALT now
-  ends the session outright (turn stops, later prompts and calls refused
-  locally), so this defect now ends sessions rather than denying calls until the
-  record clears; an accepted consequence of trusting every server HALT
-  uniformly. Fail-open does not engage, because it covers *no verdict*, not *a
-  HALT verdict*. Diagnosed live, core-side fix in flight.
-- **Egress is observed, not controlled.** With no lane installed, OpenBox does
-  not carry the coding tool's traffic to its model provider at all; it records
-  that posture as evidence. On Claude Code the transport relay carries and
-  records every model call; but it still does not *refuse* one: the refusal path
-  is written and unwired on **both** in-path lanes, so a model call that reaches
-  either is forwarded. Nothing anywhere allow-lists the tool's other
-  destinations.
-- **The installed lanes have never run against a live stack, and their reason
-  for existing is unconfirmed.** The telemetry and transport lanes are verified
-  by replaying real recorded traffic through the shipped code on a host that
-  cannot bind a socket. The desktop-app and subscription-OAuth coverage they
-  were built for is intent, not measurement. Telemetry additionally reports what
-  the governed tool chooses to report, so it is suppressible by the thing it
-  observes; treat its silence on an otherwise-active session as a finding rather
-  than as an absence.
-- **The transport lane puts a CA private key on the developer's machine.**
-  Name-constrained to the one intercepted host, generated locally, never
-  transmitted; and readable by anything running as that developer, exactly like
-  the signing key.
-- **A lane detects a bypass, it does not stop one.** Unsetting one
-  environment variable is enough, and no OpenBox default prevents that. What you
-  get is a hole in the record that is queryable and attributable, plus an
-  `openbox doctor` warning. Prevention needs your MDM to own the config and
-  control egress ([the recipe](docs/gateway-mdm-recipe.md)).
-- **Secret redaction is keyword-driven, so its reach is measured rather than
-  guaranteed.** Named formats come from a maintained rule pack; beneath them sit
-  an assignment-shape rule and an entropy floor. An unlabelled high-entropy value
-  below that floor is invisible, and the floor cannot simply be lowered: every
-  git SHA and UUID would match, and this redactor rewrites developer files.
-- **Content-based policy sees at most the first 64KB of a write.** Bodies are
-  truncated before egress, so a rule that would match past that offset does not
-  fire. Local secret detection is not subject to the cap. For model calls that
-  bound binds hard, and it is measured rather than estimated: **almost every
-  recorded request body exceeded it**, so an org typically holds the head of a
-  prompt rather than the prompt. The figures and the run that produced them are
-  in [Assurance](docs/architecture.md#model-calls-and-the-lanes).
-- **Windows is build-verified, not runtime-verified.** CI cross-compiles it on
-  every change; no automated suite exercises it, and `install.sh` is bash.
-
-Details and current status:
-**[Assurance](docs/architecture.md#assurance)**.
+The evidence behind each claim, and what is stated as unproven rather than
+omitted, is in [what is proven, and by what](docs/coverage.md#5-evidence-what-is-proven-and-by-what).
 
 ## Commands
 
-There are five, and `init` is the only one that takes a flag.
+Five commands. `init` is the only one with a flag.
 
 | | |
 |---|---|
-| `openbox auth` | connect your organization: two URLs and the control token, written to the org-level files. It prompts, and takes nothing. Blank keeps what is already there. It registers nothing |
-| `openbox init --provider <claude-code\|codex>` | register that tool's own agent, then install the hooks, every model-call lane the provider supports, and posture. Every session on this machine, enforcing, commit trailers on. Run it once per tool; a tool that already has an agent is reused offline |
-| `openbox doctor` | the posture actually in effect and who decides it; whether core is reachable and this machine authenticates; whether the hooks can run at all on a managed machine; where this machine's model calls go and what could bypass that |
-| `openbox uninstall` | the full reversal; every tool's credentials and the org control token included. It detects what is installed rather than being told |
+| `openbox auth` | connect your organization: two URLs and the control token. Prompts; takes no flags; blank keeps what is stored. Registers nothing |
+| `openbox init --provider <claude-code\|codex>` | register that tool's own agent, then install its hooks, lanes and posture. Run once per tool; a tool that already has an agent is reused offline |
+| `openbox doctor` | what is in effect on this machine and where each value came from; whether the platform is reachable; what could be silently not working |
+| `openbox uninstall` | the full reversal, every tool's credentials and the control token included. It finds what is installed rather than being told |
 | `openbox version` | |
 
-Two postures stay per-machine, as environment variables rather than flags:
-`OPENBOX_ENFORCE=false` observes only for one run, and
-`OPENBOX_INSTALL_GIT_HOOK=false` leaves every repo's `.git/hooks` alone.
-
-`openbox gateway`, `telemetry`, `transport`, `hook` and `rewake` still exist and
-still dispatch — the service units and the hook registrations invoke them by
-string — but they are not commands you type, so they are not listed above.
+Two settings are environment variables rather than flags: `OPENBOX_ENFORCE=false`
+observes only for one run, and `OPENBOX_INSTALL_GIT_HOOK=false` leaves every
+repository's `.git/hooks` alone.
 
 ## Documentation
 
-| | |
+Read top to bottom for the fullest picture; jump in anywhere for one question.
+
+| | For |
 |---|---|
-| [Getting started](docs/getting-started.md) | install → onboard → verify, with troubleshooting |
-| [Architecture](docs/architecture.md) | engine, adapters, enforcement, approvals, assurance |
-| [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent |
-| [Credentials and secret detection](docs/credentials-and-secrets.md) | where the keys live, and what the local redactor catches |
-| [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
-| [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | the artifacts to push if you need the gateway prevented-from, not just detected-around |
-| [Event contract](docs/dev-event-contract.md) | the normalized event schema in `api/`, its lifecycle types, and the INV-2 content gate |
-| [Wire mapping](docs/mapping.md) | how each field lands in core's columns |
-| [Provider coverage](docs/coverage.md) | what each provider's native surface does and does not supply, and the bounded non-goals |
-| [What is proven, and by what](docs/coverage.md) | the claim register, and the evidence class behind each claim |
+| [Getting started](docs/getting-started.md) | **everyone.** Install, connect, govern, confirm; self-hosting, approvals, upgrading, key rotation, troubleshooting |
+| [Architecture](docs/architecture.md) | how the engine, adapters, enforcement and approvals fit together; the assurance ledger |
+| [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent, and the switches |
+| [Credentials and secret detection](docs/credentials-and-secrets.md) | where the keys live and what the local redactor catches |
+| [Lineage](docs/lineage.md) | `session → commit → deploy`, and how sure each link is |
+| [Gateway MDM recipe](docs/gateway-mdm-recipe.md) | administrators who need bypass *prevented*, not just detected |
+| [Provider coverage](docs/coverage.md) | adapter authors: what each tool's native surface does and does not supply |
+| [Event contract](docs/dev-event-contract.md) | adapter authors: the normalized event schema in `api/` |
+| [Wire mapping](docs/mapping.md) | platform integrators: how each field lands in core's columns |
 
 **One-time migration note**, not current authority:
-[Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) — what
-changed for an install predating inline evaluation, including file bodies now
-egressing. A fresh install needs nothing from it.
+[Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md). A
+fresh install needs nothing from it.
 
 ## Contributing
 
-Go 1.27+, no cgo; a `GOTOOLCHAIN=auto` default fetches it for you. The repo is
-one Go module, laid out per `golang-standards/project-layout`:
+This is an open-source project under the [Apache License 2.0](LICENSE).
+Contributions are welcome.
+
+You need Go 1.27+ and nothing else; a `GOTOOLCHAIN=auto` default fetches it for
+you. The repo is one Go module.
 
 ```bash
-go build ./...                      # everything, from the root
-go test -race -count=1 ./...        # -count=1 is required; see internal/depguard
-go test -run TestGovernanceEval -v ./cmd/openbox/   # the governance evals, listed by claim
+go build ./... && go vet ./...                    # everything, from the root
+go test -race -count=1 ./...                      # -count=1 is required; see internal/depguard
+go test -run TestGovernanceEval -v ./cmd/openbox/  # the governance evals, listed by claim
 ```
 
-Anything provider-agnostic belongs in `internal/adapters/common/`. The
-governance evals need nothing: they drive the real hook entrypoint against an
-in-process fake control plane, so they run offline, on any machine, with no
-stack to stand up.
+The tests need no platform: they drive the real hook entrypoint against an
+in-process fake, so they run offline on any machine. Anything provider-agnostic
+belongs in `internal/adapters/common/`; the layout and the invariants a change
+would otherwise break are in [`CLAUDE.md`](CLAUDE.md) and
+[Architecture § Layout](docs/architecture.md#layout).
 
-**What they do not prove.** They grade what this binary put on the wire, what it
-rendered to the coding agent and what it left on disk. They say nothing about
-what the control plane does with any of it — that it accepts the wire, stores a
-row, or deduplicates one — nor about binding a socket, TLS to a real listener,
-or verifying an attestation. Those need a live stack, nothing in this repository
-observes the far end of the wire, and
-[what is proven, and by what](docs/coverage.md) names each of them as unproven
-rather than omitting it. The claim is detection, not prevention.
+**What the tests do not prove.** They grade what this binary put on the wire,
+what it showed the coding agent and what it left on disk. They say nothing about
+what the platform does with any of it. Those claims are named as unproven in
+[what is proven, and by what](docs/coverage.md#5-evidence-what-is-proven-and-by-what)
+rather than omitted.
 
 ## License
 

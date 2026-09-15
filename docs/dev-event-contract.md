@@ -1,5 +1,10 @@
 # `api/`; normalized developer-runtime event contract
 
+> **Who this is for.** Someone adding or changing a coding-tool adapter, or
+> consuming these events downstream. It assumes the shape in
+> [Architecture](architecture.md): one engine, one thin adapter per tool, one
+> event schema between them. Nothing here is needed to set a machine up.
+
 **Story:**  event contract · **Version:** the `schema_version` `const` in [the
 schema](../api/dev-event.schema.json) is the authority, and its `x-changelog`
 records what every bump added and why — one entry per version, in the file that
