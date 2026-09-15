@@ -34,7 +34,7 @@ func TestProjectFinalizeExactFlagsAndSuccessOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observation := filepath.Join(root, "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04")
+	observation := readableObservationPack(t, filepath.Join(root, "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04"))
 	sourceCandidate := filepath.Join(root, "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-27-phase-03-installed-codex-candidate.json")
 	content, err := os.ReadFile(sourceCandidate)
 	if err != nil {
@@ -79,4 +79,41 @@ func TestProjectFinalizeExactFlagsAndSuccessOutput(t *testing.T) {
 	if code := a.runProjectFinalize([]string{"--evaluation", observation, "--evaluation", observation, "--analysis", candidate, "--output", output}); code != exitError || runnerCalls != 1 {
 		t.Fatalf("duplicate flag was accepted: code=%d calls=%d", code, runnerCalls)
 	}
+}
+
+// readableObservationPack reproduces a committed evidence pack at the modes the
+// observation reader requires, and returns the copy.
+//
+// The working-tree path cannot be used directly: git materializes directories
+// at 0755 and files at 0644, while runfs demands an exact 0500 root of 0400
+// files, so these tests failed on a fresh checkout with "run root mode 0755 is
+// not recoverable". Copying also keeps the tests from mutating committed
+// evidence to make themselves pass.
+func readableObservationPack(t *testing.T, source string) string {
+	t.Helper()
+	destination := filepath.Join(t.TempDir(), "observation")
+	if err := os.Mkdir(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			t.Fatalf("committed pack holds directory %s", entry.Name())
+		}
+		content, err := os.ReadFile(filepath.Join(source, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(destination, entry.Name()), content, 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(destination, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(destination, 0o700) })
+	return destination
 }

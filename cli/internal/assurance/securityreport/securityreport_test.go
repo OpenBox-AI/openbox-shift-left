@@ -603,9 +603,42 @@ func privateCandidateCopy(t *testing.T, source string) string {
 	return path
 }
 
+// mastraObservation reproduces the committed evidence pack at the modes the
+// observation reader requires, and returns the copy.
+//
+// It cannot return the working-tree path. Git materializes directories at 0755
+// and regular files at 0644, while runfs demands an exact 0500 root holding
+// 0400 files, so every test here failed on a fresh checkout with "run root mode
+// 0755 is not recoverable". Reading the checkout in place would also mean these
+// tests mutate committed evidence to make themselves pass.
 func mastraObservation(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(repoRoot(t), "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04")
+	source := filepath.Join(repoRoot(t), "plans/260825-1623-lean-openshell-project-assurance/evidence/2026-08-26-phase-02-public-mastra-dashboard-observation-04")
+	destination := filepath.Join(t.TempDir(), "observation")
+	if err := os.Mkdir(destination, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			t.Fatalf("committed pack holds directory %s", entry.Name())
+		}
+		content, err := os.ReadFile(filepath.Join(source, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(destination, entry.Name()), content, 0o400); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(destination, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(destination, 0o700) })
+	return destination
 }
 
 func repoRoot(t *testing.T) string {

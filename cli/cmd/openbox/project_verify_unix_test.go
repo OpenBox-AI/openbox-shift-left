@@ -48,10 +48,11 @@ func TestProjectVerifyCommandChecksFinalizedPackObjects(t *testing.T) {
 }
 
 func TestProjectVerifyCommandChecksRetainedObservationPack(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", "..", "..", "plans", "260825-1623-lean-openshell-project-assurance", "evidence", "2026-08-26-phase-02-public-mastra-dashboard-observation-04"))
+	source, err := filepath.Abs(filepath.Join("..", "..", "..", "plans", "260825-1623-lean-openshell-project-assurance", "evidence", "2026-08-26-phase-02-public-mastra-dashboard-observation-04"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	root := readableObservationPack(t, source)
 	a, out, errOut := testApp(nil)
 	if code := a.run([]string{"project", "verify", root}); code != exitOK {
 		t.Fatalf("exit=%d stderr=%q", code, errOut.String())
