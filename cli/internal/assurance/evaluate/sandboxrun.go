@@ -49,11 +49,13 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.sandboxRunID = runID
 
-	// The API key is never sent. It reaches the guest through the provider the
-	// policy binds, so the evaluator holds no credential to leak.
+	// No credential-shaped name is sent, and the service refuses them anyway.
+	// Both keys reach the guest through the providers attached below —
+	// OPENBOX_API_KEY from the OpenBox provider, OPENAI_API_KEY from the
+	// inference one — so the evaluator holds neither and can leak neither.
 	environment := map[string]string{}
 	for name, value := range state.prepared.environment {
-		if name == "OPENBOX_API_KEY" {
+		if name == "OPENBOX_API_KEY" || name == "OPENAI_API_KEY" {
 			continue
 		}
 		environment[name] = value
@@ -70,7 +72,9 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 		},
 		ExpectedPolicy: identity,
 		Environment:    environment,
-		Providers:      []string{OpenBoxProvider},
+		// Both providers: the gateway resolves each one's credential into the
+		// guest. Attaching only one leaves the other's endpoint unauthorized.
+		Providers: []string{OpenBoxProvider, InferenceProvider},
 	}, sandboxBeginDeadline)
 	if err != nil {
 		return &classifiedError{class: "sandbox_create_failure", err: err}

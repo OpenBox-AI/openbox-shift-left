@@ -14,20 +14,25 @@ import (
 )
 
 const (
-	Schema                     = "ai.openbox.project-execution/v1"
-	ContractLabel              = "ai.openbox.project-evaluation.contract"
-	ContractVersion            = "v1"
-	OpenShellVersion           = "0.0.111"
-	OpenBoxProvider            = "obx-openbox-local"
-	InferenceProvider          = "openai-compatible-provider"
-	InferenceModel             = "granite4.1:3b"
-	InferenceModelDigest       = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
-	RegistryImage              = "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
-	coreURL                    = "http://127.0.0.1:8086"
-	backendHealthURL           = "http://127.0.0.1:3000/health"
-	ollamaTagsURL              = "http://127.0.0.1:11434/api/tags"
-	ollamaGenerateURL          = "http://127.0.0.1:11434/api/generate"
-	maxCaptureBytes      int64 = 8 << 20
+	Schema               = "ai.openbox.project-execution/v1"
+	ContractLabel        = "ai.openbox.project-evaluation.contract"
+	ContractVersion      = "v1"
+	OpenShellVersion     = "0.0.111"
+	OpenBoxProvider      = "obx-openbox-local"
+	InferenceProvider    = "openai-compatible-provider"
+	InferenceModel       = "granite4.1:3b"
+	InferenceModelDigest = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
+	// pushRegistryHost is where the run-owned registry writer binds INSIDE the
+	// container engine's own network namespace, which is the only address
+	// `docker push` can reach on a Docker Desktop host: the daemon runs in a VM,
+	// so a published host port is not its loopback.
+	pushRegistryHost        = "127.0.0.1:5000"
+	RegistryImage           = "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
+	coreURL                 = "http://127.0.0.1:8086"
+	backendHealthURL        = "http://127.0.0.1:3000/health"
+	ollamaTagsURL           = "http://127.0.0.1:11434/api/tags"
+	ollamaGenerateURL       = "http://127.0.0.1:11434/api/generate"
+	maxCaptureBytes   int64 = 8 << 20
 
 	// sandboxNegotiationTimeout bounds the one read-only question asked before
 	// anything is mutated. Short on purpose: an unreachable service is a

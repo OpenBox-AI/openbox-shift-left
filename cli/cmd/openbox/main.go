@@ -87,7 +87,17 @@ func defaultApp() *app {
 		getenv:       os.Getenv,
 		newRegistrar: func(u, c, id string) authRegistrar { return backend.New(u, c, id) },
 		runProjectEvaluation: func(ctx context.Context, input evaluate.Input) (evaluate.Result, error) {
-			return evaluate.Run(ctx, input, evaluate.SystemDependencies())
+			// The sandbox boundary is attached here, at the one place the real
+			// runner is built. Its absence is an operator condition — no
+			// service provisioned — and deserves that answer rather than a nil
+			// seam discovered mid-run.
+			dependencies, err := evaluate.SystemSandbox(evaluate.SystemDependencies(),
+				os.Getenv("OPENBOX_SANDBOX_AGENT_ENV"))
+			if err != nil {
+				return evaluate.Result{}, fmt.Errorf(
+					"project evaluate: no sandbox service is reachable; run `obs provision` with OPENBOX_PROJECT_RUN_V2=1: %w", err)
+			}
+			return evaluate.Run(ctx, input, dependencies)
 		},
 		runProjectFinalization: func(ctx context.Context, prepared *securityreport.Prepared, input securityreport.RuntimeInput) (securityreport.Result, error) {
 			return securityreport.Finalize(ctx, prepared, input, securityreport.Dependencies{})

@@ -93,11 +93,11 @@ func (a *app) runProjectEvaluate(args []string) int {
 	if !ok {
 		return code
 	}
+	// One wiring point, in main.go. A second construction here would be a
+	// second place for the sandbox attachment to drift out of step.
 	runner := a.runProjectEvaluation
 	if runner == nil {
-		runner = func(ctx context.Context, input evaluate.Input) (evaluate.Result, error) {
-			return evaluate.Run(ctx, input, evaluate.SystemDependencies())
-		}
+		return a.errorf("project evaluate: evaluation runner is not configured")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

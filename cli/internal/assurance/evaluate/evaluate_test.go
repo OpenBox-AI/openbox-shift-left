@@ -271,7 +271,15 @@ func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 	if record.ExitClassification != "success" || record.Core.MatchingValidations != 1 || record.Core.GovernanceEvents != 1 || !record.Cleanup.SandboxAbsent {
 		t.Fatalf("record=%+v", record)
 	}
-	if record.Image.ImmutableReference != record.Image.LocalID || !strings.HasPrefix(record.Image.PublishedReference, "127.0.0.1:") {
+	// Both references carry the same digest, and neither is the bare image ID
+	// the CLI path ran. They differ only in host: the reference handed to the
+	// sandbox uses the push address, because that is the name the local
+	// container engine can resolve, while the published one names the reader.
+	digest := record.Image.ManifestDigest
+	if record.Image.ImmutableReference != pushRegistryHost+"/ai.openbox/evaluation@"+digest ||
+		!strings.HasPrefix(record.Image.PublishedReference, "127.0.0.1:") ||
+		!strings.HasSuffix(record.Image.PublishedReference, "@"+digest) ||
+		record.Image.ImmutableReference == record.Image.LocalID {
 		t.Fatalf("image identity=%+v", record.Image)
 	}
 	if state, err := runfs.Inspect(output); err != nil || state != runfs.StateIncomplete {

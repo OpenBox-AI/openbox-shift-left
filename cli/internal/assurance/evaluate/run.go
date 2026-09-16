@@ -368,7 +368,7 @@ func (state *runState) startRegistry(ctx context.Context, dependencies Dependenc
 func (state *runState) publishImage(ctx context.Context, dependencies Dependencies) error {
 	writer := state.prepared.registryName + "-writer"
 	volume := state.prepared.registryName + "-data"
-	state.registryTag = "127.0.0.1:5000/ai.openbox/evaluation:" + state.prepared.evaluationID
+	state.registryTag = pushRegistryHost + "/ai.openbox/evaluation:" + state.prepared.evaluationID
 	if _, err := dependencies.Commands.Run(ctx, Command{Name: "docker", Args: []string{"tag", state.prepared.image.ID, state.registryTag}}); err != nil {
 		return fail("image_publication_failure", "project evaluate: create run-owned image tag failed")
 	}
@@ -442,7 +442,18 @@ func (state *runState) publishImage(ctx context.Context, dependencies Dependenci
 	}
 	state.manifestDigest = digest
 	state.publishedReference = state.registryAddress + "/ai.openbox/evaluation@" + digest
-	state.immutableReference = state.prepared.image.ID
+	// The reference handed to the sandbox is the PUSH name plus the digest, not
+	// the reader's address and not the bare image ID.
+	//
+	// The bare ID is what the CLI path used, and the sandbox service refuses it
+	// outright — a digest without a repository is not an immutable reference.
+	// The reader's address does not work either: the gateway resolves an image
+	// from the local container engine before falling back to a registry pull,
+	// and Docker only records a repo digest under the name it was pushed to.
+	// Handing it the push name means the engine resolves it locally and no
+	// registry pull is attempted at all — which matters because that fallback
+	// is HTTPS-only and this registry is plain HTTP on loopback.
+	state.immutableReference = pushRegistryHost + "/ai.openbox/evaluation@" + digest
 	state.record.Image.ManifestDigest = digest
 	state.record.Image.PublishedReference = state.publishedReference
 	state.record.Image.ImmutableReference = state.immutableReference
@@ -575,17 +586,22 @@ func (state *runState) finishRecord() {
 func (state *runState) writeOutput() error {
 	if !state.policyWritten {
 		if len(state.policy) == 0 {
-			state.policy, _ = buildPolicy(state.prepared.applicationRoot, state.prepared.argv[0], 0)
+			state.policy = buildSandboxPolicy(state.prepared.argv[0], 0)
 		}
-		if err := state.workspace.WritePrivateFile("policy.json", state.policy); err != nil {
+		if err := state.workspace.WritePrivateFile("policy.yaml", state.policy); err != nil {
 			return err
 		}
 		state.policyWritten = true
 	}
-	if err := state.workspace.WritePrivateFile("process.stdout", state.process.Stdout); err != nil {
+	// The retained bytes come from the same place as their digests in the
+	// record. They used to come from the attached command's CommandResult,
+	// which nothing populates now — so the record claimed a 473-byte stderr
+	// while the file beside it was empty. A digest that does not describe the
+	// artifact next to it is worse than no artifact.
+	if err := state.workspace.WritePrivateFile("process.stdout", state.sandboxStdout()); err != nil {
 		return err
 	}
-	if err := state.workspace.WritePrivateFile("process.stderr", state.process.Stderr); err != nil {
+	if err := state.workspace.WritePrivateFile("process.stderr", state.sandboxStderr()); err != nil {
 		return err
 	}
 	if err := state.workspace.WritePrivateFile("sandbox-evidence.json", state.sandboxEvidence()); err != nil {
