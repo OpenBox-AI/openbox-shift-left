@@ -136,7 +136,7 @@ func (state *runState) preflightObservation(ctx context.Context, dependencies De
 		return fail("not_runnable", "project evaluate: backend observation HTTP client is unavailable")
 	}
 	client, err := observation.New(observation.Config{
-		BackendURL:      state.prepared.input.BackendURL,
+		BackendURL:      state.prepared.connector.backendURL,
 		ControlToken:    state.prepared.input.ControlToken,
 		AgentID:         state.prepared.input.OpenBoxAgent,
 		HTTP:            dependencies.BackendHTTP,
@@ -239,7 +239,7 @@ func (state *runState) initializeRecord(started time.Time) {
 	record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 	record.Sandbox.Service = state.prepared.sandboxService
 	record.Sandbox.Capability = state.prepared.sandboxCapability
-	record.Sandbox.Provider = OpenBoxProvider
+	record.Sandbox.Provider = state.prepared.connector.openBoxProvider
 	record.Inference.Provider = InferenceProvider
 	record.Inference.Model = InferenceModel
 	record.Inference.ModelDigest = InferenceModelDigest
@@ -299,7 +299,7 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 	}
 	state.phase(dependencies, "image_published")
 
-	relay, err := startCoreRelay(dependencies, state.prepared.input.OpenBoxAgent, state.prepared.evaluationID)
+	relay, err := startCoreRelay(dependencies, state.prepared.connector.coreURL, state.prepared.input.OpenBoxAgent, state.prepared.evaluationID)
 	if err != nil {
 		return &classifiedError{class: "core_relay_failure", err: err}
 	}
@@ -611,7 +611,7 @@ func (state *runState) finishRecord() {
 func (state *runState) writeOutput() error {
 	if !state.policyWritten {
 		if len(state.policy) == 0 {
-			state.policy = buildSandboxPolicy(state.prepared.argv[0], 0)
+			state.policy = buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, 0)
 		}
 		if err := state.workspace.WritePrivateFile("policy.yaml", state.policy); err != nil {
 			return err

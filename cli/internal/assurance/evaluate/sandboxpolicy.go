@@ -10,9 +10,8 @@ import (
 // service validates: OpenShell's policy YAML, meeting that service's security
 // floor exactly.
 //
-// This is not a reformat of buildPolicy. The floor is stricter than the CLI
-// path's policy in three ways that change what the image may do, and each is
-// enforced rather than negotiated:
+// The floor is stricter than the retired CLI path's policy in three ways that
+// change what the image may do, and each is enforced rather than negotiated:
 //
 //   - read_write is EXACTLY ["/sandbox"]. The CLI path granted /dev/null and
 //     /tmp; here /tmp is pinned read-only, because a policy that declares
@@ -28,7 +27,7 @@ import (
 // gateway. Credentials are never written here: credential_binding names a
 // provider and the gateway resolves it, so the evaluation key does not appear
 // in the policy, the request, or the guest's environment.
-func buildSandboxPolicy(applicationExecutable string, relayPort int, effectPorts ...int) []byte {
+func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort int, effectPorts ...int) []byte {
 	var policy strings.Builder
 	policy.WriteString("version: 1\n")
 	policy.WriteString("filesystem_policy:\n")
@@ -55,7 +54,7 @@ func buildSandboxPolicy(applicationExecutable string, relayPort int, effectPorts
 	endpoints := map[string][]sandboxEndpoint{
 		"openbox_core_relay": {{
 			port:     relayPort,
-			provider: OpenBoxProvider,
+			provider: openBoxProvider,
 			rules: []sandboxRule{
 				{method: "GET", path: "/api/v1/auth/validate"},
 				{method: "POST", path: "/api/v1/governance/evaluate"},

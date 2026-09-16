@@ -54,6 +54,7 @@ type prepared struct {
 	applicationRoot   string
 	sandboxService    string
 	sandboxCapability string
+	connector         connector
 }
 
 func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prepared, error) {
@@ -97,11 +98,16 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 		return nil, fmt.Errorf("project evaluate: generate evaluation identity: %w", err)
 	}
 	evaluationID := "ev-" + identifier
+	resolved, err := resolveConnector(input)
+	if err != nil {
+		return nil, err
+	}
 	result := &prepared{
 		input: input, evaluationID: evaluationID,
 		sandboxName:  "obx-eval-" + identifier[:10],
 		registryName: "obx-eval-registry-" + identifier,
 		output:       output,
+		connector:    resolved,
 	}
 
 	image, err := inspectImage(ctx, dependencies.Commands, input.Image)
@@ -125,7 +131,7 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if err := preflightSandbox(dependencies, result); err != nil {
 		return nil, err
 	}
-	if err := preflightLocalServices(ctx, dependencies); err != nil {
+	if err := preflightLocalServices(ctx, dependencies, resolved); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -376,14 +382,17 @@ func outputField(content, name string) string {
 	return ""
 }
 
-func preflightLocalServices(ctx context.Context, dependencies Dependencies) error {
-	for name, endpoint := range map[string]string{"Core": coreURL + "/", "backend": backendHealthURL} {
+func preflightLocalServices(ctx context.Context, dependencies Dependencies, resolved connector) error {
+	for name, endpoint := range map[string]string{
+		"Core":    resolved.coreURL + "/",
+		"backend": resolved.backendURL + "/health",
+	} {
 		response, err := get(ctx, dependencies.HTTP, endpoint)
 		if err != nil || response == nil || response.StatusCode < 200 || response.StatusCode >= 300 {
 			if response != nil {
 				response.Body.Close()
 			}
-			return fmt.Errorf("project evaluate: local OpenBox %s health endpoint is unavailable", name)
+			return fmt.Errorf("project evaluate: OpenBox %s health endpoint at %s is unavailable", name, endpoint)
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		response.Body.Close()

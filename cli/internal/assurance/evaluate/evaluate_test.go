@@ -139,8 +139,8 @@ func TestValidateImageUsesStandardOCICommand(t *testing.T) {
 // The policy the sandbox service validates is YAML meeting its floor, not the
 // CLI path's JSON. These are the properties that decide what the image may do.
 func TestSandboxPolicyMeetsTheFloorAndBindsCredentialsByProvider(t *testing.T) {
-	first := buildSandboxPolicy("/usr/local/bin/node", 49152, 49153)
-	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", 49152, 49153)) {
+	first := buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153)
+	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153)) {
 		t.Fatal("policy bytes changed between identical renders")
 	}
 	text := string(first)
@@ -454,7 +454,7 @@ func (runner *lifecycleRunner) Run(_ context.Context, command Command) (CommandR
 		return jsonResult(map[string]any{"status": "connected", "version": "0.0.111", "server": "https://localhost:17670", "authentication": map[string]string{"status": "authenticated", "provider": "mTLS transport"}}), nil
 	case command.Name == "openshell" && args == "gateway info -o json":
 		return jsonResult(map[string]any{"status": "healthy", "version": "0.0.111", "compute_drivers": []any{map[string]any{"name": "vm", "capabilities": map[string]string{"driver_name": "openshell-driver-vm", "driver_version": "0.0.111"}}}}), nil
-	case command.Name == "openshell" && args == "provider get "+OpenBoxProvider:
+	case command.Name == "openshell" && args == "provider get "+DefaultOpenBoxProvider:
 		return CommandResult{Stdout: []byte("Name: obx-openbox-local\nType: openbox-local\nCredential keys: OPENBOX_API_KEY\nConfig keys: <none>\n")}, nil
 	case command.Name == "openshell" && args == "provider get "+InferenceProvider:
 		return CommandResult{Stdout: []byte("Name: openai-compatible-provider\nType: openai\nCredential keys: OPENAI_API_KEY\nConfig keys: OPENAI_BASE_URL\n")}, nil
@@ -562,9 +562,9 @@ type lifecycleHTTP struct {
 func (client *lifecycleHTTP) Do(request *http.Request) (*http.Response, error) {
 	status, body, headers := http.StatusOK, `{}`, make(http.Header)
 	switch {
-	case request.URL.String() == coreURL+"/":
+	case request.URL.String() == localCoreURL+"/":
 		body = "hello world"
-	case request.URL.String() == backendHealthURL:
+	case request.URL.String() == localBackendURL+"/health":
 		body = `{"status":200}`
 	case request.URL.String() == ollamaTagsURL:
 		body = `{"models":[{"name":"granite4.1:3b","digest":"` + strings.TrimPrefix(InferenceModelDigest, "sha256:") + `"}]}`
@@ -692,4 +692,45 @@ func (fake *fakeSandbox) WaitDeleted(string, time.Duration) error {
 		return nil
 	}
 	return errors.New("fake sandbox: still present")
+}
+
+// The connector is the whole point of part 2: a run against UAT or production
+// is the same lane pointed somewhere else, not a different code path. The
+// local-stack values are a default, and defaults must not be reachable by
+// accident when a caller said something.
+func TestConnectorResolvesPerEnvironmentAndDefaultsToLocalStack(t *testing.T) {
+	local, err := resolveConnector(Input{})
+	if err != nil {
+		t.Fatalf("default connector: %v", err)
+	}
+	if local.coreURL != localCoreURL || local.backendURL != localBackendURL || local.openBoxProvider != DefaultOpenBoxProvider {
+		t.Fatalf("default connector = %+v", local)
+	}
+
+	uat, err := resolveConnector(Input{
+		CoreURL:         "https://core.uat.openbox.ai/",
+		BackendURL:      "https://backend.uat.openbox.ai",
+		OpenBoxProvider: "obx-openbox-uat",
+	})
+	if err != nil {
+		t.Fatalf("uat connector: %v", err)
+	}
+	// The trailing slash is trimmed once, here, so no later caller has to guess
+	// whether it needs to add or strip one.
+	if uat.coreURL != "https://core.uat.openbox.ai" || uat.backendURL != "https://backend.uat.openbox.ai" {
+		t.Fatalf("uat connector = %+v", uat)
+	}
+	if uat.openBoxProvider != "obx-openbox-uat" {
+		t.Fatalf("uat provider = %q", uat.openBoxProvider)
+	}
+
+	for name, input := range map[string]Input{
+		"no scheme":         {CoreURL: "core.uat.openbox.ai"},
+		"wrong scheme":      {CoreURL: "ftp://core.uat.openbox.ai"},
+		"embedded userinfo": {BackendURL: "https://user:pass@backend.uat.openbox.ai"},
+	} {
+		if _, err := resolveConnector(input); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
 }

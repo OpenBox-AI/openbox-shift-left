@@ -104,7 +104,13 @@ func (a *app) runProjectEvaluate(args []string) int {
 	result, err := runner(ctx, evaluate.Input{
 		Image: options.image, EnvFile: options.envFile,
 		OpenBoxAgent: options.openboxAgent, Output: options.output,
+		// The connector. Env wins, then dev.json, then the local-stack default
+		// inside evaluate — the same precedence auth and init already use, so a
+		// developer pointed at UAT by `openbox auth` stays pointed at UAT here
+		// without passing a flag.
+		CoreURL:             inputEnvironment(a.getenv, devconfig.EnvBaseURL),
 		BackendURL:          inputEnvironment(a.getenv, devconfig.EnvBackendURL),
+		OpenBoxProvider:     inputEnvironment(a.getenv, "OPENBOX_SANDBOX_PROVIDER"),
 		ControlToken:        inputEnvironment(a.getenv, devconfig.EnvControlToken),
 		ObservationRequired: true,
 		ProxyConfigured:     proxyEnvironmentConfigured(a.getenv),

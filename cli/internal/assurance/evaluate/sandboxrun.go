@@ -31,7 +31,7 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	if dependencies.Sandbox == nil {
 		return fail("not_runnable", "project evaluate: no sandbox service is configured")
 	}
-	document := buildSandboxPolicy(state.prepared.argv[0], state.relay.Port(), state.effectPorts()...)
+	document := buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, state.relay.Port(), state.effectPorts()...)
 	digest := sha256.Sum256(document)
 	identity := sandboxclient.PolicyIdentity{
 		ID:      sandboxPolicyIdentity,
@@ -89,7 +89,7 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 		PlaceholderEnvironment: placeholders,
 		// Only the OpenBox provider, and only because this policy binds its
 		// credential to an endpoint. See the environment split above.
-		Providers: []string{OpenBoxProvider},
+		Providers: []string{state.prepared.connector.openBoxProvider},
 		// The image's own entrypoint, as the sandbox's MAIN process. That is
 		// what makes the provider credentials reach it at all.
 		Command: state.prepared.argv,

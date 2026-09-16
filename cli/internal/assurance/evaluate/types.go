@@ -4,32 +4,36 @@ package evaluate
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
 const (
-	Schema               = "ai.openbox.project-execution/v1"
-	ContractLabel        = "ai.openbox.project-evaluation.contract"
-	ContractVersion      = "v1"
-	OpenShellVersion     = "0.0.111"
-	OpenBoxProvider      = "obx-openbox-local"
-	InferenceProvider    = "openai-compatible-provider"
-	InferenceModel       = "granite4.1:3b"
-	InferenceModelDigest = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
+	Schema          = "ai.openbox.project-execution/v1"
+	ContractLabel   = "ai.openbox.project-evaluation.contract"
+	ContractVersion = "v1"
+	// DefaultOpenBoxProvider is the OpenShell provider carrying OPENBOX_API_KEY
+	// for a local-stack connector. It is a default, not a pin: a UAT or
+	// production connector is a different Core, a different runtime key, and
+	// therefore a different provider object on the gateway.
+	DefaultOpenBoxProvider = "obx-openbox-local"
+	InferenceProvider      = "openai-compatible-provider"
+	InferenceModel         = "granite4.1:3b"
+	InferenceModelDigest   = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
 	// pushRegistryHost is where the run-owned registry writer binds INSIDE the
 	// container engine's own network namespace, which is the only address
 	// `docker push` can reach on a Docker Desktop host: the daemon runs in a VM,
 	// so a published host port is not its loopback.
 	pushRegistryHost        = "127.0.0.1:5000"
 	RegistryImage           = "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
-	coreURL                 = "http://127.0.0.1:8086"
-	backendHealthURL        = "http://127.0.0.1:3000/health"
 	ollamaTagsURL           = "http://127.0.0.1:11434/api/tags"
 	ollamaGenerateURL       = "http://127.0.0.1:11434/api/generate"
 	maxCaptureBytes   int64 = 8 << 20
@@ -62,14 +66,66 @@ var reservedEnvironment = map[string]string{
 
 // Input is the complete public input contract.
 type Input struct {
-	Image               string
-	EnvFile             string
-	OpenBoxAgent        string
-	Output              string
-	BackendURL          string
-	ControlToken        string
+	Image        string
+	EnvFile      string
+	OpenBoxAgent string
+	Output       string
+	// Connector coordinates. Empty means the local-stack default, which is a
+	// convenience for development and NOT an assumption the lane makes: a run
+	// against UAT or production supplies its own, and everything downstream —
+	// the relay target, the health preflight, the URL allowlist, the provider
+	// carrying OPENBOX_API_KEY — follows from these three.
+	CoreURL         string
+	BackendURL      string
+	OpenBoxProvider string
+	ControlToken    string
+
 	ObservationRequired bool
 	ProxyConfigured     bool
+}
+
+// connector is the resolved OpenBox environment for one run.
+//
+// Resolution happens once, in prepare, so no later step can disagree about
+// which Core a run was pointed at. The record carries it for the same reason:
+// an observation pack that does not say which environment produced it is not
+// evidence of anything in particular.
+type connector struct {
+	coreURL         string
+	backendURL      string
+	openBoxProvider string
+}
+
+const (
+	localCoreURL    = "http://127.0.0.1:8086"
+	localBackendURL = "http://127.0.0.1:3000"
+)
+
+func resolveConnector(input Input) (connector, error) {
+	resolved := connector{
+		coreURL:         firstNonEmpty(strings.TrimRight(input.CoreURL, "/"), localCoreURL),
+		backendURL:      firstNonEmpty(strings.TrimRight(input.BackendURL, "/"), localBackendURL),
+		openBoxProvider: firstNonEmpty(input.OpenBoxProvider, DefaultOpenBoxProvider),
+	}
+	for name, value := range map[string]string{"Core": resolved.coreURL, "backend": resolved.backendURL} {
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
+			return connector{}, fmt.Errorf("project evaluate: %s URL is not an absolute credential-free URL", name)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return connector{}, fmt.Errorf("project evaluate: %s URL scheme %q is not http or https", name, parsed.Scheme)
+		}
+	}
+	return resolved, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // Command describes one direct executable invocation. Args never pass through

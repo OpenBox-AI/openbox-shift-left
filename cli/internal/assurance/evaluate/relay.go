@@ -35,13 +35,16 @@ type coreRelay struct {
 	receipt      relayReceipt
 }
 
-func startCoreRelay(dependencies Dependencies, agentID, evaluationID string) (*coreRelay, error) {
+func startCoreRelay(dependencies Dependencies, target, agentID, evaluationID string) (*coreRelay, error) {
 	listener, err := dependencies.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("project evaluate: start Core relay: %w", err)
 	}
-	target, _ := url.Parse(coreURL)
-	relay := &coreRelay{listener: listener, client: dependencies.HTTP, target: target, agentID: agentID, evaluationID: evaluationID}
+	upstream, err := url.Parse(target)
+	if err != nil {
+		return nil, fmt.Errorf("project evaluate: parse Core URL: %w", err)
+	}
+	relay := &coreRelay{listener: listener, client: dependencies.HTTP, target: upstream, agentID: agentID, evaluationID: evaluationID}
 	relay.server = &http.Server{
 		Handler:           http.HandlerFunc(relay.serveHTTP),
 		ReadHeaderTimeout: 5 * time.Second,
