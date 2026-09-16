@@ -53,15 +53,20 @@ const (
 	sandboxCommandTimeout uint16 = 180
 )
 
+// reservedEnvironment is what the CONNECTOR owns and a project may not set.
+//
+// The model variables used to be here too, pinned to a local Ollama serving
+// granite4.1:3b. They are not the evaluator's to own: which model backend
+// serves the gateway's inference.local route is a gateway-side choice, and a
+// project that wants OpenAI, Gemini or OpenRouter declares its own model name
+// in `.env.sandbox`. What remains reserved is the five values that describe the
+// OpenBox connector and the run itself, which no project can know.
 var reservedEnvironment = map[string]string{
 	"OPENBOX_EVALUATION_ID": "",
 	"OPENBOX_AGENT_ID":      "",
 	"OPENBOX_URL":           "",
 	"OPENBOX_API_KEY":       "provider-supplied",
 	"OPENBOX_SAFE_SINK_URL": "",
-	"OPENAI_BASE_URL":       "https://inference.local/v1",
-	"OPENAI_API_KEY":        "unused",
-	"OPENAI_MODEL":          InferenceModel,
 }
 
 // Input is the complete public input contract.

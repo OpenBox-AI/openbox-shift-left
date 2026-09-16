@@ -25,18 +25,18 @@ func TestParseEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if accepted["A"] != "one=two" || accepted["EMPTY"] != "" {
-		t.Fatalf("values=%v", accepted)
+	if accepted.public["A"] != "one=two" || accepted.public["EMPTY"] != "" {
+		t.Fatalf("values=%v", accepted.public)
 	}
 
 	tests := map[string]string{
-		"duplicate":        "A=1\nA=2\n",
-		"export":           "export A=1\n",
-		"reserved":         "OPENBOX_URL=http://127.0.0.1:1\n",
-		"credential":       "SERVICE_TOKEN=value\n",
-		"remote URL":       "ENDPOINT=https://example.com/v1\n",
-		"indented comment": "  # not-a-comment\n",
-		"bad name":         "1A=value\n",
+		"duplicate":             "A=1\nA=2\n",
+		"export":                "export A=1\n",
+		"reserved":              "OPENBOX_URL=http://127.0.0.1:1\n",
+		"undeclared credential": "SERVICE_TOKEN=value\n",
+		"remote URL":            "ENDPOINT=https://example.com/v1\n",
+		"indented comment":      "  # not-a-comment\n",
+		"bad name":              "1A=value\n",
 	}
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -84,25 +84,90 @@ func TestEnvironmentFileRejectsSymlink(t *testing.T) {
 }
 
 func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
-	values, err := effectiveEnvironment(
-		[]string{"PATH=/usr/bin", "A=image", "OPENAI_API_KEY=unused"},
-		map[string]string{"A": "file", "B": "file"}, "ev-one", "agent-one",
-	)
+	declared, err := parseEnvironment([]byte(
+		"A=file\nB=file\n" +
+			publicPrefix + "OPENAI_MODEL=granite4.1:3b\n" +
+			publicPrefix + "OPENAI_API_KEY=unused\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["A"] != "file" || values["OPENAI_API_KEY"] != "unused" || values["OPENBOX_EVALUATION_ID"] != "ev-one" {
+	values, placeholders, err := effectiveEnvironment(
+		[]string{"PATH=/usr/bin", "A=image", "OPENAI_API_KEY=unused"}, declared, "ev-one", "agent-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The project's declaration beats the image's baked-in value.
+	if values["A"] != "file" || values["OPENBOX_EVALUATION_ID"] != "ev-one" || values["OPENAI_MODEL"] != "granite4.1:3b" {
 		t.Fatalf("values=%v", values)
 	}
-	wantNames := []string{"A", "B", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENBOX_AGENT_ID", "OPENBOX_API_KEY", "OPENBOX_EVALUATION_ID", "PATH"}
-	if got := environmentInventory(values); !reflect.DeepEqual(got, wantNames) {
+	// A credential-shaped name lands on the placeholder channel and nowhere
+	// else — being in both would put the value on a wire that refuses it.
+	if placeholders["OPENAI_API_KEY"] != "unused" {
+		t.Fatalf("placeholders=%v", placeholders)
+	}
+	if _, leaked := values["OPENAI_API_KEY"]; leaked {
+		t.Fatal("placeholder also appeared in the ordinary environment")
+	}
+	// The evaluator no longer injects the model route, so OPENAI_BASE_URL is
+	// absent unless declared. The placeholder IS listed: the guest receives it,
+	// and a record that omitted it would say the variable was never there.
+	wantNames := []string{"A", "B", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENBOX_AGENT_ID", "OPENBOX_API_KEY", "OPENBOX_EVALUATION_ID", "PATH"}
+	if got := environmentInventory(values, placeholders); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("names=%v want=%v", got, wantNames)
 	}
-	if _, err := effectiveEnvironment([]string{"SERVICE_SECRET=x"}, nil, "ev", "agent"); err == nil {
+
+	empty := newProjectEnvironment()
+	if _, _, err := effectiveEnvironment([]string{"SERVICE_SECRET=x"}, empty, "ev", "agent"); err == nil {
 		t.Fatal("accepted embedded credential")
 	}
-	if _, err := effectiveEnvironment([]string{"OPENBOX_API_KEY=embedded"}, nil, "ev", "agent"); err == nil {
+	if _, _, err := effectiveEnvironment([]string{"OPENBOX_API_KEY=embedded"}, empty, "ev", "agent"); err == nil {
 		t.Fatal("accepted embedded reserved credential")
+	}
+}
+
+// The three channels of `.env.sandbox`, and the rule that decides them.
+func TestProjectEnvironmentClassifiesByDeclarationNotByValue(t *testing.T) {
+	declared, err := parseEnvironment([]byte(
+		"NODE_ENV=production\n" +
+			modelRouteSetting + "=" + ModelRouteGateway + "\n" +
+			publicPrefix + "OPENAI_BASE_URL=https://inference.local/v1\n" +
+			publicPrefix + "OPENAI_API_KEY=unused\n" +
+			secretPrefix + "PAYMENTS_API_KEY=sk-live-do-not-log\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declared.public["NODE_ENV"] != "production" || declared.public["OPENAI_BASE_URL"] == "" {
+		t.Fatalf("public=%v", declared.public)
+	}
+	// Credential-SHAPED but declared public: a stand-in, on the placeholder
+	// channel, never in public.
+	if declared.placeholder["OPENAI_API_KEY"] != "unused" || declared.public["OPENAI_API_KEY"] != "" {
+		t.Fatalf("placeholder=%v public=%v", declared.placeholder, declared.public)
+	}
+	if declared.secret["PAYMENTS_API_KEY"] == "" || len(declared.secretNames()) != 1 {
+		t.Fatalf("secret names=%v", declared.secretNames())
+	}
+	if declared.modelRoute != ModelRouteGateway {
+		t.Fatalf("model route=%q", declared.modelRoute)
+	}
+
+	// A bare credential-shaped name is refused, and the error says which
+	// prefix to reach for rather than only that it was rejected.
+	_, err = parseEnvironment([]byte("SERVICE_TOKEN=value\n"))
+	if err == nil || !strings.Contains(err.Error(), secretPrefix) || !strings.Contains(err.Error(), publicPrefix) {
+		t.Fatalf("err=%v", err)
+	}
+	// One name, two channels, is a contradiction rather than a precedence.
+	if _, err := parseEnvironment([]byte(publicPrefix + "TOKEN=a\n" + secretPrefix + "TOKEN=b\n")); err == nil {
+		t.Fatal("accepted a name declared on two channels")
+	}
+	for name, input := range map[string]string{
+		"unknown route": modelRouteSetting + "=somewhere\n",
+		"bad digest":    modelDigestSetting + "=not-a-digest\n",
+	} {
+		if _, err := parseEnvironment([]byte(input)); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
 	}
 }
 
@@ -219,7 +284,7 @@ func TestExistingOutputFailsBeforeReadsOrCommands(t *testing.T) {
 func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 	parent := t.TempDir()
 	envFile := filepath.Join(parent, "evaluation.env")
-	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"), 0o600); err != nil {
+	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"+publicPrefix+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(parent, "record")
@@ -322,7 +387,7 @@ func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			parent := t.TempDir()
 			envFile := filepath.Join(parent, "evaluation.env")
-			if err := os.WriteFile(envFile, []byte("# empty\n"), 0o600); err != nil {
+			if err := os.WriteFile(envFile, []byte(publicPrefix+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(parent, "record")

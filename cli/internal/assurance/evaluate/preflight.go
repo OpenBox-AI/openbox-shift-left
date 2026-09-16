@@ -24,6 +24,7 @@ var (
 	agentIDPattern         = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
 	credentialNamePattern  = regexp.MustCompile(`(?i)(^|_)(api_?key|access_?key|token|secret|password|passwd|credential|private_?key|signing_?key|bearer|auth)($|_)`)
 	ansiPattern            = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+	digestPattern          = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 type dockerImage struct {
@@ -55,6 +56,11 @@ type prepared struct {
 	sandboxService    string
 	sandboxCapability string
 	connector         connector
+	// placeholders are credential-shaped names carrying deliberate non-secrets.
+	placeholders map[string]string
+	// declared is the project's own `.env.sandbox`, kept for the secret names
+	// and the model-route setting. Its secret VALUES are never recorded.
+	declared *projectEnvironment
 }
 
 func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prepared, error) {
@@ -119,11 +125,12 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 		return nil, err
 	}
 	result.image, result.argv, result.applicationRoot = image, argv, applicationRoot
-	result.environment, err = effectiveEnvironment(image.Config.Env, fileEnvironment, evaluationID, input.OpenBoxAgent)
+	result.declared = fileEnvironment
+	result.environment, result.placeholders, err = effectiveEnvironment(image.Config.Env, fileEnvironment, evaluationID, input.OpenBoxAgent)
 	if err != nil {
 		return nil, err
 	}
-	result.environmentNames = environmentInventory(result.environment)
+	result.environmentNames = environmentInventory(result.environment, result.placeholders)
 
 	if _, err := inspectImage(ctx, dependencies.Commands, RegistryImage); err != nil {
 		return nil, fmt.Errorf("project evaluate: required registry image is not preloaded: %w", err)
@@ -132,6 +139,9 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 		return nil, err
 	}
 	if err := preflightLocalServices(ctx, dependencies, resolved); err != nil {
+		return nil, err
+	}
+	if err := preflightModelRoute(ctx, dependencies, result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -236,7 +246,7 @@ func looksLikeRelativeApplicationPath(argument string) bool {
 	return strings.Contains(argument, "/")
 }
 
-func parseEnvironmentFile(filename string) (map[string]string, error) {
+func parseEnvironmentFile(filename string) (*projectEnvironment, error) {
 	content, err := readEnvironmentFileNoFollow(filename)
 	if err != nil {
 		return nil, err
@@ -244,14 +254,21 @@ func parseEnvironmentFile(filename string) (map[string]string, error) {
 	return parseEnvironment(content)
 }
 
-func parseEnvironment(content []byte) (map[string]string, error) {
+// parseEnvironment reads `.env.sandbox` — the project's sandbox declaration.
+//
+// This is deliberately NOT the developer's own `.env` or `.env.local`. Those
+// describe how the project runs on their machine and routinely hold real
+// credentials; reading them would import every one of those into a sandbox run
+// by default. The sandbox file is separate so that what crosses this boundary
+// is a thing the developer wrote down on purpose.
+func parseEnvironment(content []byte) (*projectEnvironment, error) {
 	if len(content) > 64<<10 {
 		return nil, errors.New("project evaluate: environment file exceeds 64 KiB")
 	}
 	if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
 		return nil, errors.New("project evaluate: environment file must be NUL-free UTF-8")
 	}
-	values := make(map[string]string)
+	environment := newProjectEnvironment()
 	lines := strings.Split(string(content), "\n")
 	for index, raw := range lines {
 		line := strings.TrimSuffix(raw, "\r")
@@ -265,62 +282,96 @@ func parseEnvironment(content []byte) (map[string]string, error) {
 		if !found || !environmentNamePattern.MatchString(name) {
 			return nil, fmt.Errorf("project evaluate: invalid environment line %d", index+1)
 		}
-		if _, reserved := reservedEnvironment[name]; reserved {
-			return nil, fmt.Errorf("project evaluate: environment line %d sets reserved key %s", index+1, name)
-		}
-		if credentialNamePattern.MatchString(name) {
-			return nil, fmt.Errorf("project evaluate: environment line %d uses credential-looking key %s", index+1, name)
-		}
-		if _, duplicate := values[name]; duplicate {
-			return nil, fmt.Errorf("project evaluate: duplicate environment key %s", name)
-		}
 		if len(value) > 4<<10 || strings.ContainsAny(value, "\x00\r\n") {
 			return nil, fmt.Errorf("project evaluate: invalid value for environment key %s", name)
 		}
-		if err := validateEnvironmentURL(value); err != nil {
-			return nil, fmt.Errorf("project evaluate: environment key %s: %w", name, err)
+		consumed, err := environment.setting(name, value, index+1)
+		if err != nil {
+			return nil, err
 		}
-		values[name] = value
-		if len(values) > 64 {
+		if consumed {
+			continue
+		}
+		if _, reserved := reservedEnvironment[name]; reserved {
+			return nil, fmt.Errorf("project evaluate: environment line %d sets connector-reserved key %s", index+1, name)
+		}
+		if err := environment.classify(name, value, index+1); err != nil {
+			return nil, err
+		}
+		if environment.entries() > 64 {
 			return nil, errors.New("project evaluate: environment file exceeds 64 entries")
 		}
 	}
-	return values, nil
+	// A secret's value never reaches the guest, so only the non-secret channels
+	// are URL-checked. Checking a secret's value would mean reading it here for
+	// a reason that is not passing it on.
+	for _, values := range []map[string]string{environment.public, environment.placeholder} {
+		for name, value := range values {
+			if err := validateEnvironmentURL(value); err != nil {
+				return nil, fmt.Errorf("project evaluate: environment key %s: %w", name, err)
+			}
+		}
+	}
+	return environment, nil
 }
 
-func effectiveEnvironment(imageEntries []string, overrides map[string]string, evaluationID, agentID string) (map[string]string, error) {
+// effectiveEnvironment merges the image's own Config.Env with the project's
+// declarations, keeping the placeholder channel separate the whole way.
+//
+// The evaluator no longer injects model routing. `OPENAI_BASE_URL`,
+// `OPENAI_API_KEY` and `OPENAI_MODEL` used to be forced here to a local Ollama
+// serving one pinned model, which made every project that lane could evaluate
+// the same project. They are the project's to declare now; only the five
+// connector values below are still the evaluator's.
+func effectiveEnvironment(imageEntries []string, declared *projectEnvironment, evaluationID, agentID string) (map[string]string, map[string]string, error) {
 	values := make(map[string]string)
+	placeholders := make(map[string]string)
 	for _, entry := range imageEntries {
 		name, value, found := strings.Cut(entry, "=")
 		if !found || !environmentNamePattern.MatchString(name) || len(value) > 4<<10 || strings.ContainsAny(value, "\x00\r\n") {
-			return nil, errors.New("project evaluate: image Config.Env is malformed")
+			return nil, nil, errors.New("project evaluate: image Config.Env is malformed")
 		}
 		if _, reserved := reservedEnvironment[name]; reserved {
+			// The connector supplies these, so the image's value is discarded
+			// either way — but a real credential baked into a layer is still
+			// refused rather than quietly dropped, because the layer is what
+			// gets shared and the developer should hear about it.
 			if credentialNamePattern.MatchString(name) && value != "" && value != "unused" {
-				return nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
+				return nil, nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
 			}
 			continue
 		}
 		if credentialNamePattern.MatchString(name) {
-			return nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
+			// An image may embed a credential-shaped name only as the empty or
+			// "unused" stand-in its SDK insists on — which is a placeholder, and
+			// is routed as one. Any other value is a credential baked into a
+			// layer, which is refused for the same reason it always was.
+			if value != "" && value != "unused" {
+				return nil, nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
+			}
+			placeholders[name] = value
+			continue
 		}
 		if _, duplicate := values[name]; duplicate {
-			return nil, fmt.Errorf("project evaluate: image has duplicate environment key %s", name)
+			return nil, nil, fmt.Errorf("project evaluate: image has duplicate environment key %s", name)
 		}
 		if err := validateEnvironmentURL(value); err != nil {
-			return nil, fmt.Errorf("project evaluate: image environment key %s: %w", name, err)
+			return nil, nil, fmt.Errorf("project evaluate: image environment key %s: %w", name, err)
 		}
 		values[name] = value
 	}
-	for name, value := range overrides {
+	// The project's declarations win over anything the image baked in.
+	for name, value := range declared.public {
+		delete(placeholders, name)
 		values[name] = value
+	}
+	for name, value := range declared.placeholder {
+		delete(values, name)
+		placeholders[name] = value
 	}
 	values["OPENBOX_EVALUATION_ID"] = evaluationID
 	values["OPENBOX_AGENT_ID"] = agentID
-	values["OPENAI_BASE_URL"] = reservedEnvironment["OPENAI_BASE_URL"]
-	values["OPENAI_API_KEY"] = reservedEnvironment["OPENAI_API_KEY"]
-	values["OPENAI_MODEL"] = reservedEnvironment["OPENAI_MODEL"]
-	return values, nil
+	return values, placeholders, nil
 }
 
 func validateEnvironmentURL(value string) error {
@@ -397,6 +448,36 @@ func preflightLocalServices(ctx context.Context, dependencies Dependencies, reso
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		response.Body.Close()
 	}
+	return nil
+}
+
+// preflightModelRoute proves the local Ollama serving inference.local has the
+// declared model, and has it cold.
+//
+// It runs only for OPENBOX_SANDBOX_MODEL_ROUTE=local-ollama. A project pointed
+// at OpenAI, Gemini, OpenRouter or a remote Ollama is served by something this
+// host cannot see: there is no tag list to read and no process to prove cold,
+// and running these checks anyway would assert a local fact about a remote
+// service. That route is recorded as unproven instead, which is the honest
+// answer and not a weaker one.
+//
+// The digest pin is likewise conditional. It used to be a compile-time constant
+// for one model; now it holds only when the project states one.
+func preflightModelRoute(ctx context.Context, dependencies Dependencies, result *prepared) error {
+	model := result.environment["OPENAI_MODEL"]
+	if model == "" {
+		return fmt.Errorf("project evaluate: the project must declare %sOPENAI_MODEL", publicPrefix)
+	}
+	// Required for every route, because the v1 effects schema requires a
+	// sha256 model_digest and offers no way to say a route publishes none.
+	// Demanding the project state it is the honest version of that constraint;
+	// synthesising one here would be the dishonest version.
+	if result.declared.modelDigest == "" {
+		return fmt.Errorf("project evaluate: the project must declare %s", modelDigestSetting)
+	}
+	if result.declared.modelRoute != ModelRouteLocalOllama {
+		return nil
+	}
 	response, err := get(ctx, dependencies.HTTP, ollamaTagsURL)
 	if err != nil || response == nil || response.StatusCode != http.StatusOK {
 		if response != nil {
@@ -412,18 +493,25 @@ func preflightLocalServices(ctx context.Context, dependencies Dependencies, reso
 	}
 	err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&tags)
 	response.Body.Close()
-	found := false
-	for _, model := range tags.Models {
-		if model.Name == InferenceModel && "sha256:"+model.Digest == InferenceModelDigest {
-			found = true
-		}
+	if err != nil {
+		return errors.New("project evaluate: local Ollama tag list is unreadable")
 	}
-	if err != nil || !found {
-		return errors.New("project evaluate: local Ollama granite4.1:3b digest does not match the accepted digest")
+	found := false
+	for _, candidate := range tags.Models {
+		if candidate.Name != model {
+			continue
+		}
+		if result.declared.modelDigest != "" && "sha256:"+candidate.Digest != result.declared.modelDigest {
+			return fmt.Errorf("project evaluate: local Ollama %s does not match the declared %s", model, modelDigestSetting)
+		}
+		found = true
+	}
+	if !found {
+		return fmt.Errorf("project evaluate: local Ollama does not serve %s", model)
 	}
 	loaded, err := dependencies.Commands.Run(ctx, Command{Name: "ollama", Args: []string{"ps"}})
-	if err != nil || strings.Contains(string(loaded.Stdout), InferenceModel) {
-		return errors.New("project evaluate: granite4.1:3b must not already be loaded")
+	if err != nil || strings.Contains(string(loaded.Stdout), model) {
+		return fmt.Errorf("project evaluate: %s must not already be loaded", model)
 	}
 	return nil
 }

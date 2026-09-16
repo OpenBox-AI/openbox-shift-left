@@ -189,8 +189,23 @@ func (state *runState) publishOutput(success bool, dependencies Dependencies) er
 		Effects: map[string]any{
 			"safe_sink":        map[string]any{"status": statusForReceipt(effect.MatchingReceipts), "attempts": effect.Attempts, "matching_receipts": effect.MatchingReceipts, "evaluation_id": state.prepared.evaluationID, "matched_at": effect.MatchedAt.Format(time.RFC3339Nano)},
 			"retrieval_poison": map[string]any{"status": "missing", "matching_receipts": 0},
-			"model_route":      map[string]any{"status": "observed", "provider": InferenceProvider, "model": InferenceModel, "model_digest": InferenceModelDigest},
-			"core_relay":       map[string]any{"status": "observed", "matching_validations": receipt.MatchingValidations, "governance_events": receipt.GovernanceEvents},
+			// Reported as declared, not as observed. Nothing on this path
+			// receipts a model call: the retired CLI lane proved it by grepping
+			// a gateway log line, and no typed receipt has replaced that. The
+			// pack's own coverage forces this channel to `missing`, and these
+			// fields say which route was configured, not that it was used.
+			// `provider` carries the declared route. The pack forces `status` to
+			// missing regardless: nothing on this path receipts a model call, so
+			// these fields say what was CONFIGURED, not what was served.
+			//
+			// model_digest is required by the v1 effects schema and must be a
+			// sha256, so this lane requires the project to declare one. For a
+			// hosted route that publishes no digest there is no truthful value —
+			// the field wants to be `expected_model_digest`, or to be optional,
+			// and either is a v2 effects change rather than something to paper
+			// over with a constant here.
+			"model_route": map[string]any{"status": "missing", "provider": state.prepared.declared.modelRoute, "model": state.prepared.environment["OPENAI_MODEL"], "model_digest": state.prepared.declared.modelDigest},
+			"core_relay":  map[string]any{"status": "observed", "matching_validations": receipt.MatchingValidations, "governance_events": receipt.GovernanceEvents},
 		},
 		FinalizedAt: dependencies.Clock.Now(),
 	})
@@ -240,9 +255,9 @@ func (state *runState) initializeRecord(started time.Time) {
 	record.Sandbox.Service = state.prepared.sandboxService
 	record.Sandbox.Capability = state.prepared.sandboxCapability
 	record.Sandbox.Provider = state.prepared.connector.openBoxProvider
-	record.Inference.Provider = InferenceProvider
-	record.Inference.Model = InferenceModel
-	record.Inference.ModelDigest = InferenceModelDigest
+	record.Inference.Provider = state.prepared.declared.modelRoute
+	record.Inference.Model = state.prepared.environment["OPENAI_MODEL"]
+	record.Inference.ModelDigest = state.prepared.declared.modelDigest
 	record.CoverageLimitations = []string{
 		"development observation only; not a production confinement or enforcement qualification",
 		"Core relay credential use is bound to the validated OCI entrypoint executable",
@@ -280,10 +295,14 @@ func (state *runState) phase(dependencies Dependencies, phase string) {
 }
 
 func (state *runState) execute(ctx context.Context, dependencies Dependencies) error {
-	if err := loadInferenceModel(ctx, dependencies.inferenceHTTP()); err != nil {
-		return &classifiedError{class: "model_load_failure", err: err}
+	// Only a local-ollama route has anything here to load. A gateway-served
+	// route is warmed, or not, by whoever runs it.
+	if state.prepared.declared.modelRoute == ModelRouteLocalOllama {
+		if err := loadInferenceModel(ctx, dependencies.inferenceHTTP(), state.prepared.environment["OPENAI_MODEL"]); err != nil {
+			return &classifiedError{class: "model_load_failure", err: err}
+		}
+		state.phase(dependencies, "model_loaded")
 	}
-	state.phase(dependencies, "model_loaded")
 
 	publication, cancel := context.WithTimeout(ctx, 120*time.Second)
 	err := state.startRegistry(publication, dependencies)
@@ -305,7 +324,7 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 	}
 	state.relay = relay
 	state.prepared.environment["OPENBOX_URL"] = fmt.Sprintf("http://host.openshell.internal:%d", relay.Port())
-	state.prepared.environmentNames = environmentInventory(state.prepared.environment)
+	state.prepared.environmentNames = environmentInventory(state.prepared.environment, state.prepared.placeholders)
 	state.record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 	state.phase(dependencies, "core_relay_started")
 	if state.observationClient != nil {
@@ -315,7 +334,7 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 		}
 		state.effectRelay = effectRelay
 		state.prepared.environment["OPENBOX_SAFE_SINK_URL"] = fmt.Sprintf("http://host.openshell.internal:%d/effects/safe", effectRelay.Port())
-		state.prepared.environmentNames = environmentInventory(state.prepared.environment)
+		state.prepared.environmentNames = environmentInventory(state.prepared.environment, state.prepared.placeholders)
 		state.record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 		state.phase(dependencies, "safe_effect_sink_started")
 	}
@@ -329,8 +348,8 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 	return nil
 }
 
-func loadInferenceModel(ctx context.Context, client HTTPDoer) error {
-	body := strings.NewReader(`{"model":"` + InferenceModel + `","keep_alive":"5m"}`)
+func loadInferenceModel(ctx context.Context, client HTTPDoer, model string) error {
+	body := strings.NewReader(`{"model":"` + model + `","keep_alive":"5m"}`)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, ollamaGenerateURL, body)
 	if err != nil {
 		return fmt.Errorf("project evaluate: construct Ollama model load request: %w", err)
@@ -338,19 +357,19 @@ func loadInferenceModel(ctx context.Context, client HTTPDoer) error {
 	request.Header.Set("content-type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		return errors.New("project evaluate: load local Granite model")
+		return fmt.Errorf("project evaluate: load local model %s", model)
 	}
 	defer response.Body.Close()
 	content, err := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
 	if err != nil || len(content) > 64<<10 || response.StatusCode != http.StatusOK {
-		return errors.New("project evaluate: load local Granite model")
+		return fmt.Errorf("project evaluate: load local model %s", model)
 	}
 	var result struct {
 		Model      string `json:"model"`
 		Done       bool   `json:"done"`
 		DoneReason string `json:"done_reason"`
 	}
-	if json.Unmarshal(content, &result) != nil || result.Model != InferenceModel || !result.Done || result.DoneReason != "load" {
+	if json.Unmarshal(content, &result) != nil || result.Model != model || !result.Done || result.DoneReason != "load" {
 		return errors.New("project evaluate: Ollama returned an invalid model load receipt")
 	}
 	return nil
@@ -551,9 +570,16 @@ func (state *runState) cleanup(dependencies Dependencies) error {
 	if (state.registryStarted || state.registryTag != "") && state.record.Cleanup.RegistryTagRemoved && state.record.Cleanup.RegistryContainerAbsent && state.record.Cleanup.RegistryVolumeAbsent {
 		state.phase(dependencies, "registry_removed")
 	}
-	state.record.Cleanup.OllamaModelUnloaded = ensureModelUnloaded(ctx, dependencies.Commands)
+	// Only a local-ollama route leaves a model loaded on this host to unload.
+	// A gateway-served route reports the unload as done because there was
+	// nothing here to do, not because a remote model was touched.
+	localModel := ""
+	if state.prepared.declared.modelRoute == ModelRouteLocalOllama {
+		localModel = state.prepared.environment["OPENAI_MODEL"]
+	}
+	state.record.Cleanup.OllamaModelUnloaded = ensureModelUnloaded(ctx, dependencies.Commands, localModel)
 	if !state.record.Cleanup.OllamaModelUnloaded {
-		cleanupErrors = append(cleanupErrors, errors.New("Granite model remains loaded"))
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("model %s remains loaded", localModel))
 	}
 	// The label sweep is gone with the CLI. The service owns the run's
 	// identity and answers absence directly, so a second probe by selector
@@ -566,18 +592,21 @@ func dockerObjectAbsent(ctx context.Context, runner CommandRunner, args []string
 	return err != nil && isNotFound(errors.New(string(append(result.Stdout, result.Stderr...))))
 }
 
-func ensureModelUnloaded(ctx context.Context, runner CommandRunner) bool {
+func ensureModelUnloaded(ctx context.Context, runner CommandRunner, model string) bool {
+	if model == "" {
+		return true
+	}
 	result, err := runner.Run(ctx, Command{Name: "ollama", Args: []string{"ps"}})
 	if err != nil {
 		return false
 	}
-	if strings.Contains(string(result.Stdout), InferenceModel) {
-		if _, err := runner.Run(ctx, Command{Name: "ollama", Args: []string{"stop", InferenceModel}}); err != nil {
+	if strings.Contains(string(result.Stdout), model) {
+		if _, err := runner.Run(ctx, Command{Name: "ollama", Args: []string{"stop", model}}); err != nil {
 			return false
 		}
 		for attempt := 0; attempt < 20; attempt++ {
 			result, err = runner.Run(ctx, Command{Name: "ollama", Args: []string{"ps"}})
-			if err != nil || !strings.Contains(string(result.Stdout), InferenceModel) {
+			if err != nil || !strings.Contains(string(result.Stdout), model) {
 				break
 			}
 			select {
@@ -587,7 +616,7 @@ func ensureModelUnloaded(ctx context.Context, runner CommandRunner) bool {
 			}
 		}
 	}
-	return err == nil && !strings.Contains(string(result.Stdout), InferenceModel)
+	return err == nil && !strings.Contains(string(result.Stdout), model)
 }
 
 func (state *runState) finishRecord() {
@@ -664,8 +693,18 @@ func sortedEnvironmentNames(values map[string]string) []string {
 	return names
 }
 
-func environmentInventory(values map[string]string) []string {
+// environmentInventory lists every variable name the guest receives.
+//
+// Names, never values. Placeholders are included because a reader needs to
+// know a credential-shaped name was present as a deliberate stand-in — leaving
+// them out would make the record say the guest never saw the variable at all.
+// OPENBOX_API_KEY is included for the inverse reason: it never appears in any
+// map here, because the gateway injects it, but the guest does receive it.
+func environmentInventory(values, placeholders map[string]string) []string {
 	names := sortedEnvironmentNames(values)
+	for name := range placeholders {
+		names = append(names, name)
+	}
 	names = append(names, "OPENBOX_API_KEY")
 	sort.Strings(names)
 	return names

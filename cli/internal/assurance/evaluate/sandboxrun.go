@@ -50,29 +50,27 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.sandboxRunID = runID
 
+	// Three channels, decided at parse time by what the project declared rather
+	// than by a name this function recognises.
+	//
 	// The real OPENBOX_API_KEY never leaves the gateway: the policy's
 	// credential_binding names the OpenBox provider and the proxy resolves it,
-	// so the evaluator holds it in no request it sends.
-	//
-	// OPENAI_API_KEY is a different thing that merely looks the same. The
-	// gateway routes model traffic through inference.local and injects the real
-	// credential there, so the guest needs only the literal stand-in its SDK
-	// demands be present. That is what the placeholder channel carries, and it
-	// is why the inference provider is NOT attached: an attached provider's
-	// credential keys must each be bound to an endpoint in this policy, and an
-	// unbound one makes OpenShell fail closed and revoke the whole set —
-	// including the OpenBox credential that was correctly bound.
+	// so the evaluator holds it in no request it sends. A credential-shaped name
+	// the project declared PUBLIC is a deliberate stand-in and goes on the
+	// placeholder channel — which is also why no inference provider is attached:
+	// an attached provider's credential keys must each be bound to an endpoint
+	// in this policy, and one unbound key makes OpenShell fail closed and revoke
+	// the whole set, including the OpenBox credential that was correctly bound.
 	environment := map[string]string{}
-	placeholders := map[string]string{}
 	for name, value := range state.prepared.environment {
-		switch name {
-		case "OPENBOX_API_KEY":
+		if name == "OPENBOX_API_KEY" {
 			continue
-		case "OPENAI_API_KEY":
-			placeholders[name] = value
-		default:
-			environment[name] = value
 		}
+		environment[name] = value
+	}
+	placeholders := map[string]string{}
+	for name, value := range state.prepared.placeholders {
+		placeholders[name] = value
 	}
 
 	state.phase(dependencies, "sandbox_creating")
