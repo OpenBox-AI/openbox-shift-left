@@ -56,10 +56,9 @@ type prepared struct {
 	sandboxService    string
 	sandboxCapability string
 	connector         connector
-	// placeholders are credential-shaped names carrying deliberate non-secrets.
-	placeholders map[string]string
-	// declared is the project's own `.env.sandbox`, kept for the secret names
-	// and the model-route setting. Its secret VALUES are never recorded.
+	// declared is the project's own `.env.sandbox`, kept for the secret NAMES
+	// the run must disclose and the model-route setting. Values are never
+	// recorded.
 	declared *projectEnvironment
 }
 
@@ -126,11 +125,11 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	}
 	result.image, result.argv, result.applicationRoot = image, argv, applicationRoot
 	result.declared = fileEnvironment
-	result.environment, result.placeholders, err = effectiveEnvironment(image.Config.Env, fileEnvironment, evaluationID, input.OpenBoxAgent)
+	result.environment, err = effectiveEnvironment(image.Config.Env, fileEnvironment, evaluationID, input.OpenBoxAgent)
 	if err != nil {
 		return nil, err
 	}
-	result.environmentNames = environmentInventory(result.environment, result.placeholders)
+	result.environmentNames = environmentInventory(result.environment)
 
 	if _, err := inspectImage(ctx, dependencies.Commands, RegistryImage); err != nil {
 		return nil, fmt.Errorf("project evaluate: required registry image is not preloaded: %w", err)
@@ -144,37 +143,7 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if err := preflightModelRoute(ctx, dependencies, result); err != nil {
 		return nil, err
 	}
-	if err := refuseUnconsumedSecrets(result.declared); err != nil {
-		return nil, err
-	}
 	return result, nil
-}
-
-// refuseUnconsumedSecrets fails a run that declares a secret this lane cannot
-// yet deliver.
-//
-// The parser understands OPENBOX_SANDBOX_SECRET_ and nothing consumes it. The
-// tempting alternative — accept the declaration and carry on — would start the
-// workload with the variable simply absent, which surfaces as whatever that
-// project does when its own credential is missing, arbitrarily far from the
-// cause. A run that cannot honour a declaration must say so before it runs
-// anything.
-//
-// Delivering one is not a matter of passing the value through: a credential
-// belongs to an OpenShell provider bound to an endpoint in this policy, and an
-// unbound credential key makes the gateway fail closed and revoke every other
-// credential with it. Until that provisioning path exists, this is a refusal
-// rather than a gap the caller has to notice.
-func refuseUnconsumedSecrets(declared *projectEnvironment) error {
-	names := declared.secretNames()
-	if len(names) == 0 {
-		return nil
-	}
-	return fmt.Errorf(
-		"project evaluate: %s declarations are not deliverable yet (%s); "+
-			"a credential must be an OpenShell provider bound to an endpoint in this policy, "+
-			"and this lane cannot provision one",
-		secretPrefix, strings.Join(names, ", "))
 }
 
 func validateInputStrings(input Input) error {
@@ -332,76 +301,70 @@ func parseEnvironment(content []byte) (*projectEnvironment, error) {
 			return nil, errors.New("project evaluate: environment file exceeds 64 entries")
 		}
 	}
-	// A secret's value never reaches the guest, so only the non-secret channels
-	// are URL-checked. Checking a secret's value would mean reading it here for
-	// a reason that is not passing it on.
-	for _, values := range []map[string]string{environment.public, environment.placeholder} {
-		for name, value := range values {
-			if err := validateEnvironmentURL(value); err != nil {
-				return nil, fmt.Errorf("project evaluate: environment key %s: %w", name, err)
-			}
+	// Only non-secret values are URL-checked. A credential is not a URL, and
+	// inspecting one here would mean reading it for a reason other than passing
+	// it on — which is the one thing this code should never do.
+	for name, value := range environment.public {
+		if err := validateEnvironmentURL(value); err != nil {
+			return nil, fmt.Errorf("project evaluate: environment key %s: %w", name, err)
 		}
 	}
 	return environment, nil
 }
 
 // effectiveEnvironment merges the image's own Config.Env with the project's
-// declarations, keeping the placeholder channel separate the whole way.
+// declarations into the one map the guest receives.
 //
 // The evaluator no longer injects model routing. `OPENAI_BASE_URL`,
 // `OPENAI_API_KEY` and `OPENAI_MODEL` used to be forced here to a local Ollama
-// serving one pinned model, which made every project that lane could evaluate
+// serving one pinned model, which made every project this lane could evaluate
 // the same project. They are the project's to declare now; only the five
-// connector values below are still the evaluator's.
-func effectiveEnvironment(imageEntries []string, declared *projectEnvironment, evaluationID, agentID string) (map[string]string, map[string]string, error) {
+// connector values are still the evaluator's.
+//
+// Public and secret declarations land in the same map, because they travel the
+// same way. What differs is what the run DISCLOSES about them, which
+// `ungovernedCredentialLimitations` handles from the names.
+func effectiveEnvironment(imageEntries []string, declared *projectEnvironment, evaluationID, agentID string) (map[string]string, error) {
 	values := make(map[string]string)
-	placeholders := make(map[string]string)
 	for _, entry := range imageEntries {
 		name, value, found := strings.Cut(entry, "=")
 		if !found || !environmentNamePattern.MatchString(name) || len(value) > 4<<10 || strings.ContainsAny(value, "\x00\r\n") {
-			return nil, nil, errors.New("project evaluate: image Config.Env is malformed")
+			return nil, errors.New("project evaluate: image Config.Env is malformed")
 		}
 		if _, reserved := reservedEnvironment[name]; reserved {
 			// The connector supplies these, so the image's value is discarded
-			// either way — but a real credential baked into a layer is still
-			// refused rather than quietly dropped, because the layer is what
-			// gets shared and the developer should hear about it.
+			// either way. A real credential baked into a layer is still refused
+			// rather than quietly dropped: the layer is what gets shared, and a
+			// secret in one outlives any single run.
 			if credentialNamePattern.MatchString(name) && value != "" && value != "unused" {
-				return nil, nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
+				return nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
 			}
 			continue
 		}
-		if credentialNamePattern.MatchString(name) {
-			// An image may embed a credential-shaped name only as the empty or
-			// "unused" stand-in its SDK insists on — which is a placeholder, and
-			// is routed as one. Any other value is a credential baked into a
-			// layer, which is refused for the same reason it always was.
-			if value != "" && value != "unused" {
-				return nil, nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
-			}
-			placeholders[name] = value
-			continue
+		// The same rule for a non-reserved name. A project that needs a real
+		// credential declares it in `.env.sandbox`, where the run can disclose
+		// it; baking one into the image hides it from the evidence entirely.
+		if credentialNamePattern.MatchString(name) && value != "" && value != "unused" {
+			return nil, fmt.Errorf("project evaluate: image embeds credential-looking environment key %s", name)
 		}
 		if _, duplicate := values[name]; duplicate {
-			return nil, nil, fmt.Errorf("project evaluate: image has duplicate environment key %s", name)
+			return nil, fmt.Errorf("project evaluate: image has duplicate environment key %s", name)
 		}
 		if err := validateEnvironmentURL(value); err != nil {
-			return nil, nil, fmt.Errorf("project evaluate: image environment key %s: %w", name, err)
+			return nil, fmt.Errorf("project evaluate: image environment key %s: %w", name, err)
 		}
 		values[name] = value
 	}
 	// The project's declarations win over anything the image baked in.
 	for name, value := range declared.public {
-		delete(placeholders, name)
 		values[name] = value
 	}
-	for name, value := range declared.placeholder {
-		delete(values, name)
-		placeholders[name] = value
+	for name, value := range declared.secret {
+		values[name] = value
 	}
 	values["OPENBOX_EVALUATION_ID"] = evaluationID
 	values["OPENBOX_AGENT_ID"] = agentID
-	return values, placeholders, nil
+	return values, nil
 }
 
 func validateEnvironmentURL(value string) error {

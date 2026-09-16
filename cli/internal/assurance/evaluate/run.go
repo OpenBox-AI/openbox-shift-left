@@ -286,6 +286,31 @@ func (state *runState) initializeRecord(started time.Time) {
 		// disproven.
 		"model route is not independently receipted; the inference credential is resolved at the gateway proxy",
 	}
+	record.CoverageLimitations = append(record.CoverageLimitations,
+		ungovernedCredentialLimitations(state.prepared.declared)...)
+}
+
+// ungovernedCredentialLimitations discloses every credential the workload was
+// handed in plaintext.
+//
+// Two ways a credential reaches the workload, and the pack must not blur them.
+// A credential bound by the policy's credential_binding is held by the proxy:
+// the workload gets the access and never the secret, and CANNOT use it
+// off-policy. A credential in the environment is simply given to the workload,
+// and the egress policy is the only thing between it and anywhere else.
+//
+// The second is supported on purpose — binding requires an endpoint, and many
+// credentials have none this lane can name — but a pack that reported both the
+// same way would claim a guarantee for half of them that only the first has.
+// So each one is named here, once, by name only.
+func ungovernedCredentialLimitations(declared *projectEnvironment) []string {
+	names := declared.secretNames()
+	limitations := make([]string, 0, len(names))
+	for _, name := range names {
+		limitations = append(limitations,
+			"credential "+name+" was supplied to the workload in plaintext; its use was not bound to an endpoint")
+	}
+	return limitations
 }
 
 func (state *runState) phase(dependencies Dependencies, phase string) {
@@ -324,7 +349,7 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 	}
 	state.relay = relay
 	state.prepared.environment["OPENBOX_URL"] = fmt.Sprintf("http://host.openshell.internal:%d", relay.Port())
-	state.prepared.environmentNames = environmentInventory(state.prepared.environment, state.prepared.placeholders)
+	state.prepared.environmentNames = environmentInventory(state.prepared.environment)
 	state.record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 	state.phase(dependencies, "core_relay_started")
 	if state.observationClient != nil {
@@ -334,7 +359,7 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 		}
 		state.effectRelay = effectRelay
 		state.prepared.environment["OPENBOX_SAFE_SINK_URL"] = fmt.Sprintf("http://host.openshell.internal:%d/effects/safe", effectRelay.Port())
-		state.prepared.environmentNames = environmentInventory(state.prepared.environment, state.prepared.placeholders)
+		state.prepared.environmentNames = environmentInventory(state.prepared.environment)
 		state.record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 		state.phase(dependencies, "safe_effect_sink_started")
 	}
@@ -695,16 +720,12 @@ func sortedEnvironmentNames(values map[string]string) []string {
 
 // environmentInventory lists every variable name the guest receives.
 //
-// Names, never values. Placeholders are included because a reader needs to
-// know a credential-shaped name was present as a deliberate stand-in — leaving
-// them out would make the record say the guest never saw the variable at all.
-// OPENBOX_API_KEY is included for the inverse reason: it never appears in any
-// map here, because the gateway injects it, but the guest does receive it.
-func environmentInventory(values, placeholders map[string]string) []string {
+// Names, never values. OPENBOX_API_KEY is appended because it never appears in
+// the map — the gateway injects it — but the guest does receive it, and a
+// record that listed only what this process assembled would understate what
+// the workload could reach.
+func environmentInventory(values map[string]string) []string {
 	names := sortedEnvironmentNames(values)
-	for name := range placeholders {
-		names = append(names, name)
-	}
 	names = append(names, "OPENBOX_API_KEY")
 	sort.Strings(names)
 	return names

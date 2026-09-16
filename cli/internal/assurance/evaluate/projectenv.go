@@ -8,10 +8,10 @@ import (
 
 // The declaration prefixes a project uses in `.env.sandbox`.
 //
-// A bare name in that file stays what it always was: a non-secret application
-// default. The prefixes exist for the two things a bare name cannot express —
-// a value that LOOKS like a credential but deliberately is not one, and a value
-// that genuinely is one.
+// They decide how a value is REPORTED, not how it travels — everything here
+// reaches the guest as an ordinary environment variable. PUBLIC_ says "this is
+// a setting", SECRET_ says "this is a credential and I know the workload gets
+// it in plaintext". A bare name is read by shape, erring toward SECRET_.
 const (
 	publicPrefix = "OPENBOX_SANDBOX_PUBLIC_"
 	secretPrefix = "OPENBOX_SANDBOX_SECRET_"
@@ -31,20 +31,18 @@ const (
 )
 
 // projectEnvironment is one `.env.sandbox` file, classified.
-//
-// The three maps are separate all the way to the wire because they leave this
-// host by three different routes, and collapsing them would mean the evaluator
-// deciding which route a value takes by inspecting it. The developer decides.
 type projectEnvironment struct {
-	// public reaches the guest as an ordinary environment value.
+	// public and secret BOTH reach the guest as ordinary environment values.
+	// The split is about what the run can honestly say afterwards, not about
+	// how the value travels: a secret here is ungoverned, and the pack names it
+	// as such in coverage_limitations.
+	//
+	// The governed alternative is a policy `credential_binding`, where the
+	// proxy holds the credential and the workload cannot use it off-policy. The
+	// connector key takes that path. It is not available for every credential —
+	// non-HTTP protocols, SDKs that sign their own requests, endpoints unknown
+	// until runtime — which is why this one exists rather than being refused.
 	public map[string]string
-	// placeholder reaches the guest under a credential-shaped name, carrying a
-	// value that is deliberately not a credential. The sandbox service bounds
-	// these to short simple tokens.
-	placeholder map[string]string
-	// secret never reaches the guest as a value at all. Each entry names an
-	// OpenShell provider credential; the gateway resolves it and the policy
-	// binds it to an endpoint.
 	secret map[string]string
 
 	// modelRoute and modelDigest describe what serves inference.local, which is
@@ -55,19 +53,24 @@ type projectEnvironment struct {
 
 func newProjectEnvironment() *projectEnvironment {
 	return &projectEnvironment{
-		public:      map[string]string{},
-		placeholder: map[string]string{},
-		secret:      map[string]string{},
-		modelRoute:  ModelRouteLocalOllama,
+		public:     map[string]string{},
+		secret:     map[string]string{},
+		modelRoute: ModelRouteLocalOllama,
 	}
 }
 
-// classify files one declaration, returning the guest-visible name.
+// classify files one declaration.
 //
-// The rule is positional, not value-based: the prefix says which channel, and
-// whether the stripped name looks like a credential then decides between the
-// two public channels. An evaluator that sniffed values instead would be
-// guessing at the one thing the developer is best placed to state.
+// Nothing is refused. Every declaration reaches the guest as an ordinary
+// environment variable; the prefix decides only how the run REPORTS it, and
+// reporting is the whole job here. The evidence has to be able to say which
+// values were credentials, and the developer is the only one who knows.
+//
+// A bare credential-shaped name is filed as a secret rather than as public.
+// That is the safe direction of error: over-reporting a setting as an
+// ungoverned credential costs one line in the pack's limitations, while
+// under-reporting a real credential as non-secret would make the pack assert
+// something false about the run.
 func (environment *projectEnvironment) classify(name, value string, line int) error {
 	switch {
 	case strings.HasPrefix(name, secretPrefix):
@@ -88,20 +91,15 @@ func (environment *projectEnvironment) classify(name, value string, line int) er
 		if environment.declared(guestName) {
 			return fmt.Errorf("project evaluate: line %d redeclares %s", line, guestName)
 		}
-		if credentialNamePattern.MatchString(guestName) {
-			environment.placeholder[guestName] = value
-			return nil
-		}
 		environment.public[guestName] = value
 		return nil
 	default:
-		if credentialNamePattern.MatchString(name) {
-			return fmt.Errorf(
-				"project evaluate: line %d uses credential-looking key %s; declare it as %s%s or %s%s",
-				line, name, secretPrefix, name, publicPrefix, name)
-		}
 		if environment.declared(name) {
 			return fmt.Errorf("project evaluate: line %d redeclares %s", line, name)
+		}
+		if credentialNamePattern.MatchString(name) {
+			environment.secret[name] = value
+			return nil
 		}
 		environment.public[name] = value
 		return nil
@@ -110,13 +108,12 @@ func (environment *projectEnvironment) classify(name, value string, line int) er
 
 func (environment *projectEnvironment) declared(name string) bool {
 	_, public := environment.public[name]
-	_, placeholder := environment.placeholder[name]
 	_, secret := environment.secret[name]
-	return public || placeholder || secret
+	return public || secret
 }
 
 func (environment *projectEnvironment) entries() int {
-	return len(environment.public) + len(environment.placeholder) + len(environment.secret)
+	return len(environment.public) + len(environment.secret)
 }
 
 // setting consumes an evaluator-directed setting line, which configures the run
@@ -142,8 +139,9 @@ func (environment *projectEnvironment) setting(name, value string, line int) (bo
 	}
 }
 
-// secretNames lists declared secrets in a stable order. Names only — the values
-// are never rendered, logged, or recorded.
+// secretNames lists the credentials this run hands the workload in plaintext,
+// in a stable order. Names only — a value is never rendered, logged or recorded,
+// which is the one thing that stays true whichever channel it took.
 func (environment *projectEnvironment) secretNames() []string {
 	names := make([]string, 0, len(environment.secret))
 	for name := range environment.secret {

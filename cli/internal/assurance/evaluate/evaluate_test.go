@@ -30,13 +30,12 @@ func TestParseEnvironment(t *testing.T) {
 	}
 
 	tests := map[string]string{
-		"duplicate":             "A=1\nA=2\n",
-		"export":                "export A=1\n",
-		"reserved":              "OPENBOX_URL=http://127.0.0.1:1\n",
-		"undeclared credential": "SERVICE_TOKEN=value\n",
-		"remote URL":            "ENDPOINT=https://example.com/v1\n",
-		"indented comment":      "  # not-a-comment\n",
-		"bad name":              "1A=value\n",
+		"duplicate":        "A=1\nA=2\n",
+		"export":           "export A=1\n",
+		"reserved":         "OPENBOX_URL=http://127.0.0.1:1\n",
+		"remote URL":       "ENDPOINT=https://example.com/v1\n",
+		"indented comment": "  # not-a-comment\n",
+		"bad name":         "1A=value\n",
 	}
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -87,45 +86,73 @@ func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
 	declared, err := parseEnvironment([]byte(
 		"A=file\nB=file\n" +
 			publicPrefix + "OPENAI_MODEL=granite4.1:3b\n" +
-			publicPrefix + "OPENAI_API_KEY=unused\n"))
+			secretPrefix + "OPENAI_API_KEY=sk-live\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	values, placeholders, err := effectiveEnvironment(
+	values, err := effectiveEnvironment(
 		[]string{"PATH=/usr/bin", "A=image", "OPENAI_API_KEY=unused"}, declared, "ev-one", "agent-one")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The project's declaration beats the image's baked-in value.
+	// The project's declaration beats the image's baked-in value, for a secret
+	// exactly as for a setting.
 	if values["A"] != "file" || values["OPENBOX_EVALUATION_ID"] != "ev-one" || values["OPENAI_MODEL"] != "granite4.1:3b" {
 		t.Fatalf("values=%v", values)
 	}
-	// A credential-shaped name lands on the placeholder channel and nowhere
-	// else — being in both would put the value on a wire that refuses it.
-	if placeholders["OPENAI_API_KEY"] != "unused" {
-		t.Fatalf("placeholders=%v", placeholders)
+	if values["OPENAI_API_KEY"] != "sk-live" {
+		t.Fatalf("declared secret did not reach the guest environment: %v", values["OPENAI_API_KEY"])
 	}
-	if _, leaked := values["OPENAI_API_KEY"]; leaked {
-		t.Fatal("placeholder also appeared in the ordinary environment")
-	}
-	// The evaluator no longer injects the model route, so OPENAI_BASE_URL is
-	// absent unless declared. The placeholder IS listed: the guest receives it,
-	// and a record that omitted it would say the variable was never there.
 	wantNames := []string{"A", "B", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENBOX_AGENT_ID", "OPENBOX_API_KEY", "OPENBOX_EVALUATION_ID", "PATH"}
-	if got := environmentInventory(values, placeholders); !reflect.DeepEqual(got, wantNames) {
+	if got := environmentInventory(values); !reflect.DeepEqual(got, wantNames) {
 		t.Fatalf("names=%v want=%v", got, wantNames)
 	}
 
+	// A credential baked into the IMAGE is still refused. The run cannot
+	// disclose what it never saw declared, and a layer outlives the run.
 	empty := newProjectEnvironment()
-	if _, _, err := effectiveEnvironment([]string{"SERVICE_SECRET=x"}, empty, "ev", "agent"); err == nil {
-		t.Fatal("accepted embedded credential")
+	if _, err := effectiveEnvironment([]string{"SERVICE_SECRET=real-value"}, empty, "ev", "agent"); err == nil {
+		t.Fatal("accepted a credential baked into the image")
 	}
-	if _, _, err := effectiveEnvironment([]string{"OPENBOX_API_KEY=embedded"}, empty, "ev", "agent"); err == nil {
+	if _, err := effectiveEnvironment([]string{"OPENBOX_API_KEY=embedded"}, empty, "ev", "agent"); err == nil {
 		t.Fatal("accepted embedded reserved credential")
+	}
+	// The stand-in an SDK insists on stays allowed.
+	if _, err := effectiveEnvironment([]string{"SERVICE_TOKEN=unused"}, empty, "ev", "agent"); err != nil {
+		t.Fatalf("refused a placeholder-valued image variable: %v", err)
 	}
 }
 
-// The three channels of `.env.sandbox`, and the rule that decides them.
+// Every credential the workload gets in plaintext is named in the pack. The
+// bound one is not, because it is not in plaintext.
+func TestUngovernedCredentialsAreDisclosedByName(t *testing.T) {
+	declared, err := parseEnvironment([]byte(
+		publicPrefix + "OPENAI_MODEL=granite4.1:3b\n" +
+			secretPrefix + "PAYMENTS_API_KEY=sk-live-do-not-log\n" +
+			"SERVICE_TOKEN=also-a-secret\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitations := ungovernedCredentialLimitations(declared)
+	if len(limitations) != 2 {
+		t.Fatalf("limitations=%v", limitations)
+	}
+	joined := strings.Join(limitations, "\n")
+	// Declared, and undeclared-but-credential-shaped, are both disclosed.
+	for _, name := range []string{"PAYMENTS_API_KEY", "SERVICE_TOKEN"} {
+		if !strings.Contains(joined, name) {
+			t.Fatalf("%s was not disclosed: %v", name, limitations)
+		}
+	}
+	// A setting is not a credential, and values never appear.
+	if strings.Contains(joined, "OPENAI_MODEL") || strings.Contains(joined, "sk-live") || strings.Contains(joined, "also-a-secret") {
+		t.Fatalf("disclosure is wrong: %v", limitations)
+	}
+	if got := ungovernedCredentialLimitations(newProjectEnvironment()); len(got) != 0 {
+		t.Fatalf("a project with no credentials disclosed %v", got)
+	}
+}
+
 func TestProjectEnvironmentClassifiesByDeclarationNotByValue(t *testing.T) {
 	declared, err := parseEnvironment([]byte(
 		"NODE_ENV=production\n" +
@@ -139,10 +166,10 @@ func TestProjectEnvironmentClassifiesByDeclarationNotByValue(t *testing.T) {
 	if declared.public["NODE_ENV"] != "production" || declared.public["OPENAI_BASE_URL"] == "" {
 		t.Fatalf("public=%v", declared.public)
 	}
-	// Credential-SHAPED but declared public: a stand-in, on the placeholder
-	// channel, never in public.
-	if declared.placeholder["OPENAI_API_KEY"] != "unused" || declared.public["OPENAI_API_KEY"] != "" {
-		t.Fatalf("placeholder=%v public=%v", declared.placeholder, declared.public)
+	// Credential-SHAPED but declared PUBLIC is taken at its word: the developer
+	// said this is a stand-in, so it is not disclosed as a credential.
+	if declared.public["OPENAI_API_KEY"] != "unused" || declared.secret["OPENAI_API_KEY"] != "" {
+		t.Fatalf("public=%v secret=%v", declared.public, declared.secret)
 	}
 	if declared.secret["PAYMENTS_API_KEY"] == "" || len(declared.secretNames()) != 1 {
 		t.Fatalf("secret names=%v", declared.secretNames())
@@ -151,11 +178,16 @@ func TestProjectEnvironmentClassifiesByDeclarationNotByValue(t *testing.T) {
 		t.Fatalf("model route=%q", declared.modelRoute)
 	}
 
-	// A bare credential-shaped name is refused, and the error says which
-	// prefix to reach for rather than only that it was rejected.
-	_, err = parseEnvironment([]byte("SERVICE_TOKEN=value\n"))
-	if err == nil || !strings.Contains(err.Error(), secretPrefix) || !strings.Contains(err.Error(), publicPrefix) {
-		t.Fatalf("err=%v", err)
+	// Nothing is refused for its name. An undeclared credential-shaped name is
+	// accepted and filed as a secret — the safe direction, since the cost is a
+	// line in the pack's limitations, while the reverse would have the pack
+	// assert that a real credential was not one.
+	bare, err := parseEnvironment([]byte("SERVICE_TOKEN=value\n"))
+	if err != nil {
+		t.Fatalf("a bare credential-shaped name was refused: %v", err)
+	}
+	if bare.secret["SERVICE_TOKEN"] != "value" || len(bare.public) != 0 {
+		t.Fatalf("public=%v secret=%v", bare.public, bare.secret)
 	}
 	// One name, two channels, is a contradiction rather than a precedence.
 	if _, err := parseEnvironment([]byte(publicPrefix + "TOKEN=a\n" + secretPrefix + "TOKEN=b\n")); err == nil {
@@ -797,28 +829,5 @@ func TestConnectorResolvesPerEnvironmentAndDefaultsToLocalStack(t *testing.T) {
 		if _, err := resolveConnector(input); err == nil {
 			t.Fatalf("%s was accepted", name)
 		}
-	}
-}
-
-// A declaration this lane cannot honour must fail before the workload starts,
-// not become a variable the guest silently never receives.
-func TestDeclaredSecretsAreRefusedRatherThanSilentlyDropped(t *testing.T) {
-	declared, err := parseEnvironment([]byte(secretPrefix + "PAYMENTS_API_KEY=sk-live\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = refuseUnconsumedSecrets(declared)
-	if err == nil {
-		t.Fatal("a declared secret was accepted and would have been dropped")
-	}
-	// The name is named so the developer can find it; the value never is.
-	if !strings.Contains(err.Error(), "PAYMENTS_API_KEY") {
-		t.Fatalf("error does not name the declaration: %v", err)
-	}
-	if strings.Contains(err.Error(), "sk-live") {
-		t.Fatalf("error leaked the secret value: %v", err)
-	}
-	if err := refuseUnconsumedSecrets(newProjectEnvironment()); err != nil {
-		t.Fatalf("a project with no secrets was refused: %v", err)
 	}
 }

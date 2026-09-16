@@ -237,21 +237,20 @@ func (client *Client) SupportsProjectRun(timeout time.Duration) (bool, error) {
 
 // ProjectRunSpec is the closed run envelope.
 //
-// Environment carries no secrets — the service refuses a credential-shaped name
-// outright. Providers are NAMES: the gateway resolves the credential, so no
-// secret value is representable here.
+// Environment is ordinary guest environment and MAY carry credentials. The
+// service does not inspect it for them, so a caller putting a secret here is
+// choosing the ungoverned path and owes that disclosure to its own evidence.
+//
+// Providers are NAMES: a credential resolved through a policy credential_binding
+// is held by the proxy and never crosses this wire, which is the governed path
+// and the stronger one wherever the credential can be bound to an endpoint.
 type ProjectRunSpec struct {
 	RunID          string            `json:"run_id"`
 	Template       string            `json:"template"`
 	PolicyDocument PolicyDocument    `json:"policy_document"`
 	ExpectedPolicy PolicyIdentity    `json:"expected_policy"`
 	Environment    map[string]string `json:"environment"`
-	// PlaceholderEnvironment carries non-secret stand-ins under the
-	// credential-shaped names Environment refuses. The service bounds the
-	// values to short simple tokens; it is a guardrail, not a proof, so put
-	// nothing here that would matter if it were read.
-	PlaceholderEnvironment map[string]string `json:"placeholder_environment"`
-	Providers              []string          `json:"providers"`
+	Providers      []string          `json:"providers"`
 	// Command is the workload, and it runs as the sandbox's MAIN process.
 	//
 	// Not an exec session. Only the main process receives the environment
@@ -329,9 +328,6 @@ func (client *Client) Begin(spec ProjectRunSpec, deadline time.Duration) (runID 
 	// response frame to discover.
 	if spec.Environment == nil {
 		spec.Environment = map[string]string{}
-	}
-	if spec.PlaceholderEnvironment == nil {
-		spec.PlaceholderEnvironment = map[string]string{}
 	}
 	if spec.Providers == nil {
 		spec.Providers = []string{}

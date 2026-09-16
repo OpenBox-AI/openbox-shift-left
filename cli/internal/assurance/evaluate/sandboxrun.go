@@ -50,27 +50,25 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.sandboxRunID = runID
 
-	// Three channels, decided at parse time by what the project declared rather
-	// than by a name this function recognises.
+	// One environment map, and one name held out of it.
 	//
-	// The real OPENBOX_API_KEY never leaves the gateway: the policy's
+	// OPENBOX_API_KEY is the governed credential: the policy's
 	// credential_binding names the OpenBox provider and the proxy resolves it,
-	// so the evaluator holds it in no request it sends. A credential-shaped name
-	// the project declared PUBLIC is a deliberate stand-in and goes on the
-	// placeholder channel — which is also why no inference provider is attached:
-	// an attached provider's credential keys must each be bound to an endpoint
-	// in this policy, and one unbound key makes OpenShell fail closed and revoke
-	// the whole set, including the OpenBox credential that was correctly bound.
+	// so the workload gets the access and never the secret, and the evaluator
+	// holds it in no request it sends. Everything else the project declared —
+	// including credentials it declared SECRET — is ordinary guest environment,
+	// which the pack records as ungoverned.
+	//
+	// It is also why no inference provider is attached: an attached provider's
+	// credential keys must each be bound to an endpoint in this policy, and one
+	// unbound key makes OpenShell fail closed and revoke the whole set,
+	// including the OpenBox credential that was correctly bound.
 	environment := map[string]string{}
 	for name, value := range state.prepared.environment {
 		if name == "OPENBOX_API_KEY" {
 			continue
 		}
 		environment[name] = value
-	}
-	placeholders := map[string]string{}
-	for name, value := range state.prepared.placeholders {
-		placeholders[name] = value
 	}
 
 	state.phase(dependencies, "sandbox_creating")
@@ -82,11 +80,10 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 			MediaType: "application/yaml",
 			Base64:    base64.StdEncoding.EncodeToString(document),
 		},
-		ExpectedPolicy:         identity,
-		Environment:            environment,
-		PlaceholderEnvironment: placeholders,
+		ExpectedPolicy: identity,
+		Environment:    environment,
 		// Only the OpenBox provider, and only because this policy binds its
-		// credential to an endpoint. See the environment split above.
+		// credential to an endpoint. See the note above.
 		Providers: []string{state.prepared.connector.openBoxProvider},
 		// The image's own entrypoint, as the sandbox's MAIN process. That is
 		// what makes the provider credentials reach it at all.

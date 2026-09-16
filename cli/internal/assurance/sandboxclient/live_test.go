@@ -38,6 +38,20 @@ func liveCommand() []string {
 	return []string{"/bin/sh", "-c", "echo openbox-live-proof"}
 }
 
+// liveEnvironment lets a probe put arbitrary variables in the guest, including
+// credential-shaped ones — which is the point: this wire carries them now, and
+// a test that could only send settings would not exercise that.
+func liveEnvironment(runID string) map[string]string {
+	values := map[string]string{"OPENBOX_EVALUATION_ID": runID}
+	for _, entry := range strings.Split(os.Getenv("OPENBOX_SANDBOX_LIVE_ENV"), "\x1f") {
+		name, value, found := strings.Cut(entry, "=")
+		if found && name != "" {
+			values[name] = value
+		}
+	}
+	return values
+}
+
 // providersFromEnv attaches named providers. Attachment is not free: every
 // credential key an attached provider declares must be bound to an endpoint in
 // the run's policy, and one unbound key makes OpenShell fail closed and revoke
@@ -116,14 +130,13 @@ func TestLiveProjectRunRoundTrip(t *testing.T) {
 		t.Fatalf("run id: %v", err)
 	}
 	spec := ProjectRunSpec{
-		RunID:                  runID,
-		Template:               image,
-		PolicyDocument:         policy,
-		ExpectedPolicy:         identity,
-		Environment:            map[string]string{"OPENBOX_EVALUATION_ID": runID},
-		PlaceholderEnvironment: map[string]string{"OPENAI_API_KEY": "unused"},
-		Providers:              providersFromEnv(),
-		Command:                liveCommand(),
+		RunID:          runID,
+		Template:       image,
+		PolicyDocument: policy,
+		ExpectedPolicy: identity,
+		Environment:    liveEnvironment(runID),
+		Providers:      providersFromEnv(),
+		Command:        liveCommand(),
 	}
 
 	begunID, token, err := client.Begin(spec, 5*time.Minute)
