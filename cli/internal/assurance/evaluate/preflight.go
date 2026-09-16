@@ -459,7 +459,7 @@ func preflightLocalServices(ctx context.Context, dependencies Dependencies, reso
 func preflightModelRoute(ctx context.Context, dependencies Dependencies, result *prepared) error {
 	model := result.environment["OPENAI_MODEL"]
 	if model == "" {
-		return fmt.Errorf("project evaluate: the project must declare %sOPENAI_MODEL", publicPrefix)
+		return errors.New("project evaluate: .env.sandbox must set OPENAI_MODEL")
 	}
 	// Required for every route, because the v1 effects schema requires a
 	// sha256 model_digest and offers no way to say a route publishes none.

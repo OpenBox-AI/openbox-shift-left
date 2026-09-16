@@ -290,8 +290,8 @@ func (state *runState) initializeRecord(started time.Time) {
 		ungovernedCredentialLimitations(state.prepared.declared)...)
 }
 
-// ungovernedCredentialLimitations discloses every credential the workload was
-// handed in plaintext.
+// ungovernedCredentialLimitations discloses every credential-shaped variable
+// the workload was handed in plaintext.
 //
 // Two ways a credential reaches the workload, and the pack must not blur them.
 // A credential bound by the policy's credential_binding is held by the proxy:
@@ -307,8 +307,12 @@ func ungovernedCredentialLimitations(declared *projectEnvironment) []string {
 	names := declared.secretNames()
 	limitations := make([]string, 0, len(names))
 	for _, name := range names {
+		// "credential-shaped", not "credential". The run classified this by
+		// name, so it knows the variable was supplied in plaintext and unbound
+		// — both observed — but not that the value is really a secret. Saying
+		// more than that would be the pack guessing in its own evidence.
 		limitations = append(limitations,
-			"credential "+name+" was supplied to the workload in plaintext; its use was not bound to an endpoint")
+			"credential-shaped variable "+name+" was supplied to the workload in plaintext and was not bound to an endpoint")
 	}
 	return limitations
 }

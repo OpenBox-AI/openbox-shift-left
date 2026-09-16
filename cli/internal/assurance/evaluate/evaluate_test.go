@@ -85,8 +85,8 @@ func TestEnvironmentFileRejectsSymlink(t *testing.T) {
 func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
 	declared, err := parseEnvironment([]byte(
 		"A=file\nB=file\n" +
-			publicPrefix + "OPENAI_MODEL=granite4.1:3b\n" +
-			secretPrefix + "OPENAI_API_KEY=sk-live\n"))
+			"OPENAI_MODEL=granite4.1:3b\n" +
+			"OPENAI_API_KEY=sk-live\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,8 +127,8 @@ func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
 // bound one is not, because it is not in plaintext.
 func TestUngovernedCredentialsAreDisclosedByName(t *testing.T) {
 	declared, err := parseEnvironment([]byte(
-		publicPrefix + "OPENAI_MODEL=granite4.1:3b\n" +
-			secretPrefix + "PAYMENTS_API_KEY=sk-live-do-not-log\n" +
+		"OPENAI_MODEL=granite4.1:3b\n" +
+			"PAYMENTS_API_KEY=sk-live-do-not-log\n" +
 			"SERVICE_TOKEN=also-a-secret\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -153,45 +153,52 @@ func TestUngovernedCredentialsAreDisclosedByName(t *testing.T) {
 	}
 }
 
-func TestProjectEnvironmentClassifiesByDeclarationNotByValue(t *testing.T) {
+func TestProjectEnvironmentIsAnOrdinaryDotenvFile(t *testing.T) {
+	// No prefixes, no declaration syntax. This is what a developer gets by
+	// copying their own .env and adding the two runner directives.
 	declared, err := parseEnvironment([]byte(
 		"NODE_ENV=production\n" +
-			modelRouteSetting + "=" + ModelRouteGateway + "\n" +
-			publicPrefix + "OPENAI_BASE_URL=https://inference.local/v1\n" +
-			publicPrefix + "OPENAI_API_KEY=unused\n" +
-			secretPrefix + "PAYMENTS_API_KEY=sk-live-do-not-log\n"))
+			"OPENAI_BASE_URL=https://inference.local/v1\n" +
+			"OPENAI_MODEL=granite4.1:3b\n" +
+			"OPENAI_API_KEY=unused\n" +
+			"PAYMENTS_API_KEY=sk-live-do-not-log\n" +
+			modelRouteSetting + "=" + ModelRouteGateway + "\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if declared.public["NODE_ENV"] != "production" || declared.public["OPENAI_BASE_URL"] == "" {
-		t.Fatalf("public=%v", declared.public)
+	// Ordinary names stay ordinary and keep their own spelling.
+	for name, want := range map[string]string{
+		"NODE_ENV":        "production",
+		"OPENAI_BASE_URL": "https://inference.local/v1",
+		"OPENAI_MODEL":    "granite4.1:3b",
+	} {
+		if declared.public[name] != want {
+			t.Fatalf("public[%s]=%q want %q", name, declared.public[name], want)
+		}
 	}
-	// Credential-SHAPED but declared PUBLIC is taken at its word: the developer
-	// said this is a stand-in, so it is not disclosed as a credential.
-	if declared.public["OPENAI_API_KEY"] != "unused" || declared.secret["OPENAI_API_KEY"] != "" {
-		t.Fatalf("public=%v secret=%v", declared.public, declared.secret)
+	// Credential-shaped names are filed for disclosure by SHAPE, since nothing
+	// in the file marks them. That catches the real key and also the stand-in;
+	// over-reporting is the direction this errs in on purpose.
+	if got := declared.secretNames(); !reflect.DeepEqual(got, []string{"OPENAI_API_KEY", "PAYMENTS_API_KEY"}) {
+		t.Fatalf("secret names=%v", got)
 	}
-	if declared.secret["PAYMENTS_API_KEY"] == "" || len(declared.secretNames()) != 1 {
-		t.Fatalf("secret names=%v", declared.secretNames())
-	}
+	// A runner directive is consumed, not passed to the guest.
 	if declared.modelRoute != ModelRouteGateway {
 		t.Fatalf("model route=%q", declared.modelRoute)
 	}
+	if declared.public[modelRouteSetting] != "" || declared.secret[modelRouteSetting] != "" {
+		t.Fatal("a runner directive leaked into the guest environment")
+	}
 
-	// Nothing is refused for its name. An undeclared credential-shaped name is
-	// accepted and filed as a secret — the safe direction, since the cost is a
-	// line in the pack's limitations, while the reverse would have the pack
-	// assert that a real credential was not one.
-	bare, err := parseEnvironment([]byte("SERVICE_TOKEN=value\n"))
-	if err != nil {
-		t.Fatalf("a bare credential-shaped name was refused: %v", err)
+	// Nothing is refused for its name, whatever its shape.
+	for _, line := range []string{"SERVICE_TOKEN=value\n", "AWS_SECRET_ACCESS_KEY=abc\n", "DB_PASSWORD=hunter2\n"} {
+		if _, err := parseEnvironment([]byte(line)); err != nil {
+			t.Fatalf("%q was refused: %v", line, err)
+		}
 	}
-	if bare.secret["SERVICE_TOKEN"] != "value" || len(bare.public) != 0 {
-		t.Fatalf("public=%v secret=%v", bare.public, bare.secret)
-	}
-	// One name, two channels, is a contradiction rather than a precedence.
-	if _, err := parseEnvironment([]byte(publicPrefix + "TOKEN=a\n" + secretPrefix + "TOKEN=b\n")); err == nil {
-		t.Fatal("accepted a name declared on two channels")
+	// One name twice is still a contradiction rather than a precedence.
+	if _, err := parseEnvironment([]byte("TOKEN=a\nTOKEN=b\n")); err == nil {
+		t.Fatal("accepted a name declared twice")
 	}
 	for name, input := range map[string]string{
 		"unknown route": modelRouteSetting + "=somewhere\n",
@@ -316,7 +323,7 @@ func TestExistingOutputFailsBeforeReadsOrCommands(t *testing.T) {
 func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 	parent := t.TempDir()
 	envFile := filepath.Join(parent, "evaluation.env")
-	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"+publicPrefix+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(parent, "record")
@@ -419,7 +426,7 @@ func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			parent := t.TempDir()
 			envFile := filepath.Join(parent, "evaluation.env")
-			if err := os.WriteFile(envFile, []byte(publicPrefix+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(envFile, []byte("OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(parent, "record")

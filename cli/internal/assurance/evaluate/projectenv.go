@@ -3,19 +3,17 @@ package evaluate
 import (
 	"fmt"
 	"sort"
-	"strings"
 )
 
-// The declaration prefixes a project uses in `.env.sandbox`.
+// The two evaluator directives a project may set in `.env.sandbox`.
 //
-// They decide how a value is REPORTED, not how it travels — everything here
-// reaches the guest as an ordinary environment variable. PUBLIC_ says "this is
-// a setting", SECRET_ says "this is a credential and I know the workload gets
-// it in plaintext". A bare name is read by shape, erring toward SECRET_.
+// These keep an OPENBOX_SANDBOX_ prefix while ordinary variables have none, and
+// the asymmetry is deliberate: they are not the project's environment, they are
+// instructions to the runner, and an exact-name prefix is what keeps them from
+// colliding with a variable the workload actually wants. Nothing else in the
+// file is renamed, which is the point — `.env.sandbox` is meant to be a copy of
+// the project's own `.env`.
 const (
-	publicPrefix = "OPENBOX_SANDBOX_PUBLIC_"
-	secretPrefix = "OPENBOX_SANDBOX_SECRET_"
-
 	// modelRouteSetting selects whether the host owes an Ollama preflight.
 	modelRouteSetting  = "OPENBOX_SANDBOX_MODEL_ROUTE"
 	modelDigestSetting = "OPENBOX_SANDBOX_MODEL_DIGEST"
@@ -32,10 +30,10 @@ const (
 
 // projectEnvironment is one `.env.sandbox` file, classified.
 type projectEnvironment struct {
-	// public and secret BOTH reach the guest as ordinary environment values.
-	// The split is about what the run can honestly say afterwards, not about
-	// how the value travels: a secret here is ungoverned, and the pack names it
-	// as such in coverage_limitations.
+	// public and secret BOTH reach the guest as ordinary environment values,
+	// under the names the file gives them. The split is about what the run can
+	// honestly say afterwards, not about how a value travels: anything in
+	// secret is ungoverned, and the pack names it in coverage_limitations.
 	//
 	// The governed alternative is a policy `credential_binding`, where the
 	// proxy holds the credential and the workload cannot use it off-policy. The
@@ -59,51 +57,29 @@ func newProjectEnvironment() *projectEnvironment {
 	}
 }
 
-// classify files one declaration.
+// classify files one variable under its own name.
 //
-// Nothing is refused. Every declaration reaches the guest as an ordinary
-// environment variable; the prefix decides only how the run REPORTS it, and
-// reporting is the whole job here. The evidence has to be able to say which
-// values were credentials, and the developer is the only one who knows.
+// There is no declaration syntax and nothing is refused. `.env.sandbox` is an
+// ordinary dotenv file — a developer copies their `.env` to it and edits what
+// the sandbox needs — so every variable reaches the guest exactly as written.
 //
-// A bare credential-shaped name is filed as a secret rather than as public.
-// That is the safe direction of error: over-reporting a setting as an
-// ungoverned credential costs one line in the pack's limitations, while
-// under-reporting a real credential as non-secret would make the pack assert
-// something false about the run.
+// The split is only about what the run can say afterwards. Since the developer
+// no longer marks which values are credentials, the run reads the NAME, and the
+// heuristic errs toward calling something a credential: over-reporting a
+// setting costs one line in the pack's limitations, while under-reporting would
+// have the pack assert something false about the run. That asymmetry is why a
+// name-shaped guess is acceptable here and would not be acceptable as a
+// refusal.
 func (environment *projectEnvironment) classify(name, value string, line int) error {
-	switch {
-	case strings.HasPrefix(name, secretPrefix):
-		guestName := strings.TrimPrefix(name, secretPrefix)
-		if !environmentNamePattern.MatchString(guestName) {
-			return fmt.Errorf("project evaluate: line %d declares an invalid secret name %s", line, guestName)
-		}
-		if environment.declared(guestName) {
-			return fmt.Errorf("project evaluate: line %d redeclares %s", line, guestName)
-		}
-		environment.secret[guestName] = value
-		return nil
-	case strings.HasPrefix(name, publicPrefix):
-		guestName := strings.TrimPrefix(name, publicPrefix)
-		if !environmentNamePattern.MatchString(guestName) {
-			return fmt.Errorf("project evaluate: line %d declares an invalid public name %s", line, guestName)
-		}
-		if environment.declared(guestName) {
-			return fmt.Errorf("project evaluate: line %d redeclares %s", line, guestName)
-		}
-		environment.public[guestName] = value
-		return nil
-	default:
-		if environment.declared(name) {
-			return fmt.Errorf("project evaluate: line %d redeclares %s", line, name)
-		}
-		if credentialNamePattern.MatchString(name) {
-			environment.secret[name] = value
-			return nil
-		}
-		environment.public[name] = value
+	if environment.declared(name) {
+		return fmt.Errorf("project evaluate: line %d redeclares %s", line, name)
+	}
+	if credentialNamePattern.MatchString(name) {
+		environment.secret[name] = value
 		return nil
 	}
+	environment.public[name] = value
+	return nil
 }
 
 func (environment *projectEnvironment) declared(name string) bool {
@@ -139,9 +115,9 @@ func (environment *projectEnvironment) setting(name, value string, line int) (bo
 	}
 }
 
-// secretNames lists the credentials this run hands the workload in plaintext,
-// in a stable order. Names only — a value is never rendered, logged or recorded,
-// which is the one thing that stays true whichever channel it took.
+// secretNames lists the credential-shaped variables this run hands the workload
+// in plaintext, in a stable order. Names only — a value is never rendered,
+// logged or recorded, which stays true however the variable was classified.
 func (environment *projectEnvironment) secretNames() []string {
 	names := make([]string, 0, len(environment.secret))
 	for name := range environment.secret {
