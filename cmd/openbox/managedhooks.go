@@ -180,8 +180,9 @@ func resolveHookBlock() hookBlockState {
 		// policy delivered by MDM or from the console outranks the file and is
 		// not visible here.
 		state.detail = append(state.detail,
-			"Read from the settings files only. A policy delivered by MDM or from the console"+
-				" outranks them and is not inspected; the tool's own `/status` is authoritative.")
+			"Read from the settings files only. A policy delivered by MDM or from the",
+			"console outranks them and is not inspected; the tool's own `/status` is",
+			"authoritative.")
 		return state
 	}
 

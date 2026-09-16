@@ -40,40 +40,62 @@ func (a *app) runDoctor(args []string) int {
 	fmt.Fprintf(a.stdout, "Identity\n")
 	a.reportIdentities()
 
-	fmt.Fprintf(a.stdout, "Enforcement\n")
+	fmt.Fprintf(a.stdout, "Posture (what decides a call on this machine)\n")
 	flags := p.Flags()
 	names := make([]string, 0, len(flags))
 	width := 0
+	allDefault := true
 	for n := range flags {
 		names = append(names, n)
 		if len(n) > width {
 			width = len(n) // derived, so a longer flag name cannot break the column
 		}
+		if devconfig.Source(p.ConfigSource[n]) != devconfig.SourceDefault {
+			allDefault = false
+		}
 	}
 	sort.Strings(names)
-	for _, n := range names {
-		source := p.ConfigSource[n]
-		note := ""
-		switch devconfig.Source(source) {
-		case devconfig.SourceManaged:
-			note = "  (org mandate; not overridable here)"
-		case devconfig.SourceManagedDefault:
-			note = "  (org default; overridable)"
+	// A machine nobody has touched is the common case, and eight rows saying
+	// "from default" is eight rows of nothing. The moment one value comes from
+	// anywhere else, every row is worth reading: which one moved, and from
+	// where, is the whole question.
+	if allDefault {
+		var on, off []string
+		for _, n := range names {
+			if flags[n] {
+				on = append(on, n)
+				continue
+			}
+			off = append(off, n)
 		}
-		fmt.Fprintf(a.stdout, "  %-*s %-5v  from %s%s\n", width, n, flags[n], source, note)
+		a.wrapRow("defaults", "ON %s", strings.Join(on, ", "))
+		a.wrapRow("", "OFF %s", strings.Join(off, ", "))
+	} else {
+		for _, n := range names {
+			source := p.ConfigSource[n]
+			note := ""
+			switch devconfig.Source(source) {
+			case devconfig.SourceManaged:
+				note = "  (org mandate; not overridable here)"
+			case devconfig.SourceManagedDefault:
+				note = "  (org default; overridable)"
+			}
+			fmt.Fprintf(a.stdout, "  %-*s %-5v  from %s%s\n", width, n, flags[n], source, note)
+		}
 	}
 
-	fmt.Fprintf(a.stdout, "\nManaged OpenBox config\n")
 	m := devconfig.Managed()
 	switch {
 	case !m.Present:
-		fmt.Fprintf(a.stdout, "  %s: absent; every setting above is developer-controlled\n", m.Path)
+		a.row("managed", "%s", m.Path)
+		a.row("", "absent; every setting above is developer-controlled")
 	case !m.Readable:
-		fmt.Fprintf(a.stdout, "  %s: PRESENT BUT UNREADABLE; this machine is meant to be managed and is not.\n", m.Path)
+		a.row("managed", "%s", m.Path)
+		a.row("", "PRESENT BUT UNREADABLE; this machine is meant to be managed and is not.")
 		fmt.Fprintf(a.stdout, "    Sessions fall back to developer-controlled settings. Fix the file (an unknown\n")
 		fmt.Fprintf(a.stdout, "    key makes it unreadable, so check for typos in field names).\n")
 	default:
-		fmt.Fprintf(a.stdout, "  %s: active\n", m.Path)
+		a.row("managed", "%s: active", m.Path)
 		if len(m.Locked) == 0 {
 			fmt.Fprintf(a.stdout, "    locked: (none); values act as org defaults the developer may override\n")
 		} else {
@@ -91,36 +113,33 @@ func (a *app) runDoctor(args []string) int {
 		}
 	}
 
-	fmt.Fprintf(a.stdout, "\nPolicy decisions\n")
-	fmt.Fprintf(a.stdout, "  decided by      %s\n", orUnset(p.DecisionAuthority))
-	fmt.Fprintf(a.stdout, "  if unreachable  %s\n", orUnset(p.FailurePolicy))
+	a.row("decided by", "%s", orUnset(p.DecisionAuthority))
+	a.row("if offline", "%s", orUnset(p.FailurePolicy))
 	if p.FailurePolicy == devconfig.FailurePolicyFailOpen {
-		fmt.Fprintf(a.stdout, "                  gated calls PROCEED when the control plane cannot be\n")
-		fmt.Fprintf(a.stdout, "                  reached, so enforcement depends on reachability. Set\n")
-		fmt.Fprintf(a.stdout, "                  fail_closed to deny instead.\n")
+		a.row("", "gated calls PROCEED when it cannot be reached; fail_closed denies")
 	}
-	fmt.Fprintf(a.stdout, "  last decision   %s\n", lastDecisionSummary())
+	a.row("last verdict", "%s", lastDecisionSummary())
 
-	fmt.Fprintf(a.stdout, "\nRecent config-change denials (most recent first)\n")
 	denials, denialsUnreadable := recentConfigDenials(5)
 	switch {
 	case denialsUnreadable:
-		fmt.Fprintf(a.stdout, "  (unreadable)\n")
+		a.row("denials", "(unreadable)")
 	case len(denials) == 0:
-		fmt.Fprintf(a.stdout, "  (none recorded)\n")
+		a.row("denials", "none recorded")
 	default:
+		a.row("denials", "%d recent config change(s) denied, most recent first:", len(denials))
 		for _, d := range denials {
-			fmt.Fprintf(a.stdout, "  %s\n", d)
+			a.row("", "%s", d)
 		}
 	}
 
-	fmt.Fprintf(a.stdout, "\nProvider managed configuration\n")
-	for _, prov := range []managed.Provider{managed.ProviderClaudeCode, managed.ProviderCodex} {
-		state := managed.ProviderState(prov)
-		fmt.Fprintf(a.stdout, "  %-12s %s\n", prov, state)
-	}
-
 	a.reportReachability()
+	for _, prov := range []managed.Provider{managed.ProviderClaudeCode, managed.ProviderCodex} {
+		// The provider goes in the value: "claude-code cfg" is longer than the
+		// label column, and a row that breaks the column to say one word is a
+		// worse trade than a slightly longer value.
+		a.row("provider cfg", "%s: %s", prov, managed.ProviderState(prov))
+	}
 
 	a.reportHookRegistration()
 
@@ -129,10 +148,9 @@ func (a *app) runDoctor(args []string) int {
 	a.reportCoverage()
 	a.reportSpool()
 
-	fmt.Fprintf(a.stdout, "\nWhat this does and does not prove\n")
-	fmt.Fprintf(a.stdout, "  Settings sourced from `user` or `env` can be changed by whoever runs this\n")
-	fmt.Fprintf(a.stdout, "  command, so they are not assurance. Only `managed` values, and only with the\n")
-	fmt.Fprintf(a.stdout, "  provider config deployed, survive a developer who does not want them.\n")
+	fmt.Fprintf(a.stdout, "\nOnly `managed` values prove anything: `user` and `env` can be changed by\n")
+	fmt.Fprintf(a.stdout, "whoever runs this command, and only a deployed provider config survives a\n")
+	fmt.Fprintf(a.stdout, "developer who does not want it.\n")
 	return exitOK
 }
 
@@ -238,22 +256,22 @@ func (a *app) reportIdentities() {
 	orgPath, err := devconfig.DevConfigPathFor("")
 	if err == nil {
 		orgCfg, _ = devconfig.Load(orgPath)
-		fmt.Fprintf(a.stdout, "  %-11s  %s  (URLs; no agent identity)\n", "org", withPresence(orgPath))
+		a.row("org", "%s  (URLs; no agent identity)", withPresence(orgPath))
 	}
 	for _, name := range provider.Supported() {
 		cfgPath, err := devconfig.DevConfigPathFor(name)
 		if err != nil {
-			fmt.Fprintf(a.stdout, "  %-11s  unreadable: %v\n", name, err)
+			a.row(name, "unreadable: %v", err)
 			continue
 		}
 		cfg, _ := devconfig.Load(cfgPath)
 		switch {
 		case cfg.DID != "":
-			fmt.Fprintf(a.stdout, "  %-11s  %s  DID %s\n", name, cfgPath, cfg.DID)
+			a.row(name, "%s  DID %s", cfgPath, cfg.DID)
 			a.reportURLDrift(name, orgCfg, cfg)
 		default:
-			fmt.Fprintf(a.stdout, "  %-11s  %s  no agent; governing nothing. Run `openbox init --provider %s`\n",
-				name, withPresence(cfgPath), name)
+			a.row(name, "%s", withPresence(cfgPath))
+			a.row("", "no agent; governing nothing. Run `openbox init --provider %s`", name)
 		}
 	}
 	a.reportIdentitySource()
@@ -296,8 +314,8 @@ func (a *app) reportURLDrift(name string, org, tool devconfig.DevConfig) {
 		if a.getenv(f.env) != "" {
 			continue
 		}
-		fmt.Fprintf(a.stdout, "  %-11s  %s differs from org (%s vs %s); re-run `openbox init --provider %s`\n",
-			"", f.label, f.tool, f.org, name)
+		a.row("", "%s differs from org (%s vs %s); re-run `openbox init --provider %s`",
+			f.label, f.tool, f.org, name)
 	}
 }
 
@@ -312,13 +330,13 @@ func (a *app) reportIdentitySource() {
 		}
 	}
 	if len(shadowing) == 0 {
-		fmt.Fprintf(a.stdout, "  %-11s  each tool's own files above\n", "in effect")
+		a.row("in effect", "each tool's own files above")
 		return
 	}
-	fmt.Fprintf(a.stdout, "  %-11s  %s (environment); this outranks every file above, for every tool\n",
-		"in effect", strings.Join(shadowing, ", "))
+	a.row("in effect", "%s (environment); this outranks every file above, for every tool",
+		strings.Join(shadowing, ", "))
 	if did := a.getenv(devconfig.EnvDID); did != "" {
-		fmt.Fprintf(a.stdout, "  %-11s  every governed tool reports as %s\n", "", did)
+		a.row("", "every governed tool reports as %s", did)
 	}
 }
 
@@ -327,13 +345,28 @@ func (a *app) reportGateway() {
 	home := a.homeDir()
 	r := gatewaycheck.Inspect(home, claudeManagedSettingsPath(), 750*time.Millisecond, a.getenv)
 
+	// An unconfigured gateway is the expected state since the transport relay
+	// superseded it, so it reports in two lines and stops. A machine that has
+	// one still gets the whole section below.
+	if r.SettingsPath == "" {
+		fmt.Fprintf(a.stdout, "\nLocal gateway\n")
+		a.row("configured", "no; ANTHROPIC_BASE_URL is not set in any settings file")
+		a.row("bypass", "%s", map[bool]string{true: "DETECTABLE, not prevented", false: "no exposure found"}[r.BypassCapable])
+		// The reason is the whole of that claim, and this is now the common
+		// machine, so dropping it would make "DETECTABLE" unreachable. Safe to
+		// wrap here, unlike the configured branch: the notes that lead with a
+		// settings path are only appended when there IS one.
+		for _, note := range r.BypassNotes {
+			a.wrapRow("", "- %s", note)
+		}
+		return
+	}
+
 	fmt.Fprintf(a.stdout, "\nLocal gateway (model-call governance)\n")
 
-	if r.SettingsPath == "" {
-		fmt.Fprintf(a.stdout, "  configured   no; ANTHROPIC_BASE_URL is not set in any settings file\n")
-	} else {
-		fmt.Fprintf(a.stdout, "  configured   %s\n", r.ConfiguredAddr)
-		fmt.Fprintf(a.stdout, "  from         %s\n", r.SettingsPath)
+	{
+		a.row("configured", "%s", r.ConfiguredAddr)
+		a.row("from", "%s", r.SettingsPath)
 		owner := "uid " + strconv.Itoa(r.OwnerUID)
 		switch r.OwnerUID {
 		case 0:
@@ -341,37 +374,41 @@ func (a *app) reportGateway() {
 		case -1:
 			owner = "unknown (this OS exposes no owner to check)"
 		}
-		fmt.Fprintf(a.stdout, "  owned by     %s\n", owner)
-		fmt.Fprintf(a.stdout, "  tier         %s\n", r.Tier)
+		a.row("owned by", "%s", owner)
+		a.row("tier", "%s", r.Tier)
 		if !r.TargetsGateway {
-			fmt.Fprintf(a.stdout, "  target       NOT loopback; this machine is pointed at something else\n")
+			a.row("target", "NOT loopback; this machine is pointed at something else")
 		}
 		if r.Alive {
-			fmt.Fprintf(a.stdout, "  reachable    yes\n")
+			a.row("reachable", "yes")
 		} else {
-			fmt.Fprintf(a.stdout, "  reachable    NO; %s\n", r.AliveErr)
-			fmt.Fprintf(a.stdout, "               model calls will FAIL rather than escape, which is the safe\n")
-			fmt.Fprintf(a.stdout, "               direction. Start the gateway: `openbox gateway`\n")
+			a.row("reachable", "NO; %s", r.AliveErr)
+			a.row("", "model calls will FAIL rather than escape, which is the safe")
+			a.row("", "direction. Start the gateway: `openbox gateway`")
 		}
 		// So a differing env value is reported as information, never as a fault; the
 		// file above is what the tool uses.
 		if r.EnvDiffersFromSettings {
-			fmt.Fprintf(a.stdout, "  environment  ANTHROPIC_BASE_URL=%s is also set here, and DIFFERS\n", r.EnvValue)
-			fmt.Fprintf(a.stdout, "               The settings file above takes precedence for Claude Code, so the\n")
-			fmt.Fprintf(a.stdout, "               file is what the tool uses. Confirm with `/status` in a session.\n")
+			a.row("environment", "ANTHROPIC_BASE_URL=%s is also set here, and DIFFERS", r.EnvValue)
+			a.row("", "The settings file above takes precedence for Claude Code, so the")
+			a.row("", "file is what the tool uses. Confirm with `/status` in a session.")
 		} else if r.EnvValue != "" {
-			fmt.Fprintf(a.stdout, "  environment  agrees (ANTHROPIC_BASE_URL=%s)\n", r.EnvValue)
+			a.row("environment", "agrees (ANTHROPIC_BASE_URL=%s)", r.EnvValue)
 		} else {
 			fmt.Fprintf(a.stdout, "  verify with  `/status` in a Claude Code session; it prints the base URL\n")
-			fmt.Fprintf(a.stdout, "               actually in force. doctor reads the file, which is the source\n")
-			fmt.Fprintf(a.stdout, "               that wins, but only the session can confirm what it resolved.\n")
+			a.row("", "actually in force. doctor reads the file, which is the source")
+			a.row("", "that wins, but only the session can confirm what it resolved.")
 		}
-		fmt.Fprintf(a.stdout, "  log          %s\n", gatewayservice.LogPath(home))
+		a.row("log", "%s", gatewayservice.LogPath(home))
 	}
 
-	fmt.Fprintf(a.stdout, "  bypass       %s\n", map[bool]string{true: "DETECTABLE, not prevented", false: "no exposure found"}[r.BypassCapable])
+	a.row("bypass", "%s", map[bool]string{true: "DETECTABLE, not prevented", false: "no exposure found"}[r.BypassCapable])
 	for _, note := range r.BypassNotes {
-		fmt.Fprintf(a.stdout, "               - %s\n", note)
+		// Not wrapped: two of these notes lead with the settings path, and the
+		// managed path on macOS ("/Library/Application Support/...") carries a
+		// space -- so wrapping would break the path across two lines. A long
+		// line is the better failure.
+		a.row("", "- %s", note)
 	}
 }
 
@@ -380,76 +417,117 @@ func (a *app) reportLanes() {
 	settingsPath := gatewayservice.SettingsPath(home)
 	election := activation.ResolveElection(settingsPath)
 
-	fmt.Fprintf(a.stdout, "\nModel-call producer (which lane emits turn events)\n")
+	fmt.Fprintf(a.stdout, "\nLanes (which one emits model-call turns, and are they up)\n")
 	undecidable := election.SettingsProblem != ""
 	switch {
 	case undecidable:
-		fmt.Fprintf(a.stdout, "  elected      CANNOT BE DECIDED; %s\n", election.SettingsProblem)
-		fmt.Fprintf(a.stdout, "               This is NOT the same as no lane being routed. Nothing here knows\n")
-		fmt.Fprintf(a.stdout, "               what this machine is configured to do, so treat every lane line\n")
-		fmt.Fprintf(a.stdout, "               below as unverified. They are still printed: whether a unit is\n")
-		fmt.Fprintf(a.stdout, "               installed and whether anything is listening do not come from the\n")
-		fmt.Fprintf(a.stdout, "               settings file, and they are what recovery starts from.\n")
+		a.row("elected", "CANNOT BE DECIDED; %s", election.SettingsProblem)
+		a.row("", "This is NOT the same as no lane being routed. Nothing here knows")
+		a.row("", "what this machine is configured to do, so treat every lane line")
+		a.row("", "below as unverified. They are still printed: whether a unit is")
+		a.row("", "installed and whether anything is listening do not come from the")
+		a.row("", "settings file, and they are what recovery starts from.")
 	case election.Elected == "":
-		fmt.Fprintf(a.stdout, "  elected      (none); %s\n", election.Reason)
-		fmt.Fprintf(a.stdout, "               No lane emits model-call turns, so token counts and costs for this\n")
-		fmt.Fprintf(a.stdout, "               machine are ABSENT rather than merely incomplete.\n")
+		a.row("elected", "(none); %s", election.Reason)
+		a.row("", "No lane emits model-call turns, so token counts and costs for this")
+		a.row("", "machine are ABSENT rather than merely incomplete.")
 	default:
-		fmt.Fprintf(a.stdout, "  elected      %s\n", election.Elected)
-		fmt.Fprintf(a.stdout, "  because      %s\n", election.Reason)
-	}
-	if len(election.Routed) > 1 {
-		fmt.Fprintf(a.stdout, "  routed       %v; exactly one of these emits; the others still send their own\n", election.Routed)
-		fmt.Fprintf(a.stdout, "               non-turn evidence, which does not collide.\n")
+		a.row("elected", "%s", election.Elected)
+		a.wrapRow("because", "%s", election.Reason)
 	}
 	for _, lane := range election.Routed {
 		if !slices.Contains(election.Candidates, lane) {
 			fmt.Fprintf(a.stdout, "  NOT IN PATH  %s is configured but cannot see this machine's model calls -\n", lane)
-			fmt.Fprintf(a.stdout, "               ANTHROPIC_BASE_URL sends them somewhere it does not intercept.\n")
+			a.row("", "ANTHROPIC_BASE_URL sends them somewhere it does not intercept.")
 		}
 	}
 
-	for _, lane := range []struct {
-		name string
-		spec laneservice.Spec
-		addr string
-	}{
-		{"telemetry", laneservice.Telemetry(telemetry.DefaultAddr, "", false), telemetry.DefaultAddr},
-		{"transport", laneservice.Transport(transport.DefaultAddr, "", false), transport.DefaultAddr},
+	// A lane with nothing wrong is one row; a lane with something wrong keeps
+	// the whole section it always had. Which means every line printed here is
+	// either a coordinate or a problem, and the reader never learns to skip a
+	// block because it is usually fine.
+	var unhealthy []laneCheck
+	for _, lane := range []laneCheck{
+		{name: "telemetry", spec: laneservice.Telemetry(telemetry.DefaultAddr, "", false), addr: telemetry.DefaultAddr},
+		{name: "transport", spec: laneservice.Transport(transport.DefaultAddr, "", false), addr: transport.DefaultAddr},
 	} {
-		fmt.Fprintf(a.stdout, "\n%s lane\n", strings.ToUpper(lane.name[:1])+lane.name[1:])
-		unit := lane.spec.UnitPath(runtime.GOOS, home)
-		switch {
-		case unit == "":
-			fmt.Fprintf(a.stdout, "  unit         (no daemon packaging on %s)\n", runtime.GOOS)
-		case fileExists(unit):
-			fmt.Fprintf(a.stdout, "  unit         %s\n", unit)
-		default:
-			fmt.Fprintf(a.stdout, "  unit         not installed\n")
+		lane.unit = lane.spec.UnitPath(runtime.GOOS, home)
+		lane.routed = slices.Contains(election.Routed, activation.Lane(lane.name))
+		lane.inPath = slices.Contains(election.Candidates, activation.Lane(lane.name))
+		lane.listening, _ = portOccupied(lane.addr)
+		if !lane.healthy(undecidable) {
+			unhealthy = append(unhealthy, lane)
+			continue
 		}
-		routed := slices.Contains(election.Routed, activation.Lane(lane.name))
-		fmt.Fprintf(a.stdout, "  configured   %s\n", map[bool]string{true: "yes; " + settingsPath, false: "no; the tool is not pointed at it"}[routed])
-		occupied, _ := portOccupied(lane.addr)
-		if occupied {
-			fmt.Fprintf(a.stdout, "  reachable    yes (%s)\n", lane.addr)
+		state := "routed"
+		if election.Elected == activation.Lane(lane.name) {
+			state = "routed, ELECTED"
+		}
+		a.row(lane.name, "listening on %s; %s", lane.addr, state)
+	}
+	// One line rather than the three it used to take, because it is a standing
+	// caveat and not a finding: a lane can be up, routed and elected and still
+	// emit nothing, with no developer DID or a posture key off.
+	a.note("A reachable lane can still be recording nothing; its log says which.")
+	// The one lane coordinate a healthy machine still needs by name: this is
+	// the certificate the intercepted handshakes are signed with, and nothing
+	// else prints it now that `init` reports lanes as a summary.
+	if openboxHome, err := devconfig.Home(); err == nil {
+		if caPath, _ := transport.CAPaths(openboxHome); fileExists(caPath) {
+			a.row("relay CA", "%s", caPath)
+		}
+	}
+
+	for _, lane := range unhealthy {
+		fmt.Fprintf(a.stdout, "\n%s lane\n", strings.ToUpper(lane.name[:1])+lane.name[1:])
+		switch {
+		case lane.unit == "":
+			a.row("unit", "(no daemon packaging on %s)", runtime.GOOS)
+		case fileExists(lane.unit):
+			a.row("unit", "%s", lane.unit)
+		default:
+			a.row("unit", "not installed")
+		}
+		a.row("configured", "%s", map[bool]string{true: "yes; " + settingsPath, false: "no; the tool is not pointed at it"}[lane.routed])
+		if lane.listening {
+			a.row("reachable", "yes (%s)", lane.addr)
 		} else {
-			fmt.Fprintf(a.stdout, "  reachable    NO; nothing is listening on %s\n", lane.addr)
-			if routed {
-				fmt.Fprintf(a.stdout, "               The tool is pointed at a port with nothing behind it.\n")
+			a.row("reachable", "NO; nothing is listening on %s", lane.addr)
+			if lane.routed {
+				a.row("", "The tool is pointed at a port with nothing behind it.")
 			}
 		}
-		if election.Elected == activation.Lane(lane.name) && !occupied {
-			fmt.Fprintf(a.stdout, "  WARNING      this lane is ELECTED but nothing is listening, so NO lane is emitting\n")
-			fmt.Fprintf(a.stdout, "               model-call turns on this machine. If you did not install it, something\n")
-			fmt.Fprintf(a.stdout, "               else set its env keys; the election reads where the tool is routed,\n")
-			fmt.Fprintf(a.stdout, "               not what OpenBox installed. `openbox init --provider claude-code`\n")
-			fmt.Fprintf(a.stdout, "               brings it back up; `openbox uninstall` clears the routing.\n")
+		if election.Elected == activation.Lane(lane.name) && !lane.listening {
+			a.row("WARNING", "this lane is ELECTED but nothing is listening, so NO lane is emitting")
+			a.row("", "model-call turns on this machine. If you did not install it, something")
+			a.row("", "else set its env keys; the election reads where the tool is routed,")
+			a.row("", "not what OpenBox installed. `openbox init --provider claude-code`")
+			a.row("", "brings it back up; `openbox uninstall` clears the routing.")
 		}
-		fmt.Fprintf(a.stdout, "  log          %s\n", laneLogPath(lane.spec, home))
+		a.row("log", "%s", laneLogPath(lane.spec, home))
 	}
-	fmt.Fprintf(a.stdout, "\n  Installed is not recording. A lane can be reachable, configured and elected\n")
-	fmt.Fprintf(a.stdout, "  while emitting nothing; no developer DID, or a posture key off. The log above\n")
-	fmt.Fprintf(a.stdout, "  is the only place that says so.\n")
+}
+
+// laneCheck is one lane's four observable facts, gathered before anything is
+// printed so the same answer decides both the summary row and whether the full
+// section is printed at all.
+type laneCheck struct {
+	name string
+	spec laneservice.Spec
+	addr string
+	unit string
+
+	routed    bool
+	inPath    bool
+	listening bool
+}
+
+// healthy is a lane doing its job: installed, pointed at, able to see the
+// calls, and answering. An undecidable election makes every one of these
+// unverified, so nothing is summarized away.
+func (l laneCheck) healthy(undecidable bool) bool {
+	return !undecidable && l.unit != "" && fileExists(l.unit) &&
+		l.routed && l.inPath && l.listening
 }
 
 // reportSpool is where the machine-wide backlog is actionable, which
@@ -458,24 +536,24 @@ func (a *app) reportSpool() {
 	spool := hookflow.Spool{Dir: devconfig.SpoolDir(transportSpoolSubdir)}
 
 	fmt.Fprintf(a.stdout, "\nSpooled evidence (waiting to reach the control plane)\n")
-	fmt.Fprintf(a.stdout, "  directory    %s\n", spool.Dir)
+	a.row("directory", "%s", spool.Dir)
 
 	backlog := spool.BacklogCount()
 	switch {
 	case backlog == 0:
-		fmt.Fprintf(a.stdout, "  waiting      0; delivery is self-triggering, so an empty queue is the healthy state\n")
+		a.row("waiting", "0; delivery is self-triggering, so an empty queue is the healthy state")
 	default:
-		fmt.Fprintf(a.stdout, "  waiting      %d event(s), of which %d are in carry-over files from a failed\n", backlog, spool.UndeliveredCount())
-		fmt.Fprintf(a.stdout, "               delivery. A lane daemon sweeps every %s; `openbox hook claude-code\n", hookflow.DefaultSweepInterval)
-		fmt.Fprintf(a.stdout, "               flush` does it now.\n")
+		a.row("waiting", "%d event(s), of which %d are in carry-over files from a failed", backlog, spool.UndeliveredCount())
+		a.row("", "delivery. A lane daemon sweeps every %s; `openbox hook claude-code", hookflow.DefaultSweepInterval)
+		a.row("", "flush` does it now.")
 	}
 
 	discarded := spool.DiscardedCount()
 	if discarded > 0 {
-		fmt.Fprintf(a.stdout, "  DISCARDED    at least %d event(s) were given up on and are GONE: past %d delivery\n", discarded, hookflow.MaxRecoveryAttempts)
-		fmt.Fprintf(a.stdout, "               attempts, or past the %d-day retention age. This is real loss of\n", int(hookflow.RetireSpoolAfter.Hours()/24))
-		fmt.Fprintf(a.stdout, "               governance evidence, recorded in %s. \"At least\" because\n", spool.DiscardPath())
-		fmt.Fprintf(a.stdout, "               that record is size-capped and restarts, so it is a floor.\n")
+		a.row("DISCARDED", "at least %d event(s) were given up on and are GONE: past %d delivery", discarded, hookflow.MaxRecoveryAttempts)
+		a.row("", "attempts, or past the %d-day retention age. This is real loss of", int(hookflow.RetireSpoolAfter.Hours()/24))
+		a.row("", "governance evidence, recorded in %s. \"At least\" because", spool.DiscardPath())
+		a.row("", "that record is size-capped and restarts, so it is a floor.")
 	}
 	if backlog > 0 || discarded > 0 {
 		fmt.Fprintf(a.stdout, "  flusher log  %s\n", spool.FlusherLogPath())
@@ -487,31 +565,34 @@ func (a *app) reportCoverage() {
 	home := a.homeDir()
 	settingsPath := gatewayservice.SettingsPath(home)
 
-	fmt.Fprintf(a.stdout, "\nRouting durability (has anything un-routed a lane?)\n")
+	fmt.Fprintf(a.stdout, "\nCoverage (has anything un-routed a lane, and what is not routed at all)\n")
 	switch coverage, err := activation.CoverageOf(home); {
 	case err != nil:
-		fmt.Fprintf(a.stdout, "  unknown      %v\n", err)
-		fmt.Fprintf(a.stdout, "               Treat the lane lines above as unverified.\n")
+		a.row("unknown", "%v", err)
+		a.row("", "Treat the lane lines above as unverified.")
 	case len(coverage) == 0:
-		fmt.Fprintf(a.stdout, "  n/a          no lane has written env keys on this machine\n")
+		a.row("n/a", "no lane has written env keys on this machine")
+	case allIntact(coverage):
+		// Nothing has been un-routed, which is one fact however many lanes
+		// there are. A lane that HAS been changed still gets its own lines.
+		a.row("intact", "every managed key on this machine is still as installed")
 	default:
 		for _, c := range coverage {
 			if c.Intact() {
-				fmt.Fprintf(a.stdout, "  %-12s intact; all %d managed key(s) still as installed\n", c.Lane, len(c.Managed))
+				a.row(string(c.Lane), "intact; all %d managed key(s) still as installed", len(c.Managed))
 				continue
 			}
 			label := "CHANGED"
 			if c.Vanished() {
 				label = "UN-ROUTED"
 			}
-			fmt.Fprintf(a.stdout, "  %-12s %s: %s\n", c.Lane, label, c.Describe())
-			fmt.Fprintf(a.stdout, "               `openbox init --provider claude-code` rewrites them.\n")
-			fmt.Fprintf(a.stdout, "               Note: during an install this state is normal for a few seconds -\n")
-			fmt.Fprintf(a.stdout, "               the daemon is started BEFORE its env keys are written, on purpose.\n")
+			a.row(string(c.Lane), "%s: %s", label, c.Describe())
+			a.row("", "`openbox init --provider claude-code` rewrites them.")
+			a.row("", "Note: during an install this state is normal for a few seconds -")
+			a.row("", "the daemon is started BEFORE its env keys are written, on purpose.")
 		}
 	}
 
-	fmt.Fprintf(a.stdout, "\nClaude desktop app (a governed surface with no lane of its own)\n")
 	// The machine's OWN port: the default would call a routed app unrouted.
 	relayPort := activation.RelayPortFrom(activation.ReadSettingsEnv(settingsPath).Env)
 	relayAddr := transport.DefaultAddr
@@ -521,13 +602,24 @@ func (a *app) reportCoverage() {
 		relayAddr = "127.0.0.1:" + relayPort
 	}
 	desktop := activation.InspectDesktop(context.Background(), relayPort)
-	fmt.Fprintf(a.stdout, "  coverage     %s\n", desktop.Describe(relayAddr))
+	a.wrapRow("desktop app", "%s", desktop.Describe(relayAddr))
 	if desktop.Note != "" {
-		fmt.Fprintf(a.stdout, "  note         %s\n", desktop.Note)
+		a.wrapRow("", "%s", desktop.Note)
 	}
-	fmt.Fprintf(a.stdout, "               Routing the desktop app is NOT implemented: how it resolves proxy\n")
-	fmt.Fprintf(a.stdout, "               settings and a trust anchor is still an open question, so this line\n")
-	fmt.Fprintf(a.stdout, "               reports coverage and claims nothing about how to fix it.\n")
+	// The three lines that used to follow said only that routing it is not
+	// implemented, on every machine, forever. The coverage line above already
+	// reports the gap; how to close it is not a fact about this machine.
+}
+
+// allIntact reports that no lane's managed env keys have been changed since
+// they were installed.
+func allIntact(coverage []activation.Coverage) bool {
+	for _, c := range coverage {
+		if !c.Intact() {
+			return false
+		}
+	}
+	return true
 }
 
 func portOf(addr string) string {
@@ -560,21 +652,24 @@ func (a *app) reportHookRegistration() {
 		audit, err := providers.AuditHooks(level.path)
 		switch {
 		case err != nil:
-			fmt.Fprintf(a.stdout, "  %-13s %s: could not be read; %v\n", level.label, level.path, err)
+			a.row(level.label, "%s: could not be read; %v", level.path, err)
 			continue
 		case !audit.Present, len(audit.Engines) == 0:
 			note := "(present, no OpenBox hooks)"
 			if !audit.Present {
 				note = "(absent)"
 			}
-			fmt.Fprintf(a.stdout, "  %-13s %s  %s\n", level.label, level.path, note)
+			a.row(level.label, "%s  %s", level.path, note)
 			if level.label == "user-wide" {
 				fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider claude-code`.\n")
 			}
 			continue
 		}
-		fmt.Fprintf(a.stdout, "  %-13s %s  (present)\n", level.label, level.path)
+		a.row(level.label, "%s  (present)", level.path)
 		for _, engine := range audit.Engines {
+			// Kept even for a single engine: which binary is governing this
+			// machine is a coordinate, not commentary, and
+			// TestDoctorDoesNotWarnOnASingleEngine exists to say so.
 			fmt.Fprintf(a.stdout, "    engine  %s\n", engine)
 			engines[engine] = append(engines[engine], level.label)
 		}
@@ -637,7 +732,7 @@ func (a *app) reportCrossLevelHooks(engines map[string][]string) {
 // success and doctor, reading none of these keys, used to agree.
 func (a *app) reportBlockedHooks() {
 	state := resolveHookBlock()
-	fmt.Fprintf(a.stdout, "  %-13s %s\n", "can they run", state.summary)
+	a.row("can they run", "%s", state.summary)
 	for _, line := range state.detail {
 		fmt.Fprintf(a.stdout, "    %s\n", line)
 	}
@@ -664,9 +759,9 @@ func (a *app) reportReachability() {
 func (a *app) reportStoreReachability(tool string) {
 	creds, err := devconfig.ResolveCredentialsFor(tool)
 	if err != nil {
-		fmt.Fprintf(a.stdout, "  %-11s NOT CHECKED; %v\n", tool, err)
-		fmt.Fprintf(a.stdout, "  %-11s Run `openbox init --provider %s`. Until then this tool's hooks fire,\n", "", tool)
-		fmt.Fprintf(a.stdout, "  %-11s fail to resolve credentials, and fail open -- governing nothing, silently.\n", "")
+		a.row(tool, "NOT CHECKED; %v", err)
+		a.row("", "Run `openbox init --provider %s`. Until then its hooks fire, fail", tool)
+		a.row("", "to resolve credentials, and fail open -- governing nothing, silently.")
 		return
 	}
 
@@ -677,7 +772,7 @@ func (a *app) reportStoreReachability(tool string) {
 		PrivateKeyB64: creds.PrivateKeyB64,
 	})
 	if err != nil {
-		fmt.Fprintf(a.stdout, "  %-11s NOT CHECKED; the local credentials are unusable: %v\n", tool, err)
+		a.row(tool, "NOT CHECKED; the local credentials are unusable: %v", err)
 		return
 	}
 
@@ -686,12 +781,12 @@ func (a *app) reportStoreReachability(tool string) {
 	if err := c.Validate(ctx); err != nil {
 		// Status and guidance only. The error never carries the key, the seed,
 		// the nonce or the signature (INV-1).
-		fmt.Fprintf(a.stdout, "  %-11s NO; %v\n", tool, err)
-		fmt.Fprintf(a.stdout, "  %-11s Events spool locally and deliver when this clears, so a short\n", "")
-		fmt.Fprintf(a.stdout, "  %-11s outage costs nothing. `openbox doctor` re-checks.\n", "")
+		a.row(tool, "NO; %v", err)
+		a.row("", "Events spool locally and deliver when this clears, so a short")
+		a.row("", "outage costs nothing. `openbox doctor` re-checks.")
 		return
 	}
-	fmt.Fprintf(a.stdout, "  %-11s reachable; authenticated as %s @ %s\n", tool, creds.DID, creds.BaseURL)
+	a.row(tool, "reachable; authenticated as %s @ %s", creds.DID, creds.BaseURL)
 }
 
 // doctorReachTimeout keeps the check short. Doctor is a report, and a report

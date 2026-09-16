@@ -31,24 +31,133 @@ type laneReport struct {
 	installed []string
 	failed    []string
 	retired   []string
+	// keys is every env key the installed lanes wrote, and settings the one
+	// file they wrote them to. Summarized rather than reported per lane: on a
+	// success the reader needs the total and the file, and `openbox doctor`
+	// has the rest.
+	keys     int
+	settings string
+	// addrs is each installed lane's address, for the one summary row.
+	addrs map[string]string
 }
 
-func (r laneReport) print(a *app) {
-	for _, note := range r.retired {
-		fmt.Fprintf(a.stdout, "  retired: %s\n", note)
+// row prints one label/value line of the install report. The whole report is
+// this column plus prose indented under it, so the width lives here rather
+// than in a format string per call site.
+func (a *app) row(label, format string, args ...any) {
+	fmt.Fprintf(a.stdout, "  %-12s %s\n", label, fmt.Sprintf(format, args...))
+}
+
+// note prints prose under the rows it explains, one pre-wrapped line per
+// argument, at the row indent rather than the value column: it is a sentence
+// about the section, not another value.
+func (a *app) note(lines ...string) {
+	for _, line := range lines {
+		fmt.Fprintf(a.stdout, "  %s\n", line)
 	}
-	if len(r.installed) > 0 {
-		for _, lane := range r.installed {
-			fmt.Fprintf(a.stdout, "  lane %s is installed and running.\n", lane)
+}
+
+// detail is note one level deeper, for prose that explains the single line
+// above it rather than the whole section.
+func (a *app) detail(lines ...string) {
+	for _, line := range lines {
+		fmt.Fprintf(a.stdout, "    %s\n", line)
+	}
+}
+
+// wrapRow is row for a value whose length is not knowable when the format
+// string is written -- a joined reason, a probe's description. The first line
+// carries the label and the rest align under it, so the column holds.
+func (a *app) wrapRow(label, format string, args ...any) {
+	lines := wrapAt(fmt.Sprintf(format, args...), rowValueWidth)
+	if len(lines) == 0 {
+		return
+	}
+	a.row(label, "%s", lines[0])
+	for _, line := range lines[1:] {
+		a.row("", "%s", line)
+	}
+}
+
+// rowValueWidth keeps a wrapped value inside 78 columns once the label column
+// in front of it is counted.
+const rowValueWidth = 63
+
+// wrapAt breaks text on spaces. Prose written here is wrapped by hand, where
+// the wording can be chosen to fit; this is for the values that arrive as one
+// string from somewhere else.
+func wrapAt(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		switch {
+		case line == "":
+			line = word
+		case len(line)+1+len(word) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
 		}
 	}
-	for _, lane := range r.failed {
-		fmt.Fprintf(a.stdout, "  lane %s did NOT come up; see the warning above; `openbox doctor` reports where this machine's model calls go.\n", lane)
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// print is the whole of a successful lane install: what is running, where its
+// keys went, and the two things that capture means. The unit paths, the CA and
+// the election are facts about a healthy machine, so they belong to `openbox
+// doctor`; only a lane that did NOT come up explains itself here.
+func (r laneReport) print(a *app) {
+	for _, note := range r.retired {
+		a.row("retired", "%s", note)
 	}
 	if len(r.installed) > 0 {
-		fmt.Fprintf(a.stdout, "  note: the tool reads these settings at SESSION START, so a session that is\n")
-		fmt.Fprintf(a.stdout, "        already open keeps using whatever it started with. Restart it.\n")
+		a.row("lanes", "%s (running)", strings.Join(r.running(), ", "))
+		a.row("env", "%d lane keys in %s", r.keys, r.settings)
+		// The one thing an install must never leave to doctor: routing these
+		// lanes is what turns capture on, and that is a decision only the
+		// person reading this can make. Said per lane that actually came up --
+		// the two fail independently, and claiming TLS interception for a
+		// transport lane that did not start would be a false disclosure.
+		a.note(r.captureNotes()...)
+		a.note("What leaves this machine is gated by content_capture.")
 	}
+	for _, lane := range r.failed {
+		a.row("NOT UP", "%s; see the warning above. `openbox doctor` reports where this", lane)
+		a.row("", "machine's model calls go.")
+	}
+}
+
+// captureNotes is what each installed lane means for the developer's own data:
+// one disclosure per lane that is actually running, pre-wrapped.
+func (r laneReport) captureNotes() []string {
+	var out []string
+	for _, lane := range r.installed {
+		switch lane {
+		case "telemetry":
+			out = append(out,
+				"The tool EXPORTS its own telemetry to that receiver, prompt and tool",
+				"content included.")
+		case "transport":
+			out = append(out,
+				"The relay INTERCEPTS the provider's TLS on this machine; every other host",
+				"is tunnelled uninspected.")
+		}
+	}
+	return out
+}
+
+// running pairs each installed lane with the address it answers on, which is
+// the one coordinate a reader needs before doctor.
+func (r laneReport) running() []string {
+	out := make([]string, 0, len(r.installed))
+	for _, lane := range r.installed {
+		out = append(out, lane+" "+r.addrs[lane])
+	}
+	return out
 }
 
 func (a *app) setupLanes(req laneRequest) laneReport {
@@ -62,9 +171,9 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 	// printing it on every install teaches the reader to skip it.
 	if laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, "x") == "" {
 		fmt.Fprintf(a.stdout, "\nModel-call lanes: not packaged for %s; hooks only.\n", runtime.GOOS)
-		fmt.Fprintf(a.stdout, "  Tool calls are still governed. To observe model calls here, run `openbox\n")
-		fmt.Fprintf(a.stdout, "  telemetry` and `openbox transport` in the foreground, or supervise them with\n")
-		fmt.Fprintf(a.stdout, "  the platform's own service manager.\n")
+		a.note("Tool calls are still governed. To observe model calls here, run `openbox",
+			"telemetry` and `openbox transport` in the foreground, or supervise them with",
+			"the platform's own service manager.")
 		return report
 	}
 	home, code := a.gatewayHome()
@@ -80,7 +189,7 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 
 	if req.transport {
 		if value, present := gatewayservice.CurrentEnv(home); present && laneRouted(home, activation.LaneGateway) {
-			fmt.Fprintf(a.stdout, "\nRetiring the local gateway; the transport relay supersedes it\n")
+			fmt.Fprintf(a.stdout, "\nRetiring the local gateway - the transport relay supersedes it\n")
 			if err := a.removeGateway(home); err != nil {
 				fmt.Fprintf(a.stderr, "warning: could not retire the gateway at %s: %v\n", value, err)
 			} else {
@@ -89,29 +198,31 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 		}
 	}
 
+	report.settings = gatewayservice.SettingsPath(home)
+	report.addrs = map[string]string{}
+
 	if req.telemetry {
-		fmt.Fprintf(a.stdout, "\nTelemetry receiver (the tool's own OTLP exports)\n")
-		if err := a.setupTelemetry(home, req.telemetryAddr, req.verbose); err != nil {
+		keys, err := a.setupTelemetry(home, req.telemetryAddr, req.verbose)
+		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: telemetry setup did not complete: %v\n", err)
 			report.failed = append(report.failed, "telemetry")
 		} else {
 			report.installed = append(report.installed, "telemetry")
+			report.addrs["telemetry"] = req.telemetryAddr
+			report.keys += keys
 		}
 	}
 
 	if req.transport {
-		fmt.Fprintf(a.stdout, "\nTransport relay (in-path model-call observation)\n")
-		if err := a.setupTransport(home, req.transportAddr, req.verbose); err != nil {
+		keys, err := a.setupTransport(home, req.transportAddr, req.verbose)
+		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: transport setup did not complete: %v\n", err)
 			report.failed = append(report.failed, "transport")
 		} else {
 			report.installed = append(report.installed, "transport")
+			report.addrs["transport"] = req.transportAddr
+			report.keys += keys
 		}
-	}
-
-	e := activation.ResolveElection(gatewayservice.SettingsPath(home))
-	if e.Elected != "" {
-		fmt.Fprintf(a.stdout, "\n  model-call producer: %s; %s\n", e.Elected, e.Reason)
 	}
 	return report
 }
@@ -198,8 +309,8 @@ func (a *app) runRemovals(home string, req removalRequest) removalResult {
 		if res.ok() {
 			a.purgeLaneData(home, req.uninstall)
 		} else {
-			fmt.Fprintf(a.stdout, "  kept           the activation record and the CA: a lane is still routed, and\n")
-			fmt.Fprintf(a.stdout, "                 that record is the only thing that can restore its env keys.\n")
+			a.row("kept", "the activation record and the CA: a lane is still routed, and")
+			a.row("", "that record is the only thing that can restore its env keys.")
 		}
 	}
 
@@ -250,7 +361,7 @@ func (a *app) purgeLaneData(home string, uninstalling bool) {
 			fmt.Fprintf(a.stderr, "warning: could not delete %s: %v\n", path, err)
 			continue
 		}
-		fmt.Fprintf(a.stdout, "  deleted        %s\n", path)
+		a.row("deleted", "%s", path)
 	}
 	// This repo's stated direction of error for exactly this shape is over-keep,
 	// never over-delete. `uninstall` is the one caller that does delete it, and
@@ -261,9 +372,9 @@ func (a *app) purgeLaneData(home string, uninstalling bool) {
 	}
 	spool := devconfig.SpoolDir(transportSpoolSubdir)
 	if entries, err := os.ReadDir(spool); err == nil && len(entries) > 0 {
-		fmt.Fprintf(a.stdout, "  kept           %s (%d undelivered event file(s))\n", spool, len(entries))
-		fmt.Fprintf(a.stdout, "                 Shared with the hook path, which this command does not remove.\n")
-		fmt.Fprintf(a.stdout, "                 Delete it by hand if you mean to discard that evidence.\n")
+		a.row("kept", "%s (%d undelivered event file(s))", spool, len(entries))
+		a.row("", "Shared with the hook path, which this command does not remove.")
+		a.row("", "Delete it by hand if you mean to discard that evidence.")
 	}
 }
 

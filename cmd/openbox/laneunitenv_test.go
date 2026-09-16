@@ -45,12 +45,12 @@ func TestLaneUnitsCarryTheInstallersCoordinates(t *testing.T) {
 	}{
 		{
 			lane:  "telemetry",
-			setup: func(a *app) error { return a.setupTelemetry(h.home, telemetry.DefaultAddr, false) },
+			setup: func(a *app) error { _, err := a.setupTelemetry(h.home, telemetry.DefaultAddr, false); return err },
 			spec:  laneservice.Telemetry("", "", false),
 		},
 		{
 			lane:  "transport",
-			setup: func(a *app) error { return a.setupTransport(h.home, transport.DefaultAddr, false) },
+			setup: func(a *app) error { _, err := a.setupTransport(h.home, transport.DefaultAddr, false); return err },
 			spec:  laneservice.Transport("", "", false),
 		},
 	} {
@@ -100,7 +100,7 @@ func TestLaneUnitsCarryNoConditionalEnvironmentWhenTheInstallerHadNone(t *testin
 	// installer that read nothing beyond that, which is what a.getenv reports
 	// for the two CONDITIONAL keys.
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
-	if err := a.setupTransport(h.home, transport.DefaultAddr, false); err != nil {
+	if _, err := a.setupTransport(h.home, transport.DefaultAddr, false); err != nil {
 		t.Fatalf("setupTransport: %v", err)
 	}
 	unitPath := laneservice.Transport("", "", false).UnitPath(runtime.GOOS, h.home)

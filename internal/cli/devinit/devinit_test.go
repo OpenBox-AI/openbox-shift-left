@@ -503,3 +503,38 @@ func TestABackendErrorNamesTheHostItCameFrom(t *testing.T) {
 		t.Errorf("a URL-less APIError reads badly: %s", got)
 	}
 }
+
+// TestAnUnscoredAgentPrintsNoTierRow. The control plane leaves tier and trust
+// empty until an agent has been scored, and TrustScore reaches here through
+// fmt.Sprint of an any -- so "absent" arrives as the literal "<nil>" and the
+// row rendered as "tier:   (trust <nil>)". A row with nothing in it is worse
+// than no row.
+func TestAnUnscoredAgentPrintsNoTierRow(t *testing.T) {
+	for _, tc := range []struct {
+		name, tier, trust, want string
+	}{
+		{"scored", "Tier 2", "0.81", "Tier 2 (trust 0.81)"},
+		{"tier only", "Tier 2", "<nil>", "Tier 2"},
+		{"score only", "", "0.81", "trust 0.81"},
+		{"neither", "", "<nil>", ""},
+		{"neither, empty score", "", "", ""},
+	} {
+		if got := tierLabel(tc.tier, tc.trust); got != tc.want {
+			t.Errorf("%s: tierLabel(%q, %q) = %q, want %q", tc.name, tc.tier, tc.trust, got, tc.want)
+		}
+	}
+
+	isolateHome(t)
+	var out bytes.Buffer
+	reg := &backend.Registration{
+		AgentID: "a-1", AgentName: "dev", DID: "did:aip:x",
+		APIKey: "obx_test_k", PrivateKey: "c2VlZA==", TrustScore: "<nil>",
+	}
+	if _, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{Registrar: &fakeRegistrar{reg: reg}, Installer: &fakeInstaller{}, Out: &out}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if s := out.String(); strings.Contains(s, "tier") || strings.Contains(s, "<nil>") {
+		t.Errorf("an unscored agent still prints a tier row:\n%s", s)
+	}
+}

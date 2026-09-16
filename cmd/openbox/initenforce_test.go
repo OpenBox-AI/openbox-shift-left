@@ -140,7 +140,10 @@ func TestCodexInstallsHooksOnlyWithoutError(t *testing.T) {
 	if !strings.Contains(s, "hooks only") {
 		t.Errorf("a codex install does not say it installed hooks only:\n%s", s)
 	}
-	for _, absent := range []string{"transport CA", "INTERCEPTS", "telemetry env"} {
+	// Anchored on what a lane install actually prints now: the two capture
+	// disclosures and the summary row. A codex install reaching any of these
+	// is claiming a lane it cannot have.
+	for _, absent := range []string{"INTERCEPTS", "EXPORTS", "lane keys", "(running)"} {
 		if strings.Contains(s, absent) {
 			t.Errorf("a codex install claims a lane it cannot have (%q):\n%s", absent, s)
 		}

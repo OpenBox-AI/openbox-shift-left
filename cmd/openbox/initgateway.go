@@ -85,10 +85,10 @@ func (a *app) removeGateway(homeDir string) error {
 				return err
 			}
 			for _, key := range removed {
-				fmt.Fprintf(a.stdout, "  removed        %s from %s\n", key, gatewayservice.SettingsPath(homeDir))
+				a.row("removed", "%s from %s", key, gatewayservice.SettingsPath(homeDir))
 			}
 			if restored != "" {
-				fmt.Fprintf(a.stdout, "  restored       %s = %s (the value that was there before OpenBox)\n",
+				a.row("restored", "%s = %s (the value that was there before OpenBox)",
 					gatewayservice.EnvKey, restored)
 			}
 			return nil

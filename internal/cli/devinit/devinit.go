@@ -184,18 +184,16 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		if !fromFile {
 			where = "the environment"
 		}
-		fmt.Fprintf(d.Out, "%s already has credentials in %s; reusing them (DID %s).\n",
-			o.Provider, where, didOrNone(did))
-		fmt.Fprintf(d.Out, "  Nothing was registered. This store belongs to %s alone; another tool has its\n", o.Provider)
-		fmt.Fprintf(d.Out, "  own agent and its own DID. `openbox doctor` lists every store and says which\n")
-		fmt.Fprintf(d.Out, "  identity is in effect for each.\n")
+		fmt.Fprintf(d.Out, "Reusing the existing %s agent; nothing was registered.\n", o.Provider)
+		fmt.Fprintf(d.Out, "  %-12s %s\n", "DID", didOrNone(did))
 		// Reuse is a file test, so a key that was revoked server-side still looks
 		// like a complete store and this run never goes online to find out. That
 		// makes deleting the file the whole rotation procedure, and a reader who
-		// is not told will look for a flag that does not exist.
+		// is not told will look for a flag that does not exist. Which tool this
+		// store belongs to, and which identity wins, is `openbox doctor`'s.
+		fmt.Fprintf(d.Out, "  %-12s %s\n", "credentials", where)
 		if fromFile {
-			fmt.Fprintf(d.Out, "  Rotating a key? Delete %s and re-run this command; it will offer to adopt\n", credentialFileLabel())
-			fmt.Fprintf(d.Out, "  the agent so the DID stays the same.\n")
+			fmt.Fprintf(d.Out, "  %-12s delete it and re-run to rotate the key, keeping this DID\n", "")
 		}
 		return res, ref, nil
 	}
@@ -292,10 +290,14 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(), err)
 	}
 
-	fmt.Fprintf(d.Out, "Registered developer agent %q\n  id:    %s\n  DID:   %s\n  tier:  %s (trust %s)\n",
-		reg.AgentName, reg.AgentID, reg.DID, reg.Tier, reg.TrustScore)
-	fmt.Fprintf(d.Out, "Credentials written to %s (0600); values are not printed (INV-1).\n",
-		credentialFileLabel())
+	fmt.Fprintf(d.Out, "Registered developer agent %q\n", reg.AgentName)
+	fmt.Fprintf(d.Out, "  %-12s %s\n", "id", reg.AgentID)
+	fmt.Fprintf(d.Out, "  %-12s %s\n", "DID", reg.DID)
+	if tier := tierLabel(reg.Tier, reg.TrustScore); tier != "" {
+		fmt.Fprintf(d.Out, "  %-12s %s\n", "tier", tier)
+	}
+	fmt.Fprintf(d.Out, "  %-12s %s (0600; values never printed, INV-1)\n",
+		"credentials", credentialFileLabel())
 	if o.ManagedEnable {
 		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated; Phase-1 pilot is opt-in).")
 	}
@@ -311,9 +313,27 @@ func applyConfig(o Options, d Deps, ref provider.CredentialRef, res *Result) err
 		return fmt.Errorf("agent ready but writing %s config failed: %w", o.Provider, err)
 	}
 	res.ConfigApplied = true
-	fmt.Fprintf(d.Out, "Wrote %s native config (no secrets inline; the hook reads %s at runtime).\n",
-		o.Provider, credentialFileLabel())
+	fmt.Fprintf(d.Out, "  %-12s Wrote %s native config; the hook reads the .env above\n",
+		"config", o.Provider)
 	return nil
+}
+
+// tierLabel renders the pair only when the control plane actually sent one. An
+// unscored agent arrives with both halves empty, and TrustScore comes through
+// fmt.Sprint of an any, so "absent" reads as the literal "<nil>" -- which is
+// what "tier:   (trust <nil>)" was.
+func tierLabel(tier, trust string) string {
+	scored := trust != "" && trust != "<nil>"
+	switch {
+	case tier != "" && scored:
+		return tier + " (trust " + trust + ")"
+	case tier != "":
+		return tier
+	case scored:
+		return "trust " + trust
+	default:
+		return ""
+	}
 }
 
 func resumeErr(reg *backend.Registration, step string, err error) error {

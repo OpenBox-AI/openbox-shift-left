@@ -21,8 +21,17 @@ type laneInstall struct {
 	laneIdentity
 	installUnit   func() error
 	uninstallUnit func() error
-	activate      func() (replaced []string, err error)
+	activate      func() (activated, error)
 	envNotSet     string
+}
+
+// activated is what routing a lane changed. It is returned rather than
+// printed because a success prints one summary for every lane at the end; a
+// replaced value is the exception, being the one thing here that belonged to
+// somebody else.
+type activated struct {
+	keys     int
+	replaced []string
 }
 
 type laneIdentity struct {
@@ -39,50 +48,50 @@ func identityOf(spec laneservice.Spec, homeDir string) laneIdentity {
 	}
 }
 
-func (a *app) setupLane(in laneInstall) error {
+func (a *app) setupLane(in laneInstall) (int, error) {
 	// Checked before starting, because the readiness probe below cannot tell our
 	// daemon from a stranger: it is a bare TCP connect.
 	if occupied, who := portOccupied(in.addr); occupied {
 		if !unitDescribesAddr(in.unitPath, in.addr) {
-			return fmt.Errorf("%s is already in use%s; refusing to continue, because the readiness check "+
+			return 0, fmt.Errorf("%s is already in use%s; refusing to continue, because the readiness check "+
 				"cannot tell our %s from whatever is listening. Stop it, or choose another address",
 				in.addr, who, in.label)
 		}
-		fmt.Fprintf(a.stdout, "  replacing      the %s already installed at %s (%s)\n", in.label, in.addr, in.unitPath)
+		a.row("replacing", "the %s already installed at %s (%s)", in.label, in.addr, in.unitPath)
 		a.unloadUnit(in.laneIdentity)
 		if !waitForPortFreeFn(in.addr, gatewayStopTimeout) {
-			return fmt.Errorf("the %s already running on %s did not stop within %s; nothing was changed. "+
+			return 0, fmt.Errorf("the %s already running on %s did not stop within %s; nothing was changed. "+
 				"Stop it by hand and re-run init", in.label, in.addr, gatewayStopTimeout)
 		}
 	}
 
 	if err := in.installUnit(); err != nil {
-		return err
+		return 0, err
 	}
-	fmt.Fprintf(a.stdout, "  %-14s %s\n", in.label+" unit", in.unitPath)
 
 	if err := a.loadUnit(in.laneIdentity); err != nil {
 		a.rollbackLaneUnit(in)
-		return fmt.Errorf("wrote %s but could not start it (%w); %s. Start it by hand with "+
+		return 0, fmt.Errorf("wrote %s but could not start it (%w); %s. Start it by hand with "+
 			"`openbox %s`, then re-run init", in.unitPath, err, in.envNotSet, in.label)
 	}
 
+	// The env keys go in only once something is listening, and that order is a
+	// safety property rather than a nicety: see TestLaneEnvIsWrittenAfterReadiness.
 	if !waitForListenerFn(in.addr, gatewayReadyTimeout) {
 		a.rollbackLaneUnit(in)
-		return fmt.Errorf("the %s did not start listening on %s within %s; %s. Check the service logs, "+
+		return 0, fmt.Errorf("the %s did not start listening on %s within %s; %s. Check the service logs, "+
 			"or run `openbox %s` in the foreground to see why", in.label, in.addr, gatewayReadyTimeout, in.envNotSet, in.label)
 	}
-	fmt.Fprintf(a.stdout, "  %-14s listening on %s\n", in.label, in.addr)
 
-	replaced, err := in.activate()
+	act, err := in.activate()
 	if err != nil {
 		a.rollbackLaneUnit(in)
-		return err
+		return 0, err
 	}
-	for _, r := range replaced {
-		fmt.Fprintf(a.stdout, "  replaced       %s\n", r)
+	for _, r := range act.replaced {
+		a.row("replaced", "%s", r)
 	}
-	return nil
+	return act.keys, nil
 }
 
 func (a *app) rollbackLaneUnit(in laneInstall) {
@@ -91,7 +100,7 @@ func (a *app) rollbackLaneUnit(in laneInstall) {
 	}
 	a.unloadUnit(in.laneIdentity)
 	if err := in.uninstallUnit(); err == nil {
-		fmt.Fprintf(a.stdout, "  rolled back    removed %s\n", in.unitPath)
+		a.row("rolled back", "removed %s", in.unitPath)
 	}
 }
 
@@ -113,7 +122,7 @@ func (a *app) removeLane(in laneRemoval) error {
 		return err
 	}
 	if in.unitPath != "" {
-		fmt.Fprintf(a.stdout, "  removed        %s\n", in.unitPath)
+		a.row("removed", "%s", in.unitPath)
 	}
 	return nil
 }
@@ -155,12 +164,12 @@ var uninstallLaneUnitFn = func(spec laneservice.Spec, goos, homeDir string) erro
 
 // setupTelemetry installs the local OTLP receiver and points the tool's own
 // telemetry at it.
-func (a *app) setupTelemetry(homeDir, addr string, verbose bool) error {
+func (a *app) setupTelemetry(homeDir, addr string, verbose bool) (int, error) {
 	// The settings path goes INTO the unit: only the install path knows the real home.
 	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).WithEnv(a.laneUnitEnv())
 	binPath, err := a.selfPath()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	settings := claudeSettingsPath(homeDir)
 	return a.setupLane(laneInstall{
@@ -172,18 +181,13 @@ func (a *app) setupTelemetry(homeDir, addr string, verbose bool) error {
 		uninstallUnit: func() error { return uninstallLaneUnitFn(spec, runtime.GOOS, homeDir) },
 		envNotSet: "the telemetry env keys were NOT written, so the tool exports nothing and this lane " +
 			"records nothing; everything else on this machine is unaffected",
-		activate: func() ([]string, error) {
+		activate: func() (activated, error) {
 			keys := activation.TelemetryKeys(addr)
 			res, err := activation.Activate(homeDir, settings, activation.LaneTelemetry, keys)
 			if err != nil {
-				return nil, err
+				return activated{}, err
 			}
-			fmt.Fprintf(a.stdout, "  %-14s %d keys -> %s (user scope: %s)\n",
-				"telemetry env", len(keys), "http://"+addr, settings)
-			fmt.Fprintf(a.stdout, "                 this makes the tool EXPORT its own telemetry, including prompt and\n")
-			fmt.Fprintf(a.stdout, "                 tool content, to that local receiver. What leaves this machine is\n")
-			fmt.Fprintf(a.stdout, "                 still gated by the content_capture posture.\n")
-			return res.Replaced, nil
+			return activated{keys: len(keys), replaced: res.Replaced}, nil
 		},
 	})
 }
@@ -201,15 +205,15 @@ func (a *app) removeTelemetry(homeDir string, force bool) error {
 	})
 }
 
-func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
+func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
 	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose).WithEnv(a.laneUnitEnv())
 	binPath, err := a.selfPath()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	openboxHome, err := devconfig.Home()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	caPath, _ := transport.CAPaths(openboxHome)
 	settings := claudeSettingsPath(homeDir)
@@ -223,9 +227,9 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
 		uninstallUnit: func() error { return uninstallLaneUnitFn(spec, runtime.GOOS, homeDir) },
 		envNotSet: "the proxy env keys were NOT written, so model calls still reach the provider " +
 			"directly and are unobserved by this lane",
-		activate: func() ([]string, error) {
+		activate: func() (activated, error) {
 			if !fileExists(caPath) {
-				return nil, fmt.Errorf("the transport relay is listening on %s but its CA certificate is not at %s; "+
+				return activated{}, fmt.Errorf("the transport relay is listening on %s but its CA certificate is not at %s; "+
 					"refusing to set NODE_EXTRA_CA_CERTS to a file that does not exist, because every intercepted "+
 					"handshake would then fail and look like the provider being down. Check %s",
 					addr, caPath, spec.LogPath(homeDir))
@@ -233,14 +237,9 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) error {
 			keys := activation.TransportKeys(addr, caPath, activation.CurrentEnv(settings))
 			res, err := activation.Activate(homeDir, settings, activation.LaneTransport, keys)
 			if err != nil {
-				return nil, err
+				return activated{}, err
 			}
-			fmt.Fprintf(a.stdout, "  %-14s %d keys -> %s (user scope: %s)\n",
-				"transport env", len(keys), "http://"+addr, settings)
-			fmt.Fprintf(a.stdout, "  %-14s %s\n", "transport CA", caPath)
-			fmt.Fprintf(a.stdout, "                 this INTERCEPTS the provider's TLS on this machine. Every other host is\n")
-			fmt.Fprintf(a.stdout, "                 tunnelled uninspected.\n")
-			return res.Replaced, nil
+			return activated{keys: len(keys), replaced: res.Replaced}, nil
 		},
 	})
 }
@@ -264,10 +263,10 @@ func (a *app) reportDeactivation(label, homeDir, settingsPath string, lane activ
 		return err
 	}
 	if len(res.Removed) > 0 {
-		fmt.Fprintf(a.stdout, "  removed        %d %s env key(s) from %s\n", len(res.Removed), label, settingsPath)
+		a.row("removed", "%d %s env key(s) from %s", len(res.Removed), label, settingsPath)
 	}
 	for key, value := range res.Restored {
-		fmt.Fprintf(a.stdout, "  restored       %s = %s (the value that was there before OpenBox)\n", key, value)
+		a.row("restored", "%s = %s (the value that was there before OpenBox)", key, value)
 	}
 	return nil
 }

@@ -352,38 +352,38 @@ func (a *app) printInventory(inv uninstallInventory) {
 		if s.present {
 			state = "present"
 		}
-		fmt.Fprintf(a.stdout, "  hooks          %s (%s, %s)\n", s.path, s.provider, state)
+		a.row("hooks", "%s (%s, %s)", s.path, s.provider, state)
 	}
 	if inv.pluginDir != "" {
-		fmt.Fprintf(a.stdout, "  plugin bundle  %s (includes a copy of the openbox binary)\n", inv.pluginDir)
+		a.row("plugin", "%s (a bundle including a copy of the openbox binary)", inv.pluginDir)
 	}
 	for _, lane := range inv.lanes {
-		fmt.Fprintf(a.stdout, "  lane           %s (unit stopped and removed, env keys restored)\n", lane)
+		a.row("lane", "%s (unit stopped and removed, env keys restored)", lane)
 	}
 	if inv.unrecordedLane {
-		fmt.Fprintf(a.stdout, "  lane           a unit or a routed env key with no activation record behind it,\n")
-		fmt.Fprintf(a.stdout, "                 left by an interrupted removal or an older install. The unit can be\n")
-		fmt.Fprintf(a.stdout, "                 removed; a routed key cannot, because the record of what was there\n")
-		fmt.Fprintf(a.stdout, "                 before it is gone.\n")
+		a.row("lane", "a unit or a routed env key with no activation record behind it,")
+		a.row("", "left by an interrupted removal or an older install. The unit can be")
+		a.row("", "removed; a routed key cannot, because the record of what was there")
+		a.row("", "before it is gone.")
 	}
 	for _, p := range inv.posture {
-		fmt.Fprintf(a.stdout, "  posture        %s\n", p)
+		a.row("posture", "%s", p)
 	}
 	for _, d := range inv.ownedDirs {
-		fmt.Fprintf(a.stdout, "  directory      %s\n", d)
+		a.row("directory", "%s", d)
 	}
 	for _, s := range inv.spools {
-		fmt.Fprintf(a.stdout, "  spool          %s (%d undelivered event(s), %d already given up on)\n",
+		a.row("spool", "%s (%d undelivered event(s), %d already given up on)",
 			s.dir, s.backlog, s.discarded)
 	}
 	for _, p := range inv.envFiles {
-		fmt.Fprintf(a.stdout, "  credentials    %s (deleted last, and its signing seed cannot be re-retrieved)\n", p)
+		a.row("credentials", "%s (deleted last, and its signing seed cannot be re-retrieved)", p)
 	}
 	for _, p := range inv.envResidue {
-		fmt.Fprintf(a.stdout, "  credentials    %s (an interrupted write; same secrets, deleted with them)\n", p)
+		a.row("credentials", "%s (an interrupted write; same secrets, deleted with them)", p)
 	}
 	for _, p := range inv.managed {
-		fmt.Fprintf(a.stdout, "  kept           %s (your organization's, not OpenBox's)\n", p)
+		a.row("kept", "%s (your organization's, not OpenBox's)", p)
 	}
 }
 
@@ -401,9 +401,9 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 	st.backlog += queued
 	if !a.haveCredentials(inv) {
 		fmt.Fprintf(a.stdout, "\nflushing SKIPPED: no credentials on this machine, so nothing can be delivered.\n")
-		fmt.Fprintf(a.stdout, "  %d undelivered event(s) will be DESTROYED with the spool below. Run\n", st.backlog)
-		fmt.Fprintf(a.stdout, "  `openbox init --provider <tool>` and `openbox hook <tool> flush` first if that\n")
-		fmt.Fprintf(a.stdout, "  evidence matters.\n")
+		a.note(fmt.Sprintf("%d undelivered event(s) will be DESTROYED with the spool below. Run", st.backlog),
+			"`openbox init --provider <tool>` and `openbox hook <tool> flush` first if that",
+			"evidence matters.")
 		return
 	}
 	for _, name := range provider.Supported() {
@@ -425,10 +425,10 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 	// Reported as "cleared", not "delivered": the same call retires events past
 	// their attempt limit or retention age, and a retired event left the spool
 	// without reaching the control plane.
-	fmt.Fprintf(a.stdout, "  spool went from %d to %d event(s); some of that may be retirement, not delivery\n",
-		queued, remaining)
+	a.note(fmt.Sprintf("spool went from %d to %d event(s); some of that may be retirement, not delivery",
+		queued, remaining))
 	if remaining > 0 {
-		fmt.Fprintf(a.stdout, "  those %d event(s) could not be delivered and will be DESTROYED with the spool.\n", remaining)
+		a.note(fmt.Sprintf("those %d event(s) could not be delivered and will be DESTROYED with the spool.", remaining))
 	}
 }
 
@@ -495,7 +495,7 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 			continue
 		}
 		for _, r := range removed {
-			fmt.Fprintf(a.stdout, "  removed        %s from %s\n", r, s.path)
+			a.row("removed", "%s from %s", r, s.path)
 			st.deleted++
 		}
 		if s.restoreSettings {
@@ -512,7 +512,7 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 			st.hookFailed = append(st.hookFailed, hookFailure{path: inv.pluginDir})
 			st.failed = true
 		} else {
-			fmt.Fprintf(a.stdout, "  deleted        %s\n", inv.pluginDir)
+			a.row("deleted", "%s", inv.pluginDir)
 			st.deleted++
 		}
 	}
@@ -558,12 +558,12 @@ func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSur
 	case !res.Recorded:
 		return // the ordinary case: never installed here, or already uninstalled
 	case res.Drifted:
-		fmt.Fprintf(a.stdout, "  left alone     %s in %s (now %s; changed since `init` set it to true)\n",
+		a.row("left alone", "%s in %s (now %s; changed since `init` set it to true)",
 			providers.ClaudeThinkingSummariesKey, s.path, res.Current)
 	case res.Present:
-		fmt.Fprintf(a.stdout, "  restored       %s in %s to %s\n", providers.ClaudeThinkingSummariesKey, s.path, res.Value)
+		a.row("restored", "%s in %s to %s", providers.ClaudeThinkingSummariesKey, s.path, res.Value)
 	default:
-		fmt.Fprintf(a.stdout, "  removed        %s from %s\n", providers.ClaudeThinkingSummariesKey, s.path)
+		a.row("removed", "%s from %s", providers.ClaudeThinkingSummariesKey, s.path)
 	}
 }
 
@@ -605,11 +605,10 @@ func (a *app) removeArtifacts(st *uninstallState, inv uninstallInventory) {
 	recPath := providers.ClaudePriorSettingsPath(inv.home)
 	for _, p := range inv.posture {
 		if st.keepPriorRecord && p == recPath {
-			fmt.Fprintf(a.stdout, "  kept           %s\n", p)
-			fmt.Fprintf(a.stdout, "                 the showThinkingSummaries restore against %s did not complete;\n",
-				st.keepPriorRecordPath)
-			fmt.Fprintf(a.stdout, "                 see the warning above for what to fix. Fix it, then run `openbox\n")
-			fmt.Fprintf(a.stdout, "                 uninstall` again to finish the restore and remove this record.\n")
+			a.row("kept", "%s", p)
+			a.row("", "the showThinkingSummaries restore against %s did not complete;", st.keepPriorRecordPath)
+			a.row("", "see the warning above for what to fix. Fix it, then run `openbox")
+			a.row("", "uninstall` again to finish the restore and remove this record.")
 			st.kept = appendUnique(st.kept, p)
 			continue
 		}
@@ -617,7 +616,7 @@ func (a *app) removeArtifacts(st *uninstallState, inv uninstallInventory) {
 	}
 	for _, dir := range inv.ownedDirs {
 		if !safeToRemoveAll(dir, inv.home) {
-			fmt.Fprintf(a.stdout, "  kept           %s (refusing to delete this recursively; delete it by hand)\n", dir)
+			a.row("kept", "%s (refusing to delete this recursively; delete it by hand)", dir)
 			st.kept = appendUnique(st.kept, dir)
 			continue
 		}
@@ -660,7 +659,7 @@ func (a *app) deletePath(st *uninstallState, path string, remove func(string) er
 		st.undeleted = appendUnique(st.undeleted, path)
 		return
 	}
-	fmt.Fprintf(a.stdout, "  deleted        %s\n", path)
+	a.row("deleted", "%s", path)
 	st.deleted++
 }
 
@@ -678,10 +677,11 @@ func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
 	// The directories follow, from runUninstall: by name first and the
 	// directory after, because a directory delete racing the credential delete
 	// is how a store survives an uninstall that reported success.
-	fmt.Fprintf(a.stdout, "  the obx_ keys and Ed25519 signing seeds in those files cannot be re-retrieved.\n")
-	fmt.Fprintf(a.stdout, "  `openbox init --provider <tool>` registers a NEW agent; it does not recover these.\n")
-	fmt.Fprintf(a.stdout, "  The organization control token went with them; `openbox auth` takes a new one.\n")
-	fmt.Fprintf(a.stdout, "  This is an unlink, not a secure erase: the blocks are freed, not overwritten.\n")
+	a.note("The obx_ keys and Ed25519 signing seeds in those files cannot be re-retrieved.",
+		"`openbox init --provider <tool>` registers a NEW agent; it does not recover",
+		"these. The organization control token went with them; `openbox auth` takes a",
+		"new one. This is an unlink, not a secure erase: the blocks are freed, not",
+		"overwritten.")
 }
 
 // removeEmptyIdentityDirs takes each ~/.openbox/<tool>/ away once nothing is
@@ -702,12 +702,12 @@ func (a *app) removeEmptyIdentityDirs(st *uninstallState) {
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			fmt.Fprintf(a.stdout, "  kept           %s (could not read it: %v)\n", dir, err)
+			a.row("kept", "%s (could not read it: %v)", dir, err)
 			st.kept = appendUnique(st.kept, dir)
 			continue
 		}
 		if len(entries) > 0 {
-			fmt.Fprintf(a.stdout, "  kept           %s (%s)\n", dir, keptDirReason(st, dir, entries))
+			a.row("kept", "%s (%s)", dir, keptDirReason(st, dir, entries))
 			st.kept = appendUnique(st.kept, dir)
 			continue
 		}
@@ -757,26 +757,26 @@ func (a *app) reportUnrestorableRouting(st *uninstallState, home string) {
 	}
 	settings := gatewayservice.SettingsPath(home)
 	fmt.Fprintf(a.stdout, "\nLEFT IN PLACE; and this machine is NOT clean\n")
-	fmt.Fprintf(a.stdout, "  %s still routes model calls through %v.\n", settings, routed)
-	fmt.Fprintf(a.stdout, "  There is no activation record for it, so nothing here knows what those keys held\n")
-	fmt.Fprintf(a.stdout, "  before OpenBox set them -- and a proxy or base-URL value belongs to whoever put it\n")
-	fmt.Fprintf(a.stdout, "  there. Deleting it blind could take a corporate proxy down with it.\n")
-	fmt.Fprintf(a.stdout, "  The daemon those keys point at is gone, so model calls will fail until you edit\n")
-	fmt.Fprintf(a.stdout, "  that file by hand.\n")
+	a.note(fmt.Sprintf("%s still routes model calls through %v.", settings, routed),
+		"There is no activation record for it, so nothing here knows what those keys",
+		"held before OpenBox set them -- and a proxy or base-URL value belongs to",
+		"whoever put it there. Deleting it blind could take a corporate proxy down",
+		"with it. The daemon those keys point at is gone, so model calls will fail",
+		"until you edit that file by hand.")
 	st.failed = true
 }
 
 func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 	fmt.Fprintf(a.stdout, "\nDone. %d item(s) removed.\n", st.deleted)
 	for _, p := range inv.managed {
-		fmt.Fprintf(a.stdout, "  kept           %s; your organization's mandate, not OpenBox's state.\n", p)
+		a.row("kept", "%s; your organization's mandate, not OpenBox's state.", p)
 	}
 	// Everything the steps above decided to keep, repeated here. Each was named
 	// as it happened, but this block is what an operator reads to decide the
 	// machine is clean -- and a store directory reaching it unmentioned is the
 	// same silence the residue sweep exists to end, one level up.
 	for _, p := range st.kept {
-		fmt.Fprintf(a.stdout, "  kept           %s; see the reason above.\n", p)
+		a.row("kept", "%s; see the reason above.", p)
 	}
 	// Two residues, opposite severities. Conflating them would tell an operator
 	// to ignore the one that breaks every tool call.
@@ -785,23 +785,18 @@ func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 	// name the engine copy inside the plugin bundle this command just deleted,
 	// so the tool reports a failed hook on every call there. No registry of
 	// initialized projects exists to find them, but the remedy is free.
-	fmt.Fprintf(a.stdout, "  could not reach  a .claude/settings.local.json in any project other than this "+
-		"directory.\n")
-	fmt.Fprintf(a.stdout, "                   Those entries point at the engine copy deleted above, so the tool "+
-		"will report a\n")
-	fmt.Fprintf(a.stdout, "                   FAILED HOOK on every tool call in that project. There is no "+
-		"registry of\n")
-	fmt.Fprintf(a.stdout, "                   initialized projects to find them: `cd` into each one and run "+
-		"`openbox uninstall`\n")
-	fmt.Fprintf(a.stdout, "                   again. It needs no credentials and deletes nothing twice.\n")
+	a.row("not reached", "a .claude/settings.local.json in any project other than this one.")
+	a.row("", "Those entries point at the engine copy deleted above, so the tool will")
+	a.row("", "report a FAILED HOOK on every tool call in that project, and there is no")
+	a.row("", "registry of initialized projects to find them: `cd` into each one and run")
+	a.row("", "`openbox uninstall` again. It needs no credentials, and deletes nothing")
+	a.row("", "twice.")
 	// Inert, by contrast: the hook script guards on the engine being reachable
 	// and exits 0, so a commit in a repo that still carries it proceeds.
-	fmt.Fprintf(a.stdout, "  could not reach  a per-repo .git/hooks/prepare-commit-msg installed by "+
-		"`openbox hook git install`.\n")
-	fmt.Fprintf(a.stdout, "                   That one IS inert: the script skips its body when the engine is "+
-		"not reachable\n")
-	fmt.Fprintf(a.stdout, "                   and exits 0, so commits keep working. Removing it is optional "+
-		"hygiene.\n")
+	a.row("not reached", "a per-repo .git/hooks/prepare-commit-msg installed by `openbox hook")
+	a.row("", "git install`. That one IS inert: the script skips its body when the")
+	a.row("", "engine is not reachable and exits 0, so commits keep working. Removing")
+	a.row("", "it is optional hygiene.")
 
 	if len(st.hookFailed) == 0 && !st.laneFailed {
 		return

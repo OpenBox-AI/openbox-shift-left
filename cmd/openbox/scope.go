@@ -72,32 +72,45 @@ func (a *app) requireControlToken() (token, source string, code int) {
 // successful install.
 func (a *app) printGovernedScope(o devinit.Options) {
 	if o.Provider == "codex" {
-		fmt.Fprintf(a.stdout, "\nGoverned: EVERY CODEX SESSION on this machine (user-wide hooks).\n")
-		fmt.Fprintf(a.stdout, "  One more step inside Codex: run /hooks and TRUST the new OpenBox hooks -\n")
-		fmt.Fprintf(a.stdout, "  until trusted they do not run.\n")
+		fmt.Fprintf(a.stdout, "\nGoverned: EVERY CODEX SESSION on this machine (user-wide hooks)\n")
+		a.printPosture(o)
+		a.row("one step", "run /hooks inside Codex and TRUST the new OpenBox hooks; until")
+		a.row("", "trusted they do not run")
 		a.printHookBlockNotice()
 		return
 	}
 
-	fmt.Fprintf(a.stdout, "\nGoverned: EVERY SESSION on this machine, in any directory.\n")
-	fmt.Fprintf(a.stdout, "  Hooks were merged into %s.\n", providers.ClaudeUserSettingsPath())
+	fmt.Fprintf(a.stdout, "\nGoverned: EVERY SESSION on this machine, in any directory\n")
+	a.row("hooks", "%s", providers.ClaudeUserSettingsPath())
 	// Not "the next session": the tool's own file watcher picks up direct edits
 	// to hooks in a settings file, so governance starts at once, including in
 	// sessions that are already running. Promising a restart would undersell it.
-	fmt.Fprintf(a.stdout, "  This takes effect IMMEDIATELY: the tool watches that file, so sessions already\n")
-	fmt.Fprintf(a.stdout, "  running are governed too. There is nothing to restart.\n")
-	fmt.Fprintf(a.stdout, "  Absence of events is therefore evidence about the work, not about the scope.\n")
+	a.row("", "live IMMEDIATELY: nothing to restart, and sessions already running")
+	a.row("", "are governed too")
+	a.printPosture(o)
+	// The lanes are the half that a restart DOES gate: their env keys are read
+	// once, at session start.
+	a.row("restart", "open sessions, so their model calls reach the lanes above")
 	// Named whether or not anything was there: "only partly cleaned" is only
 	// actionable if the reader can see which file this run actually looked at.
 	if wd, err := os.Getwd(); err == nil {
 		project := providers.ClaudeProjectSettingsPath(wd)
 		if fileExists(project) {
-			fmt.Fprintf(a.stdout, "  Checked %s for a superseded OpenBox entry;\n", project)
-			fmt.Fprintf(a.stdout, "  a project-level copy would register the same gate a second time. Anything\n")
-			fmt.Fprintf(a.stdout, "  removed, or any reason it could not be, is reported above.\n")
+			a.row("checked", "%s", project)
+			a.row("", "for a superseded project-level copy of the same gate")
 		}
 	}
 	a.printHookBlockNotice()
+}
+
+// printPosture is what this install left switched on. One row each: the
+// reasons they are the right defaults are `openbox doctor`'s, and the two
+// environment variables that opt out are in this command's own --help.
+func (a *app) printPosture(o devinit.Options) {
+	a.row("posture", "mode: ENFORCE, fail-open; commit trailers ON")
+	if o.Provider == "claude-code" {
+		a.row("summaries", "ON; showThinkingSummaries, restored by `openbox uninstall`")
+	}
 }
 
 // printHookBlockNotice is the one case where a successful install governs

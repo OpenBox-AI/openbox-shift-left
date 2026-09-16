@@ -359,29 +359,18 @@ func (a *app) runDevInit(args []string) int {
 			transportAddr: transport.DefaultAddr,
 		})
 	} else {
-		fmt.Fprintf(a.stdout, "\nModel-call lanes: hooks only for %s.\n", o.Provider)
-		fmt.Fprintf(a.stdout, "  The telemetry receiver and the transport relay observe the Anthropic Messages\n")
-		fmt.Fprintf(a.stdout, "  API through Claude Code's own settings, so there is nothing for them to read\n")
-		fmt.Fprintf(a.stdout, "  here. Tool calls are still governed by the hooks above.\n")
+		a.row("lanes", "hooks only for %s; the receiver and the relay read Claude Code's", o.Provider)
+		a.row("", "own settings, so there is nothing for them to read here")
 	}
-
-	fmt.Fprintf(a.stdout, "\nDone.\n")
-	fmt.Fprintf(a.stdout, "  openbox doctor         the effective posture, and where each value came from\n")
-	fmt.Fprintf(a.stdout, "  mode: ENFORCE; tool calls are gated in-process. Inert until your org publishes a\n")
-	fmt.Fprintf(a.stdout, "        policy, and fail-open, so an OpenBox outage never blocks you.\n")
-	fmt.Fprintf(a.stdout, "        OPENBOX_ENFORCE=false opts out, per run; nothing is persisted either way.\n")
-	fmt.Fprintf(a.stdout, "  commit trailers: ON. A session installs prepare-commit-msg and post-commit into\n")
-	fmt.Fprintf(a.stdout, "        the repo it runs in, so a commit is attributed to the session that made it.\n")
-	fmt.Fprintf(a.stdout, "        A hook somebody else wrote is never overwritten. OPENBOX_INSTALL_GIT_HOOK=false\n")
-	fmt.Fprintf(a.stdout, "        turns it off.\n")
-	if o.Provider == "claude-code" {
-		fmt.Fprintf(a.stdout, "  reasoning summaries: ON. showThinkingSummaries is now true in your Claude Code\n")
-		fmt.Fprintf(a.stdout, "        settings, so a governed transcript gets the model's own summary of its\n")
-		fmt.Fprintf(a.stdout, "        reasoning instead of an empty thinking block. There is no per-key opt-out;\n")
-		fmt.Fprintf(a.stdout, "        `openbox uninstall` restores whatever that key held before this run.\n")
-	}
-	a.printGovernedScope(o)
 	laneReport.print(a)
+
+	// Every posture, and the scope they apply to, in one block. The opt-out
+	// environment variables live in `openbox init --help`, which is where
+	// somebody looking for them goes; repeating them on every success turned
+	// three facts into three paragraphs.
+	a.printGovernedScope(o)
+
+	fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` explains every value above, and where it came from.\n")
 	return exitOK
 }
 

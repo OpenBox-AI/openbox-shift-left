@@ -152,7 +152,7 @@ func TestOccupiedPortIsRefusedRatherThanAdopted(t *testing.T) {
 	withRealProbes(t)
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	err = a.setupTransport(h.home, ln.Addr().String(), false)
+	_, err = a.setupTransport(h.home, ln.Addr().String(), false)
 	if err == nil {
 		t.Fatal("setupTransport adopted a port held by a foreign process")
 	}
@@ -176,7 +176,7 @@ func TestReInstallReplacesOurOwnLaneInsteadOfRefusing(t *testing.T) {
 	addr := freeAddr(t)
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupTransport(h.home, addr, false); err != nil {
+	if _, err := a.setupTransport(h.home, addr, false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
 	if _, present := laneSettings(t, h.home)["HTTPS_PROXY"]; !present {
@@ -190,7 +190,7 @@ func TestReInstallReplacesOurOwnLaneInsteadOfRefusing(t *testing.T) {
 	t.Cleanup(func() { portOccupied = origProbe })
 
 	out.Reset()
-	if err := a.setupTransport(h.home, addr, false); err != nil {
+	if _, err := a.setupTransport(h.home, addr, false); err != nil {
 		t.Errorf("re-install refused instead of replacing: %v", err)
 	}
 	if !strings.Contains(out.String(), "replacing") {
@@ -216,7 +216,7 @@ func TestAForeignProcessOnThePortIsStillRefused(t *testing.T) {
 	h.seedCA(t)
 	withRealProbes(t)
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
-	err = a.setupTransport(h.home, addr, false)
+	_, err = a.setupTransport(h.home, addr, false)
 	if err == nil {
 		t.Fatal("setupTransport proceeded over a foreign listener")
 	}
@@ -238,7 +238,7 @@ func TestAFailedInstallLeavesNoUnitBehind(t *testing.T) {
 	h.listening = false // the supervisor accepts the unit; nothing ever listens
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupTransport(h.home, freeAddr(t), false); err == nil {
+	if _, err := a.setupTransport(h.home, freeAddr(t), false); err == nil {
 		t.Fatal("setupTransport reported success with nothing listening")
 	}
 	spec := laneservice.Transport("", "", false)

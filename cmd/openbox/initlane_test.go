@@ -123,7 +123,7 @@ func TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp(t *testing.T) {
 	h.listening = false // the supervisor accepts the unit; nothing serves
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	err := a.setupTransport(h.home, "127.0.0.1:18790", false)
+	_, err := a.setupTransport(h.home, "127.0.0.1:18790", false)
 	if err == nil {
 		t.Fatal("setupTransport reported success though nothing was listening")
 	}
@@ -140,14 +140,39 @@ func TestLaneEnvIsWrittenOnlyAfterTheDaemonIsProvenUp(t *testing.T) {
 
 // TestLaneEnvIsWrittenAfterReadiness is the happy path, and it asserts the
 // order rather than only the outcome.
+//
+// It reads the settings file from inside the readiness probe rather than
+// comparing two positions in the printed report. The report is a layout
+// choice and has already been rewritten once; the file is the actual
+// invariant. Writing the env keys first points the tool at a port with
+// nothing behind it, so every model call fails while `init` prints success.
 func TestLaneEnvIsWrittenAfterReadiness(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)
 	caPath := h.seedCA(t)
-	a, out, _ := testApp(map[string]string{"HOME": h.home})
+	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
+	var atProbe map[string]string
+	probed := false
+	realWait := waitForListenerFn
+	waitForListenerFn = func(addr string, d time.Duration) bool {
+		probed = true
+		atProbe = laneSettings(t, h.home)
+		return realWait(addr, d)
+	}
+	t.Cleanup(func() { waitForListenerFn = realWait })
+
+	if _, err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
 		t.Fatalf("setupTransport: %v", err)
+	}
+	if !probed {
+		t.Fatal("the readiness probe never ran, so this test proves nothing about the order")
+	}
+	for _, key := range []string{"HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"} {
+		if v, ok := atProbe[key]; ok && v != "" {
+			t.Errorf("%s was already written when readiness was still being probed (%q); "+
+				"the order is the safety property", key, v)
+		}
 	}
 	env := laneSettings(t, h.home)
 	if env["HTTPS_PROXY"] != "http://127.0.0.1:18790" {
@@ -155,14 +180,6 @@ func TestLaneEnvIsWrittenAfterReadiness(t *testing.T) {
 	}
 	if env["NODE_EXTRA_CA_CERTS"] != caPath {
 		t.Errorf("NODE_EXTRA_CA_CERTS = %q, want %q", env["NODE_EXTRA_CA_CERTS"], caPath)
-	}
-	s := out.String()
-	iListen, iEnv := strings.Index(s, "listening on"), strings.Index(s, "transport env")
-	if iListen < 0 || iEnv < 0 {
-		t.Fatalf("output missing one of the two steps:\n%s", s)
-	}
-	if iListen > iEnv {
-		t.Errorf("env was reported before readiness; the order is the safety property:\n%s", s)
 	}
 }
 
@@ -172,7 +189,7 @@ func TestTransportRefusesToNameACAThatIsNotThere(t *testing.T) {
 	h := newLaneHarness(t) // no seedCA
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	err := a.setupTransport(h.home, "127.0.0.1:18790", false)
+	_, err := a.setupTransport(h.home, "127.0.0.1:18790", false)
 	if err == nil {
 		t.Fatal("setupTransport pointed the tool at a CA that does not exist")
 	}
@@ -194,7 +211,7 @@ func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 	h := newLaneHarness(t)
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+	if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
 		t.Fatalf("setupTelemetry: %v", err)
 	}
 	if err := a.removeTelemetry(h.home, false); err != nil {
@@ -258,10 +275,10 @@ func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+	if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
 		t.Fatalf("setupTelemetry: %v", err)
 	}
-	if err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
+	if _, err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
 		t.Fatalf("setupTransport: %v", err)
 	}
 	if got := laneSettings(t, h.home)["HTTPS_PROXY"]; got != "http://127.0.0.1:18790" {
@@ -329,10 +346,10 @@ func TestASecondFullInstallDoesNotOverwriteTheRememberedOriginals(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
+	if _, err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
 		t.Fatalf("first install: %v", err)
 	}
-	if err := a.setupTransport(h.home, "127.0.0.1:18791", false); err != nil {
+	if _, err := a.setupTransport(h.home, "127.0.0.1:18791", false); err != nil {
 		t.Fatalf("second install: %v", err)
 	}
 	if res := a.runRemovals(h.home, removalRequest{transport: true}); !res.ok() {
@@ -363,7 +380,7 @@ func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing
 	h.seedCA(t)
 	a, _, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
+	if _, err := a.setupTransport(h.home, "127.0.0.1:18790", false); err != nil {
 		t.Fatalf("setupTransport: %v", err)
 	}
 	settingsPath := gatewayservice.SettingsPath(h.home)
@@ -393,7 +410,7 @@ func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 	caPath := h.seedCA(t)
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	if err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+	if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
 		t.Fatalf("setupTelemetry: %v", err)
 	}
 	if _, err := os.Stat(activation.RecordPath(h.home)); err != nil {
@@ -608,7 +625,7 @@ func TestLaneEnvIsNotWrittenWhenTheSupervisorRefusesTheUnit(t *testing.T) {
 	h.startFails = true
 	a, out, _ := testApp(map[string]string{"HOME": h.home})
 
-	err := a.setupTransport(h.home, transport.DefaultAddr, false)
+	_, err := a.setupTransport(h.home, transport.DefaultAddr, false)
 	if err == nil {
 		t.Fatal("setupTransport reported success though the supervisor refused the unit")
 	}
@@ -624,5 +641,44 @@ func TestLaneEnvIsNotWrittenWhenTheSupervisorRefusesTheUnit(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "rolled back") {
 		t.Errorf("the rollback was silent:\n%s", out.String())
+	}
+}
+
+// TestAPartialLaneInstallDisclosesOnlyWhatRuns. The two lanes fail
+// independently -- each has its own unit, its own readiness probe and its own
+// activation -- so an install where one came up and the other did not is an
+// ordinary outcome, not an edge case. The capture disclosure is the one thing
+// on this path a developer cannot verify for themselves later, so claiming TLS
+// interception for a relay that is not running would be worse than saying
+// nothing at all.
+func TestAPartialLaneInstallDisclosesOnlyWhatRuns(t *testing.T) {
+	for _, tc := range []struct {
+		lane, want, absent string
+	}{
+		{"telemetry", "EXPORTS", "INTERCEPTS"},
+		{"transport", "INTERCEPTS", "EXPORTS"},
+	} {
+		t.Run(tc.lane, func(t *testing.T) {
+			a, out, _ := testApp(nil)
+			r := laneReport{
+				installed: []string{tc.lane},
+				failed:    []string{map[string]string{"telemetry": "transport", "transport": "telemetry"}[tc.lane]},
+				keys:      5,
+				settings:  "/somewhere/settings.json",
+				addrs:     map[string]string{tc.lane: "127.0.0.1:8789"},
+			}
+			r.print(a)
+			s := out.String()
+			if !strings.Contains(s, tc.want) {
+				t.Errorf("a running %s lane did not disclose what it captures:\n%s", tc.lane, s)
+			}
+			if strings.Contains(s, tc.absent) {
+				t.Errorf("claimed %q for a lane that did NOT come up:\n%s", tc.absent, s)
+			}
+			// The gate applies to whatever did run, so it is never dropped.
+			if !strings.Contains(s, "content_capture") {
+				t.Errorf("the posture gating egress went unmentioned:\n%s", s)
+			}
+		})
 	}
 }

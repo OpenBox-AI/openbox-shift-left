@@ -116,7 +116,10 @@ func TestDoctorSurvivesInvalidProjectSettingsJSON(t *testing.T) {
 	if !strings.Contains(out, "could not be read") {
 		t.Errorf("invalid JSON not reported as a condition:\n%s", out)
 	}
-	if !strings.Contains(out, "What this does and does not prove") {
+	// The closing claim, whatever its wording, is the last thing doctor
+	// prints: finding it proves the run continued past the unparsable file
+	// rather than stopping at it.
+	if !strings.Contains(out, "Only `managed` values prove anything") {
 		t.Errorf("doctor stopped early instead of continuing past the failed check:\n%s", out)
 	}
 }

@@ -338,7 +338,16 @@ func TestUninstallDeDuplicatesASharedSpool(t *testing.T) {
 	if code := a.runUninstall(nil); code != exitOK {
 		t.Fatalf("exit = %d:\n%s", code, out.String())
 	}
-	if n := strings.Count(out.String(), "deleted        "+m.spoolDirs[0]); n != 1 {
+	// Counted by row rather than by a padded literal: the column width is a
+	// layout choice, and pinning it here fails the next time it changes without
+	// saying anything about de-duplication.
+	n := 0
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "deleted ") && strings.Contains(line, m.spoolDirs[0]) {
+			n++
+		}
+	}
+	if n != 1 {
 		t.Errorf("the shared spool was reported %d times, want 1:\n%s", n, out.String())
 	}
 }
