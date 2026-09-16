@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -49,16 +50,29 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.sandboxRunID = runID
 
-	// No credential-shaped name is sent, and the service refuses them anyway.
-	// Both keys reach the guest through the providers attached below —
-	// OPENBOX_API_KEY from the OpenBox provider, OPENAI_API_KEY from the
-	// inference one — so the evaluator holds neither and can leak neither.
+	// The real OPENBOX_API_KEY never leaves the gateway: the policy's
+	// credential_binding names the OpenBox provider and the proxy resolves it,
+	// so the evaluator holds it in no request it sends.
+	//
+	// OPENAI_API_KEY is a different thing that merely looks the same. The
+	// gateway routes model traffic through inference.local and injects the real
+	// credential there, so the guest needs only the literal stand-in its SDK
+	// demands be present. That is what the placeholder channel carries, and it
+	// is why the inference provider is NOT attached: an attached provider's
+	// credential keys must each be bound to an endpoint in this policy, and an
+	// unbound one makes OpenShell fail closed and revoke the whole set —
+	// including the OpenBox credential that was correctly bound.
 	environment := map[string]string{}
+	placeholders := map[string]string{}
 	for name, value := range state.prepared.environment {
-		if name == "OPENBOX_API_KEY" || name == "OPENAI_API_KEY" {
+		switch name {
+		case "OPENBOX_API_KEY":
 			continue
+		case "OPENAI_API_KEY":
+			placeholders[name] = value
+		default:
+			environment[name] = value
 		}
-		environment[name] = value
 	}
 
 	state.phase(dependencies, "sandbox_creating")
@@ -70,11 +84,15 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 			MediaType: "application/yaml",
 			Base64:    base64.StdEncoding.EncodeToString(document),
 		},
-		ExpectedPolicy: identity,
-		Environment:    environment,
-		// Both providers: the gateway resolves each one's credential into the
-		// guest. Attaching only one leaves the other's endpoint unauthorized.
-		Providers: []string{OpenBoxProvider, InferenceProvider},
+		ExpectedPolicy:         identity,
+		Environment:            environment,
+		PlaceholderEnvironment: placeholders,
+		// Only the OpenBox provider, and only because this policy binds its
+		// credential to an endpoint. See the environment split above.
+		Providers: []string{OpenBoxProvider},
+		// The image's own entrypoint, as the sandbox's MAIN process. That is
+		// what makes the provider credentials reach it at all.
+		Command: state.prepared.argv,
 	}, sandboxBeginDeadline)
 	if err != nil {
 		return &classifiedError{class: "sandbox_create_failure", err: err}
@@ -87,8 +105,9 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.phase(dependencies, "ready")
 
-	result, err := dependencies.Sandbox.Exec(begunID, readyToken, state.prepared.argv,
-		sandboxCommandTimeout, sandboxclient.DefaultOutputLimits(), sandboxExecDeadline)
+	// The workload is already running — Begin started it as the main process —
+	// so this waits for it rather than launching anything.
+	result, err := dependencies.Sandbox.WaitCompleted(begunID, readyToken, sandboxExecDeadline)
 	if err != nil {
 		return &classifiedError{class: "command_failure", err: err}
 	}
@@ -132,26 +151,18 @@ func (state *runState) deleteSandbox(dependencies Dependencies) error {
 	return errors.New("sandbox remains after cleanup")
 }
 
-// The typed result replaces three scraped artifacts: the attached process's
-// stdout and stderr, and the gateway log tail. Absent before a run completes,
-// which callers must treat as "not observed" rather than empty.
-func (state *runState) sandboxStdout() []byte {
-	if state.sandboxResult == nil {
+// sandboxLogs renders the supervisor's records for the workload.
+//
+// A main process has no exec stream, so this is the workload's output. It is
+// written as records rather than flattened into a fake stdout stream, because
+// calling it stdout would claim a fidelity the source does not have.
+func (state *runState) sandboxLogs() []byte {
+	if state.sandboxResult == nil || len(state.sandboxResult.Logs) == 0 {
 		return nil
 	}
-	return state.sandboxResult.Stdout
-}
-
-func (state *runState) sandboxStderr() []byte {
-	if state.sandboxResult == nil {
+	encoded, err := json.Marshal(state.sandboxResult.Logs)
+	if err != nil {
 		return nil
 	}
-	return state.sandboxResult.Stderr
-}
-
-func (state *runState) sandboxEvidence() []byte {
-	if state.sandboxResult == nil || len(state.sandboxResult.SandboxEvidence) == 0 {
-		return nil
-	}
-	return state.sandboxResult.SandboxEvidence
+	return encoded
 }

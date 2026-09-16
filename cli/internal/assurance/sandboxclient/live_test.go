@@ -28,9 +28,20 @@ func liveConfig(t *testing.T) Config {
 	return config
 }
 
-// providersFromEnv attaches named providers. A policy that binds a credential
-// to a provider needs that provider attached to the sandbox, or the gateway
-// refuses the create.
+// liveCommand lets a run assert something through its exit code, which is the
+// only workload signal this path carries: a main process has no exec stream,
+// and the supervisor's records do not include its stdout.
+func liveCommand() []string {
+	if custom := os.Getenv("OPENBOX_SANDBOX_LIVE_CMD"); custom != "" {
+		return strings.Split(custom, "\x1f")
+	}
+	return []string{"/bin/sh", "-c", "echo openbox-live-proof"}
+}
+
+// providersFromEnv attaches named providers. Attachment is not free: every
+// credential key an attached provider declares must be bound to an endpoint in
+// the run's policy, and one unbound key makes OpenShell fail closed and revoke
+// the whole set — so attach only what the policy binds.
 func providersFromEnv() []string {
 	names := os.Getenv("OPENBOX_SANDBOX_LIVE_PROVIDERS")
 	if names == "" {
@@ -105,12 +116,14 @@ func TestLiveProjectRunRoundTrip(t *testing.T) {
 		t.Fatalf("run id: %v", err)
 	}
 	spec := ProjectRunSpec{
-		RunID:          runID,
-		Template:       image,
-		PolicyDocument: policy,
-		ExpectedPolicy: identity,
-		Environment:    map[string]string{"OPENBOX_EVALUATION_ID": runID},
-		Providers:      providersFromEnv(),
+		RunID:                  runID,
+		Template:               image,
+		PolicyDocument:         policy,
+		ExpectedPolicy:         identity,
+		Environment:            map[string]string{"OPENBOX_EVALUATION_ID": runID},
+		PlaceholderEnvironment: map[string]string{"OPENAI_API_KEY": "unused"},
+		Providers:              providersFromEnv(),
+		Command:                liveCommand(),
 	}
 
 	begunID, token, err := client.Begin(spec, 5*time.Minute)
@@ -131,21 +144,15 @@ func TestLiveProjectRunRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("wait ready: %v", err)
 	}
-	result, err := client.Exec(begunID, readyToken,
-		[]string{"/bin/sh", "-c", "echo openbox-live-proof"},
-		30, DefaultOutputLimits(), 60*time.Second)
+	result, err := client.WaitCompleted(begunID, readyToken, 4*time.Minute)
 	if err != nil {
-		t.Fatalf("exec: %v", err)
+		t.Fatalf("wait completed: %v", err)
 	}
-	t.Logf("exit=%d stdout=%q stderr=%q evidence=%s",
-		result.ExitCode, string(result.Stdout), string(result.Stderr), string(result.SandboxEvidence))
+	t.Logf("exit=%d records=%d", result.ExitCode, len(result.Logs))
+	for _, record := range result.Logs {
+		t.Logf("  [%s/%s] %s", record.Source, record.Level, record.Message)
+	}
 	if result.ExitCode != 0 {
 		t.Fatalf("exit code = %d", result.ExitCode)
 	}
-	if got := string(result.Stdout); got != "openbox-live-proof\n" {
-		t.Fatalf("stdout = %q, want the command's own output", got)
-	}
-	// Evidence is omitted when the provider recorded none, so its absence under
-	// a deny-network policy with no egress attempted is correct, not a gap.
-	t.Logf("sandbox evidence: %q", string(result.SandboxEvidence))
 }

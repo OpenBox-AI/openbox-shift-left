@@ -78,11 +78,11 @@ type executionRecord struct {
 	Logs               struct {
 		ProcessStdout logRecord `json:"process_stdout"`
 		ProcessStderr logRecord `json:"process_stderr"`
-		// SandboxEvidence is the provider's own typed isolation record —
-		// egress decisions and violation categories — not a gateway log. It is
-		// absent when the provider recorded none, which means "nothing was
-		// observed", never "nothing happened".
-		SandboxEvidence logRecord `json:"sandbox_evidence"`
+		// WorkloadRecords are the supervisor's log records for the workload,
+		// which is the sandbox's main process. A main process has no exec
+		// stream, so there is no captured stdout or stderr to digest — naming
+		// these for what they are keeps the record from implying otherwise.
+		WorkloadRecords logRecord `json:"workload_records"`
 	} `json:"logs"`
 	CoverageLimitations []string      `json:"coverage_limitations"`
 	Cleanup             cleanupRecord `json:"cleanup"`

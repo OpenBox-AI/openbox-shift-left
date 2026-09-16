@@ -246,7 +246,39 @@ type ProjectRunSpec struct {
 	PolicyDocument PolicyDocument    `json:"policy_document"`
 	ExpectedPolicy PolicyIdentity    `json:"expected_policy"`
 	Environment    map[string]string `json:"environment"`
-	Providers      []string          `json:"providers"`
+	// PlaceholderEnvironment carries non-secret stand-ins under the
+	// credential-shaped names Environment refuses. The service bounds the
+	// values to short simple tokens; it is a guardrail, not a proof, so put
+	// nothing here that would matter if it were read.
+	PlaceholderEnvironment map[string]string `json:"placeholder_environment"`
+	Providers              []string          `json:"providers"`
+	// Command is the workload, and it runs as the sandbox's MAIN process.
+	//
+	// Not an exec session. Only the main process receives the environment
+	// OpenShell builds from the attached provider profiles, so a workload run
+	// through exec loses every credential the providers were attached to
+	// supply — silently, because the variables are simply absent.
+	Command []string `json:"command"`
+}
+
+// ProjectRunLogRecord is one supervisor log record.
+//
+// A main process has no exec stream to read, so this is what the workload's
+// output is. Typed, but the payload is the workload's own text.
+type ProjectRunLogRecord struct {
+	TimestampMS int64  `json:"timestamp_ms"`
+	Level       string `json:"level"`
+	Source      string `json:"source"`
+	Target      string `json:"target"`
+	Message     string `json:"message"`
+}
+
+// ProjectRunCompleted is one terminal run.
+type ProjectRunCompleted struct {
+	// ExitCode is the gateway-normalized main process result. A signal exit is
+	// 128 + the signal number.
+	ExitCode int                   `json:"exit_code"`
+	Logs     []ProjectRunLogRecord `json:"logs"`
 }
 
 // ProjectRunResult is one terminal execution, with the isolation evidence the
@@ -298,6 +330,9 @@ func (client *Client) Begin(spec ProjectRunSpec, deadline time.Duration) (runID 
 	if spec.Environment == nil {
 		spec.Environment = map[string]string{}
 	}
+	if spec.PlaceholderEnvironment == nil {
+		spec.PlaceholderEnvironment = map[string]string{}
+	}
 	if spec.Providers == nil {
 		spec.Providers = []string{}
 	}
@@ -335,45 +370,29 @@ func (client *Client) WaitReady(runID, token string, expected PolicyIdentity, de
 	return stringField(fields, "lifecycle_token"), nil
 }
 
-// Exec runs one command, two-phase.
+// WaitCompleted blocks until the workload exits and returns its result.
 //
-// Prepare-then-commit is what makes an ambiguous dispatch un-retryable, so both
-// halves stay on the caller's path rather than being hidden behind one call.
-func (client *Client) Exec(runID, token string, argv []string, commandTimeout uint16, limits OutputLimits, deadline time.Duration) (*ProjectRunResult, error) {
+// There is no exec here, and its absence is the point: the workload was started
+// by Begin as the sandbox's main process, because that is the only process
+// OpenShell gives the provider environment to. Waiting is an observation, so a
+// repeated wait returns the same terminal exit rather than running anything
+// again.
+func (client *Client) WaitCompleted(runID, token string, deadline time.Duration) (*ProjectRunCompleted, error) {
 	fields, kind, err := client.projectRun(map[string]any{
-		"operation":       "prepare_exec",
+		"operation":       "wait_completed",
 		"run_id":          runID,
 		"lifecycle_token": token,
-		"request": map[string]any{
-			"argv":          argv,
-			"timeout":       commandTimeout,
-			"output_limits": limits,
-		},
-		"deadline_ms": deadline.Milliseconds(),
+		"deadline_ms":     deadline.Milliseconds(),
 	}, deadline+networkGrace)
 	if err != nil {
 		return nil, err
 	}
-	if kind != "exec_prepared" {
-		return nil, failureFor("prepare_exec", kind, fields)
+	if kind != "completed" {
+		return nil, failureFor("wait_completed", kind, fields)
 	}
-	prepareToken := stringField(fields, "prepare_token")
-
-	fields, kind, err = client.projectRun(map[string]any{
-		"operation":     "commit_exec",
-		"run_id":        runID,
-		"prepare_token": prepareToken,
-		"deadline_ms":   deadline.Milliseconds(),
-	}, deadline+networkGrace)
-	if err != nil {
-		return nil, err
-	}
-	if kind != "executed" {
-		return nil, failureFor("commit_exec", kind, fields)
-	}
-	var result ProjectRunResult
+	var result ProjectRunCompleted
 	if err := json.Unmarshal(fields["result"], &result); err != nil {
-		return nil, fmt.Errorf("sandboxclient: decode execution result: %w", err)
+		return nil, fmt.Errorf("sandboxclient: decode run result: %w", err)
 	}
 	return &result, nil
 }

@@ -120,7 +120,7 @@ type SandboxClient interface {
 	Capabilities(timeout time.Duration) ([]string, error)
 	Begin(spec sandboxclient.ProjectRunSpec, deadline time.Duration) (string, string, error)
 	WaitReady(runID, token string, expected sandboxclient.PolicyIdentity, deadline time.Duration) (string, error)
-	Exec(runID, token string, argv []string, commandTimeout uint16, limits sandboxclient.OutputLimits, deadline time.Duration) (*sandboxclient.ProjectRunResult, error)
+	WaitCompleted(runID, token string, deadline time.Duration) (*sandboxclient.ProjectRunCompleted, error)
 	Delete(runID string, deadline time.Duration) error
 	WaitDeleted(runID string, deadline time.Duration) error
 }

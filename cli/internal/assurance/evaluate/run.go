@@ -40,7 +40,7 @@ type runState struct {
 	immutableReference  string
 	sandboxMayExist     bool
 	sandboxRunID        string
-	sandboxResult       *sandboxclient.ProjectRunResult
+	sandboxResult       *sandboxclient.ProjectRunCompleted
 	observationClient   *observation.Client
 	observationSnapshot *observation.Snapshot
 	observationResult   *observation.Result
@@ -175,8 +175,14 @@ func (state *runState) publishOutput(success bool, dependencies Dependencies) er
 		effect = state.effectRelay.Receipt()
 	}
 	pack, err := observation.Assemble(observation.PackInput{
-		ExecutionJSON:   execution,
-		SandboxEvidence: state.sandboxEvidence(),
+		ExecutionJSON: execution,
+		// No typed isolation evidence yet on this path. The egress decisions
+		// and violation categories were attached to exec results, and the
+		// workload is no longer an exec — it is the main process, which is the
+		// only way it receives provider credentials. The pack records that as
+		// `observed: false`, which means the provider recorded nothing, never
+		// that nothing happened.
+		SandboxEvidence: nil,
 		Snapshot:        state.observationSnapshot,
 		Backend:         state.observationResult,
 		Window:          state.observationWindow,
@@ -578,9 +584,7 @@ func (state *runState) finishRecord() {
 		state.record.Effects.SafeSinkAttempts = receipt.Attempts
 		state.record.Effects.SafeSinkMatching = receipt.MatchingReceipts
 	}
-	state.record.Logs.ProcessStdout = digestRecord(state.sandboxStdout(), false)
-	state.record.Logs.ProcessStderr = digestRecord(state.sandboxStderr(), false)
-	state.record.Logs.SandboxEvidence = digestRecord(state.sandboxEvidence(), false)
+	state.record.Logs.WorkloadRecords = digestRecord(state.sandboxLogs(), false)
 }
 
 func (state *runState) writeOutput() error {
@@ -598,13 +602,7 @@ func (state *runState) writeOutput() error {
 	// which nothing populates now — so the record claimed a 473-byte stderr
 	// while the file beside it was empty. A digest that does not describe the
 	// artifact next to it is worse than no artifact.
-	if err := state.workspace.WritePrivateFile("process.stdout", state.sandboxStdout()); err != nil {
-		return err
-	}
-	if err := state.workspace.WritePrivateFile("process.stderr", state.sandboxStderr()); err != nil {
-		return err
-	}
-	if err := state.workspace.WritePrivateFile("sandbox-evidence.json", state.sandboxEvidence()); err != nil {
+	if err := state.workspace.WritePrivateFile("workload-records.json", state.sandboxLogs()); err != nil {
 		return err
 	}
 	execution, err := json.Marshal(state.record)

@@ -253,7 +253,9 @@ func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 			t.Fatalf("%s mode=%o", entry.Name(), info.Mode().Perm())
 		}
 	}
-	want := []string{".incomplete", "execution.json", "policy.yaml", "process.stderr", "process.stdout", "sandbox-evidence.json"}
+	// No process.stdout/stderr: the workload is the sandbox's main process, and
+	// a main process has no exec stream. Its output is the supervisor's records.
+	want := []string{".incomplete", "execution.json", "policy.yaml", "workload-records.json"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("entries=%v want=%v", names, want)
 	}
@@ -620,6 +622,12 @@ func (fake *fakeSandbox) Begin(spec sandboxclient.ProjectRunSpec, _ time.Duratio
 	if fake.beginErr != nil {
 		return "", "", fake.beginErr
 	}
+	// The workload must be the main process, or provider credentials never
+	// reach it. A spec without a command would run a keepalive and observe
+	// nothing.
+	if len(spec.Command) == 0 {
+		return "", "", errors.New("fake sandbox: run began without a workload command")
+	}
 	// The credential must never reach the service. Asserting it here rather
 	// than only in the policy test keeps the guarantee on the live path.
 	if _, present := spec.Environment["OPENBOX_API_KEY"]; present {
@@ -636,7 +644,7 @@ func (fake *fakeSandbox) WaitReady(runID, _ string, _ sandboxclient.PolicyIdenti
 	return "token-ready", nil
 }
 
-func (fake *fakeSandbox) Exec(_, _ string, _ []string, _ uint16, _ sandboxclient.OutputLimits, _ time.Duration) (*sandboxclient.ProjectRunResult, error) {
+func (fake *fakeSandbox) WaitCompleted(_, _ string, _ time.Duration) (*sandboxclient.ProjectRunCompleted, error) {
 	if fake.execErr != nil {
 		return nil, fake.execErr
 	}
@@ -644,8 +652,11 @@ func (fake *fakeSandbox) Exec(_, _ string, _ []string, _ uint16, _ sandboxclient
 	// that the relay observed a matching validation and a governance event, so
 	// a fake that never calls it would only ever prove the failure path.
 	fake.callCoreRelay()
-	return &sandboxclient.ProjectRunResult{
-		ExitCode: fake.exitCode, Stdout: []byte("ok\n"), SandboxEvidence: fake.evidence,
+	return &sandboxclient.ProjectRunCompleted{
+		ExitCode: fake.exitCode,
+		Logs: []sandboxclient.ProjectRunLogRecord{
+			{TimestampMS: 1, Level: "INFO", Source: "sandbox", Target: "workload", Message: "ok"},
+		},
 	}, nil
 }
 
