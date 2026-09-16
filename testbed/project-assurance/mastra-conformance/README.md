@@ -34,9 +34,10 @@ Docker or OpenShell execution.
 
 ## Public evaluation
 
-The developer environment file contains only optional, non-secret application
-defaults. OpenBox and OpenAI routing variables are reserved and injected by the
-evaluator.
+`.env.sandbox` is an ordinary dotenv file carrying this project's environment,
+including its model routing. Only the five connector values are reserved and
+injected by the evaluator: `OPENBOX_EVALUATION_ID`, `OPENBOX_AGENT_ID`,
+`OPENBOX_URL`, `OPENBOX_API_KEY` and `OPENBOX_SAFE_SINK_URL`.
 
 ```sh
 openbox project evaluate \
@@ -50,9 +51,16 @@ The one-shot command requires and consumes:
 
 - `OPENBOX_EVALUATION_ID` as its Mastra/OpenBox run identity;
 - `OPENBOX_AGENT_ID` for conformance identity output;
-- `OPENBOX_URL` and provider-supplied `OPENBOX_API_KEY`;
-- `OPENAI_BASE_URL=https://inference.local/v1`;
-- `OPENAI_API_KEY=unused`;
+- `OPENBOX_URL` and provider-supplied `OPENBOX_API_KEY` — both from the
+  evaluator, the second resolved by the gateway and never carried by the caller;
+
+and, from this project's own `.env.sandbox`:
+
+- `OPENAI_BASE_URL=https://inference.local/v1` — the gateway's intercept route;
+- `OPENAI_API_KEY=unused` — a stand-in. The gateway injects the real inference
+  credential at that route; the SDK only requires the variable be present. This
+  image asserts the literal value, which is a conformance check, not a rule the
+  lane imposes.
 - `OPENAI_MODEL=granite4.1:3b`.
 
 It forces exactly one `recording-tool` selection, emits the normal OpenBox

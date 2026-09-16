@@ -389,14 +389,16 @@ stale-path replacement assertions.
 **Project assurance runs end to end now** (`plans/260825-1623-lean-openshell-project-assurance/`).
 The public surface is `project inspect`, `evaluate`, `finalize`, `verify`,
 `report`, `propose` — six subcommands, `docs/project-assurance.md` for the user
-view. Codex, Claude/SRT, Seatbelt, governed-rerun and ProjectRun v2 execution
-paths stay retired with no CLI fallback or hidden probe entrypoint; their audit-
-pack v1 objects survive only as historical READ contracts. Phases 1–3 are
+view. Codex, Claude/SRT, Seatbelt and governed-rerun execution paths stay
+retired with no CLI fallback or hidden probe entrypoint; their audit-pack v1
+objects survive only as historical READ contracts. **ProjectRun v2 is no longer
+retired** — it is the execution path, see the section below. Phases 1–3 are
 verified and Phase 4 is implemented through OS-04-03; **OS-04-04 is the one open
 task** — a live GET-only finalization and a before/after zero-control-mutation
 proof still need a host-side control token, and human report review remains.
-Production data, credentials, control publication and automatic fixes stay out
-of scope. Four things about this lane are worth not re-litigating:
+Production data, control publication and automatic fixes stay out of scope;
+project credentials do NOT — see the sandbox section below. Four things about
+this lane are worth not re-litigating:
 
 - **The analyzer is a model, and that is not a contradiction of "no LLM
   verdicts."** The native-host skill may emit only an *issue candidate*;
@@ -436,6 +438,58 @@ route), and `securityreport.Prepare` for candidate validation. Do not restore
 the old packages to "reuse the fixtures" — the poison fixture in particular
 belongs to the retired scenario machinery, and the current lane reports
 `retrieval_poison` as a `missing` coverage channel on purpose.
+
+**The evaluation lane goes through openbox-sandbox, not OpenShell** (2026-09-16).
+`project evaluate` used to shell out to the `openshell` CLI 13 times and parse
+stdout — including scraping human-readable fields after stripping ANSI escapes —
+which made this repo a second owner of the OpenShell contract, pinned to a
+different version than the sandbox service, with no test holding the two
+together. `kb/sandbox.md` already forbade exactly that. The lane now speaks the
+sandbox service protocol over mutual TLS (`cli/internal/assurance/sandboxclient`,
+stdlib only) and `git grep '"openshell"' cli/internal/assurance` returns nothing.
+Six things are worth not re-litigating:
+
+- **The workload is the sandbox's MAIN process, not an exec.** Only the main
+  process receives the environment OpenShell builds from attached provider
+  profiles (`openshell-sandbox/src/lib.rs`, `main_env = provider_env.clone()`),
+  so a workload run through exec silently loses every provider credential. Three
+  regressions follow and are recorded in every pack rather than left as silent
+  gaps: no workload stdout/stderr (the gRPC API carries `SandboxLogLine`,
+  supervisor events only — the old path got output from CLI *attachment*), no
+  per-process egress decisions, and no model-route receipt.
+- **Attach only providers the policy binds.** OpenShell classifies every key an
+  attached provider contributes: bound to an endpoint by `credential_binding`,
+  or declared non-secret. A key that is neither makes the guest supervisor fail
+  closed and revoke the WHOLE set — so attaching the inference provider once
+  revoked the correctly-bound `OPENBOX_API_KEY` and the workload died on its
+  first missing variable. The gateway resolves inference itself at
+  `inference.local`; do not attach a provider for it.
+- **Project credentials are plaintext, deliberately, and disclosed.** The
+  sandbox used to refuse credential-shaped names in `environment`. That was
+  stricter than the substrate for no gain — OpenShell carries caller-supplied
+  env with no classification of its own — and it assumed every credential can be
+  endpoint-bound, which is false for non-HTTP protocols, self-signing SDKs and
+  runtime-resolved endpoints. Refusing those made projects unevaluable, not
+  safer. Binding is still the governed path and still preferred; everything else
+  is listed in `coverage_limitations` by name. The pack says *credential-shaped
+  variable*, not *credential*, because classification is by name and the run
+  never observed that the value is really a secret.
+- **`.env.sandbox` is an ordinary dotenv file**, deliberately NOT `.env` or
+  `.env.local` — the evaluator never reads those, so a run carries only what was
+  copied deliberately. No prefixes. The only prefixed names are two runner
+  directives, `OPENBOX_SANDBOX_MODEL_ROUTE` and `_MODEL_DIGEST`, matched exactly
+  and never passed to the guest.
+- **The connector is per-environment, the pin is not this repo's.** Core URL,
+  backend URL and the OpenBox provider name resolve once in `resolveConnector`
+  (env → `dev.json` → local-stack default). The OpenShell version pin lives in
+  openbox-sandbox; this repo asks one capability question and treats a `no` as
+  `not_runnable`. `OpenShellVersion` here was dead and is deleted — do not
+  reintroduce a version assertion.
+- **`effects.model_route.model_digest` is required by the v1 schema and cannot
+  express absence.** A hosted route publishes no digest, so the project must
+  declare one anyway. The field wants to be `expected_model_digest` or optional;
+  that is a v2 effects change, and synthesising a constant here would be the
+  dishonest fix.
 
 The demo is two scripts under
 `testbed/project-assurance/mastra-security-demo/` — `prepare-demo.zsh` then

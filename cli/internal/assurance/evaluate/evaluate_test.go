@@ -20,6 +20,15 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
+// The demo project's model, as a TEST fixture. It is not a lane constant any
+// more: which model serves the gateway's inference.local route is declared per
+// project in `.env.sandbox`, so pinning one here would re-create the coupling
+// that made every evaluable project the same project.
+const (
+	testModel       = "granite4.1:3b"
+	testModelDigest = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
+)
+
 func TestParseEnvironment(t *testing.T) {
 	accepted, err := parseEnvironment([]byte("# comment\nEMPTY=\nA=one=two\nLOCAL=http://127.0.0.1:8080/path\nINFERENCE=https://inference.local/v1\n"))
 	if err != nil {
@@ -323,7 +332,7 @@ func TestExistingOutputFailsBeforeReadsOrCommands(t *testing.T) {
 func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
 	parent := t.TempDir()
 	envFile := filepath.Join(parent, "evaluation.env")
-	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+testModelDigest+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(parent, "record")
@@ -426,7 +435,7 @@ func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			parent := t.TempDir()
 			envFile := filepath.Join(parent, "evaluation.env")
-			if err := os.WriteFile(envFile, []byte("OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+InferenceModelDigest+"\n"), 0o600); err != nil {
+			if err := os.WriteFile(envFile, []byte("OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+testModelDigest+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			output := filepath.Join(parent, "record")
@@ -491,40 +500,6 @@ func (runner *countingRunner) Start(context.Context, Command) (Process, error) {
 	return nil, errors.New("unexpected")
 }
 
-type lifecycleProcess struct {
-	ctx                 context.Context
-	trigger             <-chan struct{}
-	evaluationID, relay string
-	result              CommandResult
-}
-
-type lifecycleLogProcess struct{ ctx context.Context }
-
-func (process *lifecycleLogProcess) Wait() CommandResult {
-	<-process.ctx.Done()
-	return CommandResult{Stdout: []byte("sandbox live log\n"), ExitCode: -1}
-}
-
-func (process *lifecycleProcess) Wait() CommandResult {
-	select {
-	case <-process.trigger:
-	case <-process.ctx.Done():
-		return CommandResult{ExitCode: -1}
-	}
-	relayURL := strings.Replace(process.relay, "host.openshell.internal", "127.0.0.1", 1)
-	response, _ := http.Get(relayURL + "/api/v1/auth/validate")
-	if response != nil {
-		response.Body.Close()
-	}
-	request, _ := http.NewRequest(http.MethodPost, relayURL+"/api/v1/governance/evaluate", strings.NewReader(`{"run_id":"`+process.evaluationID+`"}`))
-	request.Header.Set("content-type", "application/json")
-	response, _ = http.DefaultClient.Do(request)
-	if response != nil {
-		response.Body.Close()
-	}
-	return process.result
-}
-
 type lifecycleRunner struct {
 	mu              sync.Mutex
 	commands        []Command
@@ -552,20 +527,6 @@ func (runner *lifecycleRunner) Run(_ context.Context, command Command) (CommandR
 		image := validTestImage()
 		image.ID = "sha256:" + strings.Repeat("c", 64)
 		return jsonResult([]dockerImage{image}), nil
-	case command.Name == "openshell" && args == "--version":
-		return CommandResult{Stdout: []byte("openshell 0.0.111\n")}, nil
-	case command.Name == "openshell" && args == "status -o json":
-		return jsonResult(map[string]any{"status": "connected", "version": "0.0.111", "server": "https://localhost:17670", "authentication": map[string]string{"status": "authenticated", "provider": "mTLS transport"}}), nil
-	case command.Name == "openshell" && args == "gateway info -o json":
-		return jsonResult(map[string]any{"status": "healthy", "version": "0.0.111", "compute_drivers": []any{map[string]any{"name": "vm", "capabilities": map[string]string{"driver_name": "openshell-driver-vm", "driver_version": "0.0.111"}}}}), nil
-	case command.Name == "openshell" && args == "provider get "+DefaultOpenBoxProvider:
-		return CommandResult{Stdout: []byte("Name: obx-openbox-local\nType: openbox-local\nCredential keys: OPENBOX_API_KEY\nConfig keys: <none>\n")}, nil
-	case command.Name == "openshell" && args == "provider get "+InferenceProvider:
-		return CommandResult{Stdout: []byte("Name: openai-compatible-provider\nType: openai\nCredential keys: OPENAI_API_KEY\nConfig keys: OPENAI_BASE_URL\n")}, nil
-	case command.Name == "openshell" && args == "inference get":
-		return CommandResult{Stdout: []byte("Provider: openai-compatible-provider\nModel: granite4.1:3b\n")}, nil
-	case command.Name == "openshell" && strings.HasPrefix(args, "sandbox list --selector "):
-		return CommandResult{Stdout: []byte("[]")}, nil
 	case command.Name == "ollama" && args == "ps":
 		return CommandResult{Stdout: []byte("NAME ID SIZE PROCESSOR UNTIL\n")}, nil
 	case command.Name == "docker" && strings.HasPrefix(args, "run --detach --pull=never"):
@@ -579,24 +540,6 @@ func (runner *lifecycleRunner) Run(_ context.Context, command Command) (CommandR
 	case command.Name == "docker" && strings.HasPrefix(args, "tag "):
 		return CommandResult{}, nil
 	case command.Name == "docker" && strings.HasPrefix(args, "push "):
-		return CommandResult{}, nil
-	case command.Name == "openshell" && strings.HasPrefix(args, "sandbox get "):
-		if runner.deleted {
-			return CommandResult{Stderr: []byte("sandbox not found")}, errors.New("not found")
-		}
-		runner.getCount++
-		if runner.phaseError {
-			return CommandResult{Stdout: []byte(`{"phase":"Error"}`)}, nil
-		}
-		if runner.getCount == 1 {
-			return CommandResult{Stdout: []byte(`{"phase":"Provisioning"}`)}, nil
-		}
-		runner.triggerOnce.Do(func() { close(runner.trigger) })
-		return CommandResult{Stdout: []byte(`{"phase":"Ready"}`)}, nil
-	case command.Name == "openshell" && strings.HasPrefix(args, "logs --source all "):
-		return CommandResult{Stdout: []byte("sandbox log\n")}, nil
-	case command.Name == "openshell" && strings.HasPrefix(args, "sandbox delete "):
-		runner.deleted = true
 		return CommandResult{}, nil
 	case command.Name == "docker" && strings.HasPrefix(args, "image rm "):
 		return CommandResult{}, nil
@@ -618,29 +561,17 @@ func (runner *lifecycleRunner) Run(_ context.Context, command Command) (CommandR
 	}
 }
 
-func (runner *lifecycleRunner) Start(ctx context.Context, command Command) (Process, error) {
+// Start refuses everything, which is the assertion.
+//
+// The lane used to start two long-running `openshell` processes — an attached
+// `sandbox create` and a `logs --tail` follower — and this fake reconstructed
+// the run from their argv. Execution is a typed sandbox call now, so a Start
+// reaching this runner would mean something regressed to spawning a process.
+func (runner *lifecycleRunner) Start(_ context.Context, command Command) (Process, error) {
 	runner.mu.Lock()
 	runner.commands = append(runner.commands, command)
 	runner.mu.Unlock()
-	if command.Name == "openshell" && len(command.Args) >= 2 && command.Args[0] == "logs" && command.Args[1] == "--tail" {
-		return &lifecycleLogProcess{ctx: ctx}, nil
-	}
-	if command.Name != "openshell" || len(command.Args) < 3 || command.Args[0] != "sandbox" || command.Args[1] != "create" {
-		return nil, errors.New("unexpected start")
-	}
-	var relay, evaluationID string
-	for index, argument := range command.Args {
-		if argument == "--env" && index+1 < len(command.Args) {
-			name, value, _ := strings.Cut(command.Args[index+1], "=")
-			if name == "OPENBOX_URL" {
-				relay = value
-			}
-			if name == "OPENBOX_EVALUATION_ID" {
-				evaluationID = value
-			}
-		}
-	}
-	return &lifecycleProcess{ctx: ctx, trigger: runner.trigger, relay: relay, evaluationID: evaluationID, result: CommandResult{Stdout: []byte("application complete\n"), ExitCode: runner.commandExit}}, nil
+	return nil, errors.New("unexpected start: " + command.Name)
 }
 
 func (runner *lifecycleRunner) JoinedCommands() string {
@@ -671,7 +602,7 @@ func (client *lifecycleHTTP) Do(request *http.Request) (*http.Response, error) {
 	case request.URL.String() == localBackendURL+"/health":
 		body = `{"status":200}`
 	case request.URL.String() == ollamaTagsURL:
-		body = `{"models":[{"name":"granite4.1:3b","digest":"` + strings.TrimPrefix(InferenceModelDigest, "sha256:") + `"}]}`
+		body = `{"models":[{"name":"granite4.1:3b","digest":"` + strings.TrimPrefix(testModelDigest, "sha256:") + `"}]}`
 	case request.URL.String() == ollamaGenerateURL && request.Method == http.MethodPost:
 		body = `{"model":"granite4.1:3b","done":true,"done_reason":"load"}`
 	case request.URL.Host == "127.0.0.1:49153" && request.URL.Path == "/v2/":

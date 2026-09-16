@@ -1,5 +1,9 @@
-// Package evaluate runs one self-starting local OCI image in the pinned local
-// OpenShell development topology and seals its observation on success.
+// Package evaluate runs one self-starting local OCI image as the main process
+// of an OpenBox Sandbox project run, and seals its observation on success.
+//
+// It does not drive OpenShell. The sandbox service owns that contract, its
+// version pin and its security floor; this package asks one capability question
+// and treats a refusal as not_runnable.
 package evaluate
 
 import (
@@ -25,9 +29,6 @@ const (
 	// production connector is a different Core, a different runtime key, and
 	// therefore a different provider object on the gateway.
 	DefaultOpenBoxProvider = "obx-openbox-local"
-	InferenceProvider      = "openai-compatible-provider"
-	InferenceModel         = "granite4.1:3b"
-	InferenceModelDigest   = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
 	// pushRegistryHost is where the run-owned registry writer binds INSIDE the
 	// container engine's own network namespace, which is the only address
 	// `docker push` can reach on a Docker Desktop host: the daemon runs in a VM,

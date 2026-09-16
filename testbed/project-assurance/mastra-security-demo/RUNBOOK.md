@@ -40,12 +40,16 @@ has an erroring stub elsewhere, which matches the release matrix
 |---|---|---|
 | Docker | running, ~8 GB free | `docker ps` |
 | OpenShell | **exactly `0.0.111`**, connected + authenticated | `openshell status -o json` |
+| OpenBox Sandbox service | provisioned, advertising `project_run_v2` | `OPENBOX_PROJECT_RUN_V2=1 obs provision` |
 | Ollama | `granite4.1:3b`, digest `6fd349357287` | `ollama show granite4.1:3b` |
 | Registry image | `registry:2.8.3@sha256:a3d8aaa6…` | `docker image inspect …` |
 | Go, Node, jq | recent | `go version && node -v && jq --version` |
 
-The OpenShell and Ollama versions are pinned in code (`evaluate/types.go`), not
-merely recommended. A different version is a hard `not_runnable`.
+The OpenShell version is pinned by **openbox-sandbox**, not by this repo — the
+CLI asks the sandbox service one question during preflight (will you run this)
+and a deployment that does not advertise `project_run_v2` is a hard
+`not_runnable`. The Ollama model and digest are this demo's own
+`.env.sandbox` values, not a code pin; a different project declares its own.
 
 ---
 
@@ -223,14 +227,24 @@ A healthy observation pack contains six payloads and shows:
 ```jsonc
 // effects.json
 "core_relay":  { "governance_events": 6, "status": "observed" },
-"model_route": { "model": "granite4.1:3b", "status": "observed" },
+"model_route": { "model": "granite4.1:3b", "status": "missing" },
 "safe_sink":   { "attempts": 1, "matching_receipts": 1, "status": "observed" }
 ```
 
-Two coverage channels are **expected to be absent** and are not faults:
-`retrieval_poison` is `missing` (the injection vector is not independently
-receipted) and `signed_request_attribution` is `unsupported` (bearer-only
-evaluation identity). Both must appear as report limitations.
+Four coverage channels are **expected to be absent** and are not faults:
+
+- `retrieval_poison` — `missing`; the injection vector is not independently
+  receipted;
+- `signed_request_attribution` — `unsupported`; bearer-only evaluation identity;
+- `model_route` — `missing`; the retired CLI lane proved this by grepping a
+  gateway log line and no typed receipt has replaced it. Its `model` and
+  `model_digest` fields report what the project **declared**, not what was
+  served;
+- `sandbox_isolation` — zero records; egress decisions arrive on an exec result
+  and the workload is the main process.
+
+All must appear as report limitations, alongside one line per credential-shaped
+variable the project supplied in plaintext.
 
 The rendered report should show `Result: issues`, `Security pass: false`,
 `severity: unavailable` on every issue, and inert recommendations mapped
@@ -283,8 +297,17 @@ diagnostic form — never a partial pack that could be mistaken for evidence.
 `execution.json` inside it carries `exit_classification` and the phase list, and
 is the first thing to read.
 
-**`OpenShell Gateway/VM driver tuple must be exactly 0.0.111`**
-Version pin, not a suggestion. Match it or the run is `not_runnable`.
+**`sandbox service does not offer project_run_v2`**
+The service is unprovisioned, or was provisioned without the capability.
+Re-provision with `OPENBOX_PROJECT_RUN_V2=1 obs provision`. The OpenShell
+version pin lives there too, so a gateway mismatch surfaces from the sandbox
+rather than from this CLI.
+
+**The image failed and the pack says nothing about why**
+Expected, and recorded in every pack's `coverage_limitations`: the workload runs
+as the sandbox's main process and the gateway API carries supervisor records
+only, so there is no stdout or stderr to retain. Reproduce under plain
+`docker run` with the same `.env.sandbox` values first.
 
 **Phase 4 rejects the control token**
 Re-run `local-stack/scripts/bootstrap.sh` to reconcile the permission set (§2).
