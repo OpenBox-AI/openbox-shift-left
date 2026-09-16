@@ -249,6 +249,27 @@ func (state *runState) initializeRecord(started time.Time) {
 		"landlock best_effort may run without filesystem enforcement",
 		"runtime cgroup pids.max availability is not guaranteed",
 		"OpenBox evaluation agent uses provider-bound bearer authentication without SDK request signing",
+		// Both of these are regressions against the retired CLI path, and both
+		// are named here rather than left to show up as a bare "missing"
+		// channel, because a reader cannot tell a channel that observed nothing
+		// from a channel this path cannot observe at all.
+		//
+		// The workload runs as the sandbox's MAIN process, which is the only
+		// process OpenShell gives the provider credentials to. The gRPC API has
+		// no channel for a main process's stdout or stderr: GetSandboxLogs and
+		// WatchSandbox both carry SandboxLogLine, which is supervisor events.
+		// The old path did not read this from the API either — it came from CLI
+		// attachment, which the supported path does not have.
+		"workload stdout and stderr are not retained; the gateway API carries supervisor records only",
+		// Typed egress decisions and violations arrive on an exec result. A main
+		// process produces none, so sandbox_isolation reports zero records —
+		// which is a statement about this channel, not about the workload.
+		"per-process egress decisions and violations are not collected for a main-process workload",
+		// The retired path proved the model route by substring-matching
+		// API:INFERENCE in a gateway log line. That stream is gone and no typed
+		// receipt has replaced it yet, so the route is unproven rather than
+		// disproven.
+		"model route is not independently receipted; the inference credential is resolved at the gateway proxy",
 	}
 }
 
