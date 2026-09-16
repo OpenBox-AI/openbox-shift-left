@@ -153,11 +153,12 @@ wants, are matched by exact name, and are never passed to the guest:
   model is present and cold before the run; `gateway` says the route is served
   by something this host cannot see, so there is nothing local to preflight and
   the route is recorded as unproven.
-- `OPENBOX_SANDBOX_MODEL_DIGEST` — required, because the v1 effects schema
-  requires a sha256 `model_digest` and offers no way to express a route that
-  publishes none. For a hosted route there is no truthful value; the field wants
-  to be `expected_model_digest` or optional, which is a v2 effects change rather
-  than something to synthesise. Stated here as the limitation it is.
+- `OPENBOX_SANDBOX_MODEL_DIGEST` — optional. A local Ollama has a real content
+  address for its weights and the preflight checks the declared value against
+  it. A hosted route — OpenAI, Anthropic, Gemini, OpenRouter — has none: the
+  model is a service-side name whose weights can change behind it. Omit it and
+  the pack omits `model_digest` entirely, which states that the route publishes
+  no digest rather than asserting an empty one.
 
 The five connector values are reserved and a project may not set them:
 `OPENBOX_EVALUATION_ID`, `OPENBOX_AGENT_ID`, `OPENBOX_URL`, `OPENBOX_API_KEY`,

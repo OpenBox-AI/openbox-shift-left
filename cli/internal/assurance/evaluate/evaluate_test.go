@@ -769,3 +769,39 @@ func TestConnectorResolvesPerEnvironmentAndDefaultsToLocalStack(t *testing.T) {
 		}
 	}
 }
+
+// A hosted model route has no content address, and the pack must be able to say
+// so. This used to be impossible: model_digest was required, so a project on
+// OpenAI or Anthropic could only run by inventing a sha256 — a fabricated
+// content address in sealed evidence.
+func TestModelDigestIsOmittedWhenTheRoutePublishesNone(t *testing.T) {
+	hosted, err := parseEnvironment([]byte(
+		"OPENAI_MODEL=gpt-4o\n" + modelRouteSetting + "=" + ModelRouteGateway + "\n"))
+	if err != nil {
+		t.Fatalf("a hosted route without a digest was refused: %v", err)
+	}
+	effect := modelRouteEffect(&prepared{
+		declared:    hosted,
+		environment: map[string]string{"OPENAI_MODEL": "gpt-4o"},
+	})
+	if _, present := effect["model_digest"]; present {
+		t.Fatalf("emitted a digest for a route that publishes none: %v", effect)
+	}
+	// Absent, not empty: an empty string would still assert a digest exists.
+	if effect["provider"] != ModelRouteGateway || effect["model"] != "gpt-4o" || effect["status"] != "missing" {
+		t.Fatalf("effect=%v", effect)
+	}
+
+	local, err := parseEnvironment([]byte(
+		"OPENAI_MODEL=" + testModel + "\n" + modelDigestSetting + "=" + testModelDigest + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect = modelRouteEffect(&prepared{
+		declared:    local,
+		environment: map[string]string{"OPENAI_MODEL": testModel},
+	})
+	if effect["model_digest"] != testModelDigest {
+		t.Fatalf("a declared digest was dropped: %v", effect)
+	}
+}

@@ -197,14 +197,7 @@ func (state *runState) publishOutput(success bool, dependencies Dependencies) er
 			// `provider` carries the declared route. The pack forces `status` to
 			// missing regardless: nothing on this path receipts a model call, so
 			// these fields say what was CONFIGURED, not what was served.
-			//
-			// model_digest is required by the v1 effects schema and must be a
-			// sha256, so this lane requires the project to declare one. For a
-			// hosted route that publishes no digest there is no truthful value —
-			// the field wants to be `expected_model_digest`, or to be optional,
-			// and either is a v2 effects change rather than something to paper
-			// over with a constant here.
-			"model_route": map[string]any{"status": "missing", "provider": state.prepared.declared.modelRoute, "model": state.prepared.environment["OPENAI_MODEL"], "model_digest": state.prepared.declared.modelDigest},
+			"model_route": modelRouteEffect(state.prepared),
 			"core_relay":  map[string]any{"status": "observed", "matching_validations": receipt.MatchingValidations, "governance_events": receipt.GovernanceEvents},
 		},
 		FinalizedAt: dependencies.Clock.Now(),
@@ -288,6 +281,31 @@ func (state *runState) initializeRecord(started time.Time) {
 	}
 	record.CoverageLimitations = append(record.CoverageLimitations,
 		ungovernedCredentialLimitations(state.prepared.declared)...)
+}
+
+// modelRouteEffect describes the route this run was pointed at.
+//
+// model_digest is present only when the project declared one, and that is the
+// whole point of it being optional. A local Ollama has a real content address
+// for its weights and the preflight checks it. A hosted route — OpenAI,
+// Anthropic, Gemini, OpenRouter — has none: the model is a service-side name
+// whose weights can change behind it, so there is nothing to cite. The field
+// used to be required, which left such a project no way to run except to invent
+// a digest, and an invented content address in sealed evidence is worse than an
+// absent one.
+//
+// Absent therefore means "this route publishes no digest", which is a fact
+// about the route, and is why it is omitted rather than emitted empty.
+func modelRouteEffect(prepared *prepared) map[string]any {
+	effect := map[string]any{
+		"status":   "missing",
+		"provider": prepared.declared.modelRoute,
+		"model":    prepared.environment["OPENAI_MODEL"],
+	}
+	if prepared.declared.modelDigest != "" {
+		effect["model_digest"] = prepared.declared.modelDigest
+	}
+	return effect
 }
 
 // ungovernedCredentialLimitations discloses every credential-shaped variable

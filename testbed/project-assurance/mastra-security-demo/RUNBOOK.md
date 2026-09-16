@@ -239,7 +239,7 @@ Four coverage channels are **expected to be absent** and are not faults:
 - `model_route` — `missing`; the retired CLI lane proved this by grepping a
   gateway log line and no typed receipt has replaced it. Its `model` and
   `model_digest` fields report what the project **declared**, not what was
-  served;
+  served, and `model_digest` is absent entirely for a hosted route;
 - `sandbox_isolation` — zero records; egress decisions arrive on an exec result
   and the workload is the main process.
 

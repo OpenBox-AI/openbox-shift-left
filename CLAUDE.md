@@ -485,11 +485,14 @@ Six things are worth not re-litigating:
   openbox-sandbox; this repo asks one capability question and treats a `no` as
   `not_runnable`. `OpenShellVersion` here was dead and is deleted — do not
   reintroduce a version assertion.
-- **`effects.model_route.model_digest` is required by the v1 schema and cannot
-  express absence.** A hosted route publishes no digest, so the project must
-  declare one anyway. The field wants to be `expected_model_digest` or optional;
-  that is a v2 effects change, and synthesising a constant here would be the
-  dishonest fix.
+- **`effects.model_route.model_digest` is optional, and that was a schema fix,
+  not a workaround.** It was required with a sha256 pattern, which left a
+  project on OpenAI or Anthropic no way to run except to invent a content
+  address — a fabrication in sealed evidence. Dropping it from `required` is a
+  WIDENING: every previously valid v1 artifact still validates, so it needs no
+  version bump under ADR-0020. The field is written by nobody's decision — grep
+  confirms nothing reads it — and absent now means "this route publishes no
+  digest". Do not re-require it.
 
 The demo is two scripts under
 `testbed/project-assurance/mastra-security-demo/` — `prepare-demo.zsh` then

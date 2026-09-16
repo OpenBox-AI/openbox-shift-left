@@ -454,19 +454,13 @@ func preflightLocalServices(ctx context.Context, dependencies Dependencies, reso
 // service. That route is recorded as unproven instead, which is the honest
 // answer and not a weaker one.
 //
-// The digest pin is likewise conditional. It used to be a compile-time constant
-// for one model; now it holds only when the project states one.
+// The digest pin is likewise optional. It used to be a compile-time constant
+// for one model, then a required declaration; it now holds only when the
+// project states one, because a hosted route has no content address to state.
 func preflightModelRoute(ctx context.Context, dependencies Dependencies, result *prepared) error {
 	model := result.environment["OPENAI_MODEL"]
 	if model == "" {
 		return errors.New("project evaluate: .env.sandbox must set OPENAI_MODEL")
-	}
-	// Required for every route, because the v1 effects schema requires a
-	// sha256 model_digest and offers no way to say a route publishes none.
-	// Demanding the project state it is the honest version of that constraint;
-	// synthesising one here would be the dishonest version.
-	if result.declared.modelDigest == "" {
-		return fmt.Errorf("project evaluate: the project must declare %s", modelDigestSetting)
 	}
 	if result.declared.modelRoute != ModelRouteLocalOllama {
 		return nil
