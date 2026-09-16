@@ -799,3 +799,26 @@ func TestConnectorResolvesPerEnvironmentAndDefaultsToLocalStack(t *testing.T) {
 		}
 	}
 }
+
+// A declaration this lane cannot honour must fail before the workload starts,
+// not become a variable the guest silently never receives.
+func TestDeclaredSecretsAreRefusedRatherThanSilentlyDropped(t *testing.T) {
+	declared, err := parseEnvironment([]byte(secretPrefix + "PAYMENTS_API_KEY=sk-live\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = refuseUnconsumedSecrets(declared)
+	if err == nil {
+		t.Fatal("a declared secret was accepted and would have been dropped")
+	}
+	// The name is named so the developer can find it; the value never is.
+	if !strings.Contains(err.Error(), "PAYMENTS_API_KEY") {
+		t.Fatalf("error does not name the declaration: %v", err)
+	}
+	if strings.Contains(err.Error(), "sk-live") {
+		t.Fatalf("error leaked the secret value: %v", err)
+	}
+	if err := refuseUnconsumedSecrets(newProjectEnvironment()); err != nil {
+		t.Fatalf("a project with no secrets was refused: %v", err)
+	}
+}

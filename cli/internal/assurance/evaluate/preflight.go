@@ -144,7 +144,37 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if err := preflightModelRoute(ctx, dependencies, result); err != nil {
 		return nil, err
 	}
+	if err := refuseUnconsumedSecrets(result.declared); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+// refuseUnconsumedSecrets fails a run that declares a secret this lane cannot
+// yet deliver.
+//
+// The parser understands OPENBOX_SANDBOX_SECRET_ and nothing consumes it. The
+// tempting alternative — accept the declaration and carry on — would start the
+// workload with the variable simply absent, which surfaces as whatever that
+// project does when its own credential is missing, arbitrarily far from the
+// cause. A run that cannot honour a declaration must say so before it runs
+// anything.
+//
+// Delivering one is not a matter of passing the value through: a credential
+// belongs to an OpenShell provider bound to an endpoint in this policy, and an
+// unbound credential key makes the gateway fail closed and revoke every other
+// credential with it. Until that provisioning path exists, this is a refusal
+// rather than a gap the caller has to notice.
+func refuseUnconsumedSecrets(declared *projectEnvironment) error {
+	names := declared.secretNames()
+	if len(names) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"project evaluate: %s declarations are not deliverable yet (%s); "+
+			"a credential must be an OpenShell provider bound to an endpoint in this policy, "+
+			"and this lane cannot provision one",
+		secretPrefix, strings.Join(names, ", "))
 }
 
 func validateInputStrings(input Input) error {
