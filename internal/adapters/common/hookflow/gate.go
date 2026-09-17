@@ -99,8 +99,15 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 
 	LogEnforceDecision(logger, t.ToolName(), dec, policy)
 	res := ApplyDecision(stdout, dec, localRedaction, t.ToolInput(), g.Contract)
-	// A contract with no session-stop lever (Codex) renders a HALT as its per-
-	// call deny, so it never accumulates latch state its hooks would not consult.
+	// Only a contract that RENDERS a session stop reports DecisionHalt back, so
+	// only such a contract latches. Both providers deliberately keep that to one
+	// contract each -- the prompt contract, the single surface either vendor
+	// gives a session-stop lever on. Every tool contract folds HALT into its
+	// per-call refusal and returns that instead, so no tool call can latch.
+	//
+	// The read side is wider than the write side on purpose: every gated class
+	// consults the latch, or a session halted at the prompt would keep running
+	// tools.
 	if res.Decision == DecisionHalt {
 		WriteSessionHalt(logger, g.runID(t), dec.Evaluation)
 	}
