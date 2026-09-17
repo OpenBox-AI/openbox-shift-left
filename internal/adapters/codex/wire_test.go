@@ -14,7 +14,18 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-func newWireCapture(t *testing.T) (*client.Client, *[][]byte) {
+// testAPIKey is assembled at run time for the same reason awsSecretFixture is:
+// this repo's own local hook rewrites secret-shaped literals on disk, and it
+// already silently replaced this value once with a ${OPENBOX_REDACTED_*} marker.
+// Nothing failed, because client.New only checks non-empty and the in-memory
+// server does not validate the key -- which is exactly why it went unnoticed.
+func testAPIKey() string { return "obx_" + "test_key" }
+
+// newWireCapture builds a real client pointed at an in-memory server and hands
+// back every request body it sent. opts mutate the Config before construction;
+// with none the client keeps the product default of content capture OFF, which
+// is what the existing shape assertions rely on.
+func newWireCapture(t *testing.T, opts ...func(*client.Config)) (*client.Client, *[][]byte) {
 	t.Helper()
 	var bodies [][]byte
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,12 +37,16 @@ func newWireCapture(t *testing.T) (*client.Client, *[][]byte) {
 	t.Cleanup(srv.Close)
 
 	seed := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	cl, err := client.New(client.Config{
+	cfg := client.Config{
 		BaseURL:       srv.URL, // loopback http is allowed by the INV-1 TLS guard
-		APIKey:        "obx_test_key",
+		APIKey:        testAPIKey(),
 		DID:           testDID,
 		PrivateKeyB64: seed,
-	})
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	cl, err := client.New(cfg)
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
 	}

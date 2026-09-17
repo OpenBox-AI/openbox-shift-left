@@ -35,6 +35,11 @@ type Mapper struct {
 	// prompt is gated here; command strings, patch bodies, and tool output are
 	// never decoded at all.
 	CaptureContent bool
+	// RedactContent redacts a content body for secrets before it is attached to
+	// an event. Nil ⇒ identity, which is the honest `secret_detection:false`
+	// case: the text egresses unredacted (that decision says so rather than
+	// hiding it).
+	RedactContent func(string) string
 	// Finops, when non-nil, carries the usage numbers only the finops reader
 	// extracted from the SessionEnd rollout jsonl.
 	Finops *FinopsUsage
@@ -107,9 +112,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
 		// Off ⇒ Content stays nil and the prompt never egresses (Emit would strip it
-		// anyway).
+		// anyway). The capture gate is checked first, so capture-off never builds a
+		// redactor; redaction happens before attachment, which is the only
+		// in-transit control there is.
 		if m.CaptureContent && e.Prompt != "" {
-			ev.Content = &client.Content{Prompt: e.Prompt}
+			ev.Content = &client.Content{Prompt: m.redact(e.Prompt)}
 		}
 
 	case HookPreToolUse:
@@ -117,6 +124,45 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.StartedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "started")
 		ev.Metadata = toolMetadata(e)
+
+	case HookPermissionRequest:
+		// A signal, not an activity: the escalation is not a second execution of
+		// the tool, and Codex gives it no tool_use_id to pair with, so it can
+		// never become half of an activity pair.
+		ev.EventType = client.EventPermissionRequest
+		kind, _, _, mcpServer, _ := classifyTool(e.ToolName)
+		ev.Tool = client.Tool{Name: capStr(e.ToolName), Kind: kind}
+		if kind == client.ToolMCP {
+			ev.Tool.MCPServer = capStr(mcpServer)
+		}
+		ev.Metadata = compact(map[string]any{
+			"permission_mode": enumOr(e.PermissionMode, permissionModes),
+			"tool_name":       capStr(e.ToolName),
+		})
+
+	case HookSubagentStart:
+		ev.EventType = client.EventSubagentStarted
+		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
+		ev.Metadata = compact(map[string]any{
+			"agent_id":   capStr(e.AgentID),
+			"agent_type": capStr(e.AgentType),
+		})
+
+	case HookPreCompact, HookPostCompact:
+		if hook == HookPreCompact {
+			ev.EventType = client.EventPreCompact
+		} else {
+			ev.EventType = client.EventPostCompact
+		}
+		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
+		ev.Metadata = compact(map[string]any{"trigger": enumOr(e.Trigger, compactTriggers)})
+
+	case HookStop, HookSubagentStop:
+		// Deliberately (zero, false): a turn end is not a signal. It is emitted as
+		// an llm_completion activity PAIR by emitTurn/MapTurn instead, which is the
+		// same shape Claude Code uses and the reason no EventSubagentStopped exists
+		// in the shared vocabulary.
+		return client.DevEvent{}, false
 
 	case HookPostToolUse:
 		ev.EventType = client.EventToolResult
@@ -313,6 +359,8 @@ var (
 	sourceValues    = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true}
 	reasonValues    = map[string]bool{"other": true}
 	permissionModes = map[string]bool{"default": true, "acceptEdits": true, "plan": true, "dontAsk": true, "bypassPermissions": true}
+	// compactTriggers is the closed enum the Pre/PostCompact schemas declare.
+	compactTriggers = map[string]bool{"manual": true, "auto": true}
 )
 
 func enumOr(v string, allowed map[string]bool) string {
@@ -340,6 +388,17 @@ func (m Mapper) clock() time.Time {
 		return m.Now()
 	}
 	return time.Now()
+}
+
+// redact runs a content body through the secret detector before it is attached.
+// It lives on the Mapper rather than at the call site so every caller of Map
+// inherits it: the enforce gate re-maps the same hook event for its own
+// DecisionRequest copy, and a call-site redactor would leave that copy raw.
+func (m Mapper) redact(s string) string {
+	if m.RedactContent == nil {
+		return s
+	}
+	return m.RedactContent(s)
 }
 
 func (m Mapper) eventID(ev client.DevEvent) string {
@@ -373,4 +432,68 @@ func deriveID(ev client.DevEvent) string {
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return "cdx-" + hex.EncodeToString(sum[:])
+}
+
+// MapTurn builds one turn's llm_completion activity pair.
+//
+// SessionRollup is deliberately NEVER set here. That single field is what routes
+// an id to the `<session>:usage:rollup` namespace; leaving it false lets
+// client/payload.go derive `<session>:turn:N` (or `<session>:agent:<id>:turn:N`
+// for a sidechain), which is what keeps per-turn rows from colliding with the
+// SessionEnd rollup.
+func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, completed client.DevEvent, ok bool) {
+	if e == nil || e.SessionID == "" || !w.HasUsage {
+		return client.DevEvent{}, client.DevEvent{}, false
+	}
+	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+		return client.DevEvent{}, client.DevEvent{}, false
+	}
+
+	ts := m.clock().UTC().Format(time.RFC3339Nano)
+	turnIndex := index
+	base := client.DevEvent{
+		SchemaVersion: client.SchemaVersion,
+		SessionID:     e.SessionID,
+		DeveloperDID:  m.Identity.DeveloperDID,
+		Tool:          client.Tool{Name: agentToolName, Kind: client.ToolShell},
+		TurnIndex:     &turnIndex,
+		AgentID:       capStr(e.AgentID),
+	}
+
+	started = base
+	started.EventType = client.EventTurnStarted
+	started.Timestamp = ts
+	started.StartedAt = ts
+	started.Metadata = mergeMetadata(
+		compact(map[string]any{"turn_index": turnIndex}),
+		m.sessionTreeMetadata(e))
+	started.EventID = m.eventID(started)
+
+	completed = base
+	completed.EventType = client.EventTurnCompleted
+	completed.Timestamp = ts
+	completed.EndedAt = ts
+	completed.Tokens = w.tokens()
+	completed.Model = capStr(w.Model)
+	completed.Metadata = mergeMetadata(
+		compact(map[string]any{"turn_index": turnIndex}),
+		m.sessionTreeMetadata(e))
+	// Content rides the COMPLETED half only: a turn's input is the prompt, which
+	// already ships on PromptSubmitted under the same gate. Redaction happens here
+	// rather than at the call site so a second caller of MapTurn inherits it.
+	if m.CaptureContent {
+		var c client.Content
+		if e.LastAssistantMessage != "" {
+			c.Output = m.redact(e.LastAssistantMessage)
+		}
+		if w.Thinking != "" {
+			c.Thinking = m.redact(w.Thinking)
+		}
+		if c.Output != "" || c.Thinking != "" {
+			completed.Content = &c
+		}
+	}
+	completed.EventID = m.eventID(completed)
+
+	return started, completed, true
 }
