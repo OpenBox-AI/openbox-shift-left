@@ -227,23 +227,31 @@ what replaces it is what the probe actually showed rather than a softer version
 of the same absence:
 
 - Codex **does** read an `[otel]` block from `$CODEX_HOME/config.toml` and export
-  OTLP over HTTP to whatever endpoint that block names. Measured: a loopback sink
-  received six protobuf batches from a single turn, carrying `service.name`,
-  `conversation.id`, `model`, `originator`, token counts and the `environment`
-  value the config set (probe P0.3). So the `:otel:`-shaped lane is reachable on
-  Codex in principle, through a file OpenBox could write.
-- That was measured **on the terminal CLI only**. Whether Codex Desktop honours
-  the same config could not be tested from this session (probe P0.1b), and on
-  this machine Desktop and the SDK originator account for essentially every
-  session record. So the population the lane would serve is exactly the
-  population the probe could not reach.
-- **Nothing is built, deliberately.** Installing a lane means writing a
-  third-party trust surface (`config.toml`), standing up a daemon, and pointing
-  Codex at a port — and install ordering is a safety property: the pointer must be
-  written only after the listener is proven live, or every model call fails while
-  `init` prints success. Building that against a surface whose main consumer is
-  unverified risks aiming a fleet's Codex at a dead port. The mechanism being
-  real is not the same as the install being safe.
+  OTLP over HTTP to whatever endpoint that block names. Measured on **both**
+  surfaces: a loopback sink received six protobuf batches from a single terminal
+  CLI turn (probe P0.3), and **twelve** from Codex Desktop relaunched under a
+  throwaway `CODEX_HOME` (probe P0.3-Desktop). Both carried `service.name`,
+  `conversation.id`, `app.version`, token counts and the `environment` value the
+  config set; the Desktop capture additionally carried `codex.api_request`,
+  `codex.sse_event`, `codex.tool_result` and `codex.user_prompt`, at
+  `protocol = "binary"` — the production wire format this document records as
+  unexercised for the Claude Code `:otel:` lane.
+- **Nothing is built yet, and the reason has narrowed.** The original reason was
+  evidentiary: the surface the lane would serve was unverified. That no longer
+  holds — Desktop demonstrably reads a `config.toml` OpenBox could write. What
+  remains is engineering risk, not doubt about the mechanism: installing a lane
+  means writing a third-party trust surface, standing up a daemon, and pointing
+  Codex at a port, where install ordering is a safety property — the pointer must
+  be written only after the listener is proven live, or every model call fails
+  while `init` prints success. Plus an ownership-aware `config.toml` merge and a
+  matching uninstall sweep, or `openbox uninstall` leaves Codex exporting to a
+  dead port forever.
+- **Still unmeasured:** whether Codex Desktop runs `hooks.json` at all. The probe
+  registered all eleven events and none fired, but the app was idle and wrote no
+  rollout, so nothing reached a hook; and hook trust is a second confound. That
+  is a genuinely open question, not a negative result — see
+  `plans/260917-0225-codex-parity-with-claude-code/probes/` for exactly what
+  would settle it.
 
 **Cursor: no lane, and no probe has been run** — unsurveyed, not measured-empty.
 
