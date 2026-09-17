@@ -6,12 +6,18 @@ import (
 )
 
 func TestParseHookName(t *testing.T) {
-	for _, ok := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "SessionEnd"} {
+	for _, ok := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
+		"PostToolUse", "Stop", "SubagentStart", "SubagentStop", "PreCompact", "PostCompact", "SessionEnd"} {
 		if _, err := ParseHookName(ok); err != nil {
 			t.Errorf("ParseHookName(%q): %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"Stop", "SubagentStart", "SubagentStop", "PermissionRequest", "PreCompact", "PostCompact", "flush", ""} {
+	// Rejected. "Interrupt" and "Notification" are not Codex hook events at all:
+	// the 0.150.0-alpha.8 binary embeds no schema and no HookEventNameWire member
+	// for either. That is a vendor fact, not a scope decision of ours -- worth
+	// stating, because "we chose not to wire it" would take credit for a gap that
+	// is not ours to close. "flush" is our own subcommand, not a hook name.
+	for _, bad := range []string{"Interrupt", "Notification", "flush", ""} {
 		if _, err := ParseHookName(bad); err == nil {
 			t.Errorf("ParseHookName(%q) should be rejected", bad)
 		}

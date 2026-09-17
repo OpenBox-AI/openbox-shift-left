@@ -10,19 +10,31 @@ import (
 type HookName string
 
 const (
-	HookSessionStart     HookName = "SessionStart"
-	HookUserPromptSubmit HookName = "UserPromptSubmit"
-	HookPreToolUse       HookName = "PreToolUse"
-	HookPostToolUse      HookName = "PostToolUse"
-	HookSessionEnd       HookName = "SessionEnd"
+	HookSessionStart      HookName = "SessionStart"
+	HookUserPromptSubmit  HookName = "UserPromptSubmit"
+	HookPreToolUse        HookName = "PreToolUse"
+	HookPermissionRequest HookName = "PermissionRequest"
+	HookPostToolUse       HookName = "PostToolUse"
+	HookStop              HookName = "Stop"
+	HookSubagentStart     HookName = "SubagentStart"
+	HookSubagentStop      HookName = "SubagentStop"
+	HookPreCompact        HookName = "PreCompact"
+	HookPostCompact       HookName = "PostCompact"
+	HookSessionEnd        HookName = "SessionEnd"
 )
 
 var hookNames = map[HookName]bool{
-	HookSessionStart:     true,
-	HookUserPromptSubmit: true,
-	HookPreToolUse:       true,
-	HookPostToolUse:      true,
-	HookSessionEnd:       true,
+	HookSessionStart:      true,
+	HookUserPromptSubmit:  true,
+	HookPreToolUse:        true,
+	HookPermissionRequest: true,
+	HookPostToolUse:       true,
+	HookStop:              true,
+	HookSubagentStart:     true,
+	HookSubagentStop:      true,
+	HookPreCompact:        true,
+	HookPostCompact:       true,
+	HookSessionEnd:        true,
 }
 
 // ParseHookName validates a raw argv value as a known hook name.
@@ -56,10 +68,13 @@ type HookEvent struct {
 	// Source sessionStart.
 	Source string `json:"source"` // startup|resume|clear|compact
 
-	// ToolName preToolUse / PostToolUse.
+	// ToolName preToolUse / PostToolUse / PermissionRequest.
 	ToolName string `json:"tool_name"`
 	// ToolUseID pairs a PreToolUse with its PostToolUse (new in 0.145.0, addendum
-	// #5); the per-invocation pairing id Claude Code lacks.
+	// #5); the per-invocation pairing id Claude Code lacks. PermissionRequest
+	// does NOT carry one -- verified on 0.150.0-alpha.8 (probe P0.6), where the
+	// payload has tool_name and tool_input but no tool_use_id -- so a
+	// PermissionRequest cannot be paired to the tool call it escalates from.
 	ToolUseID string `json:"tool_use_id"`
 	// ToolInput is retained only as an opaque blob for the enforce leg (local,
 	// never-egressed decision input). The observe path never decodes it.
@@ -68,6 +83,28 @@ type HookEvent struct {
 	// Reason sessionEnd. The embedded schema pins reason to the single value
 	// "other" (not load-bearing here).
 	Reason string `json:"reason"`
+
+	// LastAssistantMessage is that turn's final assistant text, required on both
+	// Stop and SubagentStop (nullable on the wire, so it decodes to ""). Content
+	// (INV-2): consumed only by MapTurn under Mapper.CaptureContent, redacted
+	// before attachment.
+	LastAssistantMessage string `json:"last_assistant_message"`
+
+	// StopHookActive is Codex's hook-driven-loop breaker. It is READ and never
+	// acted on, because this adapter's Stop output is always empty and so no loop
+	// is possible. Binding it keeps that deliberate: a later change that wanted to
+	// write on Stop would have to confront the field rather than discover it.
+	StopHookActive bool `json:"stop_hook_active"`
+
+	// AgentID / AgentType identify a subagent on SubagentStart/SubagentStop; both
+	// are required there (verified against the 0.150.0-alpha.8 embedded schema).
+	// A sidechain turn without an AgentID is SKIPPED rather than guessed: it would
+	// otherwise share the main thread's turn cursor.
+	AgentID   string `json:"agent_id"`
+	AgentType string `json:"agent_type"`
+
+	// Trigger is PreCompact/PostCompact's cause: "manual" or "auto".
+	Trigger string `json:"trigger"`
 
 	// Prompt is the UserPromptSubmit prompt text; content (INV-2), not
 	// structural. It is decoded here but consumed only by the mapper when

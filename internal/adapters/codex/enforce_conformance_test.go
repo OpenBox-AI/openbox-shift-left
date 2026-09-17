@@ -260,10 +260,22 @@ func TestObserveByteParity_EnforceOff(t *testing.T) {
 	serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
 	t.Setenv(devconfig.EnvEnforce, "0")
 	payloads := map[string]string{
-		"SessionStart":     `{"hook_event_name":"SessionStart","session_id":"s","cwd":"/tmp","source":"startup"}`,
-		"UserPromptSubmit": `{"hook_event_name":"UserPromptSubmit","session_id":"s","cwd":"/tmp","prompt":"hi"}`,
-		"PreToolUse":       `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`,
-		"PostToolUse":      `{"hook_event_name":"PostToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_use_id":"c1"}`,
+		"SessionStart":      `{"hook_event_name":"SessionStart","session_id":"s","cwd":"/tmp","source":"startup"}`,
+		"UserPromptSubmit":  `{"hook_event_name":"UserPromptSubmit","session_id":"s","cwd":"/tmp","prompt":"hi"}`,
+		"PreToolUse":        `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`,
+		"PostToolUse":       `{"hook_event_name":"PostToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_use_id":"c1"}`,
+		"PermissionRequest": `{"hook_event_name":"PermissionRequest","session_id":"s","cwd":"/tmp","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch"}}`,
+		"Stop":              `{"hook_event_name":"Stop","session_id":"s","cwd":"/tmp","last_assistant_message":"done","stop_hook_active":false,"turn_id":"t1","transcript_path":null}`,
+		"SubagentStart":     `{"hook_event_name":"SubagentStart","session_id":"s","cwd":"/tmp","agent_id":"a1","agent_type":"general"}`,
+		"SubagentStop":      `{"hook_event_name":"SubagentStop","session_id":"s","cwd":"/tmp","agent_id":"a1","agent_type":"general","last_assistant_message":"done","transcript_path":null}`,
+		"PreCompact":        `{"hook_event_name":"PreCompact","session_id":"s","cwd":"/tmp","trigger":"manual","turn_id":"t1","transcript_path":null}`,
+		"PostCompact":       `{"hook_event_name":"PostCompact","session_id":"s","cwd":"/tmp","trigger":"manual","turn_id":"t1","transcript_path":null}`,
+	}
+	// An event missing from this map ships unasserted, so the count is pinned to
+	// the installer's own list: a newly registered event must appear here too.
+	if len(payloads) != len(hookedEvents)-1 { // SessionEnd flushes; covered separately
+		t.Fatalf("byte-parity map covers %d events but the installer registers %d; a wired event is unasserted",
+			len(payloads), len(hookedEvents))
 	}
 	for hook, payload := range payloads {
 		var stdout bytes.Buffer

@@ -24,8 +24,12 @@ func TestHookedEventNamesCarryNoPathSyntax(t *testing.T) {
 			t.Error("an empty event name would address the hooks object itself")
 		}
 	}
-	if len(hookedEvents) != 5 {
-		t.Errorf("hookedEvents has %d entries; the installer's Plan output names five", len(hookedEvents))
+	// The count is pinned so adding an event is a deliberate act: a new entry
+	// changes the user's hooks.json, which re-triggers Codex's hash-based trust
+	// prompt. Bump this only together with the HookName const and the RunHook
+	// branch (see hookedEvents' own comment).
+	if len(hookedEvents) != 11 {
+		t.Errorf("hookedEvents has %d entries; the installer's Plan output names eleven", len(hookedEvents))
 	}
 }
 
