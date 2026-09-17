@@ -216,12 +216,36 @@ table is what each *lane* sees of a single model call. It is deliberately not
 averaged into a "model calls are governed" sentence: the three lanes differ in
 what they carry, in who can suppress them, and in how strongly each is verified.
 
-All three are **Claude Code only, and structurally so**; `init` installs no lane
-for any other provider and prints why rather than erroring
-(`laneCapable`, `cmd/openbox/initlanes.go`), the transport allowlist holds one host
-(`api.anthropic.com`), and the telemetry keys are `CLAUDE_CODE_*`. **Codex and
-Cursor: no lane, and no probe has been run**; their absence here is unsurveyed,
-not measured-empty.
+All three are **Claude Code only**; `init` installs no lane for any other
+provider and prints why rather than erroring (`laneCapable`,
+`cmd/openbox/initlanes.go`), the transport allowlist holds one host
+(`api.anthropic.com`), and the telemetry keys are `CLAUDE_CODE_*`.
+
+**Codex: surveyed 2026-09-17, and the mechanism exists — but no lane is built.**
+That sentence used to read "no probe has been run", and it is no longer true, so
+what replaces it is what the probe actually showed rather than a softer version
+of the same absence:
+
+- Codex **does** read an `[otel]` block from `$CODEX_HOME/config.toml` and export
+  OTLP over HTTP to whatever endpoint that block names. Measured: a loopback sink
+  received six protobuf batches from a single turn, carrying `service.name`,
+  `conversation.id`, `model`, `originator`, token counts and the `environment`
+  value the config set (probe P0.3). So the `:otel:`-shaped lane is reachable on
+  Codex in principle, through a file OpenBox could write.
+- That was measured **on the terminal CLI only**. Whether Codex Desktop honours
+  the same config could not be tested from this session (probe P0.1b), and on
+  this machine Desktop and the SDK originator account for essentially every
+  session record. So the population the lane would serve is exactly the
+  population the probe could not reach.
+- **Nothing is built, deliberately.** Installing a lane means writing a
+  third-party trust surface (`config.toml`), standing up a daemon, and pointing
+  Codex at a port — and install ordering is a safety property: the pointer must be
+  written only after the listener is proven live, or every model call fails while
+  `init` prints success. Building that against a surface whose main consumer is
+  unverified risks aiming a fleet's Codex at a dead port. The mechanism being
+  real is not the same as the install being safe.
+
+**Cursor: no lane, and no probe has been run** — unsurveyed, not measured-empty.
 
 | Signal | `:gateway:` | `:proxy:` (transport) | `:otel:` (telemetry) |
 |---|---|---|---|
@@ -361,10 +385,16 @@ region, own-key or cost, so no routing promise exists to honour.
   `content_capture` (checked twice; once by the mapper, once independently by
   the client's `stripContent`). Secret-redacted **before** attachment, then
   capped at 64KB. With `secret_detection:false` it egresses unredacted.
-  **Codex**: no assistant-text field on its hook surface; its `Stop` is
-  deliberately unwired, and its SessionEnd rollup shares a flush with
-  `WorkflowCompleted`, which deletes the goal session; wrong granularity and
-  racy ordering. So Codex sessions do not feed Goal Alignment.
+  **Codex**: the assistant-text field **does exist** on its hook surface —
+  `last_assistant_message`, required on both `Stop` and `SubagentStop`, and
+  observed carrying that turn's text on codex-cli 0.150.0-alpha.8 (phase 00
+  probe P0.7). What is true is narrower and is a scope statement, not a surface
+  limit: OpenBox does not wire `Stop` yet, so nothing reads the field, and the
+  SessionEnd rollup shares a flush with `WorkflowCompleted`, which deletes the
+  goal session — wrong granularity and racy ordering. So Codex sessions do not
+  feed Goal Alignment **today**. Wiring `Stop` fixes both at once: it fires once
+  per turn, well before SessionEnd, so the race disappears and the granularity
+  becomes per-turn.
 - **`error_type`** (v1.2): passed through an `enumOr` allowlist of the
   provider's own ten values. This is not decoration: `error` is the same JSON
   key on `StopFailure` (a closed enum) and `PostToolUseFailure` (free text a
@@ -436,17 +466,33 @@ lineage):
      direction is the dangerous one.**
      `internal/adapters/claude-code/hookrun.go` wires a redactor onto the mapper
      as a collaborator, so every content field it attaches is scanned by
-     construction. **The Codex mapper has no such field to wire**, its local
-     redaction exists only on the enforce path, over an `apply_patch` body, so
-     the prompt, the only content class it egresses, is sent **unscanned even
-     with `secret_detection` on**. The Claude Code prompt had exactly this gap
-     until 2026-08-26, and it survived review because that one field was
-     assigned directly instead of through the collaborator; conformance C42 now
-     asserts it on the outbound bytes, and **the same shape is still live for
-     Codex**. The asymmetry widened again with a dependency decision (2026-08-28): the scanner
+     construction. **The Codex mapper had no such field to wire** until
+     2026-09-17: its local redaction existed only on the enforce path, over an
+     `apply_patch` body, so the prompt — the only content class it egresses —
+     was sent **unscanned even with `secret_detection` on**.
+
+     This is the second time the same shape shipped. The Claude Code prompt had
+     exactly this gap until 2026-08-26, and it survived review because that one
+     field was assigned directly instead of through the collaborator. Codex then
+     repeated it, for the same reason, and it survived for the same reason. The
+     history is the point: *assigned directly* is the smell, and a redactor that
+     is a mapper collaborator is the fix, because a second caller of `Map`
+     inherits it and a call-site redactor does not.
+
+     **Closed 2026-09-17.** The Codex mapper now carries `RedactContent` with
+     the Claude Code nil-is-identity contract, and the prompt is routed through
+     it before attachment. Held by
+     `internal/adapters/codex/prompt_redaction_test.go`, which asserts the same
+     triple conformance C42 asserts for Claude Code — secret absent, placeholder
+     present, surrounding prose intact — on the spooled record and again on the
+     outbound bytes, plus the honest opt-out (detection off ⇒ verbatim) and
+     `TestMapper_RedactionIsStructural`, which fails if a future change moves
+     redaction back to the call site.
+
+     The volume asymmetry widened with a dependency decision (2026-08-28): the scanner
      Claude Code's content passes through gained gitleaks' 222 format rules on
-     top of the nine hand-rolled ones, so Claude Code content is now checked
-     against 231 formats and Codex's prompt against none. A dedicated
+     top of the nine hand-rolled ones. Both providers' content now passes the
+     same 231 formats; what still differs is how many classes each sends. A dedicated
      `CompletionReceived` type was the v1.1 candidate here; it was not built,
      because the alignment reader that needs the text keys on the activity
      fields of an existing `Activity*` row rather than on an event type of its

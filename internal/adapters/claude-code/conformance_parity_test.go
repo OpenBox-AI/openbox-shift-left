@@ -291,7 +291,19 @@ var codexConformanceParity = []parityRow{
 	{goCase: "CDX-C12 REQUIRE_APPROVAL → deny (OD-SL7-ASK)", baseCase: "", status: statusGoExtension,
 		note: "NOT a mapping delta: both providers HOLD a REQUIRE_APPROVAL for a real decision and deny if it goes unanswered, so neither renders ask through the gate. What is Codex-specific is that its runtime also REJECTS permissionDecision:ask (output_parser.rs 'unsupported permissionDecision:ask') and a no-decision under approval_policy=never auto-runs (probe P3), so per the ruled OD-SL7-ASK every REQUIRE_APPROVAL quadrant DENIES with a content-free reason; strictly tighter. This is the base-unmapped 'require_approval' row the CC matrix noted, now covered on Codex."},
 	{goCase: "CDX tighten-only: allow never bare", baseCase: "", status: statusGoExtension,
-		note: "Codex-only structural invariant: permissionDecision:allow is emitted ONLY bundled with a redacting updatedInput (never a grant; OD-SL7-ALLOW-REWRITE); a plain allow writes NOTHING. Codex itself rejects a bare allow ('unsupported permissionDecision:allow'), and any-deny-wins + no approval-bypass lever means allow+updatedInput cannot loosen."},
+		note: "Codex-only structural invariant: permissionDecision:allow is emitted ONLY bundled with a redacting updatedInput (never a grant; OD-SL7-ALLOW-REWRITE); a plain allow writes NOTHING. Codex itself rejects a bare allow ('unsupported permissionDecision:allow'), and any-deny-wins + no approval-bypass lever means allow+updatedInput cannot loosen. Confirmed live on codex-cli 0.150.0-alpha.8 (probe P0.11): allow+updatedInput APPLIES -- the rewritten command is what ran -- while the bare-allow rejection is conditional on updatedInput being absent, not a blanket rejection of allow."},
+	{goCase: "CDX-C13 prompt gate blocks a refused prompt", baseCase: "C13 prompt gate blocks a refused prompt", status: statusParity,
+		note: "Both providers gate UserPromptSubmit through /evaluate and render decision:block + reason. Codex reaches this later than CC but the rendered shape is the same; measured on 0.150.0-alpha.8, Codex logs `UserPromptSubmit Blocked` (probe P0.5)."},
+	{goCase: "CDX-C14 prompt HALT stops the session", baseCase: "C14 prompt HALT stops the session", status: statusParity,
+		note: "A session-terminating HALT adds continue:false + stopReason on top of the block. Codex treats that as a distinct state from a plain block -- `UserPromptSubmit Stopped` versus `Blocked` (probe P0.5) -- which is what makes the halt latch meaningful rather than decorative."},
+	{goCase: "CDX-C15 halt latch replays with zero round trips", baseCase: "C15 halt latch replays with zero round trips", status: statusParity,
+		note: "The first HALT writes a latch keyed by session id; every later gated call in that session (prompt OR tool) replays it locally, asserted by counting the evaluate server's hits. An unparsable latch still halts: presence is the decided state. Identical to CC, including the no-remove-path design."},
+	{goCase: "CDX-C16 PermissionRequest denies or writes nothing", baseCase: "", status: statusGoExtension,
+		note: "Codex-only gate class: PermissionRequest fires between PreToolUse and PostToolUse when a call needs escalated permission (probe P0.6). Claude Code declares the event but does not gate on it, so there is no base case. OpenBox emits behavior:deny + a non-empty message, or nothing at all -- an allow there would SKIP the human approval prompt, which is the one lever in the Codex surface that loosens."},
+	{goCase: "CDX-C17 PermissionRequest never emits a reserved field", baseCase: "", status: statusGoExtension,
+		note: "Codex-only: updatedInput, updatedPermissions and interrupt are reserved on this surface and documented to fail closed, and continue/stopReason/suppressOutput are rejected outright. The contract type has no Go field for any of them, so a later edit cannot spell one. Held by TestPermissionGate_NeverLoosens over every verdict."},
+	{goCase: "CDX-C18 Stop is never decision:block", baseCase: "", status: statusGoExtension,
+		note: "Codex-only refusal. Codex's Stop accepts decision:block, which injects a continuation prompt built from the hook's reason text -- OpenBox would be driving the agent rather than governing it. CC has no analog because CC has a real rewake primitive for this. Stop output here is ALWAYS empty; stop_hook_active is read and never acted on, so no hook-driven loop is possible."},
 }
 
 // TestCrossAdapterParityMatrix_SL7B guards the CC↔Codex parity record: every
@@ -317,7 +329,10 @@ func TestCrossAdapterParityMatrix_SL7B(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"CDX-C1 ", "CDX-C2 ", "CDX-C3 ", "CDX-C4 ", "CDX-C5 ", "CDX-C6 ", "CDX-C7 ", "CDX-C8 ", "CDX-C9 ", "CDX-C10 ", "CDX-C11 ", "CDX-C12 "} {
+	// Every CDX-C* id must be listed here or the row is present but uncounted.
+	// Adding a row and forgetting this line is the failure mode, so they change
+	// together or not at all.
+	for _, id := range []string{"CDX-C1 ", "CDX-C2 ", "CDX-C3 ", "CDX-C4 ", "CDX-C5 ", "CDX-C6 ", "CDX-C7 ", "CDX-C8 ", "CDX-C9 ", "CDX-C10 ", "CDX-C11 ", "CDX-C12 ", "CDX-C13 ", "CDX-C14 ", "CDX-C15 ", "CDX-C16 ", "CDX-C17 ", "CDX-C18 "} {
 		n := 0
 		for _, r := range codexConformanceParity {
 			if strings.HasPrefix(r.goCase, id) {

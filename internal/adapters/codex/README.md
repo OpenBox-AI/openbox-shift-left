@@ -6,16 +6,28 @@ native hooks onto the normalized developer event contract and emits
 them through the shared AIP-signed transport on the E7 flat hook
 wire. The **telemetry leg** described here is observe-only and fail-open: it can
 never block, deny, or slow a Codex tool call (INV-3). The **enforce leg**
-(`enforce.go`, `outputcontract.go`) is a separate path and does deny — every
-gated `PreToolUse` call is evaluated by `/evaluate`, on by default. See
-`capabilities.go`'s `verdict.apply` and `enforce.rewrite` for what each may do.
+(`enforce.go`, `outputcontract.go`, `promptgate.go`, `permissiongate.go`) is a
+separate path and does deny — three gate classes (`PreToolUse`,
+`UserPromptSubmit`, `PermissionRequest`), each evaluated by `/evaluate`, on by
+default. A session-terminating HALT on the prompt gate latches, and every later
+gated call in that session replays it locally. See `capabilities.go`'s
+`verdict.apply` and `enforce.rewrite` for what each may do, **and for the limits
+that bound every enforcement claim here** — hooks are a guardrail, not a complete
+boundary.
 
-**Version pin: codex-cli >= 0.145.0**; hooks are stable and ON by default (no
-feature flag to flip), `tool_use_id` exists on Pre/PostToolUse, the `SessionEnd`
-hook exists, and `CODEX_THREAD_ID` is injected into every exec env. Surface
-truth: spike S5's 2026-07-23 addendum, `codex-rs` @ tag `rust-v0.145.0`, and the
-hook payload JSON Schemas embedded in the 0.145.0 binary
-(`<event>.command.input`).
+**Version floor: codex-cli >= 0.145.0. Verified against codex-cli
+0.150.0-alpha.8.** Hooks are stable and ON by default (`codex features list`
+reports `hooks  stable  true`; no flag to flip), `tool_use_id` exists on
+Pre/PostToolUse, the `SessionEnd` hook exists, and `CODEX_THREAD_ID` is injected
+into every exec env. This is a floor, not a pin: it says what the adapter needs,
+and names the newest build it has actually been run against.
+
+Surface truth: spike S5's 2026-07-23 addendum, `codex-rs` @ tag `rust-v0.145.0`,
+and the hook payload JSON Schemas embedded in the binary
+(`<event>.command.input`). The 0.150.0-alpha.8 schemas and live behaviour are
+recorded in the phase 00 probe record
+(`plans/260917-0225-codex-parity-with-claude-code/probes/`), which is the
+citation for every "on this binary" claim below.
 
 ```
 Codex hook (stdin JSON)
@@ -40,12 +52,29 @@ never cross-drains, and the deterministic ids are namespaced `cdx-`.
 | `SessionStart` | `SessionStarted` |; |
 | `UserPromptSubmit` | `PromptSubmitted` |; |
 | `PreToolUse` | `ToolCall` | by tool (`stage=started`) |
+| `PermissionRequest` | `PermissionRequest` |; |
 | `PostToolUse` | `ToolResult` | by tool (`stage=completed`) |
+| `Stop` | *(no signal)* — a turn pair, see below |; |
+| `SubagentStart` | `SubagentStarted` |; |
+| `SubagentStop` | *(no signal)* — a sidechain turn pair |; |
+| `PreCompact` | `PreCompact` |; |
+| `PostCompact` | `PostCompact` |; |
 | `SessionEnd` | `SessionEnded` |; |
 
-The other six 0.145.0 events (`PermissionRequest`, `Subagent*`, `*Compact`,
-`Stop`) are deliberate non-goals. Codex **session ≡ thread**: `session_id` is
-the OpenBox session id.
+`Stop` and `SubagentStop` map to **no signal on purpose**. A turn boundary is not
+a signal: each emits an `llm_completion` activity **pair** instead, under
+`<session>:turn:N` (or `<session>:agent:<id>:turn:N`). That is the same shape the
+Claude Code adapter uses, and it is why no `SubagentStopped` event type exists in
+the shared vocabulary — adding one would be a second way to say what a turn pair
+already says.
+
+**`Interrupt` is not wired, and the reason is not a scope decision.** It is not a
+Codex hook event at all: the binary embeds no `interrupt.command.input` or
+`.output` schema and no `Interrupt` member of `HookEventNameWire`
+(0.150.0-alpha.8). The only `interrupt` on this surface is the reserved boolean
+inside `PermissionRequestDecisionWire`, which is documented to fail closed.
+
+Codex **session ≡ thread**: `session_id` is the OpenBox session id.
 
 Tool classification (`classifyTool`), grounded in `codex-rs`
 `core/src/tools/hook_names.rs` + `registry.rs` @ rust-v0.145.0 and pinned by
@@ -81,12 +110,26 @@ fall back to the CC-parity derivation; `tool_use_id`/`turn_id` ride tool-event
 
 ## Privacy
 
-**Content capture is ON by default (2026-07-15)**; the developer's **prompt** is
-the only gated field: carried (capped) on `PromptSubmitted` unless the org opts
-out (`content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`). Unconditionally:
-shell command strings, `apply_patch` bodies, and tool output **never** ride an
-observe event; `tool_input` is kept as an opaque blob the observe path never
-decodes, and `tool_response` is not even bound to a field. Asserted by
+**Content capture is ON by default (2026-07-15)**, and three fields ride that one
+gate: the developer's **prompt** on `PromptSubmitted`, and the turn's
+**assistant text** (`last_assistant_message`) plus its **reasoning summary** on
+the completed half of each turn pair. All three are opted out together with
+`content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`.
+
+All three are **redacted before attachment**, through the mapper's
+`RedactContent` collaborator rather than at any call site, so a second caller of
+`Map`/`MapTurn` inherits the scan instead of having to remember it. That
+ordering is the only in-transit control there is. Redaction is keyword-driven,
+so an unlabelled high-entropy value below the detector's floor stays invisible to
+it: scanned is not the same as safe.
+
+Unconditionally NOT captured: shell command strings, `apply_patch` bodies, and
+tool output **never** ride an observe event; `tool_input` is kept as an opaque
+blob the observe path never decodes, and `tool_response` is not even bound to a
+field. The rollout reader binds an explicit **allowlist** of payload fields
+(`rolloutAllowedPayloadFields`) and a test asserts that allowlist is exhaustive,
+so a new vendor field cannot ride along unclassified — `encrypted_content` in
+particular has no Go field at all. Asserted by
 `TestMap_NoContentLeak`, `TestWire_NoContentLeakEndToEnd`, and the cli
 real-binary E2E (`TestCodexUnifiedBinaryObserveE2E`).
 
@@ -112,14 +155,25 @@ path + event names only; no key, DID, or URL.
 
 ## Packaging & install
 
-`openbox init --provider codex` writes OpenBox-owned entries for the five events
-into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`), each
-`{"type":"command","command":"\"<engine>\" hook codex <Event>","timeout":5}` (15
+`openbox init --provider codex` writes OpenBox-owned entries for the eleven
+events into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`), each
+`{"type":"command","command":"\"<engine>\" hook codex <Event>","timeout":5}` (3
 s for SessionEnd, 30 s for PreToolUse; Codex timeouts are in seconds), with
-matcher `"*"` on the tool hooks. PreToolUse alone carries the raised ceiling
-because it is the only gating hook, and so the only one that can hold for an
-approval decision; the ceiling is not a delay; the engine spends it only
-when a high-risk class escalated and core filed an approval. The engine path is
+matcher `"*"` on the tool hooks. The two **gating** hooks — `PreToolUse` and
+`PermissionRequest` — carry the raised ceiling, because they are the ones that
+can hold for a real approval decision; a tighter bound on either would time out
+mid-decision and fail the call open. The ceiling is not a delay; the engine
+spends it only
+when a high-risk class escalated and core filed an approval.
+
+SessionEnd's 3 s is **not a choice**: Codex clamps that hook to 3 s and logs
+that it did (`clamping SessionEnd hook timeout to 3s in <hooks.json>`, measured
+on 0.150.0-alpha.8). Registering the old 15 was fiction, and the engine's drain
+budget sat above the real ceiling, so the flush was killed mid-drain every time.
+The budget now sits under it (`hookrun.go`'s `flushBudget`) and the flush
+finishes. Nothing is lost to the smaller window: every non-SessionEnd hook
+already nudges a realtime flush, and an undrained tail is swept by the next
+hook's carry-over. The engine path is
 this running `openbox` binary (`os.Executable` via the CLI registry; the CC
 `EngineBinary` precedent; no bundle, no binary copy). The merge is **idempotent
 and ownership-aware**: re-install updates entries whose command invokes `… hook

@@ -214,12 +214,16 @@ adapter on top. Adding a tool is an adapter, not a fork. →
 | Provider | Telemetry | Enforcement | Approvals | Model calls | Org mandate |
 |---|---|---|---|---|---|
 | **Claude Code** | shipped | deny · hold · redact | full, incl. waking a session on a late decision | via lanes, capture only | managed settings |
-| **Codex** | shipped | deny · hold · redact | deny + findings channel | not built | `requirements.toml` / MDM |
+| **Codex** | shipped | deny · hold · redact · halt | deny on prompt, tool **and** approval | not built | `requirements.toml` / MDM |
 | **Cursor** | not built | — | — | — | — |
 
 The two shipped providers send **different amounts of content** under the same
-settings; Claude Code captures tool input, output and the model's thinking,
-Codex captures none of them. The per-provider detail is in
+settings. Claude Code captures tool input, output and the model's thinking;
+Codex captures none of those three. Codex does capture the **prompt**, and under
+`secret_detection` that prompt is now scanned by the same 231-format scanner
+Claude Code's content passes through — scanned, which is not the same as safe:
+detection is keyword-driven, so an unlabelled high-entropy value below the floor
+stays invisible to it. The per-provider detail is in
 [Provider coverage](docs/coverage.md).
 
 ## What leaves your machine
