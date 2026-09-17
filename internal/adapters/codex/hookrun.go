@@ -15,7 +15,15 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-const flushBudget = 12 * time.Second
+// flushBudget bounds the SessionEnd drain. It must stay strictly under the
+// timeout Codex actually enforces, which is 3 s -- not the 15 the installer used
+// to register. Codex clamps and says so: "clamping SessionEnd hook timeout to 3s
+// in <hooks.json>" (measured on codex-cli 0.150.0-alpha.8; phase 00 probe P0.4).
+// The old 12 s budget was therefore never reachable -- the drain was SIGKILLed
+// mid-flight every time. 2 s leaves roughly a second for process start,
+// ResolveCredentials and client.New, so the flush now finishes and retires
+// cleanly instead of dying partway.
+const flushBudget = 2 * time.Second
 
 // RunHook executes the path for one Codex hook invocation; the engine behind
 // the unified `openbox hook codex <event>` subcommand.
@@ -59,6 +67,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	ad := New(id, DefaultSpoolDir())
 	ad.Mapper.CaptureContent = ResolveContentCapture()
+	if ResolveSecretDetection() {
+		redactor := decision.NewRedactor()
+		ad.Mapper.RedactContent = func(s string) string { return hookflow.RedactText(redactor, s) }
+	}
 	ad.Mapper.ThreadID = os.Getenv(obgit.EnvCodexThreadID)
 	pinnedNow := time.Now()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
@@ -72,6 +84,13 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			ad.Mapper.Finops = &FinopsUsage{Tokens: tokens, Model: model}
 		}
 	}
+
+	// Read the turn cursor BEFORE anything spools a SessionEnded event: the
+	// engine's own SessionEnded handler calls Turns.ClearSession, so by the time
+	// the rollup decision is made below the cursor is already gone. Capturing it
+	// here is the difference between "this session emitted turns" and "the cursor
+	// happens to be empty right now".
+	sessionHadTurns := hook == HookSessionEnd && turnsEmitted(ad, ev.SessionID)
 
 	if hook == HookSessionEnd {
 		ad.Mapper.Evidence = &EvidenceState{
@@ -89,11 +108,41 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		hookflow.RealtimeTrigger{Spool: ad.Spool, Provider: provider}.Maybe(logger, ev.SessionID)
 	}
 
+	// Stop and SubagentStop are turn boundaries, not signals and not gated calls,
+	// so they short-circuit before the gate. Stop output is ALWAYS empty here:
+	// `decision:"block"` on Stop injects a continuation prompt built from our
+	// reason text, which would be OpenBox driving the agent rather than governing
+	// it. That is a non-goal, permanently.
+	if hook == HookStop || hook == HookSubagentStop {
+		if ResolveFinops() {
+			emitTurn(ad, logger, hook, ev)
+			nudgeFlush()
+		}
+		return
+	}
+
 	// The two must agree: deciding to defer the observe copy here and then not
 	// running the gate would drop the event.
-	gated := hook == HookPreToolUse && ResolveEnforce()
+	gated := ResolveEnforce() && (hook == HookPreToolUse || hook == HookUserPromptSubmit ||
+		hook == HookPermissionRequest)
 
 	if gated {
+		// The latch is keyed by session id because the gate below sets no RunID,
+		// so EnforceGate.runID falls through to t.SessionID(). Reader and writer
+		// must move together: adding a RunID to the gate literal without changing
+		// this call would write the latch under one key and read it under another,
+		// silently un-halting a terminated session.
+		if info, halted := hookflow.SessionHalted(ev.SessionID); halted {
+			if _, err := ad.Observe(hook, ev); err != nil {
+				logger.Printf("spool %s event: %v", hook, err)
+			}
+			nudgeFlush()
+			c, toolName, toolKind := haltReplayTriple(hook, ev)
+			// The latch IS the decided state: no /evaluate round trip.
+			hookflow.ReplaySessionHalt(logger, stdout, info, ev.SessionID, toolName, toolKind, c)
+			return
+		}
+
 		var spoolObserve func()
 		if devEv, ok := ad.Mapper.Map(hook, ev); ok {
 			appendObserve := ad.RecordDeferred(devEv)
@@ -104,13 +153,31 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 				nudgeFlush()
 			}
 		}
-		g := hookflow.EnforceGate{
-			Contract:     contract,
-			Evaluator:    evaluator,
-			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { recordEnforcement(logger, ev, dec, res) },
-			SpoolObserve: spoolObserve,
+
+		var (
+			c      hookflow.OutputContract = promptContract
+			target hookflow.EnforceTarget  = promptTarget{id: id, mapper: ad.Mapper, ev: ev}
+			record                         = recordPromptEnforcement
+		)
+		switch hook {
+		case HookPreToolUse:
+			c, target, record = contract, enforceTarget{id: id, mapper: ad.Mapper, ev: ev}, recordEnforcement
+		case HookPermissionRequest:
+			c, target, record = permissionContract, permissionTarget{id: id, mapper: ad.Mapper, ev: ev}, recordPermissionEnforcement
 		}
-		g.Run(context.Background(), logger, stdout, enforceTarget{id: id, mapper: ad.Mapper, ev: ev})
+		g := hookflow.EnforceGate{
+			Contract:     c,
+			Evaluator:    evaluator,
+			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { record(logger, ev, dec, res) },
+			SpoolObserve: spoolObserve,
+			// RunID deliberately unset: see the latch-key note above.
+		}
+		res := g.Run(context.Background(), logger, stdout, target)
+		// A gate that already wrote owns stdout; appending findings after it
+		// would put a second JSON document on the same stream.
+		if hook == HookUserPromptSubmit && !res.Emitted && ResolveFindings() {
+			hookflow.SurfaceFindings(provider, string(hook), stdout, logger)
+		}
 		return
 	}
 
@@ -136,7 +203,16 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	if hook == HookSessionEnd {
-		if started, completed, ok := ad.Mapper.MapUsageRollup(ev); ok {
+		// Owner ruling (2026-09-17): the session rollup fires ONLY when no turn
+		// pair was emitted for this session. Per-turn is the primary record; the
+		// rollup survives for sessions where Stop never fired at all -- a crash, a
+		// kill, or a surface that does not run the hook. Those are not rare (the
+		// 3 s SessionEnd ceiling and the vendor's idle rule both produce them), so
+		// dropping the rollup outright would lose real data, while keeping both
+		// unconditionally would ship the same tokens twice under two activity ids.
+		if sessionHadTurns {
+			logger.Printf("finops: per-turn pairs were emitted; skipping the session rollup to avoid double-counting")
+		} else if started, completed, ok := ad.Mapper.MapUsageRollup(ev); ok {
 			for _, usageEv := range []client.DevEvent{started, completed} {
 				if err := ad.Record(usageEv); err != nil {
 					logger.Printf("finops: spool %s event: %v", usageEv.EventType, err)

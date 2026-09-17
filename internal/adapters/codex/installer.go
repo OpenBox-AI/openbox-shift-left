@@ -26,12 +26,22 @@ type CredentialRef = providerspi.CredentialRef
 var ownedInvocation = regexp.MustCompile(`^hook (?:codex|claude-code) [A-Za-z]+$`)
 
 // The four hot hooks get a small explicit bound so a wedged hook can never
-// stall a tool call for long; the SessionEnd flush hook gets more headroom
-// (the engine's own flushBudget of 12 s stays under it).
+// stall a tool call for long.
+//
+// SessionEnd is not ours to choose: Codex clamps it to 3 s and logs that it did
+// ("clamping SessionEnd hook timeout to 3s in <hooks.json>", measured on
+// codex-cli 0.150.0-alpha.8; phase 00 probe P0.4). Registering anything larger
+// was fiction -- the value in the file was 15, the enforced ceiling was 3, and
+// the engine's own drain budget sat above both. Ask for exactly what we get.
+//
+// Losing the old headroom costs no events. Egress cadence does not depend on
+// this hook: every non-SessionEnd hook already fires a RealtimeTrigger (2 s
+// debounce), and whatever the SessionEnd flush cannot drain stays spooled for
+// the next hook's FlushOrSweep carry-over sweep.
 const (
 	hotHookTimeoutSec        = 5
 	preToolUseHookTimeoutSec = 30
-	sessionEndHookTimeoutSec = 15
+	sessionEndHookTimeoutSec = 3
 )
 
 const hooksDescription = "OpenBox observe hooks (STORY-SL7-A); managed by `openbox init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
@@ -64,10 +74,17 @@ func (i Installer) Install(ref CredentialRef) error {
 	return i.writeConfig(ref)
 }
 
-// hookedEvents are the five Codex events this installer maintains entries for.
+// hookedEvents are the Codex events this installer maintains entries for.
 // Every other key in the file, at any depth, is somebody else's.
+//
+// Adding one here is three lockstep edits -- this slice, a HookName const, and a
+// RunHook branch -- and uninstall follows for free, because hookremove.go
+// iterates this same slice. Adding an event anywhere else leaves an orphan hook
+// behind after `openbox uninstall`.
 var hookedEvents = []HookName{
-	HookSessionStart, HookUserPromptSubmit, HookPreToolUse, HookPostToolUse, HookSessionEnd,
+	HookSessionStart, HookUserPromptSubmit, HookPreToolUse, HookPermissionRequest,
+	HookPostToolUse, HookStop, HookSubagentStart, HookSubagentStop,
+	HookPreCompact, HookPostCompact, HookSessionEnd,
 }
 
 // hooksEventPath addresses one event inside the hooks object. The names are
@@ -252,7 +269,11 @@ func timeoutFor(ev HookName) int {
 	switch ev {
 	case HookSessionEnd:
 		return sessionEndHookTimeoutSec
-	case HookPreToolUse:
+	// Both gating hooks can hold for a real approval decision, so both carry the
+	// raised ceiling. PermissionRequest is the escalation itself: a tighter bound
+	// here would time out mid-decision and fail the call open, which is the one
+	// outcome this surface must never produce.
+	case HookPreToolUse, HookPermissionRequest:
 		return preToolUseHookTimeoutSec
 	}
 	return hotHookTimeoutSec
