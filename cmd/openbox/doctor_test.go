@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
 // TestDoctorWarnsWhenTwoEnginesAreRegistered two engines registered in one
@@ -174,4 +178,172 @@ func runDoctorIn(t *testing.T, dir string) (string, int) {
 
 	t.Setenv("OPENBOX_HOME", t.TempDir())
 	return runDoctorHere(t)
+}
+
+// codexOnlyMachine seeds an isolated home with a Codex spool backlog and a
+// Codex hooks registration, and neither Claude Code surface, so both
+// reportSpool and reportHookRegistration have something new to report. It
+// returns doctor's full output.
+//
+// The "codex-spool" literal mirrors codex/creds.go:77's DefaultSpoolDir; it
+// is not re-derived through the adapter here because cmd/openbox must not
+// import internal/adapters/codex directly.
+func codexOnlyMachine(t *testing.T, backlogLines int) string {
+	t.Helper()
+	isolateHomeUnbound(t)
+	t.Setenv(devconfig.EnvSpoolDir, "")
+
+	codexSpoolDir := devconfig.SpoolDir("codex-spool")
+	if err := os.MkdirAll(codexSpoolDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	seedLine := `{"seed":1}` + "\n"
+	if err := os.WriteFile(filepath.Join(codexSpoolDir, "seed.jsonl"), []byte(strings.Repeat(seedLine, backlogLines)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	hooksPath := providers.CodexHooksPath()
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := providers.HookMarkers(string(provider.Codex))[0]
+	content := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/usr/local/bin/openbox ` + marker + `"}]}]}}`
+	if err := os.WriteFile(hooksPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	return out
+}
+
+// TestDoctorNamesCodexOnACodexOnlyMachine is R4 and the phase's "DX defects"
+// fix: a machine governed only by Codex must see its own real backlog and its
+// own real hook registration, not Claude Code's absence of either.
+func TestDoctorNamesCodexOnACodexOnlyMachine(t *testing.T) {
+	out := codexOnlyMachine(t, 3)
+
+	t.Run("spool", func(t *testing.T) {
+		codexSpoolDir := devconfig.SpoolDir("codex-spool")
+		if !strings.Contains(out, codexSpoolDir) {
+			t.Errorf("doctor did not name the codex spool directory %q:\n%s", codexSpoolDir, out)
+		}
+		if !strings.Contains(out, "3 event(s)") {
+			t.Errorf("doctor did not report the seeded codex backlog of 3 (still a false 'waiting 0'?):\n%s", out)
+		}
+		if !strings.Contains(out, "hook codex flush") {
+			t.Errorf("the codex remediation does not name codex:\n%s", out)
+		}
+	})
+
+	t.Run("registration", func(t *testing.T) {
+		hooksPath := providers.CodexHooksPath()
+		if !strings.Contains(out, "Codex is governed") {
+			t.Errorf("doctor did not say Codex is governed:\n%s", out)
+		}
+		if !strings.Contains(out, hooksPath) {
+			t.Errorf("doctor did not name the codex hooks path %q:\n%s", hooksPath, out)
+		}
+	})
+
+	// R4's own remediation ("Run `openbox init --provider claude-code`") must
+	// not fire once Codex is named as governing instead. This is narrower than
+	// a whole-output substring scan: reportIdentities separately and
+	// legitimately tells Claude Code to run its OWN init when IT has no agent,
+	// regardless of Codex, and that is not what R4 is about.
+	if strings.Contains(out, "Nothing is governed on this machine. Run `openbox init --provider claude-code`.") {
+		t.Errorf("a Codex-only machine must not fall back to the Claude-Code-only remediation (R4):\n%s", out)
+	}
+}
+
+// TestDoctorOutputUnchangedOnAClaudeCodeOnlyMachine is R5: a machine with only
+// Claude Code's spool and no Codex surface at all must render exactly the
+// sentences it always has -- the branches added for R4 must stay silent.
+func TestDoctorOutputUnchangedOnAClaudeCodeOnlyMachine(t *testing.T) {
+	isolateHomeUnbound(t)
+	t.Setenv(devconfig.EnvSpoolDir, "")
+
+	ccSpoolDir := devconfig.SpoolDir(transportSpoolSubdir)
+	if err := os.MkdirAll(ccSpoolDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ccSpoolDir, "seed.jsonl"), []byte(`{"seed":1}`+"\n"+`{"seed":2}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+
+	if !strings.Contains(out, "2 event(s), of which 0 are in carry-over files from a failed") {
+		t.Errorf("the untouched cc-spool block changed its wording:\n%s", out)
+	}
+	if !strings.Contains(out, "Nothing is governed on this machine. Run `openbox init --provider claude-code`.") {
+		t.Errorf("the untouched hook-registration sentence changed:\n%s", out)
+	}
+	for _, absent := range []string{"Codex is governed", "hook codex flush"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("a Claude-Code-only machine must not render the new Codex branch (%q found):\n%s", absent, out)
+		}
+	}
+}
+
+// TestDoctorSpoolDoesNotDoubleCountAnOverriddenSharedDirectory is hard
+// constraint 2: OPENBOX_SPOOL_DIR overrides the whole path for every
+// provider, so Claude Code and Codex resolve to the identical directory. A
+// comparison that misses this renders the same backlog twice, once per
+// provider name, over-reporting the machine's real backlog by 2x.
+func TestDoctorSpoolDoesNotDoubleCountAnOverriddenSharedDirectory(t *testing.T) {
+	isolateHomeUnbound(t)
+	shared := t.TempDir()
+	t.Setenv(devconfig.EnvSpoolDir, shared)
+
+	if err := os.WriteFile(filepath.Join(shared, "seed.jsonl"), []byte(`{"seed":1}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+
+	if got := strings.Count(out, "1 event(s)"); got != 1 {
+		t.Errorf("a shared spool directory was counted %d times, want 1:\n%s", got, out)
+	}
+	if strings.Contains(out, "hook codex flush") {
+		t.Errorf("a directory identical to cc-spool must not also render as Codex's own row:\n%s", out)
+	}
+}
+
+// TestCodexHooksPresent is the direct unit test of the DRY helper
+// reportHookRegistration's new branch depends on, isolated from doctor's
+// surrounding report so a failure here points at the ownership parse rather
+// than at string-matching noise in the full doctor output.
+func TestCodexHooksPresent(t *testing.T) {
+	isolateHomeUnbound(t)
+
+	if path, present := codexHooksPresent(); present {
+		t.Errorf("codexHooksPresent() = (%q, true) on a fresh home with no codex hooks file", path)
+	}
+
+	hooksPath := providers.CodexHooksPath()
+	if err := os.MkdirAll(filepath.Dir(hooksPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := providers.HookMarkers(string(provider.Codex))[0]
+	content := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/usr/local/bin/openbox ` + marker + `"}]}]}}`
+	if err := os.WriteFile(hooksPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	path, present := codexHooksPresent()
+	if !present {
+		t.Fatalf("codexHooksPresent() = (_, false) after seeding a marker at %s", hooksPath)
+	}
+	if path != hooksPath {
+		t.Errorf("codexHooksPresent() path = %q, want %q", path, hooksPath)
+	}
 }

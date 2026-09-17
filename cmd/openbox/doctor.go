@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -497,6 +498,9 @@ func (a *app) reportLanes() {
 				a.row("", "The tool is pointed at a port with nothing behind it.")
 			}
 		}
+		// Lane-gated: laneCapable is provider.ClaudeCode only (initlanes.go), so
+		// Codex has no lanes to elect and cannot reach this branch. The literal
+		// "claude-code" below is not a missed provider case -- leave it.
 		if election.Elected == activation.Lane(lane.name) && !lane.listening {
 			a.row("WARNING", "this lane is ELECTED but nothing is listening, so NO lane is emitting")
 			a.row("", "model-call turns on this machine. If you did not install it, something")
@@ -558,6 +562,48 @@ func (a *app) reportSpool() {
 	if backlog > 0 || discarded > 0 {
 		fmt.Fprintf(a.stdout, "  flusher log  %s\n", spool.FlusherLogPath())
 	}
+
+	a.reportCodexSpool(spool.Dir)
+}
+
+// reportCodexSpool is the additive half of the spool section (R4/R5): a
+// Codex-only machine spools to "codex-spool", never "cc-spool", so the block
+// above -- reading only the cc-spool directory -- reports a healthy empty
+// queue while a real backlog waits in a directory it never looked at. It
+// renders nothing, not even a directory row, when Codex's resolved spool path
+// matches ccDir (OPENBOX_SPOOL_DIR overrides the whole path for every
+// provider, so both resolve to the same directory; comparing resolved paths
+// keeps that machine from double-counting its own backlog) or when Codex's
+// spool has nothing waiting or discarded -- so a Claude-Code-only machine's
+// output is byte-identical to before this existed (R5).
+func (a *app) reportCodexSpool(ccDir string) {
+	codexSpool := hookflow.Spool{Dir: providers.CodexSpoolDir()}
+	if filepath.Clean(codexSpool.Dir) == filepath.Clean(ccDir) {
+		return
+	}
+
+	backlog := codexSpool.BacklogCount()
+	discarded := codexSpool.DiscardedCount()
+	if backlog == 0 && discarded == 0 {
+		return
+	}
+
+	// The row label names the owning provider (constraint: the remediation
+	// must say who owns a non-zero backlog), mirroring how reportIdentities and
+	// reportStoreReachability label multi-provider rows above.
+	a.row(string(provider.Codex), "%s", codexSpool.Dir)
+	switch {
+	case backlog == 0:
+		a.row("", "waiting 0; delivery is self-triggering, so an empty queue is the healthy state")
+	default:
+		a.row("", "waiting %d event(s), of which %d are in carry-over files from a failed delivery.", backlog, codexSpool.UndeliveredCount())
+		a.row("", "A lane daemon sweeps every %s; `openbox hook %s flush` does it now.", hookflow.DefaultSweepInterval, provider.Codex)
+	}
+	if discarded > 0 {
+		a.row("", "DISCARDED at least %d event(s): past %d delivery attempts, or past the %d-day", discarded, hookflow.MaxRecoveryAttempts, int(hookflow.RetireSpoolAfter.Hours()/24))
+		a.row("", "retention age. Recorded in %s.", codexSpool.DiscardPath())
+	}
+	fmt.Fprintf(a.stdout, "  flusher log  %s\n", codexSpool.FlusherLogPath())
 }
 
 // reportCoverage answers what absence cannot; docs/coverage.md §1b.
@@ -586,6 +632,9 @@ func (a *app) reportCoverage() {
 			if c.Vanished() {
 				label = "UN-ROUTED"
 			}
+			// Lane-gated: laneCapable is provider.ClaudeCode only (initlanes.go), so
+			// every entry in `coverage` is a Claude Code lane and the literal
+			// "claude-code" below is not a missed provider case -- leave it.
 			a.row(string(c.Lane), "%s: %s", label, c.Describe())
 			a.row("", "`openbox init --provider claude-code` rewrites them.")
 			a.row("", "Note: during an install this state is normal for a few seconds -")
@@ -661,7 +710,12 @@ func (a *app) reportHookRegistration() {
 			}
 			a.row(level.label, "%s  %s", level.path, note)
 			if level.label == "user-wide" {
-				fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider claude-code`.\n")
+				if codexPath, present := codexHooksPresent(); present {
+					fmt.Fprintf(a.stdout, "    Codex is governed; Claude Code is not. Codex hooks: %s\n", codexPath)
+					fmt.Fprintf(a.stdout, "    `openbox init --provider %s` refreshes it.\n", provider.Codex)
+				} else {
+					fmt.Fprintf(a.stdout, "    Nothing is governed on this machine. Run `openbox init --provider %s`.\n", provider.ClaudeCode)
+				}
 			}
 			continue
 		}
@@ -687,6 +741,18 @@ func (a *app) reportHookRegistration() {
 
 	a.reportCrossLevelHooks(engines)
 	a.reportBlockedHooks()
+}
+
+// codexHooksPresent reports whether the Codex hooks file carries an OpenBox
+// registration, and where it lives, so reportHookRegistration's "nothing is
+// governed" branch can name Codex instead of assuming Claude Code is the only
+// tool a machine can be governed by (R4). Built on the same path providers
+// already exposes (CodexHooksPath) and the same ownership parse uninstall
+// already uses (carriesHookRegistration), so a renamed marker or a moved
+// hooks file cannot drift between the two call sites.
+func codexHooksPresent() (path string, present bool) {
+	path = providers.CodexHooksPath()
+	return path, carriesHookRegistration(string(provider.Codex), path)
 }
 
 // reportCrossLevelHooks is the condition neither file can see on its own.

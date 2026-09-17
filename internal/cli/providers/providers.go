@@ -152,6 +152,10 @@ func ClaudePriorSettingsPath(homeDir string) string { return claudecode.PriorSet
 // uninstall can look where the install wrote without importing the adapter.
 func CodexHooksPath() string { return codex.DefaultHooksPath() }
 
+// CodexSpoolDir is where the Codex adapter spools events before flush, so
+// doctor can report its backlog without importing the adapter.
+func CodexSpoolDir() string { return codex.DefaultSpoolDir() }
+
 // OwnedSpoolDirs is every spool directory the adapters write to, de-duplicated
 // by resolved path. It exists so a purge cannot miss one: cmd/openbox already
 // hardcodes "cc-spool" three times for its own lane spools, and a fourth copy
