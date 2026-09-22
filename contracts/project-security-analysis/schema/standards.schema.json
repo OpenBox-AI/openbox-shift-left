@@ -1,51 +1,124 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ai.openbox.security-standards-catalog/v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema", "version", "retrieved_at", "sources", "entries"],
-  "properties": {
-    "schema": { "const": "ai.openbox.security-standards-catalog/v1" },
-    "version": { "const": "2026-08-26-mvp1" },
-    "retrieved_at": { "const": "2026-08-26" },
-    "sources": {
-      "type": "array",
-      "minItems": 4,
-      "maxItems": 4,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["catalog", "title", "url", "upstream_version", "retrieved_at", "local_source", "local_source_digest", "selected_ids"],
-        "properties": {
-          "catalog": { "enum": ["OWASP_AGENTIC", "OWASP_LLM", "CWE", "MITRE_ATLAS"] },
-          "title": { "type": "string", "minLength": 1 },
-          "url": { "type": "string", "format": "uri", "pattern": "^https://" },
-          "upstream_version": { "type": "string", "minLength": 1 },
-          "retrieved_at": { "const": "2026-08-26" },
-          "local_source": { "type": "string", "pattern": "^sources/[a-z0-9.-]+\\.json$" },
-          "local_source_digest": { "$ref": "#/$defs/digest" },
-          "selected_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } }
-        }
-      }
-    },
-    "entries": {
-      "type": "array",
-      "minItems": 7,
-      "maxItems": 7,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["catalog", "version", "id", "title"],
-        "properties": {
-          "catalog": { "enum": ["OWASP_AGENTIC", "OWASP_LLM", "CWE", "MITRE_ATLAS"] },
-          "version": { "type": "string", "minLength": 1 },
-          "id": { "type": "string", "pattern": "^(ASI0[12]|LLM0[16]|CWE-142[67]|AML\\.T0051)$" },
-          "title": { "type": "string", "minLength": 1 }
-        }
-      }
+  "$defs": {
+    "digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
     }
   },
-  "$defs": {
-    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
-  }
+  "$id": "ai.openbox.security-standards-catalog/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "entries": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "enum": [
+              "OWASP_AGENTIC",
+              "OWASP_LLM",
+              "CWE",
+              "MITRE_ATLAS"
+            ]
+          },
+          "id": {
+            "pattern": "^(CWE-[0-9]{1,6}|AML\\.(T|TA|M|CS)[0-9]{4}(\\.[0-9]{3})?|LLM[0-9]{2}|ASI[0-9]{2})$",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog",
+          "version",
+          "id",
+          "title"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "retrieved_at": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+      "type": "string"
+    },
+    "schema": {
+      "const": "ai.openbox.security-standards-catalog/v1"
+    },
+    "sources": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "catalog": {
+            "enum": [
+              "OWASP_AGENTIC",
+              "OWASP_LLM",
+              "CWE",
+              "MITRE_ATLAS"
+            ]
+          },
+          "local_source": {
+            "pattern": "^sources/[a-z0-9_.-]+\\.json$",
+            "type": "string"
+          },
+          "local_source_digest": {
+            "$ref": "#/$defs/digest"
+          },
+          "retrieved_at": {
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "upstream_sha256": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "upstream_version": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "pattern": "^https://",
+            "type": "string"
+          }
+        },
+        "required": [
+          "catalog",
+          "title",
+          "url",
+          "upstream_version",
+          "retrieved_at",
+          "local_source",
+          "local_source_digest",
+          "upstream_sha256"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "version": {
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(-[a-z0-9-]+)?$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "retrieved_at",
+    "sources",
+    "entries"
+  ],
+  "type": "object"
 }

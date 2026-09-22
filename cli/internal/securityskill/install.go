@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -223,13 +224,27 @@ func validateManagedDirectory(root string) (Manifest, error) {
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 		return manifest, err
 	}
-	if manifest.Schema != BundleSchema || manifest.Name != Name || len(manifest.Files) != len(payloadPaths) {
+	// Validated against its OWN manifest, never against the current payload set.
+	// It used to require len(manifest.Files) == len(payloadPaths), which made any
+	// release that adds or removes a file unupgradable: the installed copy was
+	// reported "invalid" rather than "out of date", and refused. Whether the
+	// installed bundle is the one we ship is inspectAction's question, decided by
+	// version and digest; this function only answers whether what is on disk is
+	// internally consistent and unmodified.
+	if manifest.Schema != BundleSchema || manifest.Name != Name || len(manifest.Files) == 0 {
 		return manifest, errors.New("security skill: managed bundle identity is invalid")
 	}
-	wantPaths := append([]string(nil), payloadPaths[:]...)
-	for index, descriptor := range manifest.Files {
-		if descriptor.Path != wantPaths[index] || descriptor.Bytes < 0 || descriptor.Bytes > MaxCandidateBytes || descriptor.SHA256 == "" {
+	directories := map[string]bool{}
+	wantEntries := map[string]bool{BundleManifestName: true}
+	for _, descriptor := range manifest.Files {
+		if descriptor.Path == "" || descriptor.Bytes < 0 || descriptor.Bytes > MaxCandidateBytes || descriptor.SHA256 == "" ||
+			strings.HasPrefix(descriptor.Path, "/") || strings.Contains(descriptor.Path, "..") {
 			return manifest, errors.New("security skill: managed bundle descriptor set is invalid")
+		}
+		wantEntries[descriptor.Path] = true
+		parts := strings.Split(descriptor.Path, "/")
+		for index := 1; index < len(parts); index++ {
+			directories[strings.Join(parts[:index], "/")] = true
 		}
 		mode := os.FileMode(0o600)
 		if descriptor.Path == "scripts/publish-candidate.sh" {
@@ -240,16 +255,12 @@ func validateManagedDirectory(root string) (Manifest, error) {
 			return manifest, errors.New("security skill: managed bundle payload does not match its descriptor")
 		}
 	}
-	for _, directory := range []string{"references", "scripts"} {
-		entry, err := os.Lstat(filepath.Join(root, directory))
+	for directory := range directories {
+		wantEntries[directory] = true
+		entry, err := os.Lstat(filepath.Join(root, filepath.FromSlash(directory)))
 		if err != nil || !entry.IsDir() || entry.Mode()&os.ModeSymlink != 0 || entry.Mode().Perm() != 0o700 {
 			return manifest, errors.New("security skill: managed bundle directory permissions are invalid")
 		}
-	}
-	wantEntries := map[string]bool{
-		BundleManifestName: true, "SKILL.md": true, "references": true, "scripts": true,
-		"references/candidate.schema.json": true, "references/evidence-authority.md": true,
-		"references/standards.json": true, "scripts/publish-candidate.sh": true,
 	}
 	seen := make(map[string]bool, len(wantEntries))
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -307,12 +318,32 @@ func readManagedFile(path string, mode os.FileMode, maximum int64) ([]byte, erro
 	return content, nil
 }
 
+// stagedDirectories lists every directory payloadPaths implies, parents first.
+func stagedDirectories() []string {
+	seen := map[string]bool{}
+	directories := make([]string, 0, 4)
+	for _, path := range payloadPaths {
+		parts := strings.Split(path, "/")
+		for index := 1; index < len(parts); index++ {
+			directory := strings.Join(parts[:index], "/")
+			if !seen[directory] {
+				seen[directory] = true
+				directories = append(directories, directory)
+			}
+		}
+	}
+	sort.Strings(directories)
+	return directories
+}
+
 func writeStagedBundle(stage string, files map[string][]byte) error {
 	if err := os.Chmod(stage, 0o700); err != nil {
 		return err
 	}
-	for _, directory := range []string{"references", "scripts"} {
-		if err := os.Mkdir(filepath.Join(stage, directory), 0o700); err != nil {
+	// Derived from payloadPaths rather than listed, so adding a nested payload
+	// cannot leave the installer writing into a directory it never created.
+	for _, directory := range stagedDirectories() {
+		if err := os.Mkdir(filepath.Join(stage, filepath.FromSlash(directory)), 0o700); err != nil {
 			return err
 		}
 	}

@@ -12,7 +12,7 @@
       "required": ["name", "version", "digest"],
       "properties": {
         "name": { "const": "openbox-security-evaluation" },
-        "version": { "const": "1.0.1" },
+        "version": { "const": "1.0.2" },
         "digest": { "$ref": "#/$defs/digest" }
       }
     },
@@ -77,7 +77,7 @@
       "properties": {
         "catalog": { "enum": ["OWASP_AGENTIC", "OWASP_LLM", "CWE", "MITRE_ATLAS"] },
         "version": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "id": { "type": "string", "pattern": "^(ASI0[12]|LLM0[16]|CWE-142[67]|AML\\.T0051)$" }
+        "id": { "type": "string", "pattern": "^(CWE-[0-9]{1,6}|AML\\.(T|TA|M|CS)[0-9]{4}(\\.[0-9]{3})?|LLM[0-9]{2}|ASI[0-9]{2})$" }
       }
     },
     "issue": {

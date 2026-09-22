@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/artifact"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -17,7 +16,7 @@ func TestBundleIdentityAndPublicReferenceParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Name != Name || manifest.Version != Version || manifest.Digest != "sha256:76525c636e8bd190fe261e9c9db0406d75170c4092ea873990bb971bf0bff6de" {
+	if manifest.Name != Name || manifest.Version != Version || manifest.Digest != "sha256:c519954fa2eca7fb735b36af76cf09c99a23ef5f78dc8b867f187336fce5a094" {
 		t.Fatalf("manifest identity = %#v", manifest)
 	}
 	if lines := bytes.Count(files["SKILL.md"], []byte("\n")); lines >= 500 {
@@ -98,8 +97,10 @@ func TestStandardsCatalogSchemaSelectionAndSourceDigests(t *testing.T) {
 	var catalog struct {
 		Version string `json:"version"`
 		Sources []struct {
-			LocalSource       string `json:"local_source"`
-			LocalSourceDigest string `json:"local_source_digest"`
+			Catalog         string `json:"catalog"`
+			LocalSource     string `json:"local_source"`
+			UpstreamVersion string `json:"upstream_version"`
+			UpstreamSHA256  string `json:"upstream_sha256"`
 		} `json:"sources"`
 		Entries []struct {
 			Catalog string `json:"catalog"`
@@ -110,16 +111,49 @@ func TestStandardsCatalogSchemaSelectionAndSourceDigests(t *testing.T) {
 	if err := json.Unmarshal(catalogBytes, &catalog); err != nil {
 		t.Fatal(err)
 	}
-	if catalog.Version != CatalogVersion || len(catalog.Entries) != 7 {
-		t.Fatalf("catalog identity/count = %s/%d", catalog.Version, len(catalog.Entries))
+	// No count is pinned. The catalog ships whole upstream corpora, so a fixed
+	// number would mean editing a test every time a standard is added — and the
+	// bundle manifest already digest-pins these exact bytes.
+	if catalog.Version != CatalogVersion || len(catalog.Entries) == 0 || len(catalog.Sources) == 0 {
+		t.Fatalf("catalog identity = %s, entries=%d sources=%d", catalog.Version, len(catalog.Entries), len(catalog.Sources))
 	}
+
+	// What actually matters: every index entry resolves to a shipped source that
+	// really contains it. An index naming an id no corpus defines would let the
+	// analyst cite a standard nobody can look up.
+	defined := map[string]bool{}
 	for _, source := range catalog.Sources {
 		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(source.LocalSource)))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("source %s: %v", source.LocalSource, err)
 		}
-		if got := artifact.DigestBytes(content).String(); got != source.LocalSourceDigest {
-			t.Errorf("%s digest = %s, want %s", source.LocalSource, got, source.LocalSourceDigest)
+		var payload struct {
+			Catalog         string `json:"catalog"`
+			UpstreamVersion string `json:"upstream_version"`
+			UpstreamSHA256  string `json:"upstream_sha256"`
+			Entries         []struct {
+				ID          string `json:"id"`
+				Title       string `json:"title"`
+				Description string `json:"description"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal(content, &payload); err != nil {
+			t.Fatalf("source %s: %v", source.LocalSource, err)
+		}
+		if payload.Catalog != source.Catalog || payload.UpstreamVersion != source.UpstreamVersion ||
+			payload.UpstreamSHA256 != source.UpstreamSHA256 || !strings.HasPrefix(source.UpstreamSHA256, "sha256:") {
+			t.Errorf("%s provenance disagrees with the index", source.LocalSource)
+		}
+		for _, entry := range payload.Entries {
+			if entry.Title == "" || entry.Description == "" {
+				t.Errorf("%s entry %s has no title or description", source.LocalSource, entry.ID)
+			}
+			defined[payload.Catalog+"/"+payload.UpstreamVersion+"/"+entry.ID] = true
+		}
+	}
+	for _, entry := range catalog.Entries {
+		if !defined[entry.Catalog+"/"+entry.Version+"/"+entry.ID] {
+			t.Errorf("index cites %s/%s/%s, which no shipped source defines", entry.Catalog, entry.Version, entry.ID)
 		}
 	}
 }

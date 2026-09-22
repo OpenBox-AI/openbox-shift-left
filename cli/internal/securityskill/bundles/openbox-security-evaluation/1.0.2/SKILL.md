@@ -38,9 +38,13 @@ path and any link at that path not to exist. Do not search for either path.
    `backend.json` only to decode a retained response referenced by a selected
    `behavior.json` ID. Do not read outside the supplied pack and this installed
    skill directory.
-4. Read `references/standards.json` and cite only its exact catalog entries.
-   Standards describe a supported issue; they do not prove observed behavior
-   or severity.
+4. Read `references/standards.json` for the pinned catalog index and cite any
+   entry in it — CWE, MITRE ATLAS and the OWASP LLM Top 10 are shipped whole,
+   not as a curated shortlist. Consult the matching `references/sources/*.json`
+   for an entry's upstream description before citing it, so the citation rests
+   on the definition rather than on the title. Cite no id absent from the index,
+   however plausible; a standard describes a supported issue and never proves
+   observed behavior or severity.
 5. Read `references/candidate.schema.json` and construct one closed candidate.
    Copy the installed name, version, and digest from `bundle.json`; copy the
    observation pack digest from the verified manifest.

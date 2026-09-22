@@ -17,7 +17,7 @@ const (
 	ReportSchema                = "ai.openbox.project-security-report.report/v1"
 	RecommendationSchema        = "ai.openbox.project-recommendation-catalog/v1"
 	RecommendationVersion       = "2026-08-27-mvp1"
-	RecommendationDigest        = "sha256:96ba1937ffa01aa8515da33cbd8b374c7981a9b7b160e36fa6a4ba7d60bf3dbe"
+	RecommendationDigest        = "sha256:88ffde4e3af016c07fd2d619d514e86c74e7b048c10ca65c843c3e672df55612"
 	MaxCandidateBytes     int64 = 4 << 20
 )
 

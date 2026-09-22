@@ -221,9 +221,7 @@ func TestCandidateValidationAndMappingUseRetainedBehavior(t *testing.T) {
 		Standards: []StandardReference{
 			{Catalog: "CWE", Version: "4.20", ID: "CWE-1426"},
 			{Catalog: "CWE", Version: "4.20", ID: "CWE-1427"},
-			{Catalog: "MITRE_ATLAS", Version: "2026-08-26", ID: "AML.T0051"},
-			{Catalog: "OWASP_AGENTIC", Version: "2026", ID: "ASI01"},
-			{Catalog: "OWASP_AGENTIC", Version: "2026", ID: "ASI02"},
+			{Catalog: "MITRE_ATLAS", Version: "2026.09", ID: "AML.T0051"},
 			{Catalog: "OWASP_LLM", Version: "2025", ID: "LLM01"},
 			{Catalog: "OWASP_LLM", Version: "2025", ID: "LLM06"},
 		},
@@ -266,7 +264,7 @@ func TestRecommendationMappingDistinguishesExistingAndUnavailableTargets(t *test
 		Standards: []StandardReference{
 			{Catalog: "CWE", Version: "4.20", ID: "CWE-1426"},
 			{Catalog: "CWE", Version: "4.20", ID: "CWE-1427"},
-			{Catalog: "OWASP_AGENTIC", Version: "2026", ID: "ASI02"},
+			{Catalog: "OWASP_LLM", Version: "2025", ID: "LLM06"},
 		},
 	}
 	mapped, recommendations, err := mapRecommendations([]Issue{issue}, posture)
@@ -585,8 +583,7 @@ func controlledCandidate(bundle securityskill.Manifest, packDigest string) Candi
 		},
 		Standards: []StandardReference{
 			{Catalog: "CWE", Version: "4.20", ID: "CWE-1426"}, {Catalog: "CWE", Version: "4.20", ID: "CWE-1427"},
-			{Catalog: "MITRE_ATLAS", Version: "2026-08-26", ID: "AML.T0051"},
-			{Catalog: "OWASP_AGENTIC", Version: "2026", ID: "ASI01"}, {Catalog: "OWASP_AGENTIC", Version: "2026", ID: "ASI02"},
+			{Catalog: "MITRE_ATLAS", Version: "2026.09", ID: "AML.T0051"},
 			{Catalog: "OWASP_LLM", Version: "2025", ID: "LLM01"}, {Catalog: "OWASP_LLM", Version: "2025", ID: "LLM06"},
 		},
 		CoverageGapIDs: []string{"coverage:retrieval_poison", "coverage:signed_request_attribution"},

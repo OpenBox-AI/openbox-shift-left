@@ -1,1 +1,18 @@
-{"coverage_gap_ids":["coverage:retrieval_poison","coverage:signed_request_attribution"],"issues":[],"observation":{"pack_digest":"sha256:59f77363771c943265fbfadef517ec1ff7c30b7537d7771c2c4301a50913cb9c","schema":"ai.openbox.project-observation/v1"},"result":"no_supported_issue","schema":"ai.openbox.project-security-analysis/v1","skill":{"digest":"sha256:76525c636e8bd190fe261e9c9db0406d75170c4092ea873990bb971bf0bff6de","name":"openbox-security-evaluation","version":"1.0.1"}}
+{
+  "coverage_gap_ids": [
+    "coverage:retrieval_poison",
+    "coverage:signed_request_attribution"
+  ],
+  "issues": [],
+  "observation": {
+    "pack_digest": "sha256:59f77363771c943265fbfadef517ec1ff7c30b7537d7771c2c4301a50913cb9c",
+    "schema": "ai.openbox.project-observation/v1"
+  },
+  "result": "no_supported_issue",
+  "schema": "ai.openbox.project-security-analysis/v1",
+  "skill": {
+    "digest": "sha256:c519954fa2eca7fb735b36af76cf09c99a23ef5f78dc8b867f187336fce5a094",
+    "name": "openbox-security-evaluation",
+    "version": "1.0.2"
+  }
+}

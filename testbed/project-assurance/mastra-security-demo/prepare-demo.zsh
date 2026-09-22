@@ -48,7 +48,7 @@ jq -e '
 jq -e '
   .name == "openbox-security-evaluation" and
   .version == "1.0.0" and
-  .digest == "sha256:76525c636e8bd190fe261e9c9db0406d75170c4092ea873990bb971bf0bff6de"
+  .digest == "sha256:c519954fa2eca7fb735b36af76cf09c99a23ef5f78dc8b867f187336fce5a094"
 ' "$skill_dir/bundle.json" >/dev/null
 
 print "demo preflight passed"

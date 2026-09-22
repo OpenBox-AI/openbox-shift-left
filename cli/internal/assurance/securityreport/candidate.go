@@ -377,7 +377,11 @@ func indexStandards(content []byte) (map[string]bool, error) {
 			ID      string `json:"id"`
 		} `json:"entries"`
 	}
-	if err := json.Unmarshal(content, &catalog); err != nil || catalog.Schema != securityskill.CatalogSchema || catalog.Version != securityskill.CatalogVersion || len(catalog.Entries) != 7 {
+	// No entry count is asserted. The catalog ships whole upstream corpora, so
+	// pinning a count would mean a code change every time a standard is added —
+	// and the bundle already digest-pins these bytes, which is the check that
+	// matters. An empty catalog is still a refusal.
+	if err := json.Unmarshal(content, &catalog); err != nil || catalog.Schema != securityskill.CatalogSchema || catalog.Version != securityskill.CatalogVersion || len(catalog.Entries) == 0 {
 		return nil, errors.New("security report: standards catalog identity is invalid")
 	}
 	result := make(map[string]bool, len(catalog.Entries))
