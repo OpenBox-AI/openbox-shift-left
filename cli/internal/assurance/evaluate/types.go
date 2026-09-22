@@ -49,9 +49,6 @@ const (
 	sandboxReadyDeadline = 5 * time.Minute
 	sandboxExecDeadline  = 4 * time.Minute
 	sandboxDeleteTimeout = 60 * time.Second
-	// sandboxCommandTimeout is the guest-side ceiling, in seconds, and is the
-	// same 180s budget the CLI path allowed the image command.
-	sandboxCommandTimeout uint16 = 180
 )
 
 // reservedEnvironment is what the CONNECTOR owns and a project may not set.

@@ -11,8 +11,9 @@ depends_on:
   - kb/sandbox.md
 supersedes_execution_work_in:
   - plans/260819-1600-project-security-evaluation
-  - plans/260822-2330-openbox-sandbox-projectrun-v2
   - plans/260825-0930-agent-behavior-assurance
+# 2026-09-16: plans/260822-2330-openbox-sandbox-projectrun-v2 is no longer
+# superseded. ProjectRun v2 is the execution path; see ADR-0021.
 ---
 
 # Lean local OpenShell project security evaluation

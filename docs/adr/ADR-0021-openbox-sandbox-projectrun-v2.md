@@ -1,11 +1,38 @@
 # ADR-0021 — Versioned OpenBox Sandbox ProjectRun v2
 
 Date: 2026-08-22
-Status: Historical design direction; implementation deferred and superseded for Shift Left execution
+Status: Accepted and implemented
 
 Amended 2026-08-26: ProjectRun v2 remains unimplemented and unauthorized. It
 is not a fallback for the lean OpenShell development-evaluation workflow. The
 associated implementation plan is retained as historical design material only.
+
+**Amended 2026-09-16 — the 2026-08-26 amendment above is reversed.** ProjectRun
+v2 is implemented in openbox-sandbox and is the execution path for
+`openbox project evaluate`. It is not a fallback: the OpenShell CLI lane it
+replaced is deleted, and the lane has no other way to run a workload.
+
+Three things differ from the design this ADR records, and each was forced by the
+substrate rather than chosen:
+
+- **The implemented surface is five operations**, not the fifteen designed:
+  `begin_project_run`, `wait_ready`, `wait_completed`, `delete`, `wait_deleted`.
+  The input-staging and artifact-sealing operations
+  (`put_input_object`, `seal_inputs`, `prepare`, `start_project`, `observe`,
+  `seal_artifacts`) are unimplemented, because this lane runs a pre-built image
+  and seals its own evidence. They are design material until something needs them.
+- **The workload is the sandbox's MAIN process**, not an exec. Only the main
+  process receives the environment OpenShell builds from attached provider
+  profiles, so an exec-based workload silently loses every provider credential.
+  Three observability regressions follow and are recorded in every sealed pack:
+  no workload stdout/stderr, no per-process egress decisions, no model-route
+  receipt.
+- **The run environment may carry credentials.** This ADR's design excluded
+  inline secret values. That held only while every credential could be bound to
+  an endpoint, which is false for non-HTTP protocols, SDKs that sign their own
+  requests, and endpoints unknown until runtime. Binding remains the governed
+  path and is still used for the OpenBox connector key; anything else is carried
+  in the environment and disclosed by name in the pack's `coverage_limitations`.
 
 ## Context
 
