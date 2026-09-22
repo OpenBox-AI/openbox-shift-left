@@ -155,6 +155,13 @@ next: ./testbed/project-assurance/mastra-security-demo/launch-claude.zsh
 
 Any failure here is a setup problem, not a demo result. Fix it before going on.
 
+**`bundle.json: No such file` means the skill is not installed.** Step 2 of the
+lane — the model analysis — runs it from `~/.claude/skills/`, and only
+`openbox init --provider claude-code` puts it there. That command also installs
+this project's hooks, so it governs the session you run it from; that is the
+intended behaviour, not a side effect, but run it knowingly. Steps 1, 3 and 4
+(`evaluate`, `finalize`, `verify`/`report`) need no skill.
+
 ---
 
 ## 5. Run it

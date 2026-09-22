@@ -393,9 +393,11 @@ view. Codex, Claude/SRT, Seatbelt and governed-rerun execution paths stay
 retired with no CLI fallback or hidden probe entrypoint; their audit-pack v1
 objects survive only as historical READ contracts. **ProjectRun v2 is no longer
 retired** — it is the execution path, see the section below. Phases 1–3 are
-verified and Phase 4 is implemented through OS-04-03; **OS-04-04 is the one open
-task** — a live GET-only finalization and a before/after zero-control-mutation
-proof still need a host-side control token, and human report review remains.
+verified and Phase 4 is implemented. **OS-04-04 closed 2026-09-22**: a live
+GET-only finalization ran against local-stack and sealed a verifiable report,
+and the zero-control-mutation proof holds (`policies=0`, `guardrails=0` for the
+evaluation agent afterwards). Human report review remains, which is a person's
+job rather than an open engineering task.
 Production data, control publication and automatic fixes stay out of scope;
 project credentials do NOT — see the sandbox section below. Four things about
 this lane are worth not re-litigating:

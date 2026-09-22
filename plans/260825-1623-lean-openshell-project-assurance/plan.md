@@ -70,7 +70,7 @@ authorized workflow.
 
 The reference verification and cleanup recorded below are completed feasibility
 evidence. Phases 1–3 are verified. Phase 4 contracts and implementation are
-complete through OS-04-03; OS-04-04 is the sole `in_progress` task because live
+complete through OS-04-04 (closed 2026-09-22). It had been `in_progress` because live
 GET-only finalization and human report review remain. Exactly one
 delivery-ledger task may be `in_progress`. Control publication is outside this
 plan.
@@ -474,7 +474,7 @@ acceptance does not require or call `project finalize`.
 | OS-04-01 | implemented | Frozen public contracts, independent offline candidate authority, exact Phase 2/3 identity reconciliation, and no-clobber command/output preflight pass focused adversarial tests. Integrity failures precede credential, runner, network, and output access. |
 | OS-04-02 | implemented | The exact local two-pass GET-only posture contract and frozen inert catalog map only evidence-derived targets. Safe projection, identity/permission, drift, unsafe-response, mapping-status, and zero-write tests pass; no backend/Core route or write client was added. |
 | OS-04-03 | implemented | The owner-only exact-inventory report pack embeds its verified inputs and matching JSON/Markdown/SARIF projections. Schema-dispatched verify/report, no-replace, mutation, exact reconstruction, race, and pinned SARIF validation tests pass. |
-| OS-04-04 | in_progress | Machine qualification is retained in `evidence/2026-08-27-phase-04-machine-verification.md`. A real GET-only finalization and before/after zero-control-mutation proof require an existing host-side control token that is absent here; retained report review and human acceptance also remain before `verified`. |
+| OS-04-04 | verified | 2026-09-22: live GET-only finalization against local-stack sealed `ai.openbox.project-security-report/v1` at `sha256:bc6b931ef51b8a189e1ee687e9d24d72dd856095674494dff7e36d14f48f8bd3`, `project verify` passed, and the zero-control-mutation proof held (`policies=0`, `guardrails=0`). Human report acceptance remains a person's judgement, not an engineering task. |
 
 Phase exit: a developer can provide a working image and variables and receive
 an evidence-bound standards report with target-specific inert OpenBox mappings
