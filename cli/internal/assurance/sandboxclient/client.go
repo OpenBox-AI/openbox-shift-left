@@ -1,15 +1,8 @@
-// Package sandboxclient speaks the OpenBox Sandbox service protocol.
+// Package sandboxclient speaks the OpenBox Sandbox service protocol, so the
+// assurance lane stops driving OpenShell itself — the rule kb/sandbox.md
+// records: typed operations only, never the CLI.
 //
-// It exists so the assurance lane stops driving OpenShell itself. The lane used
-// to shell out to the `openshell` CLI and parse its stdout — including scraping
-// human-readable fields after stripping ANSI escapes — which put a second owner
-// on the OpenShell contract, pinned to a different version than the sandbox
-// service, with no test holding the two together. `kb/sandbox.md` records the
-// rule this restores: Shift Left must not shell out to the OpenShell CLI in the
-// supported path, and must see only typed operations.
-//
-// Stdlib only, deliberately: crypto/tls and encoding/json are all this needs,
-// and this repo's dependency budget is spent (ADR-0015, ADR-0020).
+// Stdlib only, deliberately: this repo's dependency budget is spent.
 package sandboxclient
 
 import (
@@ -237,13 +230,9 @@ func (client *Client) SupportsProjectRun(timeout time.Duration) (bool, error) {
 
 // ProjectRunSpec is the closed run envelope.
 //
-// Environment is ordinary guest environment and MAY carry credentials. The
-// service does not inspect it for them, so a caller putting a secret here is
-// choosing the ungoverned path and owes that disclosure to its own evidence.
-//
-// Providers are NAMES: a credential resolved through a policy credential_binding
-// is held by the proxy and never crosses this wire, which is the governed path
-// and the stronger one wherever the credential can be bound to an endpoint.
+// Environment MAY carry credentials; the service does not inspect it, so a
+// caller putting one here chooses the ungoverned path and owes the disclosure.
+// Providers are NAMES — a bound credential stays with the proxy.
 type ProjectRunSpec struct {
 	RunID          string            `json:"run_id"`
 	Template       string            `json:"template"`
@@ -366,13 +355,9 @@ func (client *Client) WaitReady(runID, token string, expected PolicyIdentity, de
 	return stringField(fields, "lifecycle_token"), nil
 }
 
-// WaitCompleted blocks until the workload exits and returns its result.
-//
-// There is no exec here, and its absence is the point: the workload was started
-// by Begin as the sandbox's main process, because that is the only process
-// OpenShell gives the provider environment to. Waiting is an observation, so a
-// repeated wait returns the same terminal exit rather than running anything
-// again.
+// WaitCompleted blocks until the workload exits. There is no exec: Begin
+// started it as the main process, the only one given the provider environment.
+// Waiting is an observation, so a repeat returns the same terminal exit.
 func (client *Client) WaitCompleted(runID, token string, deadline time.Duration) (*ProjectRunCompleted, error) {
 	fields, kind, err := client.projectRun(map[string]any{
 		"operation":       "wait_completed",
@@ -509,12 +494,8 @@ func mustOperationID() string {
 // place that needs it.
 func newCertPool() *x509.CertPool { return x509.NewCertPool() }
 
-// DefaultOutputLimits are the service's own process ceilings.
-//
-// Stated by the caller rather than defaulted server-side, because a caller that
-// does not know its own output budget cannot know whether a truncated result is
-// complete. Asking for more than the ceiling is refused at prepare, so these
-// sit exactly at it rather than above it.
+// DefaultOutputLimits sit exactly at the service's process ceilings — asking
+// for more is refused at prepare.
 func DefaultOutputLimits() OutputLimits {
 	return OutputLimits{
 		StdoutBytes:   1 << 20,

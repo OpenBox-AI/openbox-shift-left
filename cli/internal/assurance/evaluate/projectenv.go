@@ -5,46 +5,29 @@ import (
 	"sort"
 )
 
-// The two evaluator directives a project may set in `.env.sandbox`.
-//
-// These keep an OPENBOX_SANDBOX_ prefix while ordinary variables have none, and
-// the asymmetry is deliberate: they are not the project's environment, they are
-// instructions to the runner, and an exact-name prefix is what keeps them from
-// colliding with a variable the workload actually wants. Nothing else in the
-// file is renamed, which is the point — `.env.sandbox` is meant to be a copy of
-// the project's own `.env`.
+// Runner directives, not project environment. Prefixed so they cannot collide
+// with a variable the workload wants; matched exactly and never passed to the
+// guest. Everything else in `.env.sandbox` keeps its own name.
 const (
-	// modelRouteSetting selects whether the host owes an Ollama preflight.
 	modelRouteSetting  = "OPENBOX_SANDBOX_MODEL_ROUTE"
 	modelDigestSetting = "OPENBOX_SANDBOX_MODEL_DIGEST"
 
-	// ModelRouteLocalOllama preserves the behaviour this lane shipped with: the
-	// gateway's inference.local route is served by an Ollama on this host, so
-	// the host can and should prove the model is present and cold.
+	// ModelRouteLocalOllama lets the host prove the model is present and cold.
+	// ModelRouteGateway is served by something this host cannot see, so there
+	// is nothing local to preflight.
 	ModelRouteLocalOllama = "local-ollama"
-	// ModelRouteGateway says the route is served by something this host cannot
-	// see — OpenAI, Gemini, OpenRouter, a remote Ollama. There is nothing local
-	// to preflight, and pretending otherwise would be a fabricated check.
-	ModelRouteGateway = "gateway"
+	ModelRouteGateway     = "gateway"
 )
 
 // projectEnvironment is one `.env.sandbox` file, classified.
+//
+// public and secret both reach the guest as ordinary values; the split decides
+// only what the pack discloses. The governed alternative is a policy
+// credential_binding, which the connector key uses and which is unavailable to
+// credentials with no endpoint to bind to.
 type projectEnvironment struct {
-	// public and secret BOTH reach the guest as ordinary environment values,
-	// under the names the file gives them. The split is about what the run can
-	// honestly say afterwards, not about how a value travels: anything in
-	// secret is ungoverned, and the pack names it in coverage_limitations.
-	//
-	// The governed alternative is a policy `credential_binding`, where the
-	// proxy holds the credential and the workload cannot use it off-policy. The
-	// connector key takes that path. It is not available for every credential —
-	// non-HTTP protocols, SDKs that sign their own requests, endpoints unknown
-	// until runtime — which is why this one exists rather than being refused.
-	public map[string]string
-	secret map[string]string
-
-	// modelRoute and modelDigest describe what serves inference.local, which is
-	// a gateway-side choice this lane can only record.
+	public      map[string]string
+	secret      map[string]string
 	modelRoute  string
 	modelDigest string
 }
@@ -57,19 +40,11 @@ func newProjectEnvironment() *projectEnvironment {
 	}
 }
 
-// classify files one variable under its own name.
+// classify files one variable under its own name. Nothing is refused.
 //
-// There is no declaration syntax and nothing is refused. `.env.sandbox` is an
-// ordinary dotenv file — a developer copies their `.env` to it and edits what
-// the sandbox needs — so every variable reaches the guest exactly as written.
-//
-// The split is only about what the run can say afterwards. Since the developer
-// no longer marks which values are credentials, the run reads the NAME, and the
-// heuristic errs toward calling something a credential: over-reporting a
-// setting costs one line in the pack's limitations, while under-reporting would
-// have the pack assert something false about the run. That asymmetry is why a
-// name-shaped guess is acceptable here and would not be acceptable as a
-// refusal.
+// The developer no longer marks credentials, so the name decides, and it errs
+// toward secret: over-reporting a setting costs one line in the pack's
+// limitations, under-reporting would make the pack assert something false.
 func (environment *projectEnvironment) classify(name, value string, line int) error {
 	if environment.declared(name) {
 		return fmt.Errorf("project evaluate: line %d redeclares %s", line, name)
@@ -92,8 +67,7 @@ func (environment *projectEnvironment) entries() int {
 	return len(environment.public) + len(environment.secret)
 }
 
-// setting consumes an evaluator-directed setting line, which configures the run
-// rather than the guest. Reports whether the name was one.
+// setting consumes a runner directive, reporting whether the name was one.
 func (environment *projectEnvironment) setting(name, value string, line int) (bool, error) {
 	switch name {
 	case modelRouteSetting:
@@ -115,9 +89,8 @@ func (environment *projectEnvironment) setting(name, value string, line int) (bo
 	}
 }
 
-// secretNames lists the credential-shaped variables this run hands the workload
-// in plaintext, in a stable order. Names only — a value is never rendered,
-// logged or recorded, which stays true however the variable was classified.
+// secretNames lists what the pack must disclose, in a stable order. Names only;
+// a value is never rendered, logged, or recorded.
 func (environment *projectEnvironment) secretNames() []string {
 	names := make([]string, 0, len(environment.secret))
 	for name := range environment.secret {

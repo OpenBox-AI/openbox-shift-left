@@ -6,44 +6,25 @@ import (
 	"strings"
 )
 
-// buildSandboxPolicy renders the evaluation policy in the form the sandbox
-// service validates: OpenShell's policy YAML, meeting that service's security
-// floor exactly.
+// buildSandboxPolicy renders the evaluation policy as OpenShell YAML meeting
+// the sandbox service's security floor: read_write exactly ["/sandbox"],
+// run_as_user/group by NAME not uid, landlock best_effort only where the
+// deployment opted in.
 //
-// The floor is stricter than the retired CLI path's policy in three ways that
-// change what the image may do, and each is enforced rather than negotiated:
-//
-//   - read_write is EXACTLY ["/sandbox"]. The CLI path granted /dev/null and
-//     /tmp; here /tmp is pinned read-only, because a policy that declares
-//     network access must not also hand the workload a writable temp directory
-//     the proxy cannot see.
-//   - run_as_user and run_as_group are the names "sandbox", not uid 1000. The
-//     proto has always taken names; the CLI path's integer was never the wire
-//     shape.
-//   - landlock best_effort is admitted only when the deployment opted into
-//     degraded landlock, and the run records that as a coverage limitation.
-//
-// The endpoints are the host-side relays the guest reaches through the
-// gateway. Credentials are never written here: credential_binding names a
-// provider and the gateway resolves it, so the evaluation key does not appear
-// in the policy, the request, or the guest's environment.
+// Credentials are never written here. credential_binding names a provider and
+// the gateway resolves it, so the key appears in neither policy nor request.
 func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort int, effectPorts ...int) []byte {
 	var policy strings.Builder
 	policy.WriteString("version: 1\n")
 	policy.WriteString("filesystem_policy:\n")
 	policy.WriteString("  include_workdir: false\n")
 	policy.WriteString("  read_only:\n")
-	// Every OpenShell proxy-mode baseline path is declared here, not because
-	// the workload needs all of them, but because enrichment only agrees with
-	// the service's local mirror when it has nothing left to add: upstream
-	// skips baseline paths that do not exist in the guest, and the service
-	// cannot see the guest filesystem to predict which. Declaring the full set
-	// makes the enriched policy deterministic.
+	// The full baseline set, because enrichment only agrees with the service's
+	// mirror when it has nothing left to add — upstream skips baseline paths
+	// absent from the guest, which the service cannot see to predict.
 	//
-	// /tmp is declared read-only because the floor requires it, though upstream
-	// appends it to read-write regardless — its read-write pass checks only the
-	// read-write list for an existing entry. The run records that as a coverage
-	// limitation rather than claiming a writable /tmp was prevented.
+	// /tmp is declared read-only for the floor, though upstream appends it to
+	// read-write anyway; the run records that as a coverage limitation.
 	for _, path := range []string{"/app", "/dev/urandom", "/etc", "/lib", "/proc", "/tmp", "/usr", "/var/log"} {
 		fmt.Fprintf(&policy, "    - %s\n", path)
 	}

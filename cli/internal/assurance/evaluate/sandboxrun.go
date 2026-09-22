@@ -12,21 +12,14 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
 )
 
-// sandboxPolicyIdentity names the policy this lane generates.
-//
-// The lane owns the document, so it owns the identity: the service attests that
-// the policy it loaded is byte-identical to the one sent, and a name the caller
-// invented is exactly as verifiable as one it was given.
+// The lane owns the document, so it owns the identity: the service attests the
+// loaded policy is byte-identical to the one sent, which makes an invented name
+// exactly as verifiable as a given one.
 const sandboxPolicyIdentity = "openbox-project-evaluation"
 
 // runThroughSandbox executes the image's own entrypoint through the sandbox
-// service and retains the typed result.
-//
-// This replaces an attached `openshell sandbox create`, a phase poll over
-// `openshell sandbox get -o json`, and a log tail over `openshell logs`. What
-// the lane gets back instead of scraped text is an exit code, bounded output,
-// and the provider's own isolation evidence — the difference between reading a
-// gateway's prose and being told what it decided.
+// service, replacing an attached `openshell sandbox create`, a phase poll and a
+// log tail with one typed result.
 func (state *runState) runThroughSandbox(ctx context.Context, dependencies Dependencies) error {
 	if dependencies.Sandbox == nil {
 		return fail("not_runnable", "project evaluate: no sandbox service is configured")
@@ -50,19 +43,9 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.sandboxRunID = runID
 
-	// One environment map, and one name held out of it.
-	//
-	// OPENBOX_API_KEY is the governed credential: the policy's
-	// credential_binding names the OpenBox provider and the proxy resolves it,
-	// so the workload gets the access and never the secret, and the evaluator
-	// holds it in no request it sends. Everything else the project declared —
-	// including credentials it declared SECRET — is ordinary guest environment,
-	// which the pack records as ungoverned.
-	//
-	// It is also why no inference provider is attached: an attached provider's
-	// credential keys must each be bound to an endpoint in this policy, and one
-	// unbound key makes OpenShell fail closed and revoke the whole set,
-	// including the OpenBox credential that was correctly bound.
+	// OPENBOX_API_KEY is held out because the policy binds it: the proxy
+	// resolves it, so the evaluator sends it in no request. Everything else is
+	// ordinary guest environment, disclosed as ungoverned in the pack.
 	environment := map[string]string{}
 	for name, value := range state.prepared.environment {
 		if name == "OPENBOX_API_KEY" {
@@ -82,11 +65,10 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 		},
 		ExpectedPolicy: identity,
 		Environment:    environment,
-		// Only the OpenBox provider, and only because this policy binds its
-		// credential to an endpoint. See the note above.
+		// Only what this policy binds. An attached provider with an unbound
+		// credential key makes OpenShell fail closed and revoke the whole set.
 		Providers: []string{state.prepared.connector.openBoxProvider},
-		// The image's own entrypoint, as the sandbox's MAIN process. That is
-		// what makes the provider credentials reach it at all.
+		// MAIN process, not an exec: only the main process gets provider env.
 		Command: state.prepared.argv,
 	}, sandboxBeginDeadline)
 	if err != nil {
@@ -100,8 +82,7 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	}
 	state.phase(dependencies, "ready")
 
-	// The workload is already running — Begin started it as the main process —
-	// so this waits for it rather than launching anything.
+	// Begin already started it; this waits rather than launching.
 	result, err := dependencies.Sandbox.WaitCompleted(begunID, readyToken, sandboxExecDeadline)
 	if err != nil {
 		return &classifiedError{class: "command_failure", err: err}
@@ -125,10 +106,8 @@ func (state *runState) effectPorts() []int {
 	return []int{state.effectRelay.Port()}
 }
 
-// deleteSandbox asks for deletion and then requires terminal absence.
-//
-// Two calls because they answer different questions: an accepted delete is not
-// proof the sandbox is gone, and this lane's cleanup record claims absence.
+// deleteSandbox asks for deletion and then requires terminal absence: an
+// accepted delete is not proof, and the cleanup record claims absence.
 func (state *runState) deleteSandbox(dependencies Dependencies) error {
 	if dependencies.Sandbox == nil || state.sandboxRunID == "" {
 		return nil
@@ -146,11 +125,8 @@ func (state *runState) deleteSandbox(dependencies Dependencies) error {
 	return errors.New("sandbox remains after cleanup")
 }
 
-// sandboxLogs renders the supervisor's records for the workload.
-//
-// A main process has no exec stream, so this is the workload's output. It is
-// written as records rather than flattened into a fake stdout stream, because
-// calling it stdout would claim a fidelity the source does not have.
+// sandboxLogs renders the supervisor's records. Kept as records rather than
+// flattened into a stdout stream, which would claim a fidelity it lacks.
 func (state *runState) sandboxLogs() []byte {
 	if state.sandboxResult == nil || len(state.sandboxResult.Logs) == 0 {
 		return nil
