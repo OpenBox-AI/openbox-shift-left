@@ -12,7 +12,7 @@
       "required": ["name", "version", "digest"],
       "properties": {
         "name": { "const": "openbox-security-evaluation" },
-        "version": { "const": "1.0.0" },
+        "version": { "const": "1.0.1" },
         "digest": { "$ref": "#/$defs/digest" }
       }
     },

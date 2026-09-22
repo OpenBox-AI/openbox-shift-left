@@ -10,12 +10,12 @@ the cited semantic record; do not create a second citation namespace.
 |---|---|---|
 | `behavior` | `backend` | `semantic_behavior` |
 | `behavior` | `independent_receipt` | `external_effect` |
-| `behavior` | `openshell` | `runtime_context` |
+| `behavior` | `sandbox` | `runtime_context` |
 | `behavior` | `model_receipt` | `model_route` |
 | `coverage` | `missing`, `opaque`, `truncated`, or `unsupported` | `limitation` |
 
 An observed coverage channel is not a limitation. Coverage absence does not
-establish that a behavior did not occur. OpenShell and model logs do not
+establish that a behavior did not occur. Sandbox and model records do not
 establish backend semantic actions; backend prose does not establish an
 external effect; a standard never establishes any observation.
 

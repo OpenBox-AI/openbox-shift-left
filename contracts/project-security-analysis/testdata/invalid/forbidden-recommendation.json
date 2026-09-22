@@ -1,9 +1,20 @@
 {
-  "schema": "ai.openbox.project-security-analysis/v1",
-  "skill": {"name": "openbox-security-evaluation", "version": "1.0.0", "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"},
-  "observation": {"schema": "ai.openbox.project-observation/v1", "pack_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
-  "result": "no_supported_issue",
   "coverage_gap_ids": [],
   "issues": [],
-  "recommendations": [{"control": "apply-policy"}]
+  "observation": {
+    "pack_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "schema": "ai.openbox.project-observation/v1"
+  },
+  "recommendations": [
+    {
+      "control": "apply-policy"
+    }
+  ],
+  "result": "no_supported_issue",
+  "schema": "ai.openbox.project-security-analysis/v1",
+  "skill": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "name": "openbox-security-evaluation",
+    "version": "1.0.1"
+  }
 }

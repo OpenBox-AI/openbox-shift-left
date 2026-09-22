@@ -132,7 +132,7 @@ jq '{name, version, digest}' ~/.claude/skills/openbox-security-evaluation/bundle
 ```
 
 The skill digest must read
-`sha256:817e35e1db637d3c9a68ea7b0adf444aa1b5e9c2ad3eaa75c22496506ce0fe13`.
+`sha256:76525c636e8bd190fe261e9c9db0406d75170c4092ea873990bb971bf0bff6de`.
 
 ---
 

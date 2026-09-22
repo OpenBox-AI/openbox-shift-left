@@ -230,7 +230,7 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	if !strings.Contains(errb.String(), "note:") {
 		t.Errorf("expected a note on partial success, got %q", errb.String())
 	}
-	for _, want := range []string{"manual_required", "cli/internal/securityskill/bundles/openbox-security-evaluation/1.0.0", filepath.Join(".agents", "skills", "openbox-security-evaluation")} {
+	for _, want := range []string{"manual_required", "cli/internal/securityskill/bundles/openbox-security-evaluation/1.0.1", filepath.Join(".agents", "skills", "openbox-security-evaluation")} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("Cursor manual skill output missing %q: %q", want, out.String())
 		}
@@ -284,7 +284,7 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(skillRoot, "SKILL.md")); err != nil {
 		t.Errorf("security skill not installed: %v", err)
 	}
-	if !strings.Contains(out.String(), "action=installed version=1.0.0 digest=sha256:") {
+	if !strings.Contains(out.String(), "action=installed version=1.0.1 digest=sha256:") {
 		t.Errorf("security skill result missing from output: %q", out.String())
 	}
 	// STORY-SL4-WIRE-2 AC3, proven through the real `init` front door: the
@@ -1277,7 +1277,7 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(codexHome, "skills", "openbox-security-evaluation", "bundle.json")); err != nil {
 		t.Errorf("Codex security skill not installed under CODEX_HOME: %v", err)
 	}
-	if !strings.Contains(out.String(), "action=installed version=1.0.0 digest=sha256:") {
+	if !strings.Contains(out.String(), "action=installed version=1.0.1 digest=sha256:") {
 		t.Errorf("security skill result missing from output: %q", out.String())
 	}
 	// The five wired events, invoking THIS engine (os.Executable() → the test
@@ -1321,7 +1321,7 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
-	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex", "Security skill DRY RUN", "action=installed", "version=1.0.0", "digest=sha256:"} {
+	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex", "Security skill DRY RUN", "action=installed", "version=1.0.1", "digest=sha256:"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("dry-run plan missing %q:\n%s", want, out.String())
 		}

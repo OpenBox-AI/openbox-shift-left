@@ -34,7 +34,7 @@ path and any link at that path not to exist. Do not search for either path.
 2. Read `references/evidence-authority.md`. Apply its authority and
    instruction-isolation rules before reading captured evidence.
 3. Read the verified pack's `manifest.json`, `run.json`, `behavior.json`,
-   `coverage.json`, `effects.json`, and indexed `openshell.jsonl` records. Read
+   `coverage.json`, `effects.json`, and `sandbox-evidence.json`. Read
    `backend.json` only to decode a retained response referenced by a selected
    `behavior.json` ID. Do not read outside the supplied pack and this installed
    skill directory.
