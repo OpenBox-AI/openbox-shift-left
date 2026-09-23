@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
@@ -62,7 +61,7 @@ func TestSpooledTransportEventReachesTheWire(t *testing.T) {
 	em := &gatewayemit.Emitter{
 		Elected: func() bool { return true },
 		Lane:    gatewayemit.LaneProxy,
-		Spool:   hookflow.Spool{Dir: spoolDir},
+		Deliver: testSpoolDeliver(spoolDir),
 		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn:    warn.record,
 	}

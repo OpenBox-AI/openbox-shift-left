@@ -143,16 +143,32 @@ type uninstallInventory struct {
 	// unrecordedLane is a unit file or routed env key with no activation record
 	// behind it.
 	unrecordedLane bool
+	// codexOtelPath and codexOtelPresent are the additive config.toml surface:
+	// Codex's telemetry pointer lives outside the generic activation record
+	// (it has its own parsed-marker ownership model, like hooks.json), so it
+	// is swept here rather than through hookSurfaces or activation.ActiveLanes.
+	codexOtelPath    string
+	codexOtelPresent bool
 }
 
-// laneResidue reports whether anything on this machine still looks like a lane,
-// independent of the activation record.
-func laneResidue(home string) bool {
-	for _, spec := range []laneservice.Spec{
-		laneservice.Telemetry("", "", false),
+// laneResidue reports whether anything on this machine still looks like a
+// lane, independent of the activation record. codexOwnsTelemetry is true
+// when providers.HasOwnedCodexOtel already confirmed a healthy Codex-only
+// telemetry install: setupCodexTelemetry never calls activation.Activate
+// (Codex's [otel] ownership lives in config.toml's own parsed marker instead,
+// so a mixed CC+Codex machine's two telemetry installs never collide on one
+// activation-record key -- see initlane.go), so the telemetry unit existing
+// with zero activation-record lanes is that install's normal, healthy shape
+// on a Codex-only machine, not residue from an interrupted removal.
+func laneResidue(home string, codexOwnsTelemetry bool) bool {
+	specs := []laneservice.Spec{
 		laneservice.Transport("", "", false),
 		laneservice.Gateway("", "", "", false),
-	} {
+	}
+	if !codexOwnsTelemetry {
+		specs = append(specs, laneservice.Telemetry("", "", false))
+	}
+	for _, spec := range specs {
 		if p := spec.UnitPath(runtime.GOOS, home); p != "" && fileExists(p) {
 			return true
 		}
@@ -205,7 +221,7 @@ func (inv uninstallInventory) empty() bool {
 	}
 	return inv.pluginDir == "" && len(inv.lanes) == 0 && !inv.unrecordedLane &&
 		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && len(inv.envFiles) == 0 &&
-		len(inv.envResidue) == 0 && len(inv.spools) == 0
+		len(inv.envResidue) == 0 && len(inv.spools) == 0 && !inv.codexOtelPresent
 }
 
 func (a *app) uninstallInventory(home string) uninstallInventory {
@@ -228,13 +244,18 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	if dir := providers.ClaudePluginDir(); dirExists(dir) {
 		inv.pluginDir = dir
 	}
+	// Additive, and swept unconditionally like the hookSurfaces above: an
+	// OpenBox-owned [otel] block is its own ownership-aware surface (parsed
+	// marker, like hooks.json), not a row in the generic activation record.
+	inv.codexOtelPath = providers.CodexConfigTOMLPath()
+	inv.codexOtelPresent = providers.HasOwnedCodexOtel(inv.codexOtelPath)
 	inv.lanes = activation.ActiveLanes(home)
 	// The activation record is not the only evidence a lane exists. A previous
 	// run that failed part-way, or an install from an older binary, can leave a
 	// unit file or a routed env key with no record at all -- and treating that
 	// machine as clean is how "nothing to remove" gets printed at a daemon that
 	// is still intercepting model calls.
-	if len(inv.lanes) == 0 && laneResidue(home) {
+	if len(inv.lanes) == 0 && laneResidue(home, inv.codexOtelPresent) {
 		inv.unrecordedLane = true
 	}
 	for _, resolve := range []func() (string, error){devconfig.DevConfigPath, devconfig.DevConfigWritePath} {
@@ -253,6 +274,17 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	for _, path := range []string{hookflow.DefaultEnforcementPath(), hookflow.DefaultAdvisoryPath()} {
 		if path != "" && fileExists(path) {
 			inv.posture = appendUnique(inv.posture, path)
+		}
+	}
+	// Each lane daemon's persisted DeliverPool status (hookflow.StatusPersister):
+	// swept with the rest of posture so a stale drop count from a since-removed
+	// daemon does not linger and mislead a later `doctor` run into reporting on
+	// a lane that no longer exists.
+	if openboxHome, err := devconfig.Home(); err == nil {
+		for _, lane := range []string{"telemetry", "transport"} {
+			if p := hookflow.DeliverStatusPath(openboxHome, lane); fileExists(p) {
+				inv.posture = appendUnique(inv.posture, p)
+			}
 		}
 	}
 	// The showThinkingSummaries prior-value record: `~/.openbox` is never
@@ -353,6 +385,9 @@ func (a *app) printInventory(inv uninstallInventory) {
 			state = "present"
 		}
 		a.row("hooks", "%s (%s, %s)", s.path, s.provider, state)
+	}
+	if inv.codexOtelPresent {
+		a.row("telemetry", "%s (codex, present; an OpenBox-owned [otel] block)", inv.codexOtelPath)
 	}
 	if inv.pluginDir != "" {
 		a.row("plugin", "%s (a bundle including a copy of the openbox binary)", inv.pluginDir)
@@ -500,6 +535,17 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 		}
 		if s.restoreSettings {
 			a.restoreProviderSettings(st, inv.home, s)
+		}
+	}
+	if inv.codexOtelPresent {
+		removed, err := providers.RemoveCodexOtel(inv.codexOtelPath)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "warning: could not clean %s: %v\n", inv.codexOtelPath, err)
+			st.hookFailed = append(st.hookFailed, hookFailure{path: inv.codexOtelPath})
+			st.failed = true
+		} else if removed {
+			a.row("removed", "the OpenBox [otel] block from %s", inv.codexOtelPath)
+			st.deleted++
 		}
 	}
 	if inv.pluginDir != "" {

@@ -15,6 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
@@ -68,11 +69,21 @@ func (a *app) runGateway(args []string) int {
 	if !*refuseAll {
 		trigger := hookflow.RealtimeTrigger{Spool: spool, Provider: gatewaySpoolProvider}
 		em := &gatewayemit.Emitter{
-			Lane:  gatewayemit.LaneGateway,
-			Spool: spool,
+			Lane: gatewayemit.LaneGateway,
+			// This lane keeps its spool and its RealtimeTrigger nudge exactly as
+			// before: it never adopted the two daemons' in-process bounded-pool
+			// delivery, since a hook process (unlike telemetry/transport) cannot
+			// dial out at all. Adapted to the Deliver/Flush seam only so it
+			// compiles against the shared Emitter type -- Flush fires once per
+			// captured call, after both its halves are spooled, which is what
+			// keeps the nudge itself firing once per call rather than once per
+			// event.
+			Deliver: func(_ context.Context, ev client.DevEvent) bool {
+				return spool.Append(ev) == nil
+			},
+			Flush: func(sessionID string) { trigger.Maybe(logger, sessionID) },
 			DID:   devconfig.ResolveDIDOrEmpty,
 			Warn:  logger.Printf,
-			Flush: func(sessionID string) { trigger.Maybe(logger, sessionID) },
 			// See transport.go: derived per record, not cached at startup.
 			Elected: electedFn(settingsPath, activation.LaneGateway, elected),
 			// Not derivable from Elected(): a false there means either "another lane

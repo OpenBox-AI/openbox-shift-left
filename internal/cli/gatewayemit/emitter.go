@@ -12,7 +12,7 @@ import (
 	"time"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
@@ -27,15 +27,30 @@ const warnInterval = time.Hour
 
 const upstreamRequestHeader = "Request-Id"
 
-// Emitter turns each relayed model call into a spooled governance event. That
-// has a second consequence worth stating: this process never touches the
-// signing key or the obx_ credential; the flusher does.
+// Emitter turns each relayed model call into a governance event and hands it
+// straight to Deliver -- the two lane daemons' in-process, bounded-pool send,
+// never a spool a separate flusher process signs for later.
 type Emitter struct {
 	// Lane names the producer this emitter speaks for. Required; there is no
 	// default, deliberately.
 	Lane Lane
 
-	Spool hookflow.Spool
+	// Deliver is how this emitter actually gets an event to core: the two
+	// lane daemons hand it a bounded pool's Submit, in-process, never a spool
+	// write. Required; nil is a wiring
+	// defect reported the same way a missing Lane or Elected is. It returns
+	// false when the record was NOT accepted (a saturated pool), which stops
+	// the pair's loop the same way a spool-write failure used to: Completed
+	// is never sent after a dropped Started.
+	Deliver func(ctx context.Context, ev client.DevEvent) bool
+
+	// Flush fires ONCE per successfully delivered call, after every one of its
+	// events has been accepted by Deliver -- never once per event, which is
+	// what a captured call's two halves (Started, Completed) would otherwise
+	// trigger it twice for. Nil disables the nudge (what a test wants; the
+	// hooks lane's own gateway.go is the one production caller, since a lane
+	// daemon's in-process Deliver has no separate nudge to make).
+	Flush func(sessionID string)
 
 	// DID resolves the developer identity, and it is a function because this is a
 	// long-lived daemon.
@@ -43,10 +58,6 @@ type Emitter struct {
 
 	// Warn reports a dropped event.
 	Warn func(format string, args ...any)
-
-	// Flush nudges delivery for a session; nil disables the nudge, which is what
-	// tests want (the real one spawns a detached process).
-	Flush func(sessionID string)
 
 	// Verbose reports the capture outcome of every call, unthrottled. Nil ⇒
 	// silent. It prints identifiers and counts only; never a header, a body, or
@@ -243,20 +254,29 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		e.warn("openbox: dropped a captured call: %v", err)
 		return
 	}
-	// Order matters twice: the spool delivers in append order, so Started lands
-	// first; and the loop STOPS on a failure, because appending Completed after
-	// Started failed files the single-sided activity this pairing eliminates.
-	appended := 0
+	if e.Deliver == nil {
+		e.vlog("  capture: DROPPED; this emitter has no delivery seam configured")
+		e.warn("openbox: a model-call emitter was constructed with no Deliver seam, so captured calls " +
+			"cannot reach core and are being DROPPED. This is a wiring defect, not a setting.")
+		return
+	}
+
+	// Order matters twice: Started must be SUBMITTED first; and the loop STOPS
+	// when a submission is refused (the pool is saturated), because submitting
+	// Completed after Started was dropped files the single-sided activity this
+	// pairing eliminates. Delivery itself happens off this goroutine; accepted
+	// here means queued for one attempt, not confirmed on the wire.
+	accepted := 0
 	for _, ev := range events {
-		if err := e.Spool.Append(ev); err != nil {
-			e.vlog("  capture: DROPPED; %v", err)
-			e.warn("openbox gateway: dropped event %s (%s) for activity %s: %v. %s",
-				ev.EventID, ev.EventType, requestID, err, abandonNote(appended))
+		if ok := e.Deliver(ctx, ev); !ok {
+			e.vlog("  capture: DROPPED; the delivery pool is saturated")
+			e.warn("openbox gateway: dropped event %s (%s) for activity %s: the delivery pool is saturated. %s",
+				ev.EventID, ev.EventType, requestID, abandonNote(accepted))
 			break
 		}
-		appended++
+		accepted++
 	}
-	if appended < len(events) {
+	if accepted < len(events) {
 		return
 	}
 	e.vlog("  capture: recorded session=%s activity=%s:%s:%s as %d event(s) in %s",
@@ -369,10 +389,14 @@ func printableASCII(s string, n int) bool {
 	return true
 }
 
-// abandonNote says what a failed append cost, which differs by which half failed.
-func abandonNote(appended int) string {
-	if appended == 0 {
+// abandonNote says what a dropped Deliver call cost, which differs by which
+// half was refused. Worded for either backing (a spool append, for the hooks
+// lane's own gateway.go; an in-process pool submission, for telemetry.go/
+// transport.go) rather than naming one, since Deliver is the shared seam both
+// use.
+func abandonNote(accepted int) string {
+	if accepted == 0 {
 		return "the whole activity is abandoned, so no half-record is stored"
 	}
-	return "its opening half is already spooled and will store UNPAIRED"
+	return "its opening half was already accepted and will store UNPAIRED"
 }

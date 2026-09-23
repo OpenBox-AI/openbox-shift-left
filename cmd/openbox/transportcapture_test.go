@@ -44,11 +44,12 @@ func TestTransportLaneRecordsThroughTheRealChain(t *testing.T) {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
 
-	// Nil Flush: the detached flusher must never be spawned from a test binary.
+	// testSpoolDeliver writes straight to a local spool dir; no flusher process
+	// is ever spawned from a test binary.
 	em := &gatewayemit.Emitter{
 		Elected: func() bool { return true },
 		Lane:    gatewayemit.LaneProxy,
-		Spool:   hookflow.Spool{Dir: spoolDir},
+		Deliver: testSpoolDeliver(spoolDir),
 		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn:    func(string, ...any) {},
 	}

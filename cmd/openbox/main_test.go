@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
@@ -31,6 +32,19 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
+
+// testSpoolDeliver adapts a gatewayemit.Emitter's Deliver seam onto a plain
+// on-disk spool for the transport tests that pre-date the daemon's in-process
+// sender: they assert on what a real spool file holds (SessionPath, file
+// locking, rotation), which hookflow.Spool.Append still does exactly as
+// before. The daemon itself no longer spools its own lane records; this is a
+// test double standing in for its (now in-process) bounded pool.
+func testSpoolDeliver(dir string) func(context.Context, client.DevEvent) bool {
+	spool := hookflow.Spool{Dir: dir}
+	return func(_ context.Context, ev client.DevEvent) bool {
+		return spool.Append(ev) == nil
+	}
+}
 
 type fakeReg struct {
 	reg    *backend.Registration

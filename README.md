@@ -214,7 +214,7 @@ adapter on top. Adding a tool is an adapter, not a fork. →
 | Provider | Telemetry | Enforcement | Approvals | Model calls | Org mandate |
 |---|---|---|---|---|---|
 | **Claude Code** | shipped | deny · hold · redact | full, incl. waking a session on a late decision | via lanes, capture only | managed settings |
-| **Codex** | shipped | deny · hold · redact · halt | deny on prompt, tool **and** approval | not built | `requirements.toml` / MDM |
+| **Codex** | shipped | deny · hold · redact · halt | deny on prompt, tool **and** approval | telemetry lane only (token/model, no request capture); proxy routing not built | `requirements.toml` / MDM |
 | **Cursor** | not built | — | — | — | — |
 
 The two shipped providers send **different amounts of content** under the same

@@ -105,6 +105,41 @@ func resolveBoolWithSource(fieldName string, field func(DevConfig) *bool, def bo
 	return value, source
 }
 
+// resolveBoolAt is resolveBoolWithSource generalized to a caller-supplied
+// dev.json path instead of the ambient cachedUser() (which always reads
+// DefaultConfigPath(), i.e. whichever tool BoundProvider() names). It applies
+// the identical precedence -- default, then a readable managed layer (a
+// locked key wins outright), then the file at path, then the env override --
+// just scoped to the file the caller actually asked about. It is not
+// memoized: callers use it a handful of times at process startup (one lookup
+// per configured tool), never on a hot path.
+func resolveBoolAt(fieldName string, field func(DevConfig) *bool, def bool, envKey string, path string) bool {
+	value := def
+
+	managed := cachedManaged()
+	if managed.readable && managed.keys[fieldName] {
+		if v := field(managed.cfg.DevConfig); v != nil {
+			if managed.locked[fieldName] {
+				return *v
+			}
+			value = *v
+		}
+	}
+
+	if cfg, err := Load(path); err == nil {
+		if keys := configKeysUncached(path); keys[fieldName] {
+			if v := field(cfg); v != nil {
+				value = *v
+			}
+		}
+	}
+
+	if v, ok := os.LookupEnv(envKey); ok {
+		value = IsTruthy(v)
+	}
+	return value
+}
+
 func configKeysUncached(path string) map[string]bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {

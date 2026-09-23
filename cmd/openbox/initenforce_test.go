@@ -124,12 +124,14 @@ func TestInitStillRequiresAProviderAndNamesTheSupportedSet(t *testing.T) {
 	}
 }
 
-// TestCodexInstallsHooksOnlyWithoutError. The lanes observe the Anthropic
-// Messages API through Claude Code's own settings, so codex gets hooks alone.
-// Under always-full that has to be a derivation with a printed line: erroring
+// TestCodexInstallsTelemetryButNeverTransport: Codex gets the telemetry lane
+// (it reads its own config.toml), but never the in-path transport relay --
+// its proxy arm is the system PAC, which installs nothing here. Erroring
 // because a provider cannot have a lane it never asked for would be a
-// regression from the flag era.
-func TestCodexInstallsHooksOnlyWithoutError(t *testing.T) {
+// regression from the flag era; the right shape is a derivation with a
+// printed line instead.
+func TestCodexInstallsTelemetryButNeverTransport(t *testing.T) {
+	skipUnlessSupervised(t)
 	isolateHome(t)
 	seedCredentials(t, "codex")
 	a, out, errb := testApp(nil)
@@ -137,16 +139,16 @@ func TestCodexInstallsHooksOnlyWithoutError(t *testing.T) {
 		t.Fatalf("codex init exit = %d; stderr=%q", code, errb.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "hooks only") {
-		t.Errorf("a codex install does not say it installed hooks only:\n%s", s)
+	if strings.Contains(s, "hooks only") {
+		t.Errorf("a codex install still claims hooks-only; the telemetry lane arm did not take:\n%s", s)
 	}
-	// Anchored on what a lane install actually prints now: the two capture
-	// disclosures and the summary row. A codex install reaching any of these
-	// is claiming a lane it cannot have.
-	for _, absent := range []string{"INTERCEPTS", "EXPORTS", "lane keys", "(running)"} {
-		if strings.Contains(s, absent) {
-			t.Errorf("a codex install claims a lane it cannot have (%q):\n%s", absent, s)
-		}
+	if !strings.Contains(s, "EXPORTS") {
+		t.Errorf("a codex install does not disclose the telemetry lane it now installs:\n%s", s)
+	}
+	// A relay of the Anthropic Messages API is Claude-Code-specific; Codex's
+	// proxy arm is the system PAC, which installs nothing here.
+	if strings.Contains(s, "INTERCEPTS") {
+		t.Errorf("a codex install claims the transport lane, which it cannot have:\n%s", s)
 	}
 }
 

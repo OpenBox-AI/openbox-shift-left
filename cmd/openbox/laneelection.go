@@ -50,6 +50,41 @@ func electionProblemFn(settingsPath string, override *bool) func() string {
 	}
 }
 
+// codexElectedFn is electedFn's Codex counterpart: it reads config.toml
+// through activation.ResolveCodexElection, never settings.json through
+// ResolveElection -- the two native surfaces must never be read through each
+// other's parser, or a TOML file handed to the JSON reader reports "cannot
+// decide" forever.
+func codexElectedFn(configPath string, override *bool) func() bool {
+	return func() bool {
+		if override != nil && *override {
+			return true
+		}
+		return activation.ResolveCodexElection(configPath).Elected == activation.LaneTelemetry
+	}
+}
+
+func reportCodexElection(logger *log.Logger, configPath string, override bool) {
+	e := activation.ResolveCodexElection(configPath)
+	if override {
+		logger.Printf("openbox telemetry: emitting Codex model-call turns because --elected was passed, "+
+			"overriding the election (which currently names %q)", orNone(string(e.Elected)))
+		return
+	}
+	if problem := e.SettingsProblem; problem != "" {
+		logger.Printf("openbox telemetry: CANNOT DECIDE whether to emit Codex model-call turns: %s. "+
+			"Reinstall with `openbox init --provider codex` so the unit carries --codex-settings, or "+
+			"pass --elected. Claude Code's own election is unaffected.", problem)
+		return
+	}
+	if e.Elected == activation.LaneTelemetry {
+		logger.Printf("openbox telemetry: elected producer of Codex model-call turns; %s", e.Reason)
+		return
+	}
+	logger.Printf("openbox telemetry: NOT the elected producer of Codex model-call turns (%s); "+
+		"emitting none. Re-checked per call.", e.Reason)
+}
+
 func reportElection(logger *log.Logger, lane string, settingsPath string, want activation.Lane, override bool) {
 	e := activation.ResolveElection(settingsPath)
 	if override {

@@ -348,19 +348,25 @@ func (a *app) runDevInit(args []string) int {
 	}
 
 	// Full means every lane the provider supports, which is a derivation rather
-	// than a choice. Codex gets hooks alone and is told why: erroring because a
-	// provider cannot have a lane it never asked for would be a regression.
+	// than a choice. Codex gets the telemetry lane, reading its own
+	// config.toml; its proxy arm is the system PAC, which installs nothing
+	// here. An unsupported provider gets hooks alone and is told why: erroring
+	// because a provider cannot have a lane it never asked for would be a
+	// regression.
 	var laneReport laneReport
 	if laneCapable(o.Provider) {
 		laneReport = a.setupLanes(laneRequest{
-			telemetry:     true,
-			transport:     true,
+			telemetry: true,
+			// Claude Code only: Codex's transport/proxy arm is the system PAC,
+			// not this in-path relay.
+			transport:     provider.Name(o.Provider) == provider.ClaudeCode,
 			telemetryAddr: telemetry.DefaultAddr,
 			transportAddr: transport.DefaultAddr,
+			provider:      o.Provider,
 		})
 	} else {
-		a.row("lanes", "hooks only for %s; the receiver and the relay read Claude Code's", o.Provider)
-		a.row("", "own settings, so there is nothing for them to read here")
+		a.row("lanes", "hooks only for %s; no model-call lane reads this provider's own", o.Provider)
+		a.row("", "settings yet")
 	}
 	laneReport.print(a)
 

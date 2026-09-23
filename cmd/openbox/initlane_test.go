@@ -13,6 +13,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -403,6 +404,64 @@ func TestRemovalRefusesToOverwriteAChangedValueButStillRemovesTheUnit(t *testing
 	}
 }
 
+// TestSetupTelemetryOmitsCodexSettingsWhenCodexHasNoOwnedOtelBlock is the
+// dead-code fix: providers.CodexConfigTOMLPath() is never empty, so passing
+// it unconditionally baked a --codex-settings flag (and the codexEmitter
+// wiring it triggers in telemetry.go) into every telemetry unit, including a
+// pure Claude-Code-only install that never touched Codex. The unit's argv
+// must carry the flag only once Codex actually has an owned [otel] block.
+func TestSetupTelemetryOmitsCodexSettingsWhenCodexHasNoOwnedOtelBlock(t *testing.T) {
+	skipUnlessSupervised(t)
+	h := newLaneHarness(t)
+	t.Setenv("CODEX_HOME", filepath.Join(h.home, ".codex"))
+	a, _, _ := testApp(map[string]string{"HOME": h.home})
+
+	if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+		t.Fatalf("setupTelemetry: %v", err)
+	}
+	unitPath := laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, h.home)
+	raw, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("read unit %s: %v", unitPath, err)
+	}
+	if strings.Contains(string(raw), laneservice.CodexSettingsFlag) {
+		t.Errorf("a Claude-Code-only install's unit carries %s with no Codex install behind it:\n%s",
+			laneservice.CodexSettingsFlag, raw)
+	}
+}
+
+// TestSetupTelemetryCarriesCodexSettingsOnceCodexIsConfigured is the other
+// side: a machine where Codex was configured (in either order relative to
+// this CC install) must still get --codex-settings so the shared receiver
+// keeps electing and signing Codex's own turns.
+func TestSetupTelemetryCarriesCodexSettingsOnceCodexIsConfigured(t *testing.T) {
+	skipUnlessSupervised(t)
+	h := newLaneHarness(t)
+	t.Setenv("CODEX_HOME", filepath.Join(h.home, ".codex"))
+	codexConfigPath := filepath.Join(h.home, ".codex", "config.toml")
+	if err := providers.WriteCodexOtel(codexConfigPath, "http://127.0.0.1:18789/v1/logs"); err != nil {
+		t.Fatalf("seed WriteCodexOtel: %v", err)
+	}
+	a, _, _ := testApp(map[string]string{"HOME": h.home})
+
+	if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+		t.Fatalf("setupTelemetry: %v", err)
+	}
+	unitPath := laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, h.home)
+	raw, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatalf("read unit %s: %v", unitPath, err)
+	}
+	if !strings.Contains(string(raw), laneservice.CodexSettingsFlag) {
+		t.Errorf("a machine with an owned Codex [otel] block must still carry %s:\n%s",
+			laneservice.CodexSettingsFlag, raw)
+	}
+	if !strings.Contains(string(raw), codexConfigPath) {
+		t.Errorf("the unit's %s does not name Codex's actual config.toml path:\n%s",
+			laneservice.CodexSettingsFlag, raw)
+	}
+}
+
 // TestPurgeDeletesTheCAAndTheRecord.
 func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 	skipUnlessSupervised(t)
@@ -436,10 +495,12 @@ func TestPurgeDeletesTheCAAndTheRecord(t *testing.T) {
 // would install two supervised daemons and rewrite ~/.claude/settings.json on
 // a machine whose tool reads neither.
 // TestLanesAreInstalledForALaneCapableProviderOnly. The exclusivity matrix
-// that used to live here went with the flags; what is left is a derivation, and
-// it must not error for a provider that simply has no lanes.
+// that used to live here went with the flags; what is left is a derivation,
+// and it must not error for a provider that simply has no lanes. Codex is
+// lane-capable: it has a telemetry lane, reading its own config.toml (its
+// proxy arm is the system PAC, not a lane this flag gates).
 func TestLanesAreInstalledForALaneCapableProviderOnly(t *testing.T) {
-	for name, want := range map[string]bool{"claude-code": true, "codex": false, "cursor": false} {
+	for name, want := range map[string]bool{"claude-code": true, "codex": true, "cursor": false} {
 		if got := laneCapable(name); got != want {
 			t.Errorf("laneCapable(%q) = %v, want %v", name, got, want)
 		}

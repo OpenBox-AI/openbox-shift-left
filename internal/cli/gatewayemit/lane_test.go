@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
@@ -120,12 +118,12 @@ func TestLaneNamesMatchTheActivityIDNamespaces(t *testing.T) {
 // Emitter with no Lane must drop the call loudly rather than file it under
 // whichever lane happens to be first in the source.
 func TestEmitRefusesAnUnconfiguredLane(t *testing.T) {
-	dir := t.TempDir()
+	delivery := newFakeDelivery()
 	var warned bool
 	em := &Emitter{
-		Spool: hookflow.Spool{Dir: dir},
-		DID:   func() string { return "did:openbox:dev" },
-		Warn:  func(string, ...any) { warned = true },
+		Deliver: delivery.Deliver,
+		DID:     func() string { return "did:openbox:dev" },
+		Warn:    func(string, ...any) { warned = true },
 	}
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 
@@ -133,48 +131,27 @@ func TestEmitRefusesAnUnconfiguredLane(t *testing.T) {
 		t.Error("an Emitter with no Lane emitted silently; a governance gap nobody is told about " +
 			"is indistinguishable from a working lane")
 	}
-	if n := spoolEntryCount(t, dir); n != 0 {
-		t.Errorf("an Emitter with no Lane spooled %d event(s); it must spool none", n)
+	if n := delivery.sessionsWithEvents(); n != 0 {
+		t.Errorf("an Emitter with no Lane delivered %d session(s) worth of event(s); it must deliver none", n)
 	}
 }
 
 // TestEmitFilesUnderTheConfiguredLane is the positive control for the above:
 // the same emitter, with a lane set, does produce the event.
 func TestEmitFilesUnderTheConfiguredLane(t *testing.T) {
-	dir := t.TempDir()
+	delivery := newFakeDelivery()
 	em := &Emitter{
 		Lane:    LaneProxy,
-		Spool:   hookflow.Spool{Dir: dir},
+		Deliver: delivery.Deliver,
 		DID:     func() string { return "did:openbox:dev" },
 		Warn:    func(string, ...any) {},
 		Elected: func() bool { return true },
 	}
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 
-	if n := spoolEntryCount(t, dir); n != 1 {
-		t.Fatalf("spooled %d events, want 1", n)
+	if n := delivery.sessionsWithEvents(); n != 1 {
+		t.Fatalf("delivered event(s) for %d session(s), want 1", n)
 	}
-}
-
-func spoolEntryCount(t *testing.T, dir string) int {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0
-		}
-		t.Fatalf("read spool dir: %v", err)
-	}
-	// Spool files only. The directory also holds the sidecar lock the append and
-	// the rotate serialize on, and counting that as an event made "did the
-	// emitter file anything" answer yes for a directory holding no events at all.
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".jsonl") {
-			n++
-		}
-	}
-	return n
 }
 
 // mustPair is EventsFor for tests that are not about the pairing itself. It

@@ -4,22 +4,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 // electionEmitter is an emitter whose gate the test controls.
-func electionEmitter(t *testing.T, elected func() bool) (*Emitter, hookflow.Spool, *bytes.Buffer) {
+func electionEmitter(t *testing.T, elected func() bool) (*Emitter, *fakeDelivery, *bytes.Buffer) {
 	t.Helper()
-	spool := hookflow.Spool{Dir: filepath.Join(t.TempDir(), "cc-spool")}
+	delivery := newFakeDelivery()
 	var warnings bytes.Buffer
 	em := &Emitter{
 		Lane:    LaneProxy,
-		Spool:   spool,
+		Deliver: delivery.Deliver,
 		DID:     func() string { return testDID },
 		Warn:    func(format string, args ...any) { fmt.Fprintf(&warnings, format+"\n", args...) },
 		Elected: elected,
@@ -27,7 +23,7 @@ func electionEmitter(t *testing.T, elected func() bool) (*Emitter, hookflow.Spoo
 		// one is a routing gap and has its own test.
 		ElectedName: func() string { return string(LaneGateway.Name) },
 	}
-	return em, spool, &warnings
+	return em, delivery, &warnings
 }
 
 // TestAnUnelectedLaneEmitsNothing is the mutual exclusion that was unenforced.
@@ -132,20 +128,19 @@ func TestTheGateIsCheckedBeforeTheSessionHeaderWarning(t *testing.T) {
 // eliminate. Zero rows is a clean absence; one row is a contract violation that
 // reads as a working record.
 func TestAFailedAppendAbandonsTheActivityRatherThanOrphaningAHalf(t *testing.T) {
-	// A spool whose directory cannot be created: every Append fails.
-	blocked := filepath.Join(t.TempDir(), "file-where-a-dir-should-be")
-	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// A delivery pool that refuses every submission (saturated): every Deliver
+	// call returns false, the in-process equivalent of every spool Append
+	// failing.
+	delivery := newFakeDelivery()
+	delivery.Accept = false
 
 	var warnings bytes.Buffer
 	em := &Emitter{
 		Lane:    LaneProxy,
-		Spool:   hookflow.Spool{Dir: filepath.Join(blocked, "cc-spool")},
+		Deliver: delivery.Deliver,
 		DID:     func() string { return testDID },
 		Warn:    func(format string, args ...any) { fmt.Fprintf(&warnings, format+"\n", args...) },
 		Elected: func() bool { return true },
-		Flush:   func(string) { t.Error("a flush was nudged for an activity that never spooled") },
 	}
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 

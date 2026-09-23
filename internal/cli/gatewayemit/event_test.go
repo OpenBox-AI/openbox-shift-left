@@ -61,6 +61,29 @@ func TestEventTypeIsTurnCompleted(t *testing.T) {
 	}
 }
 
+// TestToolNameDefaultsToClaudeCode pins the byte-identical fixture (INV-9):
+// every caller that has never heard of Identity.ToolName must keep shipping
+// "claude-code" on the wire.
+func TestToolNameDefaultsToClaudeCode(t *testing.T) {
+	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
+	if ev.Tool.Name != "claude-code" {
+		t.Fatalf("Tool.Name = %q, want the default %q", ev.Tool.Name, "claude-code")
+	}
+}
+
+// TestToolNameCarriesPerRecord: a pre-resolved per-provider identity can
+// stamp its own tool name, and it lands on BOTH halves of the pair, not just
+// one.
+func TestToolNameCarriesPerRecord(t *testing.T) {
+	id := sampleIdentity()
+	id.ToolName = "codex"
+	for i, ev := range mustPair(LaneGateway, id, "req-1", sampleAt, measuredCaptured()) {
+		if ev.Tool.Name != "codex" {
+			t.Errorf("half %d: Tool.Name = %q, want %q", i, ev.Tool.Name, "codex")
+		}
+	}
+}
+
 // TestGatewayRequestIDIsSet keeps the two turn producers in disjoint activity-
 // id namespaces (that decision requirement 8).
 func TestGatewayRequestIDIsSet(t *testing.T) {

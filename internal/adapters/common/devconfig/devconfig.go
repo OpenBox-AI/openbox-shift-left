@@ -252,10 +252,39 @@ func ResolveTelemetry() bool {
 	return resolveBool("telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry)
 }
 
+// ResolveTelemetryFor is ResolveTelemetry scoped to one named tool's own
+// dev.json, for the same reason ResolveContentCaptureFor exists: a lane
+// daemon recording turns for more than one tool must gate each tool's OWN
+// recording on that tool's OWN posture, never on whichever tool it bound at
+// startup for unrelated setup work.
+func ResolveTelemetryFor(tool string) (bool, error) {
+	path, err := DevConfigPathFor(tool)
+	if err != nil {
+		return false, err
+	}
+	return resolveBoolAt("telemetry", func(c DevConfig) *bool { return c.Telemetry }, true, EnvTelemetry, path), nil
+}
+
 // ResolveContentCapture reports the org content posture: config
 // `content_capture` first, then the env override (env wins either way).
 func ResolveContentCapture() bool {
 	return resolveBool("content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture)
+}
+
+// ResolveContentCaptureFor is ResolveContentCapture scoped to one named
+// tool's own dev.json instead of the ambiently bound ResolveContentCapture's
+// DefaultConfigPath()/BoundProvider(). A process governing more than one tool
+// for its whole life (a shared lane daemon) must ask each tool's own store
+// this question rather than answering every tool with whichever one it bound
+// at startup for something unrelated. The managed (org-mandated) layer still
+// applies the same way, since it is not a per-tool store; only the env
+// override is process-wide by nature.
+func ResolveContentCaptureFor(tool string) (bool, error) {
+	path, err := DevConfigPathFor(tool)
+	if err != nil {
+		return false, err
+	}
+	return resolveBoolAt("content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture, path), nil
 }
 
 // ResolveSecretDetection reports whether Tier-1 local secret/entropy detection
@@ -489,11 +518,13 @@ func ResolveCredentials() (Credentials, error) {
 // is the one thing that could make every row a copy of the first, because a
 // held config pin freezes what the first read resolved.
 //
-// One field is deliberately ambient rather than per tool:
-// ContentCaptureEnabled is a posture question, resolved through the managed
-// layer, and a per-store answer for it would need a second posture resolver.
-// No caller of this function reads it; the enumerators want identity and
-// reachability.
+// ContentCaptureEnabled is resolved from THIS tool's own dev.json (via
+// resolveBoolAt on cfgPath below), never from whichever tool happens to be
+// ambiently bound: a lane daemon serving two tools calls this once per tool at
+// startup, and a Codex `content_capture:false` must be honoured for Codex's
+// own client while Claude Code's stays on, and vice versa. The managed
+// (org-mandated) layer still applies to both, since it is not a per-tool
+// store.
 func ResolveCredentialsFor(tool string) (Credentials, error) {
 	cfgPath, err := DevConfigPathFor(tool)
 	if err != nil {
@@ -515,18 +546,16 @@ func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) 
 	c := Credentials{
 		BaseURL: FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
 		DID:     FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
-		// One resolver, not a second copy of the precedence chain. client.Config
-		// calls this field "the org's content posture", but the hand-rolled
-		// user-then-env pair this replaces read the user file and the environment
-		// and never the MANAGED layer -- so a *locked* managed
-		// `content_capture:false` was honoured by ResolveContentCapture (the
-		// mapper attached nothing to the observe copy) and ignored here, leaving
-		// the enforce copy and the model-call lane bodies to egress under an org
-		// lock, while the SessionStart posture row told the control plane
-		// `content_capture:false, source: managed`. ResolveContentCapture applies
-		// default -> managed (a locked key wins outright) -> user -> env in one
-		// place, so the two can no longer disagree.
-		ContentCaptureEnabled: ResolveContentCapture(),
+		// Resolved from cfgPath -- THIS tool's own dev.json for
+		// ResolveCredentialsFor, the ambient bound tool's for ResolveCredentials
+		// -- through the same default -> managed (a locked key wins outright) ->
+		// user -> env precedence ResolveContentCapture applies, just scoped to
+		// the file this call was actually given rather than re-deriving
+		// DefaultConfigPath()/BoundProvider() and silently answering for a
+		// different tool. A locked managed `content_capture:false` still wins
+		// outright for every tool, since the managed layer is org-wide, not a
+		// per-tool store.
+		ContentCaptureEnabled: resolveBoolAt("content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture, cfgPath),
 	}
 	if c.DID == "" {
 		return Credentials{}, fmt.Errorf("no developer DID configured (run `openbox init`)")

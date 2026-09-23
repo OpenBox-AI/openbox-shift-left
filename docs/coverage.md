@@ -231,10 +231,21 @@ as a "legacy constrained CA" finding until it is re-issued, which `init` does
 not yet do automatically. See [Architecture](architecture.md)'s decision
 record. The telemetry keys are `CLAUDE_CODE_*`.
 
-**Codex: surveyed 2026-09-17, and the mechanism exists — but no lane is built.**
-That sentence used to read "no probe has been run", and it is no longer true, so
-what replaces it is what the probe actually showed rather than a softer version
-of the same absence:
+The `:otel:` (telemetry) lane now has a Codex arm too: `init --provider codex`
+writes an OpenBox-owned `[otel]` block into `$CODEX_HOME/config.toml`
+(`internal/adapters/codex/oteblock.go`) alongside installing the same receiver
+Claude Code uses. A Codex record keys on `conversation.id` rather than
+`session.id`, is signed and attributed as the `codex` tool rather than
+`claude-code` (per-provider lane identity, `cmd/openbox/laneidentity.go`), and
+honours Codex's own posture (its own `content_capture`, `telemetry`) from
+Codex's own store, never Claude Code's. Codex's **proxy** arm (routing its
+model calls through the transport relay) is not built or verified; `openbox
+doctor` says so rather than reporting silence as coverage.
+
+**Codex: surveyed 2026-09-17, and the mechanism exists — and the `:otel:` lane
+is now built.** That sentence used to read "no probe has been run", and it is
+no longer true, so what replaces it is what the probe actually showed rather
+than a softer version of the same absence:
 
 - Codex **does** read an `[otel]` block from `$CODEX_HOME/config.toml` and export
   OTLP over HTTP to whatever endpoint that block names. Measured on **both**
@@ -246,16 +257,17 @@ of the same absence:
   `codex.sse_event`, `codex.tool_result` and `codex.user_prompt`, at
   `protocol = "binary"` — the production wire format this document records as
   unexercised for the Claude Code `:otel:` lane.
-- **Nothing is built yet, and the reason has narrowed.** The original reason was
-  evidentiary: the surface the lane would serve was unverified. That no longer
-  holds — Desktop demonstrably reads a `config.toml` OpenBox could write. What
-  remains is engineering risk, not doubt about the mechanism: installing a lane
-  means writing a third-party trust surface, standing up a daemon, and pointing
-  Codex at a port, where install ordering is a safety property — the pointer must
-  be written only after the listener is proven live, or every model call fails
-  while `init` prints success. Plus an ownership-aware `config.toml` merge and a
-  matching uninstall sweep, or `openbox uninstall` leaves Codex exporting to a
-  dead port forever.
+- **Built.** `openbox init --provider codex` stands up the same telemetry
+  daemon Claude Code uses, proves the listener live, and only then writes the
+  `[otel]` pointer into `config.toml` — install ordering stayed the safety
+  property this section anticipated: writing the pointer first would point
+  Codex at a dead port while `init` printed success. The merge is
+  ownership-aware (an existing foreign `[otel]` block is left untouched) and
+  `openbox uninstall` removes only the block it owns, splicing the file back to
+  its original bytes rather than leaving Codex exporting to a dead port.
+  Unverified still: Codex Desktop against this installed lane (the probe above
+  used a throwaway `CODEX_HOME`, not an install), and the production
+  `protocol = "binary"` wire path end-to-end through core.
 - **Still unmeasured:** whether Codex Desktop runs `hooks.json` at all. The probe
   registered all eleven events and none fired, but the app was idle and wrote no
   rollout, so nothing reached a hook; and hook trust is a second confound. That
@@ -368,9 +380,11 @@ region, own-key or cost, so no routing promise exists to honour.
   **Claude Code is per turn**: `Stop`/`SubagentStop` → a
   `TurnStarted`/`TurnCompleted` pair with `activity_type: llm_completion`
   carrying all four counts plus the model id, plus the retained `SessionEnded`
-  rollup. **Codex is per session**: one rollup pair at `SessionEnd`
-  (`activity_id <session>:usage:rollup`); its `Stop` hook exists but is
-  deliberately unwired, which is scope, not impossibility. Both read a local
+  rollup. **Codex is per turn too**: its `Stop` hook fires once per turn and emits an
+  `llm_completion` pair under `<session>:turn:N` whose counts are the delta
+  between cumulative rollout snapshots; the `SessionEnd` rollup pair
+  (`activity_id <session>:usage:rollup`) ships only for a session that emitted
+  zero turns, so the same tokens are never counted twice. Both read a local
   file (CC's transcript, Codex's rollout JSONL), never the providers' OTel/Usage
   APIs, through an allowlist projection whose one egressing string is the model
   id ([INV-2](dev-event-contract.md#invariants)). `cost` is never **derived** here, the server derives it from a

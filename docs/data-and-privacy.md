@@ -577,6 +577,12 @@ specifically.
 
 Both are readable only by you.
 
+A third surface sits outside both, in the governed tool's own config: `openbox
+init --provider codex` writes an OpenBox-owned `[otel]` block into
+`$CODEX_HOME/config.toml` (default `~/.codex/`), pointing Codex's own exporter
+at the telemetry lane. Foreign content in that file is spliced around
+byte-for-byte, and `openbox uninstall` removes only the block it owns.
+
 | File | Where | What it holds |
 |---|---|---|
 | `.env` | `~/.openbox/` | **your credentials**, in plaintext, `0600`; see below |
@@ -584,6 +590,7 @@ Both are readable only by you.
 | `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, only on a machine that ran an older gateway install. Diagnostics; that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
 | `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` an older gateway install displaced, so retiring or removing it restores your org's own relay instead of deleting it. A URL, no credential |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
+| `telemetry-delivery-status.json`, `transport-delivery-status.json` | `~/.openbox/` | how many of that lane's own model-call records its in-process delivery pool has dropped, and since when; `openbox doctor` reads this for its dropped-record row. No content, no credentials |
 | `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
 | `claude-code-prior-settings.json` | `~/.openbox/` | `0600`. What Claude Code's `showThinkingSummaries` held before `init` forced it: whether the key was there at all, and its raw JSON value, so a removal puts back exactly those bytes rather than a boolean OpenBox reinterpreted. One key, no credential. It is a settings key rather than an environment key, which is why it is not in `activation.json` |
 | `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted. It has no more at-rest protection than `.env` does: anything running as you can read it. It is generated **unconstrained** (owner ruling 2026-09-22, reversing an earlier name-constraint bound), so with it a leaked key can mint a certificate for **any** site this machine is made to trust the CA for; containment is the per-provider intercept allowlist instead of the certificate — see [Architecture](architecture.md)'s decision record. A machine still holding an older, constrained CA keeps working: it tunnels rather than intercepts any host it cannot mint for, and `openbox doctor` names those hosts as a "legacy constrained CA" finding until the CA is re-issued (deleting both files and reinstalling; `openbox init` does not yet re-issue one automatically). `openbox uninstall` deletes it rather than leaving it behind a relay that is gone |
@@ -593,7 +600,7 @@ Both are readable only by you.
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories*; never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
-| `cc-spool/` | events awaiting flush. With content capture on (the default) these hold the same bodies the events carry; commands, file contents, tool output, decompressed provider responses, subagent prompts, notification and task text, compaction instructions and summaries, and elicitation prompts and answers; already secret-redacted, in plaintext files readable by you. Roughly **67 KB per model call**, drained continuously, so this is an empty queue unless delivery is failing |
+| `cc-spool/` | hook-derived events awaiting flush: session, prompt, tool-call and MCP-call bodies (commands, file contents, tool output, subagent prompts, notification and task text, compaction instructions and summaries, elicitation prompts and answers) with content capture on (the default); already secret-redacted, in plaintext files readable by you, drained continuously so this is an empty queue unless delivery is failing. The `telemetry` and `transport` daemons no longer spool their own model-call records here — each delivers in-process, one attempt per record, with no spool behind it (see [Architecture](architecture.md)'s lane-daemon delivery); a record that attempt cannot land is dropped and counted in `<lane>-delivery-status.json` above, never queued here. A machine still running the retired `gateway` lane is the one exception: it still spools its own model-call bodies (including decompressed provider responses) here, roughly 67 KB each |
 | `cc-spool/flusher.log` | what the delivery processes said. New, and it exists because they used to say nothing at all: a flusher that died before delivering was indistinguishable from one that was never started, which is why two missed flushes had to be diagnosed from file timestamps. Diagnostics only, capped, no bodies |
 | `cc-spool/.discarded` | one line per batch this machine gave up on: a timestamp, the session, and how many events were lost. Never the events themselves. It exists because the give-up was previously silent |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |

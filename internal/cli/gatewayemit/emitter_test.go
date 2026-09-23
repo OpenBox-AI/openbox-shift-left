@@ -1,59 +1,96 @@
 package gatewayemit
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
-func newTestEmitter(t *testing.T) (*Emitter, hookflow.Spool, *bytes.Buffer) {
+// fakeDelivery stands in for a lane daemon's bounded pool: it captures every
+// accepted event in memory, keyed by session, and can simulate a saturated
+// pool (Accept = false) the way the real pool's Submit returns false rather
+// than blocking.
+type fakeDelivery struct {
+	mu     sync.Mutex
+	events map[string][]client.DevEvent
+	Accept bool
+}
+
+func newFakeDelivery() *fakeDelivery {
+	return &fakeDelivery{events: map[string][]client.DevEvent{}, Accept: true}
+}
+
+func (f *fakeDelivery) Deliver(_ context.Context, ev client.DevEvent) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.Accept {
+		return false
+	}
+	f.events[ev.SessionID] = append(f.events[ev.SessionID], ev)
+	return true
+}
+
+func (f *fakeDelivery) forSession(sessionID string) []client.DevEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]client.DevEvent(nil), f.events[sessionID]...)
+}
+
+// any reports whether anything was accepted for any session, the in-memory
+// equivalent of the old "did the spool directory get any files" check.
+func (f *fakeDelivery) any() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, evs := range f.events {
+		if len(evs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionsWithEvents counts distinct sessions that received at least one
+// accepted event, the in-memory equivalent of counting spool session files
+// (one file per session, however many events are appended to it).
+func (f *fakeDelivery) sessionsWithEvents() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, evs := range f.events {
+		if len(evs) > 0 {
+			n++
+		}
+	}
+	return n
+}
+
+func newTestEmitter(t *testing.T) (*Emitter, *fakeDelivery, *bytes.Buffer) {
 	t.Helper()
-	dir := t.TempDir()
-	spool := hookflow.Spool{Dir: filepath.Join(dir, "cc-spool")}
+	delivery := newFakeDelivery()
 	var warnings bytes.Buffer
 	em := &Emitter{
-		Lane:  LaneGateway,
-		Spool: spool,
-		DID:   func() string { return testDID },
-		Warn:  func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
+		Lane:    LaneGateway,
+		Deliver: delivery.Deliver,
+		DID:     func() string { return testDID },
+		Warn:    func(format string, args ...any) { fmt.Fprintf(&warnings, format, args...) },
 		// Elected must be set explicitly, here and in production: a nil gate is a
 		// wiring defect rather than a setting, because an emitter that cannot tell
 		// whether it is this machine's producer must not guess in either direction.
 		Elected: func() bool { return true },
 	}
-	return em, spool, &warnings
+	return em, delivery, &warnings
 }
 
-func spooledEvents(t *testing.T, spool hookflow.Spool, sessionID string) []client.DevEvent {
-	t.Helper()
-	f, err := os.Open(spool.SessionPath(sessionID))
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	var out []client.DevEvent
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1<<20), 8<<20)
-	for sc.Scan() {
-		var ev client.DevEvent
-		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
-			t.Fatalf("spool line is not a DevEvent: %v", err)
-		}
-		out = append(out, ev)
-	}
-	return out
+func spooledEvents(_ *testing.T, delivery *fakeDelivery, sessionID string) []client.DevEvent {
+	return delivery.forSession(sessionID)
 }
 
 func capturedWithSession(session string) gateway.Captured {
@@ -91,6 +128,44 @@ func TestEmitSpoolsUnderTheSessionTheHeaderNames(t *testing.T) {
 	}
 }
 
+// TestFlushFiresOnceNotOncePerEvent pins the gateway.go regression: a
+// captured call's two halves (Started, Completed) must trigger the nudge
+// ONCE, after both are accepted, not once per event submitted to Deliver.
+func TestFlushFiresOnceNotOncePerEvent(t *testing.T) {
+	em, delivery, _ := newTestEmitter(t)
+	var flushes int
+	var lastSession string
+	em.Flush = func(sessionID string) { flushes++; lastSession = sessionID }
+
+	em.Emit(context.Background(), capturedWithSession("sess-flush-once"))
+
+	if len(delivery.forSession("sess-flush-once")) != 2 {
+		t.Fatalf("fixture drift: expected the pair delivered before checking Flush")
+	}
+	if flushes != 1 {
+		t.Errorf("Flush fired %d time(s) for one captured call carrying 2 events, want exactly 1", flushes)
+	}
+	if lastSession != "sess-flush-once" {
+		t.Errorf("Flush session = %q, want %q", lastSession, "sess-flush-once")
+	}
+}
+
+// TestFlushDoesNotFireWhenDeliveryIsAbandoned mirrors the old Spool-backed
+// behavior: a dropped Started must skip Completed AND the nudge, since
+// nothing later would exist for a flush to do anything useful with.
+func TestFlushDoesNotFireWhenDeliveryIsAbandoned(t *testing.T) {
+	em, delivery, _ := newTestEmitter(t)
+	delivery.Accept = false
+	var flushes int
+	em.Flush = func(sessionID string) { flushes++ }
+
+	em.Emit(context.Background(), capturedWithSession("sess-flush-abandoned"))
+
+	if flushes != 0 {
+		t.Errorf("Flush fired %d time(s) after every event was dropped, want 0", flushes)
+	}
+}
+
 // TestNoSessionHeaderEmitsNothingAndSaysSo is the honest-silence case, and the
 // warning is half the requirement. Inventing one files governance records that
 // claim a session they cannot join, which is the overstatement this product
@@ -101,8 +176,8 @@ func TestNoSessionHeaderEmitsNothingAndSaysSo(t *testing.T) {
 	c.RequestHeaders = map[string]string{"Anthropic-Version": "2023-06-01"} // no session header
 	em.Emit(context.Background(), c)
 
-	if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
-		t.Errorf("spooled %d files with no session id; a synthesized session joins to nothing", len(entries))
+	if spool.any() {
+		t.Error("delivered an event with no session id; a synthesized session joins to nothing")
 	}
 	got := warnings.String()
 	if got == "" {
@@ -127,12 +202,12 @@ func TestWarningIsEmittedOnce(t *testing.T) {
 	}
 }
 
-// TestEmitSurvivesAnUnwritableSpool is INV-3 at the relay boundary.
-func TestEmitSurvivesAnUnwritableSpool(t *testing.T) {
-	em, _, warnings := newTestEmitter(t)
-	if err := os.WriteFile(em.Spool.Dir, []byte("not a directory"), 0o600); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+// TestEmitSurvivesADeliverDrop is INV-3 at the relay boundary: a saturated
+// delivery pool's accepted risk of losing a record must never panic or
+// block the relay, only warn.
+func TestEmitSurvivesADeliverDrop(t *testing.T) {
+	em, delivery, warnings := newTestEmitter(t)
+	delivery.Accept = false
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("Emit panicked into the relay path: %v", r)
@@ -141,6 +216,9 @@ func TestEmitSurvivesAnUnwritableSpool(t *testing.T) {
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
 	if warnings.String() == "" {
 		t.Error("a dropped event left no trace at all")
+	}
+	if delivery.any() {
+		t.Error("delivery.Accept was false; nothing should have been recorded as accepted")
 	}
 }
 
@@ -290,8 +368,8 @@ func TestDIDIsResolvedLazilySoInitTakesEffectWithoutARestart(t *testing.T) {
 	em.DID = func() string { return did }
 
 	em.Emit(context.Background(), capturedWithSession("sess-1"))
-	if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
-		t.Fatal("spooled an event with no DID; nothing could have attributed it")
+	if spool.any() {
+		t.Fatal("delivered an event with no DID; nothing could have attributed it")
 	}
 	// `init --provider`, not `auth`: identity is per tool and auth no longer
 	// writes one, so the old remedy would send a reader somewhere that cannot
@@ -340,23 +418,22 @@ func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
 		"path separator":        "a/b",
 	} {
 		t.Run(name, func(t *testing.T) {
-			spool := hookflow.Spool{Dir: t.TempDir()}
+			delivery := newFakeDelivery()
 			var warned int
 			e := &Emitter{
-				Lane:  LaneGateway,
-				Spool: spool,
-				DID:   func() string { return "did:aip:x" },
-				Warn:  func(string, ...any) { warned++ },
-				Now:   func() time.Time { return time.Unix(0, 0).UTC() },
+				Lane:    LaneGateway,
+				Deliver: delivery.Deliver,
+				DID:     func() string { return "did:aip:x" },
+				Warn:    func(string, ...any) { warned++ },
+				Now:     func() time.Time { return time.Unix(0, 0).UTC() },
 			}
 			e.Emit(context.Background(), gateway.Captured{
 				HTTPMethod:     "POST",
 				RequestHeaders: map[string]string{sessionHeader: id},
 			})
 
-			files, _ := os.ReadDir(spool.Dir)
-			if len(files) != 0 {
-				t.Errorf("an unusable session id produced %d spool file(s): %v", len(files), files)
+			if delivery.any() {
+				t.Error("an unusable session id produced a delivered event")
 			}
 			if warned == 0 {
 				t.Error("the drop was silent; a governance gap nobody is told about is indistinguishable from a working gateway")
@@ -368,10 +445,10 @@ func TestUnusableSessionHeaderIsRefusedAndReported(t *testing.T) {
 // TestAUsableSessionHeaderStillSpools keeps the bound from becoming a blanket
 // refusal: a real Claude Code session id is a UUID and must pass.
 func TestAUsableSessionHeaderStillSpools(t *testing.T) {
-	spool := hookflow.Spool{Dir: t.TempDir()}
+	delivery := newFakeDelivery()
 	e := &Emitter{
 		Lane:    LaneGateway,
-		Spool:   spool,
+		Deliver: delivery.Deliver,
 		DID:     func() string { return "did:aip:x" },
 		Warn:    func(string, ...any) {},
 		Now:     func() time.Time { return time.Unix(0, 0).UTC() },
@@ -381,8 +458,7 @@ func TestAUsableSessionHeaderStillSpools(t *testing.T) {
 		HTTPMethod:     "POST",
 		RequestHeaders: map[string]string{sessionHeader: "3f1c9a6e-4b2d-4c8a-9e10-7d5b2a8c4f61"},
 	})
-	files, _ := os.ReadDir(spool.Dir)
-	if len(files) == 0 {
+	if !delivery.any() {
 		t.Error("a valid UUID session id was refused; the bound is too tight to be useful")
 	}
 }
@@ -404,8 +480,8 @@ func TestOnlyModelCallsWarnAboutAMissingSession(t *testing.T) {
 		if got := warnings.String(); got != "" {
 			t.Errorf("a health check produced a governance warning: %q", got)
 		}
-		if entries, _ := os.ReadDir(spool.Dir); len(entries) != 0 {
-			t.Error("a health check was spooled as a governance event")
+		if spool.any() {
+			t.Error("a health check was delivered as a governance event")
 		}
 	})
 

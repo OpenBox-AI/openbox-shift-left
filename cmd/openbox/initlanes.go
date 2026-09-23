@@ -15,16 +15,29 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
-// laneCapable reports whether a provider has model-call lanes at all. The
-// telemetry receiver and the transport relay observe the Anthropic Messages API
-// through Claude Code's own settings, so there is nothing for them to read on
-// any other provider.
-func laneCapable(name string) bool { return provider.Name(name) == provider.ClaudeCode }
+// laneCapable reports whether a provider has model-call lanes at all. Claude
+// Code gets both lanes (telemetry via its own settings, transport as an
+// in-path relay of the Anthropic Messages API); Codex gets the telemetry
+// lane only -- it reads its own config.toml, and its proxy arm is the system
+// PAC, which installs nothing here.
+func laneCapable(name string) bool {
+	switch provider.Name(name) {
+	case provider.ClaudeCode, provider.Codex:
+		return true
+	default:
+		return false
+	}
+}
 
 type laneRequest struct {
 	telemetry, transport         bool
 	telemetryAddr, transportAddr string
 	verbose                      bool
+	// provider selects which activation this request performs when telemetry
+	// installs: Claude Code writes settings.json env keys, Codex writes an
+	// owned config.toml [otel] block. "" defaults to Claude Code so an older
+	// caller (there is only one) is unaffected.
+	provider string
 }
 
 type laneReport struct {
@@ -202,7 +215,11 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 	report.addrs = map[string]string{}
 
 	if req.telemetry {
-		keys, err := a.setupTelemetry(home, req.telemetryAddr, req.verbose)
+		setup := a.setupTelemetry
+		if provider.Name(req.provider) == provider.Codex {
+			setup = a.setupCodexTelemetry
+		}
+		keys, err := setup(home, req.telemetryAddr, req.verbose)
 		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: telemetry setup did not complete: %v\n", err)
 			report.failed = append(report.failed, "telemetry")

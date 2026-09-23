@@ -448,6 +448,73 @@ func TestAttributionMetadataCapsAHostileQuerySource(t *testing.T) {
 	}
 }
 
+// TestToolNameDefaultsToClaudeCode pins the byte-identical fixture: a mapper
+// that never heard of WithToolName keeps shipping "claude-code" on both
+// halves.
+func TestToolNameDefaultsToClaudeCode(t *testing.T) {
+	m := elected()
+	for i, ev := range mustPair(t, m, apiRequest(nil)) {
+		if ev.Tool.Name != "claude-code" {
+			t.Errorf("half %d: Tool.Name = %q, want the default %q", i, ev.Tool.Name, "claude-code")
+		}
+	}
+}
+
+// TestWithToolNameStampsBothHalves: a pre-resolved per-provider mapper can
+// carry its own tool name, on both halves of the pair.
+func TestWithToolNameStampsBothHalves(t *testing.T) {
+	m := elected().WithToolName("codex")
+	for i, ev := range mustPair(t, m, apiRequest(nil)) {
+		if ev.Tool.Name != "codex" {
+			t.Errorf("half %d: Tool.Name = %q, want %q", i, ev.Tool.Name, "codex")
+		}
+	}
+}
+
+// TestSessionAttrDefaultsToSessionID pins the CC arm byte-identical: a mapper
+// that never heard of WithSessionAttr reads only session.id, exactly as
+// before this field existed -- a record carrying conversation.id instead
+// must still DROP, never silently key on the other attribute.
+func TestSessionAttrDefaultsToSessionID(t *testing.T) {
+	m := elected()
+	rec := apiRequest(map[string]string{"session.id": ""})
+	rec.Attrs["conversation.id"] = "conv-1"
+	if _, out := completedHalf(m.EventsFor(rec)); out != DropBadSession {
+		t.Fatalf("outcome = %v, want DropBadSession; the default mapper must not read conversation.id", out)
+	}
+}
+
+// TestWithSessionAttrKeysOnConversationID is Codex's minimal attributability:
+// a mapper opted into the conversation.id surface keys a turn on it when
+// session.id is the one CC would have used, but a Codex mapper is never
+// given that key. It emits, and Tool.Name still reflects WithToolName.
+func TestWithSessionAttrKeysOnConversationID(t *testing.T) {
+	m := elected().WithSessionAttr("conversation.id").WithToolName("codex")
+	rec := apiRequest(map[string]string{"session.id": ""})
+	rec.Attrs["conversation.id"] = "conv-1"
+	ev, out := completedHalf(m.EventsFor(rec))
+	if out != Emitted {
+		t.Fatalf("outcome = %v, want Emitted", out)
+	}
+	if ev.SessionID != "conv-1" {
+		t.Errorf("SessionID = %q, want the conversation.id value %q", ev.SessionID, "conv-1")
+	}
+	if ev.Tool.Name != "codex" {
+		t.Errorf("Tool.Name = %q, want %q", ev.Tool.Name, "codex")
+	}
+}
+
+// mustPair is EventsFor for a test that wants both halves and expects them to
+// be produced; it fails loudly rather than silently trimming to zero events.
+func mustPair(t *testing.T, m *Mapper, rec telemetry.Record) []client.DevEvent {
+	t.Helper()
+	events, out := m.EventsFor(rec)
+	if out != Emitted || len(events) != 2 {
+		t.Fatalf("EventsFor: outcome=%v events=%d, want Emitted and the pair", out, len(events))
+	}
+	return events
+}
+
 // completedHalf adapts the pair to a test that means "the event": the closing
 // half, which is the one carrying the usage and the duration.
 func completedHalf(events []client.DevEvent, outcome Outcome) (client.DevEvent, Outcome) {

@@ -10,6 +10,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
@@ -165,8 +166,22 @@ var uninstallLaneUnitFn = func(spec laneservice.Spec, goos, homeDir string) erro
 // setupTelemetry installs the local OTLP receiver and points the tool's own
 // telemetry at it.
 func (a *app) setupTelemetry(homeDir, addr string, verbose bool) (int, error) {
-	// The settings path goes INTO the unit: only the install path knows the real home.
-	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).WithEnv(a.laneUnitEnv())
+	// The settings path goes INTO the unit: only the install path knows the real
+	// home. Codex's config.toml path rides the same unit too: one receiver
+	// serves both tools, and a daemon has no $HOME to re-derive either surface
+	// from. Gated on an OWNED [otel] block actually existing: CodexConfigTOMLPath
+	// always resolves to a path (there is no "Codex has no home" case the way an
+	// absent file is), so passing it unconditionally baked --codex-settings, and
+	// telemetry.go's whole codexEmitter/codexElectedFn wiring, into every unit --
+	// including a pure Claude-Code-only machine that never touched Codex. This
+	// still updates on either install order: a later `init --provider codex`
+	// reinstalls the same shared unit through setupCodexTelemetry, which always
+	// carries its own settings.
+	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
+		WithEnv(a.laneUnitEnv())
+	if codexConfigPath := providers.CodexConfigTOMLPath(); providers.HasOwnedCodexOtel(codexConfigPath) {
+		spec = spec.WithCodexSettings(codexConfigPath)
+	}
 	binPath, err := a.selfPath()
 	if err != nil {
 		return 0, err
@@ -201,6 +216,42 @@ func (a *app) removeTelemetry(homeDir string, force bool) error {
 		uninstallUnit: func() error { return uninstallLaneUnitFn(spec, runtime.GOOS, homeDir) },
 		deactivate: func() error {
 			return a.reportDeactivation("telemetry", homeDir, settings, activation.LaneTelemetry, force)
+		},
+	})
+}
+
+// setupCodexTelemetry installs the SAME local OTLP receiver setupTelemetry
+// does (one receiver, two tools) and points Codex's own OTel exporter at it
+// by merging an owned [otel] block into config.toml -- never settings.json,
+// which is Claude Code's surface. Install ordering matches setupTelemetry
+// exactly, because it is the same setupLane: unit -> start -> prove
+// listening -> write the pointer, and any failure after WriteUnit removes
+// the unit.
+func (a *app) setupCodexTelemetry(homeDir, addr string, verbose bool) (int, error) {
+	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
+		WithCodexSettings(providers.CodexConfigTOMLPath()).
+		WithEnv(a.laneUnitEnv())
+	binPath, err := a.selfPath()
+	if err != nil {
+		return 0, err
+	}
+	configPath := providers.CodexConfigTOMLPath()
+	endpoint := "http://" + addr + "/v1/logs"
+
+	return a.setupLane(laneInstall{
+		label:         "telemetry",
+		addr:          addr,
+		homeDir:       homeDir,
+		laneIdentity:  identityOf(spec, homeDir),
+		installUnit:   func() error { return installLaneUnitFn(spec, runtime.GOOS, homeDir, binPath) },
+		uninstallUnit: func() error { return uninstallLaneUnitFn(spec, runtime.GOOS, homeDir) },
+		envNotSet: "the Codex telemetry pointer was NOT written, so Codex exports nothing and this " +
+			"lane records nothing for it; Claude Code's own lane is unaffected",
+		activate: func() (activated, error) {
+			if err := providers.WriteCodexOtel(configPath, endpoint); err != nil {
+				return activated{}, err
+			}
+			return activated{keys: 1}, nil
 		},
 	})
 }

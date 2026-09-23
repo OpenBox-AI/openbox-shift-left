@@ -77,11 +77,31 @@ const VerboseFlag = "--verbose"
 // a daemon cannot re-derive it: launchd gives it no HOME.
 const SettingsFlag = "--settings"
 
+// CodexSettingsFlag carries Codex's config.toml path into the unit, the
+// second settings surface the telemetry lane needs once it serves two tools
+// from one receiver. Empty is omitted, the same as SettingsFlag: a machine
+// with no Codex install yet carries none.
+const CodexSettingsFlag = "--codex-settings"
+
 func withSettings(args []Arg, settingsPath string) []Arg {
 	if settingsPath == "" {
 		return args
 	}
 	return append(args, Literal(SettingsFlag), Value(settingsPath))
+}
+
+// WithCodexSettings returns a copy of s whose Args carry Codex's config.toml
+// path, appended after whatever WithEnv/withVerbose already built. A caller
+// building a lane for a machine that has not configured Codex yet passes ""
+// and gets s back unchanged, matching SettingsFlag's own empty-is-omitted rule.
+func (s Spec) WithCodexSettings(configPath string) Spec {
+	if configPath == "" {
+		return s
+	}
+	args := make([]Arg, len(s.Args), len(s.Args)+2)
+	copy(args, s.Args)
+	s.Args = append(args, Literal(CodexSettingsFlag), Value(configPath))
+	return s
 }
 
 func withVerbose(args []Arg, verbose bool) []Arg {

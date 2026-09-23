@@ -271,6 +271,130 @@ func TestUninstallKeepsForeignHookEntries(t *testing.T) {
 	}
 }
 
+// TestUninstallRemovesAnOwnedCodexOtelBlock is the additive config.toml
+// surface: the sweep must remove an OpenBox-owned [otel] block and report
+// it, alongside the hook surfaces.
+func TestUninstallRemovesAnOwnedCodexOtelBlock(t *testing.T) {
+	skipUnlessSupervised(t)
+	m := newInstalledMachine(t)
+	configPath := providers.CodexConfigTOMLPath()
+	if err := providers.WriteCodexOtel(configPath, "http://127.0.0.1:4318/v1/logs"); err != nil {
+		t.Fatalf("seed WriteCodexOtel: %v", err)
+	}
+
+	a, out := m.app(t)
+	if code := a.runUninstall(nil); code != exitOK {
+		t.Fatalf("exit = %d:\n%s", code, out.String())
+	}
+	if providers.HasOwnedCodexOtel(configPath) {
+		t.Errorf("the owned [otel] block survived uninstall:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), configPath) {
+		t.Errorf("the report does not name the config.toml surface it swept:\n%s", out.String())
+	}
+}
+
+// TestUninstallLeavesAForeignCodexOtelBlockIntact mirrors
+// TestUninstallKeepsForeignHookEntries for the config.toml surface: a
+// developer's own OTel setup is not OpenBox's to delete.
+func TestUninstallLeavesAForeignCodexOtelBlockIntact(t *testing.T) {
+	skipUnlessSupervised(t)
+	m := newInstalledMachine(t)
+	configPath := providers.CodexConfigTOMLPath()
+	const foreign = "[otel]\nenvironment = \"my-own-otel-setup\"\n"
+	writeFile(t, configPath, foreign)
+
+	a, out := m.app(t)
+	if code := a.runUninstall(nil); code != exitOK {
+		t.Fatalf("exit = %d:\n%s", code, out.String())
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("a file holding a foreign [otel] block was deleted: %v", err)
+	}
+	if !strings.Contains(string(raw), "my-own-otel-setup") {
+		t.Errorf("config.toml lost its foreign [otel] block:\n%s", raw)
+	}
+}
+
+// TestUninstallSweepsAStaleDeliveryStatusFile is the completeness fix: a
+// lane daemon's persisted DeliverPool status (hookflow.StatusPersister) must
+// not survive uninstall, or a later `doctor` run reports a dropped-record
+// count for a lane that no longer exists on this machine.
+func TestUninstallSweepsAStaleDeliveryStatusFile(t *testing.T) {
+	skipUnlessSupervised(t)
+	m := newInstalledMachine(t)
+	openboxHome := filepath.Join(m.home, ".openbox")
+	statusPath := hookflow.DeliverStatusPath(openboxHome, "telemetry")
+	writeFile(t, statusPath, `{"dropped":3,"since":"2026-09-20T00:00:00Z"}`)
+
+	a, out := m.app(t)
+	if code := a.runUninstall(nil); code != exitOK {
+		t.Fatalf("exit = %d:\n%s", code, out.String())
+	}
+	if fileExists(statusPath) {
+		t.Errorf("a stale delivery-status file survived uninstall: %s", statusPath)
+	}
+}
+
+// TestUninstallOnACodexOnlyTelemetryMachineReportsNoUnrecordedLane is the
+// false-diagnostic fix: setupCodexTelemetry never calls activation.Activate
+// (Codex's [otel] ownership lives in config.toml's own parsed marker, so a
+// mixed CC+Codex machine's two telemetry installs never collide on one
+// activation-record key), so activation.ActiveLanes reports zero lanes on a
+// Codex-only machine even though the telemetry unit is genuinely, healthily
+// running. laneResidue must not read that as an interrupted removal.
+//
+// This goes through the REAL install path (a.run(["init", ...])), not a
+// hand-seeded fixture: newInstalledMachine's CC-activated fixture (used by
+// the config.toml sweep tests elsewhere in this file) already carries a
+// claude-code activation record, so inv.lanes is never empty there and this
+// bug cannot surface in that fixture.
+func TestUninstallOnACodexOnlyTelemetryMachineReportsNoUnrecordedLane(t *testing.T) {
+	skipUnlessSupervised(t)
+	isolateHome(t)
+	seedCredentials(t, "codex")
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"init", "--provider", "codex"}); code != exitOK {
+		t.Fatalf("codex init exit = %d; stderr=%q", code, errb.String())
+	}
+	t.Cleanup(func() {
+		cleanup, _, cleanupErr := testApp(nil)
+		if code := cleanup.run([]string{"uninstall"}); code != exitOK {
+			t.Logf("cleanup uninstall exit = %d; stderr=%q", code, cleanupErr.String())
+		}
+	})
+
+	// The same home runUninstall itself resolves (a.gatewayHome(), which is
+	// $HOME -- an OS-level convention for LaunchAgents/systemd user units --
+	// never devconfig.Home()/OPENBOX_HOME, which is a different directory in
+	// this fixture). Calling uninstallInventory with any other path would
+	// prove nothing about the real command.
+	home, code := a.gatewayHome()
+	if home == "" {
+		t.Fatalf("could not resolve $HOME: exit %d", code)
+	}
+	inv := a.uninstallInventory(home)
+	if !inv.codexOtelPresent {
+		t.Fatal("fixture drift: codex init did not write an owned [otel] block; the rest of this test proves nothing")
+	}
+	if len(inv.lanes) != 0 {
+		t.Fatalf("fixture drift: codex's telemetry install registered an activation-record lane (%v); "+
+			"setupCodexTelemetry is supposed to own its state entirely through config.toml's marker instead", inv.lanes)
+	}
+	if inv.unrecordedLane {
+		t.Error("a healthy Codex-only telemetry install must not report an unrecorded lane; " +
+			"the telemetry unit existing with no activation record is that install's normal, healthy shape")
+	}
+
+	out.Reset()
+	a.printInventory(inv)
+	if strings.Contains(out.String(), "with no activation record behind it") {
+		t.Errorf("the inventory report still claims interrupted-removal residue on a healthy machine:\n%s", out.String())
+	}
+}
+
 // TestUninstallDeletesCredentialsEvenOnPartialFailure is the owner's ruling,
 // and its condition: keeping .env alone preserves nothing retryable, because
 // the spool is deleted unconditionally. One rule, reported precisely.

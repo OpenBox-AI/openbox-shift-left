@@ -84,12 +84,61 @@ type Mapper struct {
 	// points Dir at a temp directory so it never touches the developer's real
 	// registry.
 	runStore obgit.RunStore
+	// toolName stamps Tool.Name on every event this mapper builds. "" ⇒
+	// "claude-code" (defaultToolName), so every caller before this field
+	// existed keeps shipping the same byte-identical fixture: an idempotency
+	// key must not move underneath an existing caller.
+	toolName string
+	// sessionAttr is the OTel attribute this mapper keys a turn's session
+	// identity on. "" ⇒ "session.id" (defaultSessionAttr), which is every
+	// existing caller's behavior -- Codex exports conversation.id instead, so
+	// a caller that WANTS that surface opts in with WithSessionAttr; the
+	// default path here is untouched.
+	sessionAttr string
 }
 
 // New builds a mapper for one developer identity. It takes no redactor,
 // deliberately.
 func New(did string, p Policy) *Mapper {
 	return &Mapper{did: did, policy: p}
+}
+
+// WithToolName overrides Tool.Name on every event this mapper builds; "" (the
+// zero value) keeps the default "claude-code". Returns the receiver so a
+// caller can chain it onto New(...).
+func (m *Mapper) WithToolName(name string) *Mapper {
+	m.toolName = name
+	return m
+}
+
+// WithSessionAttr overrides which OTel attribute this mapper reads a turn's
+// session identity from; "" keeps the default "session.id". Codex exports
+// conversation.id, not session.id -- a scoped, minimal attributability, not
+// a full session-key package.
+func (m *Mapper) WithSessionAttr(attr string) *Mapper {
+	m.sessionAttr = attr
+	return m
+}
+
+// defaultToolName is what an unset Mapper.toolName resolves to.
+const defaultToolName = "claude-code"
+
+func (m *Mapper) toolNameOrDefault() string {
+	if m.toolName == "" {
+		return defaultToolName
+	}
+	return m.toolName
+}
+
+// defaultSessionAttr is what an unset Mapper.sessionAttr resolves to -- the
+// attribute every mapper read before this field existed.
+const defaultSessionAttr = "session.id"
+
+func (m *Mapper) sessionAttrOrDefault() string {
+	if m.sessionAttr == "" {
+		return defaultSessionAttr
+	}
+	return m.sessionAttr
 }
 
 // EventsFor maps one record to the PAIR one model turn is -- BOTH halves, which is
@@ -112,7 +161,7 @@ const maxRequestIDLen = 128
 const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
 func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
-	session := rec.Attrs["session.id"]
+	session := rec.Attrs[m.sessionAttrOrDefault()]
 	if !safeSessionID(session) {
 		return nil, DropBadSession
 	}
@@ -153,7 +202,7 @@ func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 			RunGeneration: runGen,
 			Timestamp:     ts.Format(time.RFC3339Nano),
 			StartedAt:     start.Format(time.RFC3339Nano),
-			Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
+			Tool:          client.Tool{Name: m.toolNameOrDefault(), Kind: client.ToolShell},
 			ActivityType:  client.ActivityTypeLLMCompletion,
 			Model:         rec.Attrs["model"],
 			OtelRequestID: reqID,

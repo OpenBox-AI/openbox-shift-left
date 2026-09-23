@@ -8,14 +8,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
 
 // Emitter is the production caller the mapper was missing.
 type Emitter struct {
-	Spool  hookflow.Spool
 	Mapper *Mapper
+
+	// Deliver is how this emitter actually gets an event to core: the
+	// telemetry daemon hands it a bounded pool's Submit, in-process, never a
+	// spool write. Required; nil is a wiring
+	// defect, counted the same way a spool-write failure used to be. It
+	// returns false when the record was NOT accepted (a saturated pool),
+	// which stops the pair's loop: Completed is never sent after a dropped
+	// Started.
+	Deliver func(ctx context.Context, ev client.DevEvent) bool
 
 	// DID is a resolver, not a value. The hook path never had the problem because
 	// every hook is a fresh process.
@@ -23,7 +31,6 @@ type Emitter struct {
 
 	// Warn reports trouble.
 	Warn    func(format string, args ...any)
-	Flush   func(sessionID string)
 	Verbose func(format string, args ...any)
 
 	mu       sync.Mutex
@@ -41,7 +48,7 @@ var _ telemetry.Emitter = (*Emitter)(nil)
 
 // Emit maps one record and spools whatever it produced. It returns nil on
 // every path, deliberately.
-func (e *Emitter) Emit(_ context.Context, rec telemetry.Record) error {
+func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 	if e == nil {
 		return nil
 	}
@@ -60,23 +67,34 @@ func (e *Emitter) Emit(_ context.Context, rec telemetry.Record) error {
 		return nil
 	}
 
-	// Both halves in order, and the loop STOPS on a failure: appending Completed
-	// after Started failed files the single-sided activity this pairing eliminates.
-	appended := 0
+	if e.Deliver == nil {
+		e.record(dropSpoolFailed, rec)
+		e.warnThrottled("openbox telemetry: this emitter has no Deliver seam configured, so a model-call "+
+			"turn (%s) for activity %s cannot reach core. This is a wiring defect, not a setting.",
+			events[0].EventType, events[0].OtelRequestID)
+		return nil
+	}
+
+	// Order matters twice: Started must be SUBMITTED first, and the loop STOPS
+	// when a submission is refused (the pool is saturated), because submitting
+	// Completed after Started was dropped files the single-sided activity this
+	// pairing eliminates. Delivery itself happens off this goroutine; accepted
+	// here means queued for one attempt, not confirmed on the wire.
+	accepted := 0
 	for i := range events {
 		events[i].DeveloperDID = did
-		if err := e.Spool.Append(events[i]); err != nil {
+		if ok := e.Deliver(ctx, events[i]); !ok {
 			e.record(dropSpoolFailed, rec)
-			e.warnThrottled("openbox telemetry: cannot spool a model-call turn (%s) for activity %s: "+
-				"%v. %s", events[i].EventType, events[i].OtelRequestID, err, abandonNote(appended))
+			e.warnThrottled("openbox telemetry: dropped a model-call turn (%s) for activity %s: "+
+				"the delivery pool is saturated. %s", events[i].EventType, events[i].OtelRequestID, abandonNote(accepted))
 			break
 		}
-		appended++
+		accepted++
 		e.mu.Lock()
 		e.emitted++
 		e.mu.Unlock()
 	}
-	if appended < len(events) {
+	if accepted < len(events) {
 		return nil
 	}
 
@@ -84,15 +102,12 @@ func (e *Emitter) Emit(_ context.Context, rec telemetry.Record) error {
 		e.Verbose("  telemetry: recorded %s turn %s as %d event(s)",
 			rec.EventName, events[0].OtelRequestID, len(events))
 	}
-	if e.Flush != nil {
-		e.Flush(events[0].SessionID)
-	}
 	return nil
 }
 
 const (
 	dropNoDID       = Outcome(-1)
-	dropSpoolFailed = Outcome(-2)
+	dropSpoolFailed = Outcome(-2) // name kept for the counter key's stability; means "delivery refused"
 )
 
 func reasonName(o Outcome) string {
@@ -100,7 +115,7 @@ func reasonName(o Outcome) string {
 	case dropNoDID:
 		return "no-developer-did"
 	case dropSpoolFailed:
-		return "spool-write-failed"
+		return "delivery-refused"
 	}
 	return o.String()
 }

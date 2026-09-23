@@ -141,7 +141,7 @@ func TestTransportRelaysARecordedExchangeByteIdentically(t *testing.T) {
 	em := &gatewayemit.Emitter{
 		Elected: func() bool { return true },
 		Lane:    gatewayemit.LaneProxy,
-		Spool:   hookflow.Spool{Dir: spoolDir},
+		Deliver: testSpoolDeliver(spoolDir),
 		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn:    warn.record,
 	}
@@ -262,7 +262,7 @@ func TestTransportStreamsARecordedSSEResponsePerChunk(t *testing.T) {
 	em := &gatewayemit.Emitter{
 		Elected: func() bool { return true },
 		Lane:    gatewayemit.LaneProxy,
-		Spool:   hookflow.Spool{Dir: t.TempDir()},
+		Deliver: testSpoolDeliver(t.TempDir()),
 		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn:    func(string, ...any) {},
 	}
@@ -382,7 +382,7 @@ func TestTransportAddsNoCompressionHeaderOfItsOwn(t *testing.T) {
 	em := &gatewayemit.Emitter{
 		Elected: func() bool { return true },
 		Lane:    gatewayemit.LaneProxy,
-		Spool:   hookflow.Spool{Dir: spoolDir},
+		Deliver: testSpoolDeliver(spoolDir),
 		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
 		Warn:    func(string, ...any) {},
 	}

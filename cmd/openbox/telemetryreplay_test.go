@@ -6,12 +6,48 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
+
+// deliveredEvents stands in for a lane daemon's bounded delivery pool: it
+// captures every accepted event in memory instead of a spool file, so the
+// replay fixtures below can assert on the same JSON-decoded shape a spool
+// line used to produce.
+type deliveredEvents struct {
+	mu   sync.Mutex
+	evts []client.DevEvent
+}
+
+func (d *deliveredEvents) Deliver(_ context.Context, ev client.DevEvent) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.evts = append(d.evts, ev)
+	return true
+}
+
+func (d *deliveredEvents) asMaps(t *testing.T) []map[string]any {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]map[string]any, 0, len(d.evts))
+	for _, ev := range d.evts {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatalf("marshal delivered event: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("unmarshal delivered event: %v", err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
 
 // Telemetryreplay_test.go; the recorded-traffic replay for the :otel: lane.
 // TestTelemetryCommandActuallyRecords next door is the socket control: it
@@ -30,14 +66,14 @@ func replayCorpus(t *testing.T) []byte {
 
 func replayThroughChain(t *testing.T, elected bool) ([]map[string]any, int, map[string]int) {
 	t.Helper()
-	spoolDir := t.TempDir()
+	delivered := &deliveredEvents{}
 
 	em := &telemetryemit.Emitter{
-		Spool: hookflow.Spool{Dir: spoolDir},
 		Mapper: telemetryemit.New("did:aip:7f3c9b2e-0000-5000-a000-00000000feed",
 			telemetryemit.Policy{Elected: func() bool { return elected }}),
-		DID:  func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
-		Warn: func(string, ...any) {},
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    func(string, ...any) {},
+		Deliver: delivered.Deliver,
 	}
 
 	rec, err := telemetry.New(telemetry.Config{Addr: "127.0.0.1:0"}, telemetry.WithEmitter(em))
@@ -49,35 +85,7 @@ func replayThroughChain(t *testing.T, elected bool) ([]map[string]any, int, map[
 	}
 
 	emitted, drops := em.Stats()
-	return readAllSpooled(t, spoolDir), emitted, drops
-}
-
-func readAllSpooled(t *testing.T, spoolDir string) []map[string]any {
-	t.Helper()
-	var out []map[string]any
-	err := filepath.WalkDir(spoolDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-			if line == "" {
-				continue
-			}
-			var ev map[string]any
-			if json.Unmarshal([]byte(line), &ev) == nil {
-				out = append(out, ev)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walking the spool: %v", err)
-	}
-	return out
+	return delivered.asMaps(t), emitted, drops
 }
 
 // TestTelemetryReplayMapsRecordedTrafficToTurns is the positive half.

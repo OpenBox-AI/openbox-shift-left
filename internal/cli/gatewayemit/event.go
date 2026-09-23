@@ -75,6 +75,24 @@ type Identity struct {
 	// existing caller/test builds one) still produces a byte-identical event.
 	RunID         string
 	RunGeneration int
+
+	// ToolName stamps Tool.Name on both halves this identity builds. "" ⇒
+	// "claude-code", so every existing caller and shipped fixture is
+	// byte-identical (INV-9): only a caller that sets this explicitly (a
+	// per-provider pre-resolved identity) ever sees a different value on the
+	// wire.
+	ToolName string
+}
+
+// defaultToolName is what an unset Identity.ToolName resolves to -- the value
+// every caller before this field existed always sent.
+const defaultToolName = "claude-code"
+
+func (id Identity) toolName() string {
+	if id.ToolName == "" {
+		return defaultToolName
+	}
+	return id.ToolName
 }
 
 // EventsFor builds one relayed call's two events from one call site, so there is
@@ -125,7 +143,7 @@ func EventsFor(lane Lane, id Identity, requestID string, at time.Time, c gateway
 			AgentID:       id.AgentID,
 			RunID:         id.RunID,
 			RunGeneration: id.RunGeneration,
-			Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
+			Tool:          client.Tool{Name: id.toolName(), Kind: client.ToolShell},
 			ActivityType:  class.ActivityType(),
 			Timestamp:     ts.Format(time.RFC3339Nano),
 			StartedAt:     started.Format(time.RFC3339Nano),

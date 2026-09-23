@@ -3,6 +3,7 @@ package hookflow
 import (
 	"context"
 	"errors"
+	"log"
 	"path/filepath"
 	"time"
 
@@ -255,10 +256,24 @@ func (e *Engine) Retire(ctx context.Context) (int, error) {
 // blocking.
 func (e *Engine) emitFunc(em Emitter) FlushFunc {
 	return func(ctx context.Context, ev client.DevEvent) error {
-		eval, err := em.Emit(ctx, ev)
-		// On success, a real verdict is recorded. Either way this cannot block the
-		// tool call.
-		e.Advisory.Record(ev, eval)
+		_, err := Deliver(ctx, em, e.Advisory, ev, nil)
 		return err
 	}
+}
+
+// Deliver is the one delivery body every path in this repo uses to get an
+// event to core and record its verdict: client.Emit, then Advisory.Record.
+// The hook flusher calls it through emitFunc above; the two in-process lane
+// daemons (telemetry.go, transport.go) call it directly from a bounded pool,
+// never the request goroutine. advisory may be nil (still delivers, records
+// nothing). logger is currently unused by this body; callers already pass
+// their own (or nil) ahead of a later caller that needs it for diagnostics.
+func Deliver(ctx context.Context, em Emitter, advisory *Advisory, ev client.DevEvent, logger *log.Logger) (client.Evaluation, error) {
+	eval, err := em.Emit(ctx, ev)
+	// On success, a real verdict is recorded. Either way this cannot block the
+	// tool call.
+	if advisory != nil {
+		advisory.Record(ev, eval)
+	}
+	return eval, err
 }

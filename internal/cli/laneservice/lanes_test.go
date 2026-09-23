@@ -298,3 +298,47 @@ func TestALaneUnitOmitsTheFlagWhenThereIsNoPath(t *testing.T) {
 		}
 	}
 }
+
+// TestTelemetryUnitCarriesCodexSettingsWhenAdded: the telemetry lane serves
+// two tools from one receiver, so its unit must carry BOTH settings surfaces
+// once both are configured -- a daemon has no $HOME to re-derive either
+// from.
+func TestTelemetryUnitCarriesCodexSettingsWhenAdded(t *testing.T) {
+	const ccSettings = "/Users/dev/.claude/settings.json"
+	const codexSettings = "/Users/dev/.codex/config.toml"
+	spec := Telemetry("127.0.0.1:4318", ccSettings, false).WithCodexSettings(codexSettings)
+	argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+	if !strings.Contains(argv, SettingsFlag+" "+ccSettings) {
+		t.Errorf("argv lost the Claude Code settings path: %s", argv)
+	}
+	if !strings.Contains(argv, CodexSettingsFlag+" "+codexSettings) {
+		t.Errorf("argv does not carry %s: %s", CodexSettingsFlag, argv)
+	}
+}
+
+// TestWithCodexSettingsOmitsTheFlagWhenThereIsNoPath mirrors
+// TestALaneUnitOmitsTheFlagWhenThereIsNoPath: a machine with no Codex install
+// yet must not carry a blank --codex-settings.
+func TestWithCodexSettingsOmitsTheFlagWhenThereIsNoPath(t *testing.T) {
+	spec := Telemetry("127.0.0.1:4318", "", false).WithCodexSettings("")
+	argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+	if strings.Contains(argv, CodexSettingsFlag) {
+		t.Errorf("argv carries an empty %s: %s", CodexSettingsFlag, argv)
+	}
+}
+
+// TestWithCodexSettingsDoesNotAliasItsCallersArgs mirrors WithEnv's own
+// non-aliasing guard: one installer builds a base Spec once and calls
+// WithCodexSettings on it per machine state, and a shared backing array would
+// let a later call's append corrupt an earlier one's rendered Args.
+func TestWithCodexSettingsDoesNotAliasItsCallersArgs(t *testing.T) {
+	base := Telemetry("127.0.0.1:4318", "/a/settings.json", false)
+	baseLen := len(base.Args)
+	withCodex := base.WithCodexSettings("/a/config.toml")
+	if len(base.Args) != baseLen {
+		t.Fatalf("WithCodexSettings mutated the receiver's Args length: %d -> %d", baseLen, len(base.Args))
+	}
+	if len(withCodex.Args) == baseLen {
+		t.Fatal("WithCodexSettings did not add anything")
+	}
+}

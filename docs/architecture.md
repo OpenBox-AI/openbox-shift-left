@@ -49,10 +49,10 @@ those gates simply opened.
 The one thing that stays local is **secret redaction**: it must run before
 content leaves the machine, and it sees the whole body where the server sees at
 most the first 64KB.
-- **Telemetry is spooled and flushed off the hot path.** A slow or absent
-  OpenBox cannot slow a tool call or block one; undelivered events are retried,
-  not dropped. Delivery is near-real-time by default: after an event is spooled,
-  the hook nudges a detached, debounced flusher for its session
+- **Hook-derived telemetry is spooled and flushed off the hot path.** A slow or
+  absent OpenBox cannot slow a tool call or block one; undelivered events are
+  retried, not dropped. Delivery is near-real-time by default: after an event is
+  spooled, the hook nudges a detached, debounced flusher for its session
   (`hookflow.RealtimeTrigger`, ~2s window), so events are queryable in core
   while the session is still running. The hook process itself still performs
   zero network I/O; its worst case is one lockfile check plus, at most once per
@@ -60,6 +60,23 @@ most the first 64KB.
   safety net, and `realtime_flush:false` / `OPENBOX_REALTIME=0` restores
   batch-at-session-end. Overlapping drains cannot double-count: spool rotation
   is an atomic rename and core deduplicates on each event's Idempotency-Key.
+  The legacy `gateway` lane (superseded by `transport`; still running on any
+  machine that installed it before) keeps this same spool-and-flush shape for
+  its own records unchanged.
+- **A lane daemon's own records are not spooled, and can be lost.** The
+  `telemetry` (OTLP receiver) and `transport` (relay) daemons send each of
+  their own model-call records in-process, through a bounded pool
+  (`hookflow.DeliverPool`: 8 concurrent, a 10s per-emit timeout) rather than a
+  spool and a flusher. One attempt per record: a saturated pool drops it, and a
+  shutdown drain abandons whatever delivery is still in flight past its own
+  deadline; either way the drop is counted, never retried. A core outage, a
+  5xx, a timeout, or a 401 therefore loses that record by design (owner ruling
+  2026-09-22) instead of queuing it for later delivery. Both daemons still run
+  the hooks-spool `Sweeper` for hook-derived events (unrelated to their own
+  records) as before. Each daemon persists its drop count to a small status
+  file (`hookflow.DeliverStatus`) so `openbox doctor` -- a separate process
+  with no channel into a running daemon's memory -- can print a dropped-record
+  row per lane.
 
 ## Layout
 

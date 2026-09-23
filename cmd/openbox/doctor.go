@@ -516,6 +516,107 @@ func (a *app) reportLanes() {
 		}
 		a.row("log", "%s", laneLogPath(lane.spec, home))
 	}
+
+	// Additive: Codex's election reads config.toml, a different native
+	// surface than the settings.json loop above, so it cannot be folded into
+	// that loop's iteration without running Codex's answer through the CC
+	// reader. Appended rather than interleaved so a Claude-Code-only machine's
+	// lane section stays byte-identical to before this existed.
+	a.reportCodexLane()
+	a.reportCodexProxy()
+	a.reportDeliveryDrops()
+}
+
+// reportDeliveryDrops discloses each lane daemon's own DeliverPool.Dropped()
+// count: a record it could not accept (saturation) or could not finish
+// delivering before a shutdown drain gave up on it, under the accepted
+// one-attempt-per-record risk of sending in-process with no spool behind
+// these two lanes. `doctor` runs as a separate process with no channel into
+// a running daemon's memory, so this reads a small status file the daemon
+// itself persists (hookflow.StatusPersister) -- no IPC, no port. Renders
+// nothing for a lane whose status file is absent, which is what keeps a
+// machine that has never run these daemons (or a binary from before this
+// existed) unaffected.
+func (a *app) reportDeliveryDrops() {
+	openboxHome, err := devconfig.Home()
+	if err != nil {
+		return
+	}
+	var printed bool
+	for _, lane := range []string{"telemetry", "transport"} {
+		status, ok := readDeliveryStatus(openboxHome, lane)
+		if !ok {
+			continue
+		}
+		if !printed {
+			fmt.Fprintf(a.stdout, "\nDelivery (each lane daemon's own in-process send; one attempt per record, by design)\n")
+			printed = true
+		}
+		a.row(lane, "dropped %d record(s) since %s", status.Dropped, status.Since.Local().Format(time.RFC3339))
+	}
+}
+
+// readDeliveryStatus reads one lane's persisted DeliverPool status. A
+// missing or unreadable file reads as "nothing to report" (ok=false): a
+// doctor row that is simply absent is the right shape for a status file that
+// was never written or could not be parsed, never an error -- this is a
+// diagnostic surface, never load-bearing for governance.
+func readDeliveryStatus(openboxHome, lane string) (hookflow.DeliverStatus, bool) {
+	raw, err := os.ReadFile(hookflow.DeliverStatusPath(openboxHome, lane))
+	if err != nil {
+		return hookflow.DeliverStatus{}, false
+	}
+	var status hookflow.DeliverStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return hookflow.DeliverStatus{}, false
+	}
+	return status, true
+}
+
+// reportCodexLane is Codex's telemetry election, reported separately from
+// the settings.json-keyed loop above because it reads a different native
+// surface (config.toml). Renders nothing on a machine that has never run
+// `openbox init --provider codex`'s telemetry step, which is what keeps a
+// Claude-Code-only machine's `doctor` output unchanged.
+func (a *app) reportCodexLane() {
+	configPath := providers.CodexConfigTOMLPath()
+	if !providers.HasOwnedCodexOtel(configPath) {
+		return
+	}
+	election := activation.ResolveCodexElection(configPath)
+	fmt.Fprintf(a.stdout, "\nCodex telemetry lane (config.toml, not settings.json)\n")
+	switch {
+	case election.SettingsProblem != "":
+		a.row("elected", "CANNOT BE DECIDED; %s", election.SettingsProblem)
+	case election.Elected == "":
+		a.row("elected", "(none); %s", election.Reason)
+	default:
+		a.row("elected", "%s; %s", election.Elected, election.Reason)
+	}
+	listening, _ := portOccupied(telemetry.DefaultAddr)
+	if listening {
+		a.row("reachable", "yes (%s)", telemetry.DefaultAddr)
+		return
+	}
+	a.row("reachable", "NO; nothing is listening on %s", telemetry.DefaultAddr)
+	if election.Elected == activation.LaneTelemetry {
+		a.row("WARNING", "this lane is ELECTED but nothing is listening, so Codex's model-call turns are not being recorded")
+	}
+}
+
+// reportCodexProxy: the Codex CLI/Desktop proxy arm is assumed to follow the
+// system PAC, unverified by this repo's own probes. Nothing is
+// installed for it (no env write, no shell-profile write); this line exists
+// so `openbox doctor` states the gap rather than implying transport parity
+// with Claude Code.
+func (a *app) reportCodexProxy() {
+	if !providers.HasOwnedCodexOtel(providers.CodexConfigTOMLPath()) {
+		return
+	}
+	fmt.Fprintf(a.stdout, "\nCodex proxy/transport lane\n")
+	a.row("status", "UNVERIFIED; assumed routed by the system PAC, not this repo's in-path relay")
+	a.row("", "No env key, no shell-profile write and no in-path relay are installed for")
+	a.row("", "Codex's transport arm. Only the telemetry lane above is built.")
 }
 
 // legacyTunnelledHosts names the host-table entries a legacy constrained CA
@@ -590,16 +691,16 @@ func (a *app) reportSpool() {
 	a.reportCodexSpool(spool.Dir)
 }
 
-// reportCodexSpool is the additive half of the spool section (R4/R5): a
-// Codex-only machine spools to "codex-spool", never "cc-spool", so the block
-// above -- reading only the cc-spool directory -- reports a healthy empty
-// queue while a real backlog waits in a directory it never looked at. It
-// renders nothing, not even a directory row, when Codex's resolved spool path
+// reportCodexSpool is the additive half of the spool section: a Codex-only
+// machine spools to "codex-spool", never "cc-spool", so the block above --
+// reading only the cc-spool directory -- reports a healthy empty queue while
+// a real backlog waits in a directory it never looked at. It renders
+// nothing, not even a directory row, when Codex's resolved spool path
 // matches ccDir (OPENBOX_SPOOL_DIR overrides the whole path for every
 // provider, so both resolve to the same directory; comparing resolved paths
 // keeps that machine from double-counting its own backlog) or when Codex's
 // spool has nothing waiting or discarded -- so a Claude-Code-only machine's
-// output is byte-identical to before this existed (R5).
+// output stays byte-identical to before this existed.
 func (a *app) reportCodexSpool(ccDir string) {
 	codexSpool := hookflow.Spool{Dir: providers.CodexSpoolDir()}
 	if filepath.Clean(codexSpool.Dir) == filepath.Clean(ccDir) {
@@ -770,7 +871,7 @@ func (a *app) reportHookRegistration() {
 // codexHooksPresent reports whether the Codex hooks file carries an OpenBox
 // registration, and where it lives, so reportHookRegistration's "nothing is
 // governed" branch can name Codex instead of assuming Claude Code is the only
-// tool a machine can be governed by (R4). Built on the same path providers
+// tool a machine can be governed by. Built on the same path providers
 // already exposes (CodexHooksPath) and the same ownership parse uninstall
 // already uses (carriesHookRegistration), so a renamed marker or a moved
 // hooks file cannot drift between the two call sites.

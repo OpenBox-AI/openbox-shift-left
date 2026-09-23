@@ -183,6 +183,25 @@ func OwnedSpoolDirs() []string {
 	return dirs
 }
 
+// CodexConfigTOMLPath is where the Codex adapter writes its owned [otel]
+// block, so `openbox init`/`doctor`/`uninstall` can look where an install
+// wrote (or would write) it without importing the adapter.
+func CodexConfigTOMLPath() string { return codex.ConfigTOMLPath() }
+
+// WriteCodexOtel merges an OpenBox-owned [otel] block into Codex's
+// config.toml, pointing its OTLP/HTTP exporter at endpoint. Ownership-aware:
+// refuses rather than overwrites a foreign [otel] block.
+func WriteCodexOtel(path, endpoint string) error { return codex.WriteOtel(path, endpoint) }
+
+// RemoveCodexOtel removes only an OpenBox-owned [otel] block from Codex's
+// config.toml, reporting whether it actually removed anything. A foreign
+// block (or none at all) is left untouched.
+func RemoveCodexOtel(path string) (bool, error) { return codex.RemoveOtel(path) }
+
+// HasOwnedCodexOtel reports whether config.toml carries an OpenBox-owned
+// [otel] block, for doctor/uninstall's inventory to check without writing.
+func HasOwnedCodexOtel(path string) bool { return codex.HasOwnedOtel(path) }
+
 // ClaudePluginDir is where the Claude Code adapter materializes its plugin
 // bundle, so an uninstall can delete it without importing the adapter.
 func ClaudePluginDir() string { return claudecode.DefaultPluginDir() }
