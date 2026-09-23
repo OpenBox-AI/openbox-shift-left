@@ -112,6 +112,28 @@ finds one set.
 
 Secrets and non-secrets never share a file, and no value lives in two places.
 
+## The transport lane's CA key is a credential too
+
+`~/.openbox/transport-ca.pem` and `transport-ca.key` exist on any machine whose
+install brought the transport lane up (see [Data and privacy](data-and-privacy.md)
+for the file table). The key gets no more at-rest protection than `.env` does:
+`0600` on macOS and Linux, nothing on Windows, readable by anything running as
+you — the same boundary this document draws everywhere else, restated because a
+signing key most readers would not think to call a "credential" is one here.
+
+The CA is generated **unconstrained** (owner ruling 2026-09-22, reversing an
+earlier name-constraint bound): what the key can do with that access is not
+bounded by the certificate at all, only by the per-provider intercept
+allowlist the relay enforces on top of it (see
+[Architecture](architecture.md)'s decision record). A leaked key can mint a
+certificate for **any** site this machine is made to trust the CA for, not
+only an intercepted one. A machine still holding an older, constrained CA is
+narrower by accident rather than by design: `openbox doctor` names it a
+"legacy constrained CA" finding, and clearing it today means deleting both CA
+files and letting the next `openbox init` generate a fresh one — `init` does
+not yet re-issue one for you. No document should imply this key is protected
+from a process running as you, on either shape of CA.
+
 ## Secret detection stays local
 
 In enforce mode, a `Write`/`Edit` body is scanned locally for credential

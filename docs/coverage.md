@@ -51,9 +51,11 @@ the gate and the caps; it proves nothing about bind, listen, TLS to a real
 socket, the OTLP HTTP intake, or what core stores. Those live only in the
 live stack these lanes have never been run against.
 
-- **`:proxy:` (transport)**; a CONNECT to the allowlisted host is TLS-terminated
-  with a project CA and served by the existing gateway relay, and the evidence
-  reaches the spool. **A recorded model call now crosses that path
+- **`:proxy:` (transport)**; a CONNECT to a host in the installed providers'
+  host-table union is TLS-terminated with a project CA and served by the
+  existing gateway relay, and the evidence reaches the spool. The CA itself is
+  generated unconstrained (owner ruling 2026-09-22); the allowlist is the
+  containment — see [Architecture](architecture.md)'s decision record. **A recorded model call now crosses that path
   byte-identically in both directions, and a recorded 60-frame SSE response
   streams through it per chunk** (phase 13); retiring phase 11's "no response
   body has ever traversed this lane". One limit stands where it did: refusal is
@@ -216,10 +218,18 @@ table is what each *lane* sees of a single model call. It is deliberately not
 averaged into a "model calls are governed" sentence: the three lanes differ in
 what they carry, in who can suppress them, and in how strongly each is verified.
 
-All three are **Claude Code only**; `init` installs no lane for any other
-provider and prints why rather than erroring (`laneCapable`,
-`cmd/openbox/initlanes.go`), the transport allowlist holds one host
-(`api.anthropic.com`), and the telemetry keys are `CLAUDE_CODE_*`.
+The `:gateway:` and `:proxy:` (transport) lanes are **Claude Code only**;
+`init` installs neither for any other provider and prints why rather than
+erroring (`laneCapable`, `cmd/openbox/initlanes.go`). The transport allowlist
+is a per-provider host table's union — installing only `claude-code` covers
+`api.anthropic.com` plus `claude.ai` and its subdomains, not one host —
+feeding both the allowlist and a `GET /proxy.pac` endpoint the relay now
+serves; the CA is unconstrained (owner ruling 2026-09-22). A machine still
+holding an older, constrained CA keeps working — it tunnels rather than
+intercepts any host it cannot mint for, and `openbox doctor` names those hosts
+as a "legacy constrained CA" finding until it is re-issued, which `init` does
+not yet do automatically. See [Architecture](architecture.md)'s decision
+record. The telemetry keys are `CLAUDE_CODE_*`.
 
 **Codex: surveyed 2026-09-17, and the mechanism exists — but no lane is built.**
 That sentence used to read "no probe has been run", and it is no longer true, so

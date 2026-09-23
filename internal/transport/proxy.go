@@ -83,6 +83,7 @@ func New(cfg Config, ca *CA, emitter gateway.Emitter, opts ...Option) (*Proxy, e
 	}
 	p.handlerFor = p.newRelay
 	p.engine.OnRequest().HandleConnectFunc(p.onConnect)
+	p.engine.NonproxyHandler = pacHandler(cfg.Addr, cfg.Providers)
 	return p.Apply(opts...), nil
 }
 
@@ -128,7 +129,16 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.engine.ServeHTTP(w, r)
 }
 
-func (p *Proxy) intercepts(host string) bool { return p.cfg.Allowlist.Allows(host) }
+// intercepts also gates on the CA: a machine still holding a legacy
+// constrained CA (CanIssueFor) must not attempt a handshake for a host
+// outside that constraint even though the allowlist now names it -- that
+// host stays blind-tunnelled, exactly as it was before the table widened,
+// until `openbox init` reissues the CA. Without this gate, mintLeaf would
+// fail mid-handshake and close the connection in a way that looks like the
+// provider being down instead.
+func (p *Proxy) intercepts(host string) bool {
+	return p.cfg.Allowlist.Allows(host) && p.ca.CanIssueFor(host)
+}
 
 // onConnect everything else is accepted, which in goproxy means a blind
 // tunnel: bytes copied both ways, never decrypted, never inspected, never

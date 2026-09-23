@@ -118,15 +118,18 @@ func createCA(dir, certPath, keyPath string) (*CA, error) {
 			Organization: []string{"OpenBox"},
 			CommonName:   "OpenBox Transport CA (local)",
 		},
-		NotBefore:                   now.Add(-time.Hour),
-		NotAfter:                    now.Add(caLifetime - time.Hour),
-		IsCA:                        true,
-		BasicConstraintsValid:       true,
-		MaxPathLen:                  0,
-		MaxPathLenZero:              true,
-		KeyUsage:                    x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
-		PermittedDNSDomains:         constrainedDomains(),
-		PermittedDNSDomainsCritical: true,
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(caLifetime - time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		MaxPathLen:            0,
+		MaxPathLenZero:        true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		// No PermittedDNSDomains: the CA is unconstrained (owner ruling
+		// 2026-09-22, reversing the earlier name-constraint bound). It may sign
+		// a leaf for any host; the allowlist, not the CA, is what a widening
+		// provider union or a leaked key is contained by. See CANeedsReissue for
+		// the one-time migration a CA minted before this ruling still needs.
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -156,8 +159,45 @@ func createCA(dir, certPath, keyPath string) (*CA, error) {
 	return &CA{cert: cert, key: key, pem: certPEM, leaves: map[string]*tls.Config{}}, nil
 }
 
-// constrainedDomains is what a generated CA may ever sign for.
-func constrainedDomains() []string { return []string{DefaultInterceptHost} }
+// CANeedsReissue reports whether ca was minted before the 2026-09-22 owner
+// ruling that removed the name constraint: a machine holding one of those
+// still carries PermittedDNSDomains, and every host outside it stays
+// blind-tunnelled rather than intercepted (Proxy.intercepts guards on
+// CanIssueFor for exactly this reason) until the CA is reissued.
+// LoadOrCreateCA does not auto-reissue -- swapping a running relay's CA
+// mid-flight breaks in-flight handshakes and silently invalidates the
+// client's trusted copy -- so the caller (doctor, and a later `init` run)
+// decides when to act on this.
+func CANeedsReissue(ca *CA) bool {
+	return ca != nil && ca.cert != nil && len(ca.cert.PermittedDNSDomains) > 0
+}
+
+// CanIssueFor reports whether ca can mint a usable leaf for host: always true
+// for an unconstrained CA (the shape every CA has had since the 2026-09-22
+// owner ruling), and for a legacy CA still carrying PermittedDNSDomains, true
+// only when host equals or is a label-boundary subdomain of one of them --
+// the same boundary rule Allowlist.Allows uses, so a legacy CA constrained to
+// "api.anthropic.com" does not also claim "evilapi.anthropic.com.evil.test".
+// This is what keeps a machine holding today's CA from ever attempting a
+// handshake for a host outside its constraint: Proxy.intercepts gates on it
+// so that host stays blind-tunnelled -- exactly today's behaviour -- instead
+// of hitting a mintLeaf failure that closes the connection and looks like the
+// provider being down.
+func (c *CA) CanIssueFor(host string) bool {
+	if c == nil || c.cert == nil || len(c.cert.PermittedDNSDomains) == 0 {
+		return true
+	}
+	n := normalizeHost(host)
+	if n == "" {
+		return false
+	}
+	for _, d := range c.cert.PermittedDNSDomains {
+		if onLabelBoundary(n, asciiLower(d)) {
+			return true
+		}
+	}
+	return false
+}
 
 // Certificate returns the CA certificate.
 func (c *CA) Certificate() *x509.Certificate { return c.cert }
@@ -231,8 +271,7 @@ func (c *CA) mintLeaf(host string) (*tls.Certificate, error) {
 		Roots:     pool,
 		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}); err != nil {
-		return nil, fmt.Errorf("transport: the CA cannot issue a usable certificate for %s "+
-			"(it is name-constrained to %v): %w", host, c.cert.PermittedDNSDomains, err)
+		return nil, fmt.Errorf("transport: the CA cannot issue a usable certificate for %s: %w", host, err)
 	}
 
 	return &tls.Certificate{

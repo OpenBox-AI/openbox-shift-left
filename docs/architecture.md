@@ -331,7 +331,11 @@ Being precise here is part of the product.
   by running**. `openbox init --provider claude-code` installs a local
   OTLP **telemetry** receiver (`:otel:`) and an in-path CONNECT/TLS
   **transport** relay (`:proxy:`) alongside the hooks; `openbox uninstall` backs
-  every lane out. What that buys, and what it does not:
+  every lane out. A per-provider host table drives both the intercept
+  allowlist and a `GET /proxy.pac` endpoint the relay now serves (below); no
+  system PAC is activated at the OS level yet, so nothing today points a
+  browser or tool's proxy setting at it — that activation is separate, later
+  work. What that buys, and what it does not:
   - **The evidence is replay, not operation.** Real recorded traffic runs
     through the
     shipped code path on a host that cannot bind a socket, with the relay's upstream
@@ -368,17 +372,45 @@ Being precise here is part of the product.
     refusal shape Claude Code does not retry around is unprobed. `tools/refusal-injector/`
     is the instrument; it needs a bind-capable host, a real install and credentials.
   - **The transport lane installs a CA on the developer's machine, and that is a
-    real
-    downgrade accepted for coverage.** It is generated once, stored beside the
-    credentials under `~/.openbox/` with no more protection than they have, and
-    anything running as the developer can read it; the same boundary
-    That decision already concedes for the
-    signing key. What bounds it is **name constraint at generation**: the CA is
-    constrained to the single intercepted host, so a leaked key cannot mint a usable
-    certificate for anything else, and the allowlist holds that one host
-    (`api.anthropic.com`) while everything else is blind-tunnelled. `openbox uninstall`
-    deletes the CA rather than leaving a trusted signing key behind a relay that is
-    gone.
+    real downgrade accepted for coverage.** It is generated once, stored beside
+    the credentials under `~/.openbox/` with no more protection than they have,
+    and anything running as the developer can read it — the same boundary
+    already conceded for the signing key.
+    **Decision record: what bounds a leaked key, reversed.** OD2 (2026-08-27)
+    bounded it by generating the CA name-constrained to the single intercepted
+    host, so a leaked key could mint a certificate for nothing else. An owner
+    ruling (2026-09-22) **reverses OD2**, and the code now matches it: the CA
+    is generated **unconstrained** (`internal/transport/ca.go` sets no
+    `PermittedDNSDomains`), and containment is a per-provider intercept host
+    table (`internal/transport/hosttable.go`) instead of the certificate —
+    `claude-code` → exact `api.anthropic.com` plus `claude.ai` and its
+    subdomains; `codex` → exact `api.openai.com` plus `chatgpt.com` and its
+    subdomains; auth hosts (`auth.*`, bare `anthropic.com`/`openai.com`) are
+    never listed. The intercept allowlist is the **union of the rows of
+    installed providers**; a CONNECT for a host outside it is blind-tunnelled,
+    never decrypted — that allowlist is the containment, not the certificate.
+    A per-provider host table also drives the `GET /proxy.pac` endpoint the
+    relay now serves (`PROXY <addr>; DIRECT` for a unioned host, `DIRECT`
+    otherwise), wired as goproxy's `NonproxyHandler`; nothing yet points a
+    browser or a tool's system proxy setting at it, so today it is reachable
+    only if something already knows the URL. Stated plainly: an unconstrained
+    CA means a leaked key can mint a certificate for **any** site this machine
+    is made to trust the CA for, not only the intercepted one. Compensating
+    controls: `0600` file permission on macOS/Linux (no at-rest protection on
+    Windows), `openbox uninstall` deletes the CA rather than leaving a trusted
+    signing key behind a relay that is gone, the relay binds loopback-only, and
+    trust today is env-scoped (`NODE_EXTRA_CA_CERTS` written into the tool's
+    settings environment, `internal/cli/activation/keys.go`) rather than a
+    system keychain.
+    **A machine still holding an old constrained CA keeps working**: `CA.
+    CanIssueFor` gates `Proxy.intercepts`, so a host the legacy CA cannot mint
+    for stays blind-tunnelled rather than failing the handshake, even after the
+    allowlist widens to name it. `openbox doctor` reports this as a "legacy
+    constrained CA" finding naming the affected hosts and the remedy that works
+    today: delete both CA files, re-run `openbox init` (which generates a fresh,
+    unconstrained CA because `LoadOrCreateCA` only creates one when both files
+    are absent), then restart the tool so it re-reads `NODE_EXTRA_CA_CERTS`.
+    Automatic re-issue on `init` is planned, not shipped.
   - **The lane does not chain through a corporate proxy.** `transport.New`
     clears the
     six proxy environment variables in its constructor, because a daemon that

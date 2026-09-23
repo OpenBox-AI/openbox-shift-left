@@ -8,10 +8,12 @@ import (
 	"time"
 )
 
-// DefaultInterceptHost is the one host this lane terminates TLS for. Single-
-// host interception is the bound that makes that decision's reversal
-// defensible (OD2): every other CONNECT is blind-tunnelled, never decrypted.
-const DefaultInterceptHost = "api.anthropic.com"
+// DefaultInterceptHost is claude-code's exact-match row in the host table
+// (hosttable.go), kept as a named value for callers built before the
+// per-provider table existed. It is no longer the only host this lane
+// terminates TLS for: an installed provider's whole table union is, and the
+// CA itself carries no host bound at all (owner ruling 2026-09-22).
+var DefaultInterceptHost = exactHostFor("claude-code")
 
 // DefaultAddr is this lane's deterministic loopback listen address. Three
 // loopback daemons can be installed on one machine, and two sharing a port
@@ -24,15 +26,29 @@ const resolveTimeout = 2 * time.Second
 // Config is what the transport lane needs to run.
 type Config struct {
 	// Addr is the proxy's listen address. It must resolve to loopback: this proxy
-	// performs no caller authentication AND terminates TLS for the provider's
-	// hostname, so a non-loopback listener would let anything on the network
-	// route its model calls through this machine's CA.
+	// performs no caller authentication AND terminates TLS for every host in
+	// the installed providers' union, so a non-loopback listener would let
+	// anything on the network route its model calls through this machine's CA.
 	Addr string
 
-	// Allowlist names the hosts that are TLS-terminated. Empty means the default
-	// single host; an explicitly configured set is kept as-is and never widened
-	// by Validate.
+	// Allowlist names the hosts that are TLS-terminated. Zero value means the
+	// default derived from Providers; an explicitly configured set (including
+	// one built from a zero-length Providers, see below) is kept as-is and
+	// never widened by Validate.
 	Allowlist Allowlist
+
+	// Providers names the installed providers whose host-table union this lane
+	// intercepts and PACs. Nil (the zero value) defaults to
+	// {"claude-code"}, so today's behaviour -- an unconfigured daemon
+	// intercepting api.anthropic.com, now plus the claude.ai suffix the table
+	// also carries -- is what a caller that never sets this field gets. An
+	// explicitly EMPTY, non-nil slice is a deliberately different value: it
+	// means every provider was uninstalled, so Validate must NOT fall back to
+	// claude-code -- the union, the allowlist and the PAC all become empty
+	// (intercept nothing, PAC returns DIRECT for every host), never the
+	// default host. Wiring this from the activation record is a later phase's
+	// job; this package only defaults and consumes it.
+	Providers []string
 
 	// Upstream overrides where an intercepted request is forwarded. Empty is the
 	// production value and means "derive it from the CONNECT host" (UpstreamFor),
@@ -47,8 +63,22 @@ func (c *Config) Validate() error {
 	if c.Addr == "" {
 		c.Addr = DefaultAddr
 	}
-	if len(c.Allowlist.hosts) == 0 {
-		c.Allowlist = NewAllowlist(DefaultInterceptHost)
+	// Only a nil Providers (never set) gets the default; an explicitly empty,
+	// non-nil slice means every provider was uninstalled and must stay empty.
+	// A caller that supplies its own Allowlist but no Providers gets an empty
+	// provider set rather than the default: the PAC is generated from
+	// Providers, so defaulting it would route hosts the caller's allowlist
+	// never named. An all-DIRECT PAC is the safe mismatch.
+	explicitAllowlist := len(c.Allowlist.hosts) > 0 || len(c.Allowlist.suffixes) > 0
+	if c.Providers == nil {
+		if explicitAllowlist {
+			c.Providers = []string{}
+		} else {
+			c.Providers = []string{"claude-code"}
+		}
+	}
+	if !explicitAllowlist {
+		c.Allowlist = AllowlistFor(c.Providers...)
 	}
 
 	if c.Upstream != "" {

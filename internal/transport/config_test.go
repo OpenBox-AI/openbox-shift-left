@@ -92,6 +92,58 @@ func TestValidateKeepsAnExplicitAllowlist(t *testing.T) {
 	}
 }
 
+// TestValidateDefaultsNilProvidersToClaudeCode: a Config whose Providers was
+// never set (nil, the zero value) gets today's behaviour.
+func TestValidateDefaultsNilProvidersToClaudeCode(t *testing.T) {
+	var c Config
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(c.Providers) != 1 || c.Providers[0] != "claude-code" {
+		t.Errorf("Providers = %v, want [claude-code] for a Config that never set it", c.Providers)
+	}
+	if !c.Allowlist.Allows(DefaultInterceptHost + ":443") {
+		t.Errorf("the defaulted providers do not intercept %q", DefaultInterceptHost)
+	}
+}
+
+// TestValidateKeepsAnExplicitlyEmptyProviderSetEmpty: an explicitly empty,
+// non-nil Providers slice means every provider was uninstalled. Validate
+// must not fall back to claude-code -- the union, the allowlist and (through
+// the same providers value) the PAC must all end up empty, never the
+// default host.
+func TestValidateKeepsAnExplicitlyEmptyProviderSetEmpty(t *testing.T) {
+	c := Config{Providers: []string{}}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if len(c.Providers) != 0 {
+		t.Errorf("Providers = %v, want it to stay empty", c.Providers)
+	}
+	if c.Allowlist.Allows(DefaultInterceptHost + ":443") {
+		t.Errorf("an explicitly empty Providers still intercepts %q; it must intercept nothing", DefaultInterceptHost)
+	}
+	if pac := PACBody(c.Addr, c.Providers...); strings.Contains(pac, "PROXY") {
+		t.Errorf("PAC body for an explicitly empty provider set still names a PROXY arm:\n%s", pac)
+	}
+}
+
+// TestValidateAnExplicitAllowlistDoesNotDefaultThePACProviders: a caller that
+// supplies its own allowlist but no provider set must not get a PAC that
+// routes the default provider's hosts its allowlist never named.
+func TestValidateAnExplicitAllowlistDoesNotDefaultThePACProviders(t *testing.T) {
+	c := Config{Allowlist: NewAllowlist("example.test")}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if !c.Allowlist.Allows("example.test:443") {
+		t.Errorf("Validate replaced the caller's allowlist")
+	}
+	if pac := PACBody(c.Addr, c.Providers...); strings.Contains(pac, "PROXY") {
+		t.Errorf("PAC routes hosts the explicit allowlist never named:\n%s", pac)
+	}
+}
+
 // TestUpstreamForIsFixedPerHost.
 func TestUpstreamForIsFixedPerHost(t *testing.T) {
 	cases := map[string]string{

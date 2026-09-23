@@ -476,6 +476,12 @@ func (a *app) reportLanes() {
 	if openboxHome, err := devconfig.Home(); err == nil {
 		if caPath, _ := transport.CAPaths(openboxHome); fileExists(caPath) {
 			a.row("relay CA", "%s", caPath)
+			if ca, err := transport.LoadOrCreateCA(openboxHome); err == nil && transport.CANeedsReissue(ca) {
+				_, keyPath := transport.CAPaths(openboxHome)
+				a.row("WARNING", "legacy constrained CA: %s tunnelled, not intercepted, until it is "+
+					"re-issued: delete %s and %s, re-run `openbox init`, then restart the tool",
+					strings.Join(legacyTunnelledHosts(ca), ", "), caPath, keyPath)
+			}
 		}
 	}
 
@@ -510,6 +516,24 @@ func (a *app) reportLanes() {
 		}
 		a.row("log", "%s", laneLogPath(lane.spec, home))
 	}
+}
+
+// legacyTunnelledHosts names the host-table entries a legacy constrained CA
+// (transport.CANeedsReissue) cannot mint a leaf for, across every provider
+// this binary supports -- not only the ones actually installed here, since a
+// second `init` can widen the union at any time and the CA problem it would
+// hit is worth naming before it does. Each of these stays blind-tunnelled
+// (transport.Proxy.intercepts gates on CA.CanIssueFor) rather than failing a
+// handshake, so this is a "not yet governed" finding, not an outage.
+func legacyTunnelledHosts(ca *transport.CA) []string {
+	var blocked []string
+	for _, r := range transport.Union(provider.Supported()...) {
+		if !ca.CanIssueFor(r.Host) {
+			blocked = append(blocked, r.Host)
+		}
+	}
+	sort.Strings(blocked)
+	return blocked
 }
 
 // laneCheck is one lane's four observable facts, gathered before anything is

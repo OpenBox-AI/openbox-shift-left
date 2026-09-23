@@ -135,7 +135,13 @@ why a startup election legitimately sees no routed lane. Any failure after
 variables *in the constructor*, because `net/http` caches the environment behind a
 `sync.Once`. `ConnState` must close the one-shot listener or `Serve` blocks in its
 second `Accept`, leaking a goroutine and fd per tunnel. Host matching folds ASCII
-only (Unicode makes U+212A equal `k`); the CA is name-constrained, ALPN http/1.1.
+only (Unicode makes U+212A equal `k`); ALPN http/1.1. The CA is generated
+unconstrained (owner ruling 2026-09-22, reversing the earlier name-constraint
+bound): containment is the per-provider intercept allowlist
+(`internal/transport/hosttable.go`), not the certificate. `CA.CanIssueFor` is
+what keeps a machine still holding an older constrained CA blind-tunnelling a
+host outside that constraint instead of failing the handshake; `openbox init`
+does not yet re-issue that legacy CA itself, only `doctor` names the finding.
 
 **Three shapes are pinned by tests.** `message.content` is bound as
 `json.RawMessage` because it is a string on user lines and an array on assistant

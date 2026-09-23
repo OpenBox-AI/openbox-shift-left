@@ -2,10 +2,15 @@ package transport
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"os"
 	"runtime"
@@ -108,9 +113,18 @@ func TestCAShapeIsWhatThePhaseSpecifies(t *testing.T) {
 	if life < 2*365*24*time.Hour-48*time.Hour || life > 2*365*24*time.Hour+48*time.Hour {
 		t.Errorf("CA lifetime = %v, want ~2 years", life)
 	}
-	if len(leaf.PermittedDNSDomains) == 0 {
-		t.Error("the CA has no name constraint; a leaked key could then be used to impersonate any host, " +
-			"not just the one this lane intercepts")
+	// Inverted deliberately (owner ruling 2026-09-22, reversing the prior
+	// name-constraint bound): a freshly generated CA must carry NO
+	// PermittedDNSDomains. The blast radius this widens is real and accepted --
+	// a leaked ~/.openbox/transport-ca.key can now mint a certificate for ANY
+	// host this machine trusts it for, not just the six the table names -- and
+	// containment moves to the allowlist instead (an unlisted CONNECT is
+	// blind-tunnelled, never decrypted). A PR re-adding this field is reverting
+	// that ruling, not fixing a regression.
+	if len(leaf.PermittedDNSDomains) != 0 {
+		t.Errorf("the CA carries a name constraint (%v); it must be unconstrained per the 2026-09-22 "+
+			"owner ruling, or every host outside it fails its handshake in a way that looks like the "+
+			"provider being down", leaf.PermittedDNSDomains)
 	}
 }
 
@@ -228,15 +242,106 @@ func TestHandshakeOverAnInMemoryPipe(t *testing.T) {
 	}
 }
 
-// TestServerConfigRefusesAHostOutsideTheNameConstraint.
-func TestServerConfigRefusesAHostOutsideTheNameConstraint(t *testing.T) {
+// TestServerConfigIssuesForAnyHostNowThatTheCAIsUnconstrained is inverted
+// deliberately (owner ruling 2026-09-22, reversing the prior name-constraint
+// bound): the CA itself no longer refuses a host outside the table, on
+// purpose -- containment is the allowlist's job now (an unlisted CONNECT is
+// never hijacked, so ServerConfigFor is never even called for it in
+// production). This asserts the CA's own new blast radius directly, so a
+// later "restore" of the constraint fails a named test rather than an
+// abstract review comment.
+func TestServerConfigIssuesForAnyHostNowThatTheCAIsUnconstrained(t *testing.T) {
 	dir := t.TempDir()
 	ca, err := LoadOrCreateCA(dir)
 	if err != nil {
 		t.Fatalf("LoadOrCreateCA: %v", err)
 	}
-	if _, err := ca.ServerConfigFor("evil.test"); err == nil {
-		t.Error("ServerConfigFor minted a leaf for a host outside the CA's name constraint")
+	if _, err := ca.ServerConfigFor("evil.test"); err != nil {
+		t.Errorf("ServerConfigFor refused a host outside the old table (%v); the CA is meant to be "+
+			"unconstrained per the 2026-09-22 owner ruling, with the allowlist as the sole containment", err)
+	}
+}
+
+// TestCANeedsReissue: a fresh CA needs nothing, and a legacy CA minted under
+// the retired name constraint is flagged so `doctor` and a later `init` can
+// act on it. LoadOrCreateCA must not reissue anything itself -- a running
+// relay swapping its CA mid-flight breaks in-flight handshakes -- so this
+// only checks the fact, never the file on disk.
+func TestCANeedsReissue(t *testing.T) {
+	t.Run("a fresh CA needs no reissue", func(t *testing.T) {
+		ca, err := LoadOrCreateCA(t.TempDir())
+		if err != nil {
+			t.Fatalf("LoadOrCreateCA: %v", err)
+		}
+		if CANeedsReissue(ca) {
+			t.Error("CANeedsReissue is true for a freshly generated, unconstrained CA")
+		}
+	})
+
+	t.Run("nil CA needs no reissue", func(t *testing.T) {
+		if CANeedsReissue(nil) {
+			t.Error("CANeedsReissue is true for a nil CA")
+		}
+	})
+
+	t.Run("a legacy constrained CA needs a reissue", func(t *testing.T) {
+		dir := t.TempDir()
+		writeLegacyConstrainedCA(t, dir)
+
+		ca, err := LoadOrCreateCA(dir)
+		if err != nil {
+			t.Fatalf("LoadOrCreateCA on a legacy CA file pair: %v", err)
+		}
+		if !CANeedsReissue(ca) {
+			t.Error("CANeedsReissue is false for a CA that still carries PermittedDNSDomains " +
+				"(the pre-2026-09-22 shape); a machine holding it will fail every handshake for a " +
+				"host outside the old constraint in a way that looks like the provider being down")
+		}
+	})
+}
+
+// writeLegacyConstrainedCA writes a CA file pair in the exact shape this
+// package generated before the 2026-09-22 owner ruling: PermittedDNSDomains
+// set to api.anthropic.com, critical. It stands in for a real pre-ruling
+// install, since createCA itself no longer produces this shape.
+func writeLegacyConstrainedCA(t *testing.T, dir string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatalf("generate serial: %v", err)
+	}
+	now := time.Now()
+	tmpl := &x509.Certificate{
+		SerialNumber:                serial,
+		Subject:                     pkix.Name{Organization: []string{"OpenBox"}, CommonName: "OpenBox Transport CA (local)"},
+		NotBefore:                   now.Add(-time.Hour),
+		NotAfter:                    now.Add(2*365*24*time.Hour - time.Hour),
+		IsCA:                        true,
+		BasicConstraintsValid:       true,
+		MaxPathLen:                  0,
+		MaxPathLenZero:              true,
+		KeyUsage:                    x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		PermittedDNSDomains:         []string{"api.anthropic.com"},
+		PermittedDNSDomainsCritical: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create legacy CA certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal legacy CA key: %v", err)
+	}
+	certPath, keyPath := CAPaths(dir)
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatalf("write legacy CA key: %v", err)
+	}
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatalf("write legacy CA certificate: %v", err)
 	}
 }
 

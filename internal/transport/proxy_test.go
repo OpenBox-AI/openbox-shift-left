@@ -127,6 +127,42 @@ func TestConnectActionInterceptsOnlyTheAllowlistedHost(t *testing.T) {
 	}
 }
 
+// TestLegacyConstrainedCABlindTunnelsHostsOutsideItsConstraint is the safety
+// property a wider host table would otherwise break: a machine still holding
+// today's CA (constrained to api.anthropic.com) must not attempt a handshake
+// for claude.ai just because the allowlist now names it. That CONNECT stays
+// blind-tunnelled -- exactly today's behaviour, since claude.ai was never
+// intercepted before this phase either -- rather than hitting a mintLeaf
+// failure that closes the connection in a way that looks like the provider
+// being down. api.anthropic.com, which the legacy CA CAN issue for, is still
+// intercepted.
+func TestLegacyConstrainedCABlindTunnelsHostsOutsideItsConstraint(t *testing.T) {
+	dir := t.TempDir()
+	writeLegacyConstrainedCA(t, dir)
+	legacyCA, err := LoadOrCreateCA(dir)
+	if err != nil {
+		t.Fatalf("LoadOrCreateCA on the legacy CA file pair: %v", err)
+	}
+	if !CANeedsReissue(legacyCA) {
+		t.Fatal("setup: writeLegacyConstrainedCA did not produce a CA CANeedsReissue flags")
+	}
+
+	p, err := New(Config{}, legacyCA, &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if !p.intercepts("api.anthropic.com:443") {
+		t.Error("api.anthropic.com is inside the legacy CA's constraint and must still be intercepted")
+	}
+	for _, host := range []string{"claude.ai:443", "www.claude.ai:443"} {
+		if p.intercepts(host) {
+			t.Errorf("%q is outside the legacy CA's constraint; it must stay blind-tunnelled until "+
+				"`openbox init` reissues the CA, not be attempted and fail mid-handshake", host)
+		}
+	}
+}
+
 // TestNewClearsInheritedProxyEnv is the self-loop guard. It happens in New
 // rather than being left to the caller because discipline is not a control: a
 // constructor that cannot be used without clearing is.
