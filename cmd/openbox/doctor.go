@@ -24,6 +24,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/managed"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
@@ -267,9 +268,17 @@ func (a *app) reportIdentities() {
 			continue
 		}
 		cfg, _ := devconfig.Load(cfgPath)
-		switch {
-		case cfg.DID != "":
-			a.row(name, "%s  DID %s", cfgPath, cfg.DID)
+		// Legacy first, and unconditional on whatever else the store carries:
+		// resolveCredentialsFrom refuses a legacy store outright (ErrLegacyStore)
+		// before it ever looks at AgentID, so a store that somehow holds both a
+		// legacy marker and a v3 agent id is one this binary still cannot speak
+		// for. Reporting the v3 row instead would tell an operator hooks are
+		// working when they are not.
+		switch ls, lsErr := devconfig.LegacyStoreFor(name); {
+		case lsErr == nil && ls.Legacy:
+			a.reportLegacyIdentity(name, cfgPath, ls)
+		case cfg.AgentID != "" && cfg.IdentityMethod == devconfig.IdentityMethodKeycloakWorkload:
+			a.reportV3Identity(name, cfgPath, cfg)
 			a.reportURLDrift(name, orgCfg, cfg)
 		default:
 			a.row(name, "%s", withPresence(cfgPath))
@@ -280,8 +289,118 @@ func (a *app) reportIdentities() {
 	fmt.Fprintln(a.stdout)
 }
 
+// reportLegacyIdentity is the loud path for a store this binary cannot speak
+// for at all (devconfig.ErrLegacyStore): the mapper drops every event, so this
+// is the only place in the product that says so, and it says it once per
+// legacy tool, in wording the acceptance criteria pin.
+func (a *app) reportLegacyIdentity(name, cfgPath string, ls devconfig.LegacyStore) {
+	reasons := "no reason recorded"
+	if len(ls.Reasons) > 0 {
+		reasons = strings.Join(ls.Reasons, "; ")
+	}
+	a.row(name, "%s", cfgPath)
+	a.wrapRow("", "LEGACY (pre-IAMv3) identity: hooks send nothing. %s. Run `openbox init "+
+		"--provider %s` (if the old agent's name is taken it registers under a suffixed name, "+
+		"and events queued under the old identity are discarded)", reasons, name)
+}
+
+// reportV3Identity is the healthy row for a keycloak_workload store: the
+// coordinate (agent id), the attribution label derived from it -- labelled
+// "(derived)" everywhere it appears, never "DID", since a workload agent has
+// no developer_did on the backend at all -- the registered key's public
+// thumbprint, and the cached-token state. Nothing here ever reads or prints a
+// secret: the private key is parsed only to compute its public half's
+// thumbprint, and the cache is read for its expires_at field alone.
+func (a *app) reportV3Identity(name, cfgPath string, cfg devconfig.DevConfig) {
+	did, err := devconfig.AttributionDIDFor(cfg.AgentID)
+	if err != nil {
+		a.row(name, "%s  agent %s (keycloak_workload); could not derive its attribution label: %v", cfgPath, cfg.AgentID, err)
+		return
+	}
+	a.row(name, "%s  agent %s (keycloak_workload), attribution %s (derived)", cfgPath, cfg.AgentID, did)
+
+	if kid, err := workloadKeyKid(name); err != nil {
+		a.row("", "key kid: unavailable; %v", err)
+	} else {
+		a.row("", "key kid %s", kid)
+	}
+
+	cachePath, err := devconfig.WorkloadTokenCachePathFor(name)
+	if err != nil {
+		a.row("", "token cache: unavailable; %v", err)
+		return
+	}
+	a.row("", "token cache: %s", tokenCacheState(cachePath, time.Now()))
+}
+
+// workloadKeyKid parses one tool's registered workload signing key -- from its
+// .env, the env override, either -- and returns the public half's RFC 7638
+// thumbprint, the same kid value the backend holds. The private key itself is
+// parsed only long enough to reach its PublicKey field and is never returned,
+// logged, or otherwise retained.
+func workloadKeyKid(tool string) (string, error) {
+	envPath, err := devconfig.EnvFilePathFor(tool)
+	if err != nil {
+		return "", err
+	}
+	secrets, err := devconfig.ParseEnvFile(envPath)
+	if err != nil {
+		return "", err
+	}
+	raw := devconfig.FirstNonEmpty(os.Getenv(devconfig.EnvWorkloadPrivateKey), secrets[devconfig.EnvWorkloadPrivateKey])
+	if raw == "" {
+		return "", fmt.Errorf("no %s configured", devconfig.EnvWorkloadPrivateKey)
+	}
+	key, err := workloadauth.ParsePrivateKey(raw)
+	if err != nil {
+		return "", err
+	}
+	return workloadauth.Thumbprint(&key.PublicKey)
+}
+
+// tokenCacheEntry reads only the one field this report ever needs. Decoding
+// into a struct that has no AccessToken field at all is the enforcement: the
+// bearer token bytes never enter this process's memory on the doctor path,
+// which is a stronger guarantee than "read but not printed".
+type tokenCacheEntry struct {
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// tokenCacheState answers absent | valid for Ns | expired Ns ago | unreadable
+// for one tool's workload-token cache, reading expires_at only. A missing
+// file is "absent"; anything else this cannot parse -- corrupt JSON, a
+// permission error -- is "unreadable", since a cache is never load-bearing for
+// correctness (workloadauth.FileCache treats both the same way on the read
+// path this call is never sent to). A zero expires_at (a negative-cache-only
+// entry, with no live token) reads as "absent": there is no bearer to report
+// on.
+func tokenCacheState(path string, now time.Time) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "absent"
+		}
+		return "unreadable (ignored; the next call re-authenticates)"
+	}
+	var entry tokenCacheEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return "unreadable (ignored; the next call re-authenticates)"
+	}
+	if entry.ExpiresAt.IsZero() {
+		return "absent"
+	}
+	if now.Before(entry.ExpiresAt) {
+		return fmt.Sprintf("valid for %ds", int(entry.ExpiresAt.Sub(now).Seconds()))
+	}
+	return fmt.Sprintf("expired %ds ago", int(now.Sub(entry.ExpiresAt).Seconds()))
+}
+
 // reportURLDrift names a tool still pointing at coordinates the organization
-// has since changed.
+// has since changed. Called for a v3 identity (keyed on the tool having an
+// agent id, never on a legacy developer_did, which no store has held since
+// WriteWorkloadIdentity started clearing it): a legacy store's hooks already
+// send nothing, so a URL drift finding on top of that would be noise about a
+// store this binary cannot speak for regardless of which core it names.
 //
 // `auth` writes the organization's URLs once and `init` copies them into each
 // tool's own config, because one dev.json is loaded and never merged over
@@ -321,24 +440,48 @@ func (a *app) reportURLDrift(name string, org, tool devconfig.DevConfig) {
 	}
 }
 
+// retiredIdentityEnvNames are the v1 signing-identity exports: retired
+// alongside the DID-based signing path, read by nothing at runtime, and
+// reported here only so a developer or an org who set one on purpose learns
+// it does nothing rather than assuming it still shadows every file. The last
+// two names match devconfig's own (unexported) legacySeedEnvNames.
+var retiredIdentityEnvNames = []string{
+	devconfig.EnvDID, devconfig.EnvAgentPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SEED",
+}
+
 // reportIdentitySource names which source actually wins, because an exported
 // variable outranks every file above and a reader comparing a dashboard to a
 // dev.json would otherwise be comparing the wrong two things.
+//
+// The shadowing set is exactly the v3 credential sources
+// (resolveCredentialsFrom/EnvIdentityPresent): the obx_ key, the workload
+// signing key, and the agent id coordinate. The v1 exports
+// (retiredIdentityEnvNames) are a different question -- "is this set" rather
+// than "does this win" -- so they get their own line rather than joining the
+// shadowing sentence, which would otherwise claim a retired DID export still
+// outranks every file when nothing reads it any more.
 func (a *app) reportIdentitySource() {
 	var shadowing []string
-	for _, name := range []string{devconfig.EnvDID, devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey} {
+	for _, name := range []string{devconfig.EnvAPIKeyDirect, devconfig.EnvWorkloadPrivateKey, devconfig.EnvAgentID} {
 		if a.getenv(name) != "" {
 			shadowing = append(shadowing, name)
 		}
 	}
 	if len(shadowing) == 0 {
 		a.row("in effect", "each tool's own files above")
-		return
+	} else {
+		a.row("in effect", "%s (environment); this outranks every file above, for every tool",
+			strings.Join(shadowing, ", "))
 	}
-	a.row("in effect", "%s (environment); this outranks every file above, for every tool",
-		strings.Join(shadowing, ", "))
-	if did := a.getenv(devconfig.EnvDID); did != "" {
-		a.row("", "every governed tool reports as %s", did)
+
+	var retired []string
+	for _, name := range retiredIdentityEnvNames {
+		if a.getenv(name) != "" {
+			retired = append(retired, name)
+		}
+	}
+	if len(retired) > 0 {
+		a.row("", "%s set but IGNORED (retired with the v1 signing path)", strings.Join(retired, ", "))
 	}
 }
 
@@ -950,6 +1093,16 @@ func (a *app) reportReachability() {
 }
 
 func (a *app) reportStoreReachability(tool string) {
+	// A legacy store already got the loud, full explanation in the Identity
+	// section above (reportLegacyIdentity), which is the one place the
+	// "hooks send nothing" claim needs to be made; resolving credentials here
+	// would only refuse with the identical ErrLegacyStore text, which is noise
+	// repeated rather than a second fact.
+	if ls, err := devconfig.LegacyStoreFor(tool); err == nil && ls.Legacy {
+		a.row(tool, "NOT CHECKED; legacy (pre-IAMv3) identity -- see the Identity section above")
+		return
+	}
+
 	creds, err := devconfig.ResolveCredentialsFor(tool)
 	if err != nil {
 		a.row(tool, "NOT CHECKED; %v", err)

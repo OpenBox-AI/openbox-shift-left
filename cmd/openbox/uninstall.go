@@ -139,7 +139,13 @@ type uninstallInventory struct {
 	// no adapter reads one of these -- counting it would make the gate answer
 	// yes on a machine whose real credentials are gone.
 	envResidue []string
-	managed    []string
+	// tokenCaches is each tool's workload-token.json: a live bearer, good for
+	// up to five minutes after the .env it was minted for is long gone, so it
+	// is inventoried and removed independently of whether that .env still
+	// exists (WriteWorkloadIdentity already deletes it on every re-init; this
+	// is the same rule at uninstall).
+	tokenCaches []string
+	managed     []string
 	// unrecordedLane is a unit file or routed env key with no activation record
 	// behind it.
 	unrecordedLane bool
@@ -221,7 +227,7 @@ func (inv uninstallInventory) empty() bool {
 	}
 	return inv.pluginDir == "" && len(inv.lanes) == 0 && !inv.unrecordedLane &&
 		len(inv.posture) == 0 && len(inv.ownedDirs) == 0 && len(inv.envFiles) == 0 &&
-		len(inv.envResidue) == 0 && len(inv.spools) == 0 && !inv.codexOtelPresent
+		len(inv.envResidue) == 0 && len(inv.tokenCaches) == 0 && len(inv.spools) == 0 && !inv.codexOtelPresent
 }
 
 func (a *app) uninstallInventory(home string) uninstallInventory {
@@ -326,6 +332,15 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 			inv.envResidue = appendUnique(inv.envResidue, p)
 		}
 	}
+	// Each tool's cached workload bearer, independent of whether its .env
+	// still exists: an interrupted removal, or a hand-deleted .env, can leave
+	// a live token in the store directory with nothing else there to trigger
+	// the credential step at all.
+	for _, name := range provider.Supported() {
+		if p, err := devconfig.WorkloadTokenCachePathFor(name); err == nil && fileExists(p) {
+			inv.tokenCaches = appendUnique(inv.tokenCaches, p)
+		}
+	}
 	// The org's, not ours: removing either silently downgrades a governed
 	// machine, and a root-owned file is not writable here anyway.
 	for _, p := range []string{devconfig.ManagedConfigPath(), claudeManagedSettingsPath()} {
@@ -336,21 +351,37 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	return inv
 }
 
-// interruptedCredentialWrites finds the residue of a credential write that was
-// killed between its temp file and its rename.
+// residueTmpPrefixes are the literal os.CreateTemp prefixes every atomic
+// writer that can leave residue in an identity directory is handed, each
+// paired with the same ".tmp" suffix:
+//   - ".env-": devconfig's WriteEnvFile (envfile.go), the API key and the
+//     workload signing key.
+//   - ".workload-token-": workloadauth.FileCache.Store (cache.go), the cached
+//     bearer token.
+//   - ".openbox-": internal/cli/atomicfile's Windows Write
+//     (write_windows.go), used wherever this repo writes a file atomically on
+//     that OS.
 //
-// WriteEnvFile is atomic by writing the whole body into a 0600 `.env-*.tmp`
-// beside the target and renaming over it, and its deferred cleanup does not run
-// if the process dies. So a lid closing, an OOM or a Ctrl-C at the wrong
-// microsecond leaves a readable copy of the API key and the signing seed in the
-// store directory, under a name nothing else looks for. `uninstall` printing
-// that those values "cannot be re-retrieved" while one of them is still on disk
-// is the one failure this command cannot have.
+// Nothing else writes any of these three shapes into a tool's identity
+// directory.
+var residueTmpPrefixes = []string{".env-", ".workload-token-", ".openbox-"}
+
+// interruptedCredentialWrites finds the residue of a credential or cache write
+// that was killed between its temp file and its rename.
 //
-// The pattern is matched, not guessed: it is the literal prefix and suffix
-// os.CreateTemp is handed in envfile.go, and nothing else writes that shape.
-// An empty tool names the org-level directory, whose residue holds the
-// organization control token.
+// Each of residueTmpPrefixes' writers is atomic the same way: the whole body
+// goes into a 0600 temp file beside the target, then a rename, and the
+// deferred cleanup that would remove the temp file does not run if the
+// process dies first. So a lid closing, an OOM or a Ctrl-C at the wrong
+// microsecond leaves a readable copy of a secret -- an API key, a signing key,
+// or a live bearer token -- in the store directory, under a name nothing else
+// looks for. `uninstall` printing that those values "cannot be re-retrieved"
+// while one of them is still on disk is the one failure this command cannot
+// have.
+//
+// The pattern is matched, not guessed: each prefix is the literal string its
+// writer hands os.CreateTemp. An empty tool names the org-level directory,
+// whose residue holds the organization control token.
 //
 // Read and filter rather than filepath.Glob, because a directory path is not a
 // pattern and matching it as one fails silently. A home holding `[`, `*` or `?`
@@ -369,7 +400,17 @@ func interruptedCredentialWrites(tool string) []string {
 	var found []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasPrefix(name, ".env-") || !strings.HasSuffix(name, ".tmp") {
+		if e.IsDir() || !strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		owned := false
+		for _, prefix := range residueTmpPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				owned = true
+				break
+			}
+		}
+		if !owned {
 			continue
 		}
 		found = append(found, filepath.Join(dir, name))
@@ -416,6 +457,9 @@ func (a *app) printInventory(inv uninstallInventory) {
 	}
 	for _, p := range inv.envResidue {
 		a.row("credentials", "%s (an interrupted write; same secrets, deleted with them)", p)
+	}
+	for _, p := range inv.tokenCaches {
+		a.row("credentials", "%s (a cached bearer token, live for up to 5 minutes)", p)
 	}
 	for _, p := range inv.managed {
 		a.row("kept", "%s (your organization's, not OpenBox's)", p)
@@ -713,17 +757,17 @@ func (a *app) deletePath(st *uninstallState, path string, remove func(string) er
 // Keeping .env alone would preserve nothing retryable, because the spool is
 // already gone; so there is one rule, reported precisely.
 func (a *app) removeCredentials(st *uninstallState, inv uninstallInventory) {
-	if len(inv.envFiles) == 0 && len(inv.envResidue) == 0 {
+	if len(inv.envFiles) == 0 && len(inv.envResidue) == 0 && len(inv.tokenCaches) == 0 {
 		return
 	}
 	fmt.Fprintf(a.stdout, "\nRemoving credentials\n")
-	for _, path := range append(append([]string{}, inv.envFiles...), inv.envResidue...) {
+	for _, path := range append(append(append([]string{}, inv.envFiles...), inv.envResidue...), inv.tokenCaches...) {
 		a.deletePath(st, path, os.Remove)
 	}
 	// The directories follow, from runUninstall: by name first and the
 	// directory after, because a directory delete racing the credential delete
 	// is how a store survives an uninstall that reported success.
-	a.note("The obx_ keys and Ed25519 signing seeds in those files cannot be re-retrieved.",
+	a.note("The obx_ keys and workload private keys in those files cannot be re-retrieved; the backend never held the private key.",
 		"`openbox init --provider <tool>` registers a NEW agent; it does not recover",
 		"these. The organization control token went with them; `openbox auth` takes a",
 		"new one. This is an unlink, not a secure erase: the blocks are freed, not",

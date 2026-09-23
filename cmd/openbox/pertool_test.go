@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -570,8 +571,8 @@ func TestDoctorListsEveryPerToolIdentity(t *testing.T) {
 	t.Setenv(devconfig.EnvAPIKeyDirect, "")
 	t.Setenv(devconfig.EnvAgentPrivateKey, "")
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
-	seedToolCredentials(t, "codex", testDIDFor(t, "codex"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
+	seedToolCredentials(t, "codex", testAgentIDFor(t, "codex"))
 
 	out, code := runDoctorHere(t)
 	if code != exitOK {
@@ -581,8 +582,16 @@ func TestDoctorListsEveryPerToolIdentity(t *testing.T) {
 		if !strings.Contains(out, filepath.Join(home, tool, "dev.json")) {
 			t.Errorf("doctor does not name %s's own config:\n%s", tool, out)
 		}
-		if !strings.Contains(out, testDIDFor(t, tool)) {
-			t.Errorf("doctor does not report %s's DID:\n%s", tool, out)
+		// The whole v3 row, not just a DID substring: agent id, the
+		// keycloak_workload method, and the derived attribution label, so a
+		// fixture that happened to leak the right bytes through an unrelated
+		// error message (as an agent id shaped like a DID once did) cannot pass
+		// this vacuously.
+		if !strings.Contains(out, fmt.Sprintf("agent %s (keycloak_workload)", testAgentIDFor(t, tool))) {
+			t.Errorf("doctor does not report %s's agent id:\n%s", tool, out)
+		}
+		if !strings.Contains(out, fmt.Sprintf("attribution %s (derived)", testDIDFor(t, tool))) {
+			t.Errorf("doctor does not report %s's derived attribution:\n%s", tool, out)
 		}
 	}
 	// And the org row, which carries coordinates and no identity at all.
@@ -594,14 +603,17 @@ func TestDoctorListsEveryPerToolIdentity(t *testing.T) {
 // TestDoctorNamesTheSourceOfTheIdentityInEffect an exported variable outranks
 // every file doctor just printed, for every tool at once. Without this line a
 // reader comparing a dashboard to a dev.json is comparing the wrong two
-// things.
+// things. The shadowing set is the v3 credential sources (OPENBOX_API_KEY,
+// OPENBOX_WORKLOAD_PRIVATE_KEY, OPENBOX_AGENT_ID); OPENBOX_AGENT_DID is a
+// retired v1 export now (TestDoctorFlagsRetiredExportsAsIgnored), not a
+// shadowing one, so it is no longer this test's example.
 func TestDoctorNamesTheSourceOfTheIdentityInEffect(t *testing.T) {
 	isolateHomeUnbound(t)
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 
 	t.Run("a file answers", func(t *testing.T) {
-		t.Setenv(devconfig.EnvDID, "")
+		t.Setenv(devconfig.EnvAgentID, "")
 		out, _ := runDoctorHere(t)
 		if !strings.Contains(out, "each tool's own files") {
 			t.Errorf("doctor does not say the files are in effect:\n%s", out)
@@ -609,14 +621,11 @@ func TestDoctorNamesTheSourceOfTheIdentityInEffect(t *testing.T) {
 	})
 
 	t.Run("an env var shadows every file", func(t *testing.T) {
-		const exported = "did:aip:99999999-9999-9999-9999-999999999999"
-		t.Setenv(devconfig.EnvDID, exported)
+		exported := testAgentIDFor(t, "codex")
+		t.Setenv(devconfig.EnvAgentID, exported)
 		out, _ := runDoctorHere(t)
-		if !strings.Contains(out, devconfig.EnvDID) || !strings.Contains(out, "environment") {
+		if !strings.Contains(out, devconfig.EnvAgentID) || !strings.Contains(out, "environment") {
 			t.Errorf("doctor does not name the variable that wins:\n%s", out)
-		}
-		if !strings.Contains(out, exported) {
-			t.Errorf("doctor does not report the DID actually in effect:\n%s", out)
 		}
 	})
 }
@@ -632,7 +641,7 @@ func TestDoctorReportsPerStoreReachability(t *testing.T) {
 	t.Setenv("OPENBOX_ED25519_SEED", "")
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
 	// Only claude-code exists.
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 
 	out, code := runDoctorHere(t)
 	if code != exitOK {
@@ -656,8 +665,8 @@ func TestDoctorReportsPerStoreReachability(t *testing.T) {
 // live signing seeds behind a report of success.
 func TestUninstallRemovesEveryPerToolCredential(t *testing.T) {
 	home := isolateHomeUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
-	seedToolCredentials(t, "codex", testDIDFor(t, "codex"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
+	seedToolCredentials(t, "codex", testAgentIDFor(t, "codex"))
 	orgEnv, err := devconfig.OrgEnvFilePath()
 	if err != nil {
 		t.Fatal(err)
@@ -703,7 +712,7 @@ func TestFlushGatePassesWhenAnyStoreHasCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Credentials in codex's store only; claude-code has none.
-	seedToolCredentials(t, "codex", testDIDFor(t, "codex"))
+	seedToolCredentials(t, "codex", testAgentIDFor(t, "codex"))
 
 	a, out, errb := testApp(nil)
 	if code := a.run([]string{"uninstall"}); code != exitOK {
@@ -767,7 +776,7 @@ func TestAuthRunsUnbound(t *testing.T) {
 func TestUninstallRunsUnbound(t *testing.T) {
 	isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 
 	a, _, errb := testApp(nil)
 	if code := a.run([]string{"uninstall"}); code != exitOK {
@@ -791,7 +800,7 @@ func TestUninstallRunsUnbound(t *testing.T) {
 func TestUninstallRemovesAnInterruptedCredentialWrite(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 
 	// Exactly what an interrupted WriteEnvFile leaves behind.
 	residue := filepath.Join(home, "claude-code", ".env-1234567890.tmp")
@@ -844,7 +853,7 @@ func TestUninstallRemovesAnIdentityDirWithNoCredentialFile(t *testing.T) {
 func TestUninstallReportsAnIdentityDirItCouldNotClear(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 	stranger := filepath.Join(home, "claude-code", "notes.txt")
 	if err := os.WriteFile(stranger, []byte("not ours\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -875,18 +884,23 @@ func TestUninstallReportsAnIdentityDirItCouldNotClear(t *testing.T) {
 	}
 }
 
-// TestDoctorReportsOrgToToolURLDrift `auth` writes the organization's URLs
+// TestDoctorReportsURLDriftForV3Store `auth` writes the organization's URLs
 // once and `init` copies them into each tool's own config, so a re-run of
 // `auth` that corrects a URL has no effect on an already installed tool until
 // that tool re-runs `init`. Nothing about that is visible: the tool keeps
 // posting to the old core, which answers 401, and a 401 never spends a
 // delivery attempt -- so the spool grows and no message anywhere names a URL.
 //
-// doctor is the only place both values are in hand at once.
-func TestDoctorReportsOrgToToolURLDrift(t *testing.T) {
+// doctor is the only place both values are in hand at once, and it has to
+// notice the drift for a v3 store: reportURLDrift is keyed on the tool having
+// a v3 agent id, never on a legacy developer_did (a legacy store's hooks
+// already send nothing, so a URL finding on top of that names a core nothing
+// will ever be posted to).
+func TestDoctorReportsURLDriftForV3Store(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
 	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvAgentID, "")
 	t.Setenv(devconfig.EnvBaseURL, "")
 	t.Setenv(devconfig.EnvBackendURL, "")
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
@@ -897,19 +911,15 @@ func TestDoctorReportsOrgToToolURLDrift(t *testing.T) {
 	}
 	ccPath := filepath.Join(home, "claude-code", "dev.json")
 	if err := devconfig.WriteConfig(ccPath, devconfig.Update{
-		BackendURL: "https://api.stale", BaseURL: "https://core.stale"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := devconfig.SetLegacyDID(ccPath, testDIDFor(t, "claude-code")); err != nil {
+		BackendURL: "https://api.stale", BaseURL: "https://core.stale",
+		AgentID: testAgentIDFor(t, "claude-code"), IdentityMethod: devconfig.IdentityMethodKeycloakWorkload}); err != nil {
 		t.Fatal(err)
 	}
 	// codex agrees with the org, so only one row may be flagged.
 	codexPath := filepath.Join(home, "codex", "dev.json")
 	if err := devconfig.WriteConfig(codexPath, devconfig.Update{
-		BackendURL: "https://api.corrected", BaseURL: "https://core.corrected"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := devconfig.SetLegacyDID(codexPath, testDIDFor(t, "codex")); err != nil {
+		BackendURL: "https://api.corrected", BaseURL: "https://core.corrected",
+		AgentID: testAgentIDFor(t, "codex"), IdentityMethod: devconfig.IdentityMethodKeycloakWorkload}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -945,7 +955,7 @@ func TestDoctorReportsOrgToToolURLDrift(t *testing.T) {
 func TestUninstallRemovesAnInterruptedOrgTokenWrite(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 
 	residue := filepath.Join(home, ".env-9876543210.tmp")
 	if err := os.WriteFile(residue, []byte("OPENBOX_CONTROL_TOKEN='${OPENBOX_REDACTED_SECRET_ASSIGNMENT}'\n"), 0o600); err != nil {
@@ -1035,7 +1045,7 @@ func TestResidueSweepIgnoresWhatItDoesNotOwn(t *testing.T) {
 func TestUninstallRefusesAHomeItCannotResolve(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 	seeded := filepath.Join(home, "claude-code", ".env")
 
 	// $HOME stays absolute, so the existing guard passes; only OPENBOX_HOME is
@@ -1067,16 +1077,16 @@ func TestDoctorDoesNotFlagDriftAnEnvVarOverrides(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
 	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvAgentID, "")
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
 	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{
 		BaseURL: "https://core.corrected"}); err != nil {
 		t.Fatal(err)
 	}
 	ccPath := filepath.Join(home, "claude-code", "dev.json")
-	if err := devconfig.WriteConfig(ccPath, devconfig.Update{BaseURL: "https://core.stale"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := devconfig.SetLegacyDID(ccPath, testDIDFor(t, "claude-code")); err != nil {
+	if err := devconfig.WriteConfig(ccPath, devconfig.Update{
+		BaseURL: "https://core.stale",
+		AgentID: testAgentIDFor(t, "claude-code"), IdentityMethod: devconfig.IdentityMethodKeycloakWorkload}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1108,7 +1118,7 @@ func TestDoctorDoesNotFlagDriftAnEnvVarOverrides(t *testing.T) {
 func TestTheKeptSummaryNamesWhatSurvived(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 	dir := filepath.Join(home, "claude-code")
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not ours\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1174,7 +1184,7 @@ func TestAKeptDirDoesNotBlameFilesOpenBoxWrote(t *testing.T) {
 	}
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
-	seedToolCredentials(t, "claude-code", testDIDFor(t, "claude-code"))
+	seedToolCredentials(t, "claude-code", testAgentIDFor(t, "claude-code"))
 
 	// A directory whose entries cannot be unlinked: the cheapest deterministic
 	// way to make os.Remove fail for a reason other than "not there".
@@ -1209,6 +1219,7 @@ func TestDoctorDoesNotFlagDriftWhenBothResolveTheSame(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
 	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvAgentID, "")
 	t.Setenv(devconfig.EnvBaseURL, "")
 	t.Setenv(devconfig.EnvBackendURL, "")
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
@@ -1218,8 +1229,8 @@ func TestDoctorDoesNotFlagDriftWhenBothResolveTheSame(t *testing.T) {
 		BaseURL: devconfig.DefaultBaseURL}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"),
-		testDIDFor(t, "claude-code")); err != nil {
+	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
+		AgentID: testAgentIDFor(t, "claude-code"), IdentityMethod: devconfig.IdentityMethodKeycloakWorkload}); err != nil {
 		t.Fatal(err)
 	}
 

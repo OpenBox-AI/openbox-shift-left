@@ -716,3 +716,119 @@ func TestUninstallDoesNotClaimALaneIsRoutedOnAPlatformWithNoDaemons(t *testing.T
 		t.Error("the platform refusal is not recognised, so a Windows uninstall would always exit 1")
 	}
 }
+
+// TestUninstallRemovesTokenCacheAndResidue: the token cache is a live
+// bearer good for up to five minutes, and it has to go with the credentials
+// even though nothing in provider.Supported()'s .env inventory names it
+// directly. The three residue shapes beside it (one per atomic writer this
+// repo has) must all go too, and a second run must report the tool as fully
+// gone rather than finding anything left to remove.
+func TestUninstallRemovesTokenCacheAndResidue(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	dir := filepath.Join(home, "claude-code")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cachePath, err := devconfig.WorkloadTokenCachePathFor("claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		filepath.Base(cachePath),
+		".workload-token-123.tmp",
+		".openbox-456.tmp",
+		".env-789.tmp",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("claude-code's identity directory survived (err=%v)", err)
+	}
+	if strings.Contains(out.String(), "kept") {
+		t.Errorf("something survived and was reported kept:\n%s", out.String())
+	}
+
+	b, second, errb2 := testApp(nil)
+	if code := b.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("second uninstall exit = %d; stderr=%q", code, errb2.String())
+	}
+	if !strings.Contains(second.String(), "nothing to remove") {
+		t.Errorf("the second run did not report a clean machine:\n%s", second.String())
+	}
+}
+
+// TestInterruptedWritesSurviveAGlobHostileHome extends
+// TestResidueIsFoundUnderAHomeWithGlobMetacharacters to the two residue
+// shapes the token cache and Windows atomic writes add: a home containing `[`, `*` or `?` must not make
+// filepath.Glob-shaped matching silently look nowhere for any of the three
+// atomic writers' temp files.
+func TestInterruptedWritesSurviveAGlobHostileHome(t *testing.T) {
+	requireUnbound(t)
+	base := t.TempDir()
+	home := filepath.Join(base, "ho[me]*")
+	if err := os.MkdirAll(filepath.Join(home, "claude-code"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvHome, home)
+	t.Setenv(devconfig.EnvConfigPath, "")
+
+	want := map[string]bool{
+		filepath.Join(home, "claude-code", ".env-1.tmp"):            false,
+		filepath.Join(home, "claude-code", ".workload-token-2.tmp"): false,
+		filepath.Join(home, "claude-code", ".openbox-3.tmp"):        false,
+	}
+	for path := range want {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := interruptedCredentialWrites("claude-code")
+	if len(got) != len(want) {
+		t.Fatalf("residue sweep returned %v, want exactly the 3 seeded files %v", got, want)
+	}
+	for _, p := range got {
+		if _, ok := want[p]; !ok {
+			t.Errorf("residue sweep returned an unexpected path %s", p)
+		}
+	}
+}
+
+// TestUninstallCleanCheckSeesACacheOnlyMachine is uninstall's other promise:
+// the clean-machine check (uninstallInventory.empty()) must count a token cache
+// even when nothing else on the machine looks installed, or an operator who
+// deleted everything else by hand would be told there is nothing left to
+// remove while a live bearer still sits on disk.
+func TestUninstallCleanCheckSeesACacheOnlyMachine(t *testing.T) {
+	isolateHomeUnbound(t)
+	requireUnbound(t)
+	cachePath, err := devconfig.WorkloadTokenCachePathFor("claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, []byte(`{"expires_at":"2026-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	if code := a.run([]string{"uninstall"}); code != exitOK {
+		t.Fatalf("uninstall exit = %d; stderr=%q", code, errb.String())
+	}
+	if strings.Contains(out.String(), "not installed on this machine") {
+		t.Errorf("a machine with only a token cache was reported clean:\n%s", out.String())
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Errorf("the token cache survived (err=%v)", err)
+	}
+}
