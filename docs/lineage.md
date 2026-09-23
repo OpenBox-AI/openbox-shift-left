@@ -50,15 +50,24 @@ reference, not membership.
 
 A trailer can be hand-written, so `inferred` is exactly that: a claim. Getting
 to `verified` needs the pipeline to fetch `refs/notes/openbox-attest` (not the
-default) and the platform to have a verifier for the signing DID. The
-distinction is surfaced rather than smoothed over; a chain that showed green for
-an unverified claim would be worse than one that showed nothing.
+default) and the platform to have a verifier for the signing DID.
+
+**`verified` is currently unreachable for a workload agent.** A commit
+attestation is an Ed25519 signature, and that seed lived in the v1 DID store;
+a `keycloak_workload` agent's store carries only its RSA workload key, no
+Ed25519 seed, by design (core owns the attestation redesign). `openbox`'s own
+commit hook knows this and skips signing rather than fabricate one: the
+trailer still gets stamped (so `inferred` still works), but no
+`refs/notes/openbox-attest` note is written, and the surfaced state stops at
+`inferred`. The distinction is surfaced rather than smoothed over; a chain
+that showed green for an unverified claim would be worse than one that showed
+nothing.
 
 ## The join keys
 
 | Concept | Key |
 |---|---|
-| session identity | `(workflow_id = agent DID, run_id = tool session id)` |
+| session identity | `(workflow_id = agent's derived attribution DID, run_id = tool session id)` |
 | commit → session | the `OpenBox-Session` trailer (a claim) + the attestation note (proof) |
 | deploy → commit → session | `deploy_session_links (deploy_id, commit_sha, session_run_id, session_id, verified, source)` |
 | deploy identity | `run_id = deploy-<env>-<sha>`; idempotent by construction |

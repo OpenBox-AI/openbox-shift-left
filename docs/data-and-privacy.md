@@ -750,9 +750,10 @@ what is queued before deleting it, prints how many events were queued and how
 many remain, and describes the remainder as loss. Where the credentials are
 already gone it cannot flush at all and says so rather than deleting quietly.
 
-**The credentials cannot be recovered.** The `obx_` key and the Ed25519 signing
-seed are shown once, at registration, and are not stored server-side. `openbox
-auth` afterwards registers a **new** agent with a new DID; it does not recover
+**The credentials cannot be recovered.** The `obx_` key and the workload
+private key are shown once, at registration, and are not stored server-side
+(the backend never holds the private key at all). `openbox init --provider
+<tool>` afterwards registers a **new**, suffixed agent; it does not recover
 this one. Deletion is an unlink, not a secure erase: the blocks are freed, not
 overwritten.
 
@@ -779,8 +780,8 @@ follow, and they point in opposite directions, so both are stated:
 
 Both moved to their own document, because two other surfaces link straight into
 them: [Credentials and secret detection](credentials-and-secrets.md) — where the
-signing key and API key live, and what the keyword-and-entropy redactor catches
-before a body is attached.
+workload private key and API key live, and what the keyword-and-entropy
+redactor catches before a body is attached.
 
 ## How this is checked
 

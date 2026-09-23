@@ -26,7 +26,7 @@ Anyone who can author a commit can name **any** session id (including a
 victim's, visible in their pushed commits). A raw trailer is therefore a claim,
 not proof. Each resolved id is passed through an `OwnershipVerifier` that must
 confirm it belongs to a session owned by the **authenticated pusher** before it
-is marked `verified` (→ `attributed`); mirroring how the client cross-binds the DID.
+is marked `verified` (→ `attributed`).
 
 Phase-1 default is `NoopVerifier` (verifies nothing): a well-formed deploy
 resolves as `inferred` with every claim flagged `verified=false`. Enabling the
@@ -58,24 +58,25 @@ It is **OFF by default** and gated by:
 |---|---|
 | `OPENBOX_OWNERSHIP_VERIFY=1` | enable verification (default: off ⇒ `NoopVerifier`) |
 | `OPENBOX_OWNERSHIP_API_URL`  | openbox-backend origin (https, or http on loopback); **bare, no path prefix** |
-| `OPENBOX_AGENT_ID`           | the deploy agent's UUID (from `POST /agent/create`) |
+| `OPENBOX_AGENT_ID`           | the deploy agent's UUID (the same one that registered via `openbox init`) |
 | `OPENBOX_ORG_API_KEY`        | org `X-API-Key` (`obx_key_…`) holding `read:agent_session` |
 
-**INV-4 binding.** There is no DID→agentId lookup; an agent's DID
-is `did:aip:uuidv5(agentID, namespace)` (one-way). So CI supplies the agent's
-UUID directly, and at startup the verifier recomputes `uuidv5(OPENBOX_AGENT_ID)`
-and **requires it to equal `OPENBOX_DID`** (the deploy/attribution identity). A
-misconfigured id that names a *different* principal is rejected → degrades to
-`NoopVerifier`. Combined with the per-row `agent_id` check, the verifier can
-only ever read; and attribute; the deploy principal's own sessions. A
-missing/misconfigured/unreachable verifier; or `--dry-run`; degrades to
-`NoopVerifier`: it **never breaks CI and never over-attributes**.
+**Ownership is a server witness, not a derived-DID self-check.** At
+construction the verifier authenticates the deploy's own runtime credential
+(`OPENBOX_API_KEY` + `OPENBOX_WORKLOAD_PRIVATE_KEY`) against core's `GET
+/api/v3/auth/validate`, once, before any session read, and requires the
+`agent_id` core names to equal `OPENBOX_AGENT_ID` (case-insensitive UUID
+compare). A `did:aip:…` label is a pure function of `agent_id`, so binding to
+one it derived itself would agree with itself by construction and prove
+nothing about which credential is actually authenticating -- the server
+witness is what makes the check real. A mismatch, a witness error (a 401
+included), or an unset witness all refuse construction and degrade to
+`NoopVerifier`, the same as any other misconfiguration. Combined with the
+per-row `agent_id` check, the verifier can only ever read, and attribute, the
+deploy principal's own sessions.
 
 > **Security note.** `OPENBOX_ORG_API_KEY` is an org-scoped key that can read any
 > agent's sessions in the org; scope the CI secret to `read:agent_session` only.
-> The `uuidv5` namespace mirrors openbox-backend `src/modules/did/aip-namespace.ts`
-> (verified cross-repo 2026-07-13); if backend DID derivation ever changes, the
-> bind fails safe (verification disables, never over-attributes).
 
 The emitted `metadata` carries the full qualified `sessions` array (each with
 `verified`/`source`/`reason`) **and** a flat `verified_session_ids` list that
@@ -112,10 +113,13 @@ openbox-git-action --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" --environment
 | `--dir` |; | repo working dir (default: cwd) |
 | `--dry-run` |; | resolve + print the event as JSON; **do not emit** (no creds needed) |
 
-Client identity (an OpenBox agent minted by openbox-backend `POST
-/agent/create`): `OPENBOX_BASE_URL`, `OPENBOX_API_KEY` (`obx_…`), `OPENBOX_DID`
-(`did:aip:<uuid>`), `OPENBOX_SEED` (base64 Ed25519 seed). Secrets ride only in
-headers, never logged (INV-1).
+Client identity, the same `keycloak_workload` agent `openbox init --provider
+<tool>` registers: `OPENBOX_BASE_URL`, `OPENBOX_API_KEY` (`obx_…`),
+`OPENBOX_WORKLOAD_PRIVATE_KEY` (the RS256 key, PEM or single-line base64 DER),
+`OPENBOX_AGENT_ID` (the agent's UUID). `OPENBOX_DID` is optional; if exported
+it must equal `devconfig.AttributionDIDFor(OPENBOX_AGENT_ID)`, or the run
+refuses (exit 2) rather than silently emit under a stale identity from before
+a re-init. Secrets ride only in headers, never logged (INV-1).
 
 **Exit codes:** `0` = resolved (emit success or fail-open drop, INV-3); `2` =
 usage/precondition fault (bad `--sha`, missing creds) the operator must fix. It
@@ -126,8 +130,11 @@ never exits non-zero over a telemetry transport failure.
 The `Deploy` event and the resolved session set ride in `metadata` (the S6 §4
 metadata-jsonb stopgap; no external schema needed to *write* the link; the
 queryable session→commit→deploy join is FR-7, external/deferred). `deploy_did`
-(`did:aip:deploy-<shortsha>-<unixts>`) is a synthetic lineage label in metadata;
-the client's **signing** identity stays the agent's real `did:aip:<uuid>`.
+(`did:aip:deploy-<shortsha>-<unixts>`) is a synthetic lineage label in
+metadata; the workflow's attribution identity stays the agent's own
+`did:aip:<uuid>`, derived in memory from `OPENBOX_AGENT_ID` and never itself a
+credential -- authentication is the API key + exchanged workload bearer,
+never a signature over this label.
 
 No core accept-list patch is needed: `Deploy` maps onto stock `SignalReceived`
 with `signal_name: "deploy"`, which a stock openbox-core already accept-lists

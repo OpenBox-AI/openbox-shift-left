@@ -28,7 +28,7 @@ in every command and message. They are defined here once.
 | **OpenBox platform** | The two servers your organization already runs. The **backend** (control plane) holds agents, policies and approvals. The **core** (data plane) receives events. Each has a URL. |
 | **Governed** | A coding tool session is *governed* when `openbox` is watching it: recording what it does, and asking the platform for permission before risky actions. |
 | **Hook** | A small program the coding tool runs at fixed moments — before a command, after a file edit, when a session starts. `openbox` installs itself as those hooks. That is the whole mechanism. |
-| **Agent** | How the platform identifies one governed tool on one machine. Each tool you govern gets its own agent, with its own **DID** (a unique id) and its own signing key. |
+| **Agent** | How the platform identifies one governed tool on one machine. Each tool you govern gets its own `keycloak_workload` agent, with its own id and its own RS256 workload key; a `did:aip:…` attribution label is derived from the id in memory, never stored. |
 | **Organization control token** | A key that belongs to your *organization*, not to one agent. It is what registers new agents. It looks like `obx_key_…`. You get it from the dashboard. |
 | **Posture** | The settings in effect on one machine: is enforcement on, is content being sent, what happens when the platform is unreachable. `openbox doctor` prints it. |
 | **Lane** | An optional extra that also records the *model calls* a tool makes (the actual requests to Anthropic), which hooks alone cannot see. Installed automatically on Claude Code. Explained in [Getting started](docs/getting-started.md#governing-the-model-call-itself). |
@@ -104,14 +104,18 @@ You should see it register an agent, then install:
 
 ```
 Registered developer agent "claude-code-<you>@<host>"
-  id:    …
-  DID:   did:aip:…
-  tier:  … (trust …)
-Credentials written to ~/.openbox/claude-code/.env (0600); values are not printed (INV-1).
+  id           …
+  identity     keycloak_workload (kid …)
+  tier         … (trust …)
+  credentials  ~/.openbox/claude-code/.env (0600; values never printed, INV-1)
 Wrote claude-code native config (no secrets inline; the hook reads ~/.openbox/claude-code/.env at runtime).
 
 Governed: EVERY SESSION on this machine, in any directory.
 ```
+
+There is no DID here to write down: the agent id above is the only
+coordinate, and the `did:aip:…` attribution label a governed event carries is
+derived from it in memory, never stored, never sent as a header.
 
 That one command created this tool's agent on your platform, saved its
 credentials, and installed the hooks into your **user-wide** settings
@@ -243,12 +247,13 @@ field list, and what changed when, is in
 ## Where things live
 
 ```
-~/.openbox/.env                   the organization control token       (0600, never commit)
-~/.openbox/dev.json               your organization's backend and core URLs
-~/.openbox/<tool>/.env            that tool's agent key and signing key   (0600, never commit)
-~/.openbox/<tool>/dev.json        that tool's posture and identity (DID, agent id, URLs)
-~/.claude/settings.json           the Claude Code hooks (user-wide) and lane settings
-~/.codex/hooks.json               the Codex hooks (user-wide)
+~/.openbox/.env                         the organization control token             (0600, never commit)
+~/.openbox/dev.json                     your organization's backend and core URLs
+~/.openbox/<tool>/.env                  that tool's API key and workload private key (0600, never commit)
+~/.openbox/<tool>/dev.json              that tool's posture and identity (agent id, URLs)
+~/.openbox/<tool>/workload-token.json   a cache, not a store: the exchanged bearer (deletable, <=270s)
+~/.claude/settings.json                 the Claude Code hooks (user-wide) and lane settings
+~/.codex/hooks.json                     the Codex hooks (user-wide)
 ```
 
 Secrets and settings never share a file. A real environment variable outranks
@@ -267,8 +272,9 @@ prevent, so the limits are stated as plainly as the features.
 
 - **Your credentials sit in a plaintext file.** `0600` on macOS and Linux; on
   Windows that is a no-op. Anything running as you — including the coding agent
-  under governance — can read the signing key. So a signed event proves *a
-  machine holding this agent's key produced it*, not that the developer could
+  under governance — can read the workload private key and the token cache. So
+  an authenticated event proves *a machine holding this agent's key produced
+  it*, not that the developer could
   not have tampered with it. The organization control token is stored the same
   way, and it has the largest blast radius on the machine. Details:
   [Credentials](docs/credentials-and-secrets.md).

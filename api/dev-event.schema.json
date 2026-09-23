@@ -89,7 +89,7 @@
       "minLength": 1
     },
     "developer_did": {
-      "description": "The developer/session agent DID. Shares the runtime-agent DID namespace (INV-7). Reuses agent/create identity (agent_type=developer, S6 §1).",
+      "description": "The session's attribution coordinate, not a credential. For a keycloak_workload agent it is derived in memory as uuid5(namespace, agent_id) on every event and carried only here in the body; it is never stored server-side for that agent and never sent as a request header (authentication is the agent's obx_ API key plus an exchanged workload bearer). Shares the runtime-agent DID namespace (INV-7).",
       "type": "string",
       "pattern": "^did:aip:"
     },

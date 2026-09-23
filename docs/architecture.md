@@ -15,12 +15,14 @@ flowchart LR
     GIT["git prepare-commit-msg<br/>trailer + signed note"]
   end
   subgraph OPENBOX["OpenBox"]
-    CORE["openbox-core<br/>/api/v1/governance/evaluate"]
+    KC["Keycloak<br/>bootstrap · client-assertion exchange"]
+    CORE["openbox-core<br/>/api/v3/governance/evaluate"]
     BE["openbox-backend<br/>agents · policy · approvals"]
     DB[("sessions · governance_events<br/>deploy_session_links")]
   end
   CC -- "hook event" --> ENG
   ENG --> RED
+  ENG -- "bootstrap, then exchange for a bearer" --> KC
   ENG -- "evaluate (gated call, blocking)" --> CORE
   CORE -- "allow · deny · hold · redact" --> CC
   ENG --> SPOOL --> CORE --> DB
@@ -29,6 +31,20 @@ flowchart LR
   BE -- "policy" --> CORE
   BE -- "approval queue" --> DASH["dashboard"]
 ```
+
+**Auth flow, once per cold identity:** the engine fetches core's bootstrap
+document with the `obx_` API key alone, builds a 60-second RS256 client
+assertion with the tool's workload private key, and exchanges it at Keycloak
+for a bearer. The bearer and the bootstrap document share one lifetime, capped
+at 270 seconds, cached to disk, and reused by the next hook until it expires;
+a cached token that gets a flat 401 is deleted immediately rather than resent
+(core answers 401 identically for a bad key and for a fault of its own, so a
+401 never spends a delivery attempt). Keycloak unreachable, or any stage of
+this dance failing, degrades exactly like a core outage: the call proceeds
+and the event spools for a later flush -- authentication is never a second
+reason to block a tool call. `/api/v3/auth/validate` is the one route that
+also answers outside this dance, for a caller (doctor, git-action) that only
+needs to confirm which agent a credential belongs to.
 
 Two paths, deliberately separate:
 
@@ -519,10 +535,10 @@ principle:
   | `internal/gateway` | **0** external; and that is the strongest statement available, not a vacuous one | `internal/depguard`, plus its own credential scan |
   | `internal/conformance` | **1**; `santhosh-tekuri/jsonschema/v6` v6.0.3, plus `golang.org/x/text` transitively | `internal/depguard`, by package **closure** |
   | `internal/cli` + `cmd/` | **5**; `kardianos/service` v1.3.0, `google/renameio/v2`, `golang.org/x/term`, `tidwall/gjson`, `tidwall/sjson`; plus `google/go-cmp` in tests | **nothing** |
-  | `internal/adapters/common/devconfig` | **2**; `pelletier/go-toml/v2`, `joho/godotenv` | **nothing** |
+  | `internal/adapters/common/devconfig` | **3**; `pelletier/go-toml/v2`, `joho/godotenv`, `google/uuid` (the AIP attribution-label derivation) | **nothing** |
   | `internal/adapters/common/hookflow` | **2**; `google/renameio/v2`, `gofrs/flock` | **nothing** |
   | `internal/adapters/claude-code`, `internal/adapters/codex` | **3**; `gofrs/flock`, `tidwall/gjson`, `tidwall/sjson`; plus `google/go-cmp` in tests | **nothing** |
-  | `internal/client` | **2**; `cenkalti/backoff/v5`, and `grpc/test/bufconn` inside `memhttptest`, which its own guard test forbids any non-test file to import | **nothing** |
+  | `internal/client` | **3**; `cenkalti/backoff/v5`, `golang-jwt/jwt/v5` (in `internal/client/workloadauth`, the RS256 client assertion), and `grpc/test/bufconn` inside `memhttptest`, which its own guard test forbids any non-test file to import | **nothing** |
   | everything else | **0** | **nothing** |
 
 The rows saying **nothing** are the accepted loss: those subtrees never had a

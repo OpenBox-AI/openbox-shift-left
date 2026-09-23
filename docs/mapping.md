@@ -11,7 +11,9 @@ the version is `x-schema-version` in that file, which is the authority; this
 document tracks it. **Wire model:** the **base SDK's** `EventType` set,
 `WorkflowStarted / WorkflowCompleted / SignalReceived / ActivityStarted /
 ActivityCompleted`, serialized by `client/payload.go` (`buildPayload`) onto
-`POST /api/v1/governance/evaluate` (openbox-core). Every payload is hook-less.
+`POST /api/v3/governance/evaluate` (openbox-core), authenticated by a
+workload agent's `obx_` API key + exchanged bearer (§6), never a per-request
+signature. Every payload is hook-less.
 It is also **entirely span-less, with no exceptions** as of v1.7. Both carriers
 that used to exist -- the content-gated span of a hook-observed turn and the span
 of a relay-observed model call -- are gone, because the control plane parses
@@ -90,7 +92,7 @@ body) and the base contract
 | `metadata` | `metadata` (`json.RawMessage`) | Merged per-type keys below; JSON object. Carries commit/deploy lineage (§2). |
 | `status` | `status` | **`ToolResult` only**, enum `completed`\|`failed`. The field core's per-tool success metric reads, and the only one: `IsSuccess = payload.Status != nil && *payload.Status == "completed"` (`openbox-core.../observability/errors.go:333`). **Not content-gated**; derived from which provider hook fired, so it ships identically with `content_capture:false`. Never on a turn/lifecycle/signal event: `payload.status` also writes the row's `workflow_status` column for **any** event type (`storage_event.go:417`), where it means something else. `client.statusFor` enforces both the vocabulary and the scope; C20–C22 assert it on the outbound bytes. |
 | `tokens`, `cost`, `model` | `metadata.tokens`, `metadata.cost`, `metadata.model` | No first-class payload fields; carried in `metadata`. On a turn's `ActivityCompleted` the same model + counts ALSO ride `activity_output`, so they are policy-visible; see §2 "The turn pair". |
-| `developer_did` |; | Identity is via the signed AIP headers + Bearer key, **not** a body field. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
+| `developer_did` |; | Never a body field. A workload agent authenticates via the `obx_` API key + exchanged bearer (§6), not a signed identity header; `workflow_id` (above) is `did:aip:uuid5(namespace, agent_id)`, derived in memory and sent nowhere -- an attribution coordinate, not a credential. `from_agent_did`/`multi_agent_session_id` stay empty (Handoff-only). |
 | `span` |; | **Not serialized, and there is no longer a wire span to confuse it with.** The adapter-facing `span` object is the carrier the client reads locators, counts and bodies *out of* (§3); it is never itself emitted, on any event, and no event carries `spans[]` or `span_count` at all (§2). |
 | `content.output` (turn) | `activity_output.content` **only when content-capture enabled**, capped | **`TurnCompleted` only.** The assistant turn's text. It rode `spans[0].response_body`, wrapped as `{"choices":[{"message":{"content":…}}]}`, for one reader -- and core parses `spans[]` on the normal path and then discards it, so it was never stored anywhere at all (§2). Verbatim now, with no OpenAI-chat wrapper, in a field that round-trips. Secret-redacted **before** attachment, capped, **absent** with capture off. `hook_trigger` is still never sent, on any event: true alongside spans routes the payload into core's approval-bypass fingerprint path (`governance_workflow.go:310-330`), and `internal/client/lifecyclepairing_test.go`'s sibling census in `modelcallcontent_test.go` is what holds that now. |
 | `content.prompt` | `signal_args.prompt` **only when content-capture enabled**, capped to 65536 chars (`capBody`) | Stripped at the client when disabled ([INV-2](dev-event-contract.md#invariants)). |
@@ -799,15 +801,24 @@ If any future lifecycle type cannot map without a non-additive wire change →
 
 ## 6. Client transport notes
 
-Verified against the SDK's `request_signing.py`; the client matches core
-exactly:
-- **Body:** compact JSON; the **signed bytes must equal the transmitted bytes**
-  (serialize once, send raw). `capBody` truncation happens **before** marshal =
-  before signing.
-- **AIP signature (Ed25519):** canonical string
-  `UPPER(METHOD)\nPATH\nTIMESTAMP\nNONCE\nBODY_SHA256_HEX`; headers
-  `X-OpenBox-Agent-DID/Timestamp/Nonce/Signature`, `X-OpenBox-Body-SHA256`,
-  `Authorization: Bearer <obx_>`, `X-OpenBox-SDK-Version`.
+The v1 AIP Ed25519 request signature (a canonical string over method, path,
+timestamp, nonce and body hash, verified per request) is retired along with
+`/api/v1`. A workload agent authenticates once per cold cache, not per
+request: a bootstrap document (API-key only) plus an RS256 client assertion
+exchanged at Keycloak for a short-lived bearer (see
+[Architecture](architecture.md)'s auth-flow paragraph), then every
+`/api/v3/governance/evaluate` request carries that bearer until it expires or
+is rejected.
+- **Body:** compact JSON, unsigned; `capBody` truncation happens before
+  marshal, same as before.
+- **Headers:** `Authorization: Bearer <obx_ API key>`,
+  `X-OpenBox-Workload-Token: <exchanged bearer>`, `X-OpenBox-SDK-Version`,
+  `Idempotency-Key` (the event id) when the caller supplies one. **No**
+  `X-OpenBox-Agent-DID`, `-Timestamp`, `-Nonce`, `-Signature` or
+  `X-OpenBox-Body-SHA256` header exists any more -- pinned by
+  `TestEmitSendsWorkloadEnvelopeOnV3` and `TestNoV1PathSurvives`. The body's
+  `workflow_id` (§2, D1) is a `did:aip:…` label derived in memory from
+  `agent_id`; it is never carried on a header, signed or otherwise.
 - **`sdk_version`:** set server-side from the header; not in the body.
 
 ---

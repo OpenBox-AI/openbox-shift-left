@@ -2,10 +2,13 @@ package claudecode
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"log"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"os"
 	"path/filepath"
 	"strings"
@@ -832,6 +835,32 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
 
+	// The workload-identity fixtures below are generated at runtime, never
+	// literals: a committed RSA key or JWT is a secret either way, and a
+	// literal secret-shaped string here would be silently rewritten to
+	// ${OPENBOX_REDACTED_*} by the local pre-commit hook.
+	workloadKey, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workloadKeyB64, err := workloadauth.EncodePrivateKey(workloadKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workloadKeyDER, err := base64.StdEncoding.DecodeString(workloadKeyB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workloadKeyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: workloadKeyDER}))
+	workloadToken, err := workloadauth.BuildAssertion(workloadKey, &workloadauth.BootstrapDocument{
+		TokenEndpoint: "https://example.test/realms/fake/protocol/openid-connect/token",
+		ClientID:      "test-client",
+		Kid:           "test-kid",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, tc := range []struct {
 		name, line, secret string
 		caught             bool
@@ -878,6 +907,28 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			line:   "SESSION_KEY=" + "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC",
 			secret: "aB3xQ9vK2mZ7pL4wR8tY6nH1jF5sD0gC",
 			caught: true, by: "entropy fallback; `=` puts the token in a value position",
+		},
+		{
+			name:   "OPENBOX_WORKLOAD_PRIVATE_KEY, base64 PKCS8 DER (runtime key)",
+			line:   "OPENBOX_WORKLOAD_PRIVATE_KEY=" + workloadKeyB64,
+			secret: workloadKeyB64,
+			caught: true, by: "secret_assignment (keyword private_key, base64 value >=64 chars)",
+		},
+		{
+			name:   "a runtime workload key's PEM block (PKCS8 \"PRIVATE KEY\")",
+			line:   workloadKeyPEM,
+			secret: workloadKeyPEM,
+			// Measured, not the gitleaks rule this repo's other private keys rely
+			// on: a local BEGIN/END PRIVATE KEY pattern (secrets.go's own
+			// `private_key` category) replaces the whole block before gitleaks'
+			// own detector ever runs over what is left.
+			caught: true, by: "private_key (a local PEM-block pattern, ahead of gitleaks)",
+		},
+		{
+			name:   "X-OpenBox-Workload-Token header, a runtime RS256 assertion (JWT-shaped)",
+			line:   "X-OpenBox-Workload-Token: " + workloadToken,
+			secret: workloadToken,
+			caught: true, by: "jwt (the three-segment eyJ...eyJ...sig shape rule; no keyword needed)",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

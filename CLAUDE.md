@@ -10,7 +10,7 @@ Codex) developers use, feeding the pipeline the agent runtime already uses.
 Shift-left onboards the developer runtime onto OpenBox's existing pipeline rather
 than a parallel one: a tool install registers as an agent (`kind=developer`) with
 the session as a child record, events go through the same
-`/api/v1/governance/evaluate` with the same auth, storage is the same tables.
+`/api/v3/governance/evaluate` with the same auth, storage is the same tables.
 Prefer reusing an existing table, endpoint or service over adding one. Dev
 sessions write no `spans` rows at all, and send no `spans[]`: see the invariant.
 
@@ -36,7 +36,7 @@ local working records, git-ignored. Inside `internal/`:
 |---|---|
 | `provider/`, `adapters/common/hookflow/` | the SPI, and the engine every adapter runs on |
 | `adapters/common/devconfig/`, `adapters/common/git/`, `adapters/claude-code/`, `adapters/codex/` | shared config and posture; trailer, notes, attestation; one thin adapter each |
-| `client/`, `decision/` | core client (payload, AIP signing, verdicts); local secret detection |
+| `client/`, `decision/` | core client (workload auth: Keycloak client assertion -> token; wire payload; verdict parsing); local secret detection |
 | `gateway/`, `telemetry/`, `transport/` | the three model-call lanes. `gateway/internal/dialhook` keeps a nested `internal/` on purpose |
 | `cli/` | behind the `openbox` commands: `activation`, `laneservice`, `atomicfile`. The command layer itself is `cmd/openbox/` |
 | `conformance/`, `depguard/`, `actions/` | the event-contract suite; the dependency guards; commit-to-deploy lineage for CI |
@@ -58,8 +58,10 @@ hence **two** `atomicWriteFile` copies: grep the pattern, not the importer.
 
 **Credentials are plaintext, on purpose.** `~/.openbox/.env` is `0600` on macOS
 and Linux and unprotected on Windows, and anything running as the developer,
-including the governed agent, can read the signing key, so attestation proves
-origin of config rather than tamper resistance. No document may imply otherwise.
+including the governed agent, can read the key, so attestation proves origin
+of config rather than tamper resistance. No document may imply otherwise. The
+RSA workload private key and the `workload-token.json` bearer cache are
+plaintext the same way, under the same boundary.
 
 **Privacy posture.** A decision only a human can make (scope, privacy posture,
 priority) is surfaced, never inferred. Content, usage and thinking capture are on
@@ -81,8 +83,10 @@ evaluation: before it, under `fail_closed`, it synthesizes a HALT that reads as
 without asking. Deprecated keys (`tier2`, `tier2_timeout_ms`,
 `require_verified_bundle`) stay parseable so they can warn; `tier2` is not
 honoured. **One store per field**: `.env` holds only secrets and `dev.json` only
-coordinates; relaxing `TestEnvFileIsNotACoordinateSource` reopens the stale-copy
-bug that reverted a corrected DID on every install.
+coordinates (now `agent_id`, not a DID); relaxing
+`TestEnvFileIsNotACoordinateSource` reopens the two-store bug this split
+exists to prevent -- historically, a stale DID silently reverting a corrected
+one on every install.
 
 **A flag defaulting to true cannot express "said nothing".** `Enforce` is a
 `*bool` and must stay nil when a run says nothing about it; `flagPassed` makes the

@@ -6,19 +6,40 @@ before anything is attached to an event. The companion to
 
 ## Where credentials live
 
-Two kinds of file, both in **plaintext**. Nothing is sent to OpenBox; but there
+Every one of these files is **plaintext**. Nothing is sent to OpenBox; but there
 is no encryption at rest either, and the difference matters, so here it is
 plainly.
 
 **One store per governed tool.** Each tool you run `openbox init --provider
-<tool>` for gets its own agent, with its own DID, in its own directory:
+<tool>` for registers its own `keycloak_workload` agent, in its own directory:
 
 ```
 ~/.openbox/claude-code/.env
 ~/.openbox/codex/.env
-    OPENBOX_API_KEY='obx_…'             # that tool's agent runtime key
-    OPENBOX_AGENT_PRIVATE_KEY='…'       # the Ed25519 key that tool signs with
+    OPENBOX_API_KEY='obx_…'                 # that tool's agent runtime key
+    OPENBOX_WORKLOAD_PRIVATE_KEY='…'        # the RS256 key that tool authenticates with
+~/.openbox/claude-code/dev.json
+~/.openbox/codex/dev.json
+    agent_id                                # a UUID; a coordinate, not a secret
+~/.openbox/claude-code/workload-token.json
+~/.openbox/codex/workload-token.json
+    a cache, not a store: the bearer Keycloak issued for that agent's key,
+    usable for at most 270 seconds and deletable at any time -- the next hook
+    just re-authenticates and writes a new one
 ```
+
+There is no DID here anymore, stored or otherwise. `agent_id` is the only
+coordinate; the `did:aip:…` attribution label a spooled event carries is
+derived from it in memory on every read (`uuid5(namespace, agent_id)`) and
+never written to disk or sent as a header -- see [Data and privacy](data-and-privacy.md).
+
+**If your org's Keycloak is unreachable, hooks fail open, not closed.** A hook
+that cannot bootstrap or exchange for a bearer proceeds exactly as it would
+during a core outage: the tool call is allowed, and the event that could not
+be delivered synchronously is held in the spool for the next flush to retry.
+The tool is ungoverned for the duration, silently -- there is no separate
+"Keycloak is down" warning distinct from an ordinary outage, because from the
+hook's side they look the same: no bearer, no verdict, proceed.
 
 **One org-level file**, shared by every tool, holding the organization
 connection and nothing else:
@@ -38,12 +59,15 @@ connection and nothing else:
   it only toggles the read-only attribute, so the file inherits the parent ACL
   and other local accounts can read it. Use full-disk encryption; do not treat
   this file as protected.
-- **It is the only copy.** OpenBox shows the API key and signing key exactly
+- **It is the only copy.** OpenBox shows the API key and workload key exactly
   once, at registration, and does not store them. Lose a tool's file and there
-  is no recovery for that identity: `openbox init --provider <tool>` registers a
-  new agent with a new DID, which leaves work attributed to the old one attached
-  to the old one. If you still have the key and seed, that command offers to
-  **adopt** the existing agent instead, which keeps the DID.
+  is no rotation: `openbox init --provider <tool>` finds the old agent's name
+  taken and registers a new, suffixed agent instead (`<name>-<6 hex>`, both
+  names printed), leaving the old one orphaned with work still attributed to
+  it. The only way to keep the same `agent_id` is `openbox init --adopt`,
+  which asks for that agent's id, its API key, and its workload private-key
+  file (PEM or the single-line base64 form) -- so adopting still requires
+  holding the very key you lost.
 - **Never commit it.** The file's own header comment says so; it lives in your
   home directory rather than anywhere near a repo for that reason.
 - **A killed write can leave a copy.** Every credential write is atomic — the
@@ -69,7 +93,7 @@ makes it obvious.
 **The organization credential is written to the org-level file, and that is a
 real exposure.** `OPENBOX_CONTROL_TOKEN` is what registers an agent, and when it
 is an `obx_key_…` organization key it can **create and rotate agents across your
-whole organization** — a tool's signing key compromises one agent, this one
+whole organization** — a tool's own key compromises one agent, this one
 compromises the fleet.
 
 `openbox auth` takes it and persists it to `~/.openbox/.env`, because `auth`
@@ -92,14 +116,16 @@ A real environment variable always beats the file, so CI can supply credentials
 without writing anything to disk:
 
 ```
-secrets       OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY  env var > ~/.openbox/<tool>/.env
-coordinates   OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …      env var > <tool>/dev.json > default
-org secret    OPENBOX_CONTROL_TOKEN                       ~/.openbox/.env > env var
+secrets       OPENBOX_API_KEY, OPENBOX_WORKLOAD_PRIVATE_KEY  env var > ~/.openbox/<tool>/.env
+coordinates   OPENBOX_AGENT_ID, …                            env var > <tool>/dev.json > default
+org secret    OPENBOX_CONTROL_TOKEN                          ~/.openbox/.env > env var
 ```
 
-An exported variable outranks **every** store at once: one `OPENBOX_AGENT_DID`
-makes every governed tool report the same identity. `openbox doctor` names which
-source is actually in effect for exactly this reason.
+An exported variable outranks **every** store at once: one `OPENBOX_AGENT_ID`
+makes every governed tool report the same identity (and the same derived
+attribution). `openbox doctor` names which source is actually in effect for
+exactly this reason. `OPENBOX_AGENT_DID` is retired: doctor flags it as an
+ignored, no-op export rather than honouring it.
 
 **The organization control token is the one exception, and it runs the other
 way.** It is the only value handed between two commands in two processes —
@@ -168,7 +194,9 @@ event and asserts the flushed bytes):
 | an AWS / GitHub / Stripe / JWT / `sk-` key, anywhere | yes | matched by shape, so surrounding syntax is irrelevant |
 | a GitLab / Shopify / Twilio / DigitalOcean / Grafana / … token, anywhere | yes | one of gitleaks' 222 rules; shape again, no key name needed |
 | `OPENBOX_API_KEY=obx_…` | yes | the key name matches a known credential keyword |
-| `OPENBOX_AGENT_PRIVATE_KEY=<base64>` | yes | matched as a generic API key by shape; the entropy pass would catch it too |
+| `OPENBOX_WORKLOAD_PRIVATE_KEY=<base64 PKCS8 DER>` | yes | `secret_assignment`: a `private_key`-keyword pattern restricted to a base64 value 64+ chars long, so it does not also fire on this repo's own `WorkloadPrivateKey: creds.WorkloadPrivateKey` source line |
+| a PEM block (`-----BEGIN…PRIVATE KEY-----…-----END…-----`), anywhere | yes | a dedicated local pattern matches the whole block and replaces it before gitleaks' own key-shape rules ever see it |
+| `X-OpenBox-Workload-Token: <a Keycloak-issued bearer>`, anywhere | yes | the JWT-shape rule (three base64url segments, `eyJ…eyJ…`); no keyword needed, so this also catches a leaked bearer with no header name attached |
 | `API_KEY=<64 hex chars>` | yes | keyword match; the value's alphabet does not matter |
 | **`AWS_ACCESS_KEY_ID=<value in no known format>`** | **no** | **the keyword must sit NEXT TO the delimiter, and `_ID` intervenes** |
 | `DEPLOY_HEX=<64 hex chars>` | **no** | no keyword, and hex cannot clear the entropy floor |

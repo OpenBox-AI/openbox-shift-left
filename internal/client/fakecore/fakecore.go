@@ -136,8 +136,11 @@ type Server struct {
 func New(t TB, s Script) *Server {
 	t.Helper()
 	f := newUnstarted(t, s)
-	f.srv = memhttptest.NewServer(t, http.HandlerFunc(f.serve))
-	t.Cleanup(f.srv.Close)
+	srv := memhttptest.NewServer(t, http.HandlerFunc(f.serve))
+	f.mu.Lock()
+	f.srv = srv
+	f.mu.Unlock()
+	t.Cleanup(srv.Close)
 	return f
 }
 
@@ -151,8 +154,17 @@ func New(t TB, s Script) *Server {
 func NewReal(t TB, s Script) *Server {
 	t.Helper()
 	f := newUnstarted(t, s)
-	f.realSrv = httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(f.realSrv.Close)
+	// httptest.NewServer binds and starts accepting before it returns, so a
+	// real client could reach f.serve -> f.URL() concurrently with the field
+	// write below (observed: an unrelated leaked subprocess from another
+	// real-socket test connecting to a since-reused ephemeral port). srv/
+	// realSrv are set exactly once and never again, so the mutex here and in
+	// URL() below is the whole fix.
+	srv := httptest.NewServer(http.HandlerFunc(f.serve))
+	f.mu.Lock()
+	f.realSrv = srv
+	f.mu.Unlock()
+	t.Cleanup(srv.Close)
 	return f
 }
 
@@ -165,6 +177,8 @@ func newUnstarted(t TB, s Script) *Server {
 
 // URL is the base URL to point OPENBOX_BASE_URL at.
 func (f *Server) URL() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.realSrv != nil {
 		return f.realSrv.URL
 	}
