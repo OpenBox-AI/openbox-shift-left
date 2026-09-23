@@ -1132,3 +1132,26 @@ func TestSuffixedNameKeepsTheSuffixAtTheLengthLimit(t *testing.T) {
 		t.Fatalf("suffixedName(dev) = %q", short)
 	}
 }
+
+// TestEnvironmentReuseRecordsTheIdentityMethod a machine provisioned entirely
+// through exported variables reaches dev.json only through this install, so
+// the reuse branch must hand the installer the identity method too; without
+// it doctor cannot recognise the store as a v3 identity.
+func TestEnvironmentReuseRecordsTheIdentityMethod(t *testing.T) {
+	isolateHome(t)
+	t.Setenv(devconfig.EnvAPIKeyDirect, "obx_env")
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, "present")
+	t.Setenv(devconfig.EnvAgentID, "8f2a1c4e-9b3d-4a6f-8c5e-2d7b9a1f3e6c")
+	inst := &fakeInstaller{}
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: &fakeRegistrar{reg: validReg()}, Installer: inst, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !res.Reused {
+		t.Fatalf("an exported v3 identity must be reused, got %+v", res)
+	}
+	if inst.gotRef.IdentityMethod != devconfig.IdentityMethodKeycloakWorkload {
+		t.Fatalf("installer got IdentityMethod %q, want %q", inst.gotRef.IdentityMethod, devconfig.IdentityMethodKeycloakWorkload)
+	}
+}

@@ -113,7 +113,11 @@ func (a *app) adoptExistingAgent(tool string) (adopted bool, code int) {
 	}
 
 	if wasLegacy {
-		if n, derr := discardLegacySpool(tool); derr == nil && n > 0 {
+		n, derr := discardLegacySpool(tool)
+		switch {
+		case derr != nil:
+			fmt.Fprintf(a.stdout, "could not discard events queued under the previous identity: %v\n", derr)
+		case n > 0:
 			fmt.Fprintf(a.stdout, "discarded %d events queued under the previous identity\n", n)
 		}
 	}

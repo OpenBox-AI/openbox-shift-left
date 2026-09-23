@@ -232,6 +232,10 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		res.AgentID = agentID
 		res.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
 		ref.AgentID = agentID
+		// Recorded on reuse too: a store provisioned through the environment
+		// reaches dev.json only through this install, and doctor reads the
+		// method to recognise a v3 identity.
+		ref.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
 		where := credentialFileLabel()
 		if !fromFile {
 			where = "the environment"
@@ -428,7 +432,14 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 
 	if wasLegacy && d.DiscardLegacySpool != nil {
-		if n, derr := d.DiscardLegacySpool(o.Provider); derr == nil && n > 0 {
+		n, derr := d.DiscardLegacySpool(o.Provider)
+		switch {
+		case derr != nil:
+			// Not fatal: the new store is written. The queued events stay where
+			// they are, and no flusher can send them, since every flusher
+			// resolves credentials that no longer name the old identity.
+			fmt.Fprintf(d.Out, "could not discard events queued under the previous identity: %v\n", derr)
+		case n > 0:
 			fmt.Fprintf(d.Out, "discarded %d events queued under the previous identity\n", n)
 		}
 	}

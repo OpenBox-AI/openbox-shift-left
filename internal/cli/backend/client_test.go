@@ -109,7 +109,7 @@ func TestCreateAPIError(t *testing.T) {
 	}
 }
 
-// TestCreateSendsIdentityVerificationVerbatim story-phase-03-step-1: the
+// TestCreateSendsIdentityVerificationVerbatim the
 // identity_verification block reaches the wire with exactly the requested
 // keys, and only the public JWK -- never a private RSA parameter.
 func TestCreateSendsIdentityVerificationVerbatim(t *testing.T) {
@@ -169,7 +169,7 @@ func TestCreateSendsIdentityVerificationVerbatim(t *testing.T) {
 	}
 }
 
-// TestCreateParsesWorkloadIdentity story-phase-03-step-2: a response shaped
+// TestCreateParsesWorkloadIdentity a response shaped
 // like agent-registration-identity.service.ts:471-484 parses into
 // Registration.Identity, non-secret fields only.
 func TestCreateParsesWorkloadIdentity(t *testing.T) {
@@ -232,10 +232,10 @@ func TestCreateOmitsIdentityVerificationWhenNil(t *testing.T) {
 	}
 }
 
-// TestClassifyCreateConflict story-phase-03-step-4: the create 409s carry no
-// reason_code, so the classifier reads the message string. Decision 1
-// (validation-log.md): the ExternalIdP primary match is the :198 source-
-// mismatch string a non-OpenBox org actually returns for source_type=openbox;
+// TestClassifyCreateConflict the create 409s carry no reason_code, so the
+// classifier reads the message string. The ExternalIdP primary match is the
+// source-mismatch string (agent-registration-identity.service.ts:198) a
+// non-OpenBox org actually returns for source_type=openbox;
 // "New identities must be created…" is the secondary match.
 func TestClassifyCreateConflict(t *testing.T) {
 	tests := []struct {

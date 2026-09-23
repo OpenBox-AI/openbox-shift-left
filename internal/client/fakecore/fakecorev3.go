@@ -37,9 +37,9 @@ const v3ClientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-b
 
 // v3AttributionAIPNamespace restates devconfig.AttributionAIPNamespace
 // (verified against core openbox_did.go:30 and backend aip-namespace.ts).
-// TestFakecoreAttributionDIDMatchesTheVerifiedVector pins
-// the same vector devconfig's own TestAttributionDIDMatchesCoreDerivation
-// asserts, so a drift here is caught without importing devconfig.
+// TestFakecoreAttributionDIDMatchesTheVerifiedVector pins the same vector
+// devconfig's own TestAttributionDIDMatchesCoreDerivation asserts, so a drift
+// here is caught without importing devconfig.
 const v3AttributionAIPNamespace = "b6e4a1d3-7c02-4e8a-9d1f-5a3b7c2d8e0f"
 
 var (
@@ -102,15 +102,16 @@ func AgentID() string {
 // the package doc comment for why this is a restatement rather than an
 // import.
 func attributionDIDFor(agentID string) (string, error) {
-	agentUUID, err := uuid.Parse(agentID)
-	if err != nil {
+	if _, err := uuid.Parse(agentID); err != nil {
 		return "", fmt.Errorf("fakecore: agent id %q is not a UUID: %w", agentID, err)
 	}
 	ns, err := uuid.Parse(v3AttributionAIPNamespace)
 	if err != nil {
 		return "", fmt.Errorf("fakecore: parse namespace: %w", err)
 	}
-	return "did:aip:" + uuid.NewSHA1(ns, []byte(agentUUID.String())).String(), nil
+	// The original string's bytes, as devconfig and core hash it, never a
+	// re-serialized form: an uppercase id would otherwise derive another DID.
+	return "did:aip:" + uuid.NewSHA1(ns, []byte(agentID)).String(), nil
 }
 
 // AttributionDID is the derived did:aip: label for AgentID(), matching

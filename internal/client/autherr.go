@@ -63,6 +63,12 @@ func diagnose(status int, body string) string {
 			return "400 payload rejected: " + truncate(msg, maxDiagMsg)
 		}
 		return "400 payload rejected (no message)"
+	case 500, 502, 503, 504:
+		hint := "core-side fault (transient); retried and still failed; safe to ignore unless persistent"
+		if msg != "" {
+			return strconv.Itoa(status) + " " + hint + ": " + truncate(msg, maxDiagMsg)
+		}
+		return strconv.Itoa(status) + " " + hint
 	default:
 		if msg != "" {
 			return "status " + strconv.Itoa(status) + ": " + truncate(msg, maxDiagMsg)
@@ -115,33 +121,13 @@ func extractReason(body []byte) string {
 // reconstructs it from a persisted reason with no status), so guidance keys
 // off Stage/Reason, never Status.
 func describeWorkloadError(e *workloadauth.Error) string {
-	var b strings.Builder
-	b.WriteString(string(e.Stage))
-	if e.Status != 0 {
-		b.WriteString(" (status ")
-		b.WriteString(strconv.Itoa(e.Status))
-		b.WriteString(")")
-	}
-	if e.Reason != "" {
-		b.WriteString(": reason=")
-		b.WriteString(e.Reason)
-		if e.Stage == workloadauth.StageBootstrap {
-			if g, ok := bootstrapGuidance[e.Reason]; ok {
-				b.WriteString(": ")
-				b.WriteString(g)
-			}
+	s := strings.TrimPrefix(e.Error(), "workloadauth: ")
+	if e.Stage == workloadauth.StageBootstrap {
+		if g, ok := bootstrapGuidance[e.Reason]; ok {
+			s += "; " + g
 		}
 	}
-	if e.Detail != "" {
-		b.WriteString(" (")
-		b.WriteString(e.Detail)
-		b.WriteString(")")
-	}
-	if e.Hint != "" {
-		b.WriteString("; ")
-		b.WriteString(e.Hint)
-	}
-	return b.String()
+	return s
 }
 
 // describeDrop the result never contains our key/token/signature (INV-1): the

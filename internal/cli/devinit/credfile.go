@@ -36,17 +36,6 @@ func readLocalCredentials() (localCredentials, error) {
 	}, nil
 }
 
-func writeLocalCredentials(apiKey, workloadKey string) error {
-	path, err := devconfig.EnvFilePath()
-	if err != nil {
-		return err
-	}
-	return devconfig.WriteEnvFile(path, map[string]string{
-		devconfig.EnvAPIKeyDirect:       apiKey,
-		devconfig.EnvWorkloadPrivateKey: workloadKey,
-	})
-}
-
 // credentialFileLabel names the credential file for output. It degrades to the
 // generic path rather than an empty string, so a message never reads "written
 // to " -- and the degraded form has to show the per-tool shape, or the one

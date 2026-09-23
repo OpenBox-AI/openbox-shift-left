@@ -8,6 +8,7 @@ package workloadauth
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Stage names which half of the workload-identity exchange an Error came
@@ -77,14 +78,17 @@ const maxDetailLen = 200
 // document problem.
 const clockSkewHint = "an assertion lives 60s; check NTP"
 
-// boundString truncates s to at most max bytes, never mid-escape-sequence
-// awareness needed since every input here is either a short machine token
-// (Reason) or free text already meant for display (Detail).
+// boundString truncates s to at most max bytes, backing up to a rune
+// boundary so free text from Keycloak never ends in a split UTF-8 sequence.
 func boundString(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max]
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // isTransientStatus reports whether status is a fault the caller should

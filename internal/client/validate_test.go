@@ -52,6 +52,8 @@ func TestValidate_MapsNon200(t *testing.T) {
 		{"401 invalid token", 401, `{"code":401,"message":"invalid token"}`, "run `openbox doctor`"},
 		{"401 no message", 401, `{"code":401}`, "run `openbox doctor`"},
 		{"500 internal error", 500, `{"code":500,"message":"internal server error"}`, "internal server error"},
+		{"500 is named transient", 500, `{"code":500,"message":"internal server error"}`, "safe to ignore unless persistent"},
+		{"503 no message is named transient", 503, ``, "transient"},
 		{"forward-compat agent_inactive", 403, `{"reason_code":"agent_inactive"}`, "deactivated by an operator"},
 	}
 	for _, tc := range cases {
@@ -94,5 +96,29 @@ func TestValidate_TransportFailureIsClearError(t *testing.T) {
 	}
 	if _, ok := AsValidateError(err); ok {
 		t.Error("a transport failure must not be a *ValidateError (no HTTP status)")
+	}
+}
+
+// TestValidateRefusesABodyThatDoesNotVouch a 200 whose body says the agent is
+// not valid or not active is not a successful validation: doctor and
+// git-action's ownership witness both read success as "core vouches for this
+// agent".
+func TestValidateRefusesABodyThatDoesNotVouch(t *testing.T) {
+	for _, body := range []string{
+		`{"valid":true,"active":false,"agent_id":"a","agent_name":"n"}`,
+		`{"valid":false,"active":true,"agent_id":"a","agent_name":"n"}`,
+	} {
+		srv := fixedRespServer(t, 200, body)
+		c, _ := newTestClient(t, srv.URL, false)
+		res, err := c.ValidateDetailed(context.Background())
+		if err == nil {
+			t.Fatalf("ValidateDetailed accepted %s", body)
+		}
+		if _, ok := AsValidateError(err); !ok {
+			t.Fatalf("error is not a *ValidateError: %v", err)
+		}
+		if res.AgentID != "a" {
+			t.Errorf("the parsed result should still be returned for diagnostics, got %+v", res)
+		}
 	}
 }

@@ -175,3 +175,23 @@ func TestFakecoreCountsBootstrapAndExchange(t *testing.T) {
 		t.Errorf("ExchangeHits = %d after a bootstrap-only call, want it unmoved at 1", got)
 	}
 }
+
+// TestFakecoreAttributionDIDMatchesTheVerifiedVector the fake restates
+// devconfig's derivation rather than importing it, so it pins the same
+// literal vector devconfig does, and hashes the id exactly as given.
+func TestFakecoreAttributionDIDMatchesTheVerifiedVector(t *testing.T) {
+	got, err := attributionDIDFor("8f2a1c4e-9b3d-4a6f-8c5e-2d7b9a1f3e6c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "did:aip:63bdd432-3786-5689-9a5c-a9979497de1d"; got != want {
+		t.Fatalf("attributionDIDFor = %q, want %q", got, want)
+	}
+	upper, err := attributionDIDFor("8F2A1C4E-9B3D-4A6F-8C5E-2D7B9A1F3E6C")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upper == got {
+		t.Fatal("an uppercase id derived the lowercase id's DID; the fake is normalising where core does not")
+	}
+}

@@ -78,7 +78,17 @@ func (c *Client) ValidateDetailed(ctx context.Context) (ValidateResult, error) {
 	if err := json.Unmarshal(body, &wire); err != nil {
 		return ValidateResult{}, fmt.Errorf("client: unparseable v3 validate response: %w", err)
 	}
-	return ValidateResult{Valid: wire.Valid, Active: wire.Active, AgentID: wire.AgentID, AgentName: wire.AgentName}, nil
+	res := ValidateResult{Valid: wire.Valid, Active: wire.Active, AgentID: wire.AgentID, AgentName: wire.AgentName}
+	// A 200 is not proof by itself: core answers valid/active in the body, and
+	// an agent deactivated after its token was issued still gets a 200. Doctor
+	// and git-action's ownership witness both treat this call as "core vouches
+	// for this agent", so a body that does not vouch is a failure here.
+	if !res.Valid || !res.Active {
+		return res, &ValidateError{Status: resp.StatusCode, Diagnostic: fmt.Sprintf(
+			"core reports the agent as valid=%t active=%t; it is deactivated or its identity was revoked",
+			res.Valid, res.Active)}
+	}
+	return res, nil
 }
 
 // ValidateError is a non-2xx /auth/validate outcome. Status is the HTTP
