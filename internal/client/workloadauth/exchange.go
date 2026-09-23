@@ -31,7 +31,7 @@ type keycloakErrorEnvelope struct {
 // (case-insensitive), a non-empty access_token, and a JSON-number
 // expires_in > 30 (never a JSON bool, which json.Unmarshal into float64
 // already rejects).
-func Exchange(ctx context.Context, hc *http.Client, doc *BootstrapDocument, assertion string) (*ExchangeResult, *Error) {
+func Exchange(ctx context.Context, hc *http.Client, doc *BootstrapDocument, assertion string) (*ExchangeResult, error) {
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
 	form.Set("client_id", doc.ClientID)

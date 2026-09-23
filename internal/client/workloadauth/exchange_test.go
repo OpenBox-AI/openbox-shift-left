@@ -128,14 +128,14 @@ func TestExchangeRejectionIsPermanentAndNamesTheClock(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error on 401")
 	}
-	if err.Transient {
+	if asWorkloadError(t, err).Transient {
 		t.Errorf("401 must not be classified transient, got %+v", err)
 	}
 	if !strings.Contains(err.Error(), "NTP") {
 		t.Errorf("401 exchange error should name the host clock, got: %v", err)
 	}
-	if err.Reason != "invalid_client" {
-		t.Errorf("Reason = %q, want invalid_client", err.Reason)
+	if asWorkloadError(t, err).Reason != "invalid_client" {
+		t.Errorf("Reason = %q, want invalid_client", asWorkloadError(t, err).Reason)
 	}
 }
 
@@ -149,7 +149,7 @@ func TestExchange5xxIsTransient(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error on 502")
 	}
-	if !err.Transient {
+	if !asWorkloadError(t, err).Transient {
 		t.Errorf("502 must be classified transient, got %+v", err)
 	}
 }

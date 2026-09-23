@@ -151,11 +151,11 @@ func TestBootstrapOutageDoesNotFallBack(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error on 503")
 	}
-	if !err.Transient {
+	if !asWorkloadError(t, err).Transient {
 		t.Errorf("503 must be classified transient, got %+v", err)
 	}
-	if err.Status != http.StatusServiceUnavailable {
-		t.Errorf("Status = %d, want 503", err.Status)
+	if asWorkloadError(t, err).Status != http.StatusServiceUnavailable {
+		t.Errorf("Status = %d, want 503", asWorkloadError(t, err).Status)
 	}
 }
 
@@ -168,14 +168,14 @@ func TestUnavailableIdentityBootstrapIsClassifiedNotTransient(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error on 409")
 	}
-	if err.Transient {
+	if asWorkloadError(t, err).Transient {
 		t.Errorf("409 must not be classified transient, got %+v", err)
 	}
-	if err.Reason != "workload_identity_unavailable" {
-		t.Errorf("Reason = %q, want workload_identity_unavailable", err.Reason)
+	if asWorkloadError(t, err).Reason != "workload_identity_unavailable" {
+		t.Errorf("Reason = %q, want workload_identity_unavailable", asWorkloadError(t, err).Reason)
 	}
-	if err.Stage != StageBootstrap {
-		t.Errorf("Stage = %q, want bootstrap", err.Stage)
+	if asWorkloadError(t, err).Stage != StageBootstrap {
+		t.Errorf("Stage = %q, want bootstrap", asWorkloadError(t, err).Stage)
 	}
 }
 

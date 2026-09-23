@@ -44,7 +44,7 @@ type BootstrapDocument struct {
 // Bootstrap performs the GET {baseURL}/api/v3/auth/bootstrap call: API key
 // only, no workload header, no body. It returns a strictly-validated document
 // or a typed *Error naming the bootstrap stage.
-func Bootstrap(ctx context.Context, hc *http.Client, baseURL, apiKey, sdkVersion string) (*BootstrapDocument, *Error) {
+func Bootstrap(ctx context.Context, hc *http.Client, baseURL, apiKey, sdkVersion string) (*BootstrapDocument, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+bootstrapPath, nil)
 	if err != nil {
 		return nil, &Error{Stage: StageBootstrap, Reason: "building request", Transient: false}

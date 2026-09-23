@@ -3,6 +3,7 @@ package workloadauth
 import (
 	"context"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -91,11 +92,12 @@ func (a *Authenticator) Token(ctx context.Context) (token string, fromCache bool
 
 	doc, berr := Bootstrap(ctx, a.http, a.baseURL, a.apiKey, a.sdkVersion)
 	if berr != nil {
-		if isNegativeCacheStatus(berr.Status) {
+		var werr *Error
+		if errors.As(berr, &werr) && isNegativeCacheStatus(werr.Status) {
 			now := a.now()
 			_ = a.cache.Store(Entry{
 				NegUntil:  now.Add(negativeCacheTTL),
-				NegReason: berr.Reason,
+				NegReason: werr.Reason,
 			})
 		}
 		return "", false, berr
