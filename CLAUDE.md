@@ -457,8 +457,9 @@ Six things are worth not re-litigating:
   so a workload run through exec silently loses every provider credential. Three
   regressions follow and are recorded in every pack rather than left as silent
   gaps: no workload stdout/stderr (the gRPC API carries `SandboxLogLine`,
-  supervisor events only — the old path got output from CLI *attachment*), no
-  per-process egress decisions, and no model-route receipt.
+  supervisor events only — the old path got output from CLI *attachment*) and
+  no per-process egress decisions. The model route is receipted only on
+  `local-ollama`, by `evaluate/model_relay.go`.
 - **Attach only providers the policy binds.** OpenShell classifies every key an
   attached provider contributes: bound to an endpoint by `credential_binding`,
   or declared non-secret. A key that is neither makes the guest supervisor fail
@@ -495,6 +496,28 @@ Six things are worth not re-litigating:
   version bump under ADR-0020. The field is written by nobody's decision — grep
   confirms nothing reads it — and absent now means "this route publishes no
   digest". Do not re-require it.
+
+**Reports suggest real OpenBox rules** (2026-09-24, reversing the Phase 4
+"no rule bodies" decision at the user's request). Three things hold it safe
+and are worth not re-litigating:
+
+- **The model finds, deterministic code prescribes.** The analyst names
+  defects and cites evidence; `securityreport` fills rule bodies from templates
+  and the cited action. The candidate's forbidden-key check still rejects any
+  control the model tries to write. The lane never applies a rule.
+- **Only suggest what OpenBox can enforce.** An approval-gate policy rule on
+  the cited action is enforceable; prompt injection and cross-event sequences
+  are not (no semantic injection guardrail; behavior rules see only prior steps
+  within one event), and the report says so instead of suggesting a rule that
+  would silently do nothing. Several shipped backend templates are inverted —
+  `credential-read-then-egress`, `untrusted-input-then-egress`,
+  `mcp-fetch-then-write`, and guardrail `prompt-injection-markers` — so do not
+  template from them.
+- **`inconclusive` needs a missing REQUIRED authority.** The demo once came out
+  `inconclusive` with a complete defect chain sitting in `backend.json`, because
+  `behavior.json` is only an index and the analyst never decoded the records it
+  points at. Skill 1.0.3 says to, and treats absent corroboration as a
+  limitation, never a block.
 
 The demo is two scripts under
 `testbed/project-assurance/mastra-security-demo/` — `prepare-demo.zsh` then

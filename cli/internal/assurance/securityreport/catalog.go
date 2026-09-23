@@ -203,7 +203,7 @@ func approvalPolicyRule(action string, posture *targetposture.Posture) *Suggeste
 	return &SuggestedRule{
 		Method: "POST", Endpoint: "/agent/" + posture.Agent.ID + "/policies",
 		PayloadKind: "policy_builder_v2_rule", Body: rule,
-		DeliveryNote: "The agent has no active policy: POST {\"name\":\"Security baseline\",\"config\":{\"policy_builder\":{\"version\":2,\"rules\":[<rule>]}}}. Or fix it in the project: set requireApproval on the " + action + " tool.",
+		DeliveryNote: "The agent has no active policy: POST a new policy whose config.policy_builder is version 2 with this rule as its only rule. Or fix it in the project: set requireApproval on the " + action + " tool.",
 	}
 }
 

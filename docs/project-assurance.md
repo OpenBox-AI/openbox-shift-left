@@ -64,9 +64,10 @@ main-process model, each recorded in every pack
 - per-process egress decisions and violations are **not collected**, because
   those arrive on an exec result and a main process produces none. The
   `sandbox_isolation` channel therefore reports zero records;
-- the model route is **not independently receipted**. The retired CLI lane
-  proved it by substring-matching a gateway log line; no typed receipt has
-  replaced that, so `model_route` reports `missing`.
+- the model route is receipted **only on `local-ollama`**. There the evaluator
+  runs a model relay (`evaluate/model_relay.go`) and points the guest's
+  `OPENAI_BASE_URL` at it, recording which tools the model chose. A
+  gateway-served route is resolved inside OpenShell and reports `missing`.
 
 Production workloads, identities, endpoints, data, and automatic control
 publication are excluded.
@@ -198,6 +199,24 @@ credential would make the pack assert something false.
 A value is never rendered, logged, or written to any sealed file. A credential
 baked into the image's own `Config.Env` is still refused outright: the run
 cannot disclose what it never saw declared, and a layer outlives the run.
+
+## What a report suggests
+
+The analyst names defects and cites evidence; it never writes a control. Rule
+bodies are filled by the finalizer from templates and the cited evidence, and
+the lane never applies one — applying is a separate, human decision.
+
+- **Excessive agency (LLM06)** yields a policy rule: `REQUIRE_APPROVAL` when
+  `activity_type` equals the cited action, in the policy_builder v2 shape the
+  dashboard's policy editor uses. It fires on `ActivityStarted`, before the
+  tool runs. An agent has one active policy and `POST` deactivates it, so the
+  rule is PUT-merged into the active policy when there is one
+  (`securityreport/catalog.go`, `approvalPolicyRule`).
+- **Prompt injection** yields no rule, and the report says why: OpenBox has no
+  semantic prompt-injection guardrail — the regex guardrail is an
+  allow-pattern, and the goal-alignment judge never changes a verdict.
+- **Effect sequences** ("untrusted input, then a later send") yield no rule: a
+  behavior rule only sees prior steps within one governance event.
 
 ## Native-host analysis and finalization
 
