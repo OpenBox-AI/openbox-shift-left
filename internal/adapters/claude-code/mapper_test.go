@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -38,7 +39,24 @@ func loadFixtureHookEvent(t *testing.T, name string) *HookEvent {
 	return ev
 }
 
-const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
+// testAgentID is the fixed v3 agent id every fixture in this package
+// configures (via envAgentID or dev.json's agent_id); testDID is its
+// attribution DID, always derived through devconfig.AttributionDIDFor rather
+// than hardcoded, so a change to the derivation cannot silently desync a
+// fixture from the function it exercises. A site that constructs an Identity
+// directly (never touching devconfig resolution) uses testDID exactly as
+// before; it is still just a did:aip: string.
+const testAgentID = "7f3c9b2e-1111-5000-a000-000000000002"
+
+var testDID = mustTestDID()
+
+func mustTestDID() string {
+	did, err := devconfig.AttributionDIDFor(testAgentID)
+	if err != nil {
+		panic(err)
+	}
+	return did
+}
 
 // testSentinel is a marker string no fixture in this package contains (a
 // full-package run before/after this constant's introduction showed zero
@@ -945,8 +963,8 @@ func TestPromptIDRidesEveryEvent(t *testing.T) {
 	// golden byte string kept HERE, not a second live build of the same
 	// event -- captured once, with testMapper()'s fixed clock/NewID, against
 	// SessionStart(source=startup).
-	const golden = `{"schema_version":"1.9","event_id":"evt-fixed","event_type":"SessionStarted",` +
-		`"openbox_session_id":"s1","developer_did":"did:aip:7f3c9b2e-0000-5000-a000-000000000001",` +
+	golden := `{"schema_version":"1.9","event_id":"evt-fixed","event_type":"SessionStarted",` +
+		`"openbox_session_id":"s1","developer_did":"` + testDID + `",` +
 		`"timestamp":"2026-07-08T12:00:00Z","tool":{"name":"claude-code","kind":"shell"},` +
 		`"metadata":{"cwd":"/repo","provider":"claude-code","source":"startup"}}`
 	noID, ok := m.Map(HookSessionStart, &HookEvent{SessionID: "s1", Cwd: "/repo", Source: "startup"})

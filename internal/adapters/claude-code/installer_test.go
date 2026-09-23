@@ -31,7 +31,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	}
 
 	ref := CredentialRef{
-		DID: testDID,
+		AgentID: testAgentID,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -63,7 +63,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	if cfg.DID != testDID {
+	if cfg.AgentID != testAgentID {
 		t.Errorf("config coordinates wrong: %+v", cfg)
 	}
 	if strings.Contains(string(raw), "obx_") {
@@ -93,7 +93,7 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 
 	tru := true
 	ref := CredentialRef{
-		DID:      testDID,
+		AgentID:  testAgentID,
 		Enforce:  &tru,
 		Tier2:    &tru,
 		Findings: &tru,
@@ -155,7 +155,7 @@ func TestInstaller_ReInstallIsByteIdentical(t *testing.T) {
 		// Pinned so the prior-settings record cannot reach the real home either.
 		HomeDir: t.TempDir(),
 	}
-	ref := CredentialRef{DID: testDID}
+	ref := CredentialRef{AgentID: testAgentID}
 
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("first install: %v", err)
@@ -196,7 +196,7 @@ func TestInstaller_SetsThinkingSummariesAndRecordsThePriorValue(t *testing.T) {
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"),
 		HomeDir:      home,
 	}
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -248,7 +248,7 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 		EngineBinary: engine,
 		HomeDir:      t.TempDir(),
 	}
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	placed := filepath.Join(pluginDir, "bin", "openbox")
@@ -262,7 +262,7 @@ func TestInstaller_PlacesEngineBinary(t *testing.T) {
 	if got, _ := os.ReadFile(placed); !strings.Contains(string(got), "exit 0") {
 		t.Errorf("placed engine content mismatch: %q", got)
 	}
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
 }
@@ -272,7 +272,7 @@ func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
 	inst := Installer{
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json"),
 		HomeDir: t.TempDir()}
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(pluginDir, "bin", "openbox")); !os.IsNotExist(err) {
@@ -280,12 +280,12 @@ func TestInstaller_SkipsEngineBinaryWhenUnset(t *testing.T) {
 	}
 }
 
-func TestInstaller_RequiresDID(t *testing.T) {
+func TestInstallRequiresAgentID(t *testing.T) {
 	inst := Installer{
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: t.TempDir(), ConfigPath: filepath.Join(t.TempDir(), "dev.json"),
 		HomeDir: t.TempDir()}
 	if err := inst.Install(CredentialRef{}); err == nil {
-		t.Error("install without a DID should error")
+		t.Error("install without an agent id should error")
 	}
 }
 
@@ -305,7 +305,6 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	tru := true
 
 	if err := inst.Install(CredentialRef{
-		DID:     testDID,
 		AgentID: "agent-1", BackendURL: "https://backend.example",
 		Enforce: &tru, Tier2: &tru, Findings: &tru,
 	}); err != nil {
@@ -313,7 +312,7 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	}
 
 	if err := inst.Install(CredentialRef{
-		DID: testDID,
+		AgentID: "agent-1",
 	}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}

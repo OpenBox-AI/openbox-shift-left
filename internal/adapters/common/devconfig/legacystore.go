@@ -16,8 +16,6 @@ type LegacyStore struct {
 // says nothing about what is actually on disk, and the question this answers
 // is about the store, not the running process's environment.
 func LegacyStoreFor(tool string) (LegacyStore, error) {
-	var ls LegacyStore
-
 	cfgPath, err := DevConfigPathFor(tool)
 	if err != nil {
 		return LegacyStore{}, err
@@ -25,10 +23,6 @@ func LegacyStoreFor(tool string) (LegacyStore, error) {
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		return LegacyStore{}, err
-	}
-	if cfg.DID != "" {
-		ls.Legacy = true
-		ls.Reasons = append(ls.Reasons, "dev.json holds a stored developer_did")
 	}
 
 	envPath, err := EnvFilePathFor(tool)
@@ -39,16 +33,30 @@ func LegacyStoreFor(tool string) (LegacyStore, error) {
 	if err != nil {
 		return LegacyStore{}, err
 	}
-	if secrets[EnvAgentPrivateKey] != "" {
+
+	return legacyStoreFromValues(cfg, secrets), nil
+}
+
+// legacyStoreFromValues is LegacyStoreFor's detection, applied to a dev config
+// and secret map the caller already loaded. resolveCredentialsFrom shares this
+// so the reuse gate (LegacyStoreFor) and the runtime resolver can never
+// disagree about what counts as legacy.
+func legacyStoreFromValues(cfg DevConfig, secrets map[string]string) LegacyStore {
+	var ls LegacyStore
+	if cfg.DID != "" {
 		ls.Legacy = true
-		ls.Reasons = append(ls.Reasons, "the credential file holds "+EnvAgentPrivateKey)
+		ls.Reasons = append(ls.Reasons, "dev.json holds a stored developer_did")
 	}
-	for _, alias := range deprecatedPrivateKeyEnvNames {
-		if secrets[alias] != "" {
-			ls.Legacy = true
-			ls.Reasons = append(ls.Reasons, "the credential file holds the deprecated "+alias)
+	for _, name := range legacySeedEnvNames {
+		if secrets[name] == "" {
+			continue
+		}
+		ls.Legacy = true
+		if name == EnvAgentPrivateKey {
+			ls.Reasons = append(ls.Reasons, "the credential file holds "+name)
+		} else {
+			ls.Reasons = append(ls.Reasons, "the credential file holds the deprecated "+name)
 		}
 	}
-
-	return ls, nil
+	return ls
 }

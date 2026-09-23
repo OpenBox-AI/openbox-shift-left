@@ -9,6 +9,7 @@ package devinit
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/aivss"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
@@ -57,6 +59,16 @@ type Options struct {
 	// decision for the mechanism).
 	Enforce  *bool
 	Findings *bool
+	// AssumeExistingStore is set by the caller when it has already written a
+	// usable store THIS run, outside the file/env shapes register's own reuse
+	// check reads -- the one case today is a successful interactive adopt
+	// (cmd/openbox/adopt.go), which still writes the pre-v3 DID+seed shape.
+	// Without this, a freshly adopted store falls through register's v3 reuse
+	// check (adopt writes no workload key) into a fresh registration with no
+	// registrar wired, discarding what the operator just pasted. Adopt's own
+	// prompts and messages are unchanged here; phase 05 owns their v3-native
+	// redesign.
+	AssumeExistingStore bool
 }
 
 // Deps are the injected collaborators (all faked in tests).
@@ -64,14 +76,28 @@ type Deps struct {
 	Registrar Registrar
 	Installer provider.Installer
 	Out       io.Writer
+	// GenerateKey creates the RSA key a fresh registration proves possession of
+	// via its public JWK. workloadauth.GenerateKey when nil; a test injects a
+	// fake to avoid paying for RSA keygen on every case, or to drive an error.
+	GenerateKey func() (*rsa.PrivateKey, error)
+	// DiscardLegacySpool discards one tool's spooled events queued under the
+	// legacy identity this run's write is about to replace, and reports how
+	// many it removed. nil (every fixture here, and cmd/openbox's wiring until
+	// a later phase supplies a real implementation) means "discard nothing":
+	// register calls it exactly the way a real implementation would, so
+	// wiring one in is a Deps assignment, not a change to this file.
+	DiscardLegacySpool func(tool string) (int, error)
 }
 
 // Result summarizes what happened, for the caller to render / pick an exit
 // code.
 type Result struct {
-	AgentID       string
-	DID           string
-	AgentName     string
+	AgentID   string
+	DID       string // the derived attribution label (D1), best-effort; "" if AgentID itself is not a UUID
+	AgentName string
+	// IdentityKid is the registered keycloak_workload key's RFC 7638
+	// thumbprint, printed in place of a DID for a fresh registration.
+	IdentityKid   string
 	Reused        bool // creds already present locally; no registration done
 	Registered    bool // a new agent was created this run
 	ConfigApplied bool // provider installer ran
@@ -165,27 +191,31 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	res := &Result{AgentName: name}
 
 	stored, readErr := readLocalCredentials()
-	fromFile := readErr == nil && stored.apiKey != "" && stored.privateKey != ""
+	fromFile := readErr == nil && stored.apiKey != "" && stored.workloadKey != ""
 	// The environment counts, and has to, because the caller's gate already
 	// accepted it: a machine provisioned entirely through exported variables
 	// would otherwise reach the registration branch with no registrar wired and
 	// be told it had hit a build bug. An exported identity also outranks every
 	// store at runtime, so minting an agent here would create one that is never
-	// used -- one per ephemeral runner.
-	if fromFile || devconfig.EnvIdentityPresent() {
-		did := devconfig.ResolveDIDOrEmpty()
-		ref.DID = did
+	// used -- one per ephemeral runner. A legacy store (a stored developer_did,
+	// or a seed under the current or a deprecated name) never satisfies either
+	// check: EnvIdentityPresent and readLocalCredentials both ask the v3
+	// question, so a legacy store falls through to registration below, same as
+	// no store at all.
+	if fromFile || devconfig.EnvIdentityPresent() || o.AssumeExistingStore {
+		agentID := devconfig.ResolveAgentID()
 		res.Reused = true
-		res.DID = did
-		// Losing it disables that check silently.
-		res.AgentID = devconfig.ResolveAgentID()
-		ref.AgentID = res.AgentID
+		res.AgentID = agentID
+		ref.AgentID = agentID
+		if did, err := devconfig.AttributionDIDFor(agentID); err == nil {
+			res.DID = did
+		}
 		where := credentialFileLabel()
-		if !fromFile {
+		if !fromFile && !o.AssumeExistingStore {
 			where = "the environment"
 		}
 		fmt.Fprintf(d.Out, "Reusing the existing %s agent; nothing was registered.\n", o.Provider)
-		fmt.Fprintf(d.Out, "  %-12s %s\n", "DID", didOrNone(did))
+		fmt.Fprintf(d.Out, "  %-12s %s\n", "agent id", agentIDOrNone(agentID))
 		// Reuse is a file test, so a key that was revoked server-side still looks
 		// like a complete store and this run never goes online to find out. That
 		// makes deleting the file the whole rotation procedure, and a reader who
@@ -193,7 +223,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// store belongs to, and which identity wins, is `openbox doctor`'s.
 		fmt.Fprintf(d.Out, "  %-12s %s\n", "credentials", where)
 		if fromFile {
-			fmt.Fprintf(d.Out, "  %-12s delete it and re-run to rotate the key, keeping this DID\n", "")
+			fmt.Fprintf(d.Out, "  %-12s delete it and re-run to rotate the key, keeping this agent id\n", "")
 		}
 		return res, ref, nil
 	}
@@ -254,6 +284,19 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 			name, existing.ID, existing.DID, o.Provider, o.Provider, existing.ID, name)
 	}
 
+	genKey := d.GenerateKey
+	if genKey == nil {
+		genKey = workloadauth.GenerateKey
+	}
+	priv, err := genKey()
+	if err != nil {
+		return res, ref, fmt.Errorf("generate workload signing key: %w", err)
+	}
+	jwk, err := workloadauth.PublicJWK(&priv.PublicKey)
+	if err != nil {
+		return res, ref, fmt.Errorf("build public jwk: %w", err)
+	}
+
 	req := backend.CreateAgentRequest{
 		AgentName:   name,
 		AgentType:   developerAgentType,
@@ -263,6 +306,12 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		AivssConfig: profile,
 		Config: map[string]any{
 			"managed_enable": o.ManagedEnable, // substrate only; not activated in Phase 1
+		},
+		IdentityVerification: &backend.IdentityVerification{
+			Method:     devconfig.IdentityMethodKeycloakWorkload,
+			Mode:       "generate",
+			SourceType: "openbox",
+			PublicJWK:  jwkAsMap(jwk),
 		},
 	}
 	reg, err := d.Registrar.Create(ctx, req)
@@ -275,24 +324,47 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		}
 		return res, ref, fmt.Errorf("agent/create failed: %w", err)
 	}
-	res.AgentID, res.DID, res.Registered = reg.AgentID, reg.DID, true
-	ref.DID = reg.DID
-	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness
+	res.AgentID, res.Registered = reg.AgentID, true
+	res.IdentityKid = reg.Identity.Kid
+	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness; ref.DID stays unset (D1: never stored)
+	ref.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
 
-	if reg.APIKey == "" || reg.PrivateKey == "" {
+	if reg.Identity.Method != devconfig.IdentityMethodKeycloakWorkload || reg.APIKey == "" {
 		return res, ref, fmt.Errorf(
-			"agent registered (id %s, DID %s) but the response did not include %s; "+
+			"agent registered (id %s) but the response did not confirm a %s identity or a token; "+
 				"cannot store runtime credentials; rotate the key or re-provision the identity",
-			reg.AgentID, reg.DID, missingCreds(reg))
+			reg.AgentID, devconfig.IdentityMethodKeycloakWorkload)
 	}
 
-	if err := writeLocalCredentials(reg.APIKey, reg.PrivateKey); err != nil {
+	workloadKeyB64, err := workloadauth.EncodePrivateKey(priv)
+	if err != nil {
+		return res, ref, fmt.Errorf("encode workload signing key: %w", err)
+	}
+
+	// Captured before the write: WriteWorkloadIdentity clears the legacy
+	// markers this reads, so reading it after would always answer false.
+	wasLegacy := false
+	if ls, lerr := devconfig.LegacyStoreFor(o.Provider); lerr == nil {
+		wasLegacy = ls.Legacy
+	}
+
+	if err := devconfig.WriteWorkloadIdentity(o.Provider, devconfig.WorkloadIdentity{
+		AgentID:       reg.AgentID,
+		APIKey:        reg.APIKey,
+		PrivateKeyB64: workloadKeyB64,
+	}); err != nil {
 		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(), err)
+	}
+
+	if wasLegacy && d.DiscardLegacySpool != nil {
+		if n, derr := d.DiscardLegacySpool(o.Provider); derr == nil && n > 0 {
+			fmt.Fprintf(d.Out, "discarded %d events queued under the previous identity\n", n)
+		}
 	}
 
 	fmt.Fprintf(d.Out, "Registered developer agent %q\n", reg.AgentName)
 	fmt.Fprintf(d.Out, "  %-12s %s\n", "id", reg.AgentID)
-	fmt.Fprintf(d.Out, "  %-12s %s\n", "DID", reg.DID)
+	fmt.Fprintf(d.Out, "  %-12s %s\n", "identity", devconfig.IdentityMethodKeycloakWorkload+" (kid "+reg.Identity.Kid+")")
 	if tier := tierLabel(reg.Tier, reg.TrustScore); tier != "" {
 		fmt.Fprintf(d.Out, "  %-12s %s\n", "tier", tier)
 	}
@@ -342,13 +414,15 @@ func resumeErr(reg *backend.Registration, step string, err error) error {
 		reg.AgentID, reg.DID, step, err)
 }
 
-func missingCreds(reg *backend.Registration) string {
-	switch {
-	case reg.APIKey == "" && reg.PrivateKey == "":
-		return "an API key or a signing key"
-	case reg.APIKey == "":
-		return "an API key"
-	default:
-		return "a signing key"
+// jwkAsMap projects a workloadauth.JWK onto the map[string]string shape
+// backend.IdentityVerification.PublicJWK carries over the wire.
+func jwkAsMap(j workloadauth.JWK) map[string]string {
+	return map[string]string{
+		"kty": j.Kty,
+		"n":   j.N,
+		"e":   j.E,
+		"kid": j.Kid,
+		"alg": j.Alg,
+		"use": j.Use,
 	}
 }

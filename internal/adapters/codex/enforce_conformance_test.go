@@ -2,12 +2,9 @@ package codex
 
 import (
 	"bytes"
-	"encoding/base64"
 	"io/fs"
 	"log"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +25,7 @@ import (
 func isolateEnforce(t *testing.T) {
 	t.Helper()
 	isolateConfig(t)
-	t.Setenv(devconfig.EnvDID, testDID)
+	t.Setenv(devconfig.EnvAgentID, testAgentID)
 	t.Setenv(devconfig.EnvSpoolDir, t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
@@ -112,14 +109,6 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 
 	t.Run("CDX-C5 fail-closed never denies a REAL allow", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
-		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-		}))
-		defer srv.Close()
-		t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
-		t.Setenv("OPENBOX_API_KEY", "obx_test_key")
-		t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 		t.Setenv(devconfig.EnvEnforce, "1")
 		t.Setenv(devconfig.EnvFailClosed, "1")
 		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`

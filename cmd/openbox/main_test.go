@@ -3,24 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
-	"io"
-	"net/http"
-	"net/http/httptest"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -413,7 +407,7 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dev config: %v", err)
 	}
-	if strings.Contains(string(raw), "obx_test_k") || strings.Contains(string(raw), "c2VlZA==") {
+	if strings.Contains(string(raw), "obx_test_k") || strings.Contains(string(raw), testWorkloadKeyOnce) {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
 	}
 	envPath, err := devconfig.EnvFilePath()
@@ -424,7 +418,7 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read credential file: %v", err)
 	}
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvWorkloadPrivateKey] != testWorkloadKeyOnce {
 		t.Errorf("init modified the credential file: %v", kv)
 	}
 }
@@ -433,7 +427,7 @@ func setHookEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000001")
+	t.Setenv(devconfig.EnvAgentID, "7f3c9b2e-0000-5000-a000-000000000001")
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
@@ -509,7 +503,7 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 	cmd := exec.Command(bin, "hook", "claude-code", "PreToolUse")
 	cmd.Stdin = strings.NewReader(payload)
 	cmd.Env = append(os.Environ(),
-		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_AGENT_ID=7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		"OPENBOX_HOME="+dir,
@@ -567,33 +561,26 @@ func onlySpoolFile(t *testing.T, dir string) string {
 //     spool;
 func TestHookEndToEndSmoke(t *testing.T) {
 	const contentCanary = "SECRET-EGRESS-CANARY-do-not-send"
-	var mu sync.Mutex
-	got := 0
-	var bodies []string
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
-			b, _ := io.ReadAll(r.Body)
-			mu.Lock()
-			got++
-			bodies = append(bodies, string(b))
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"governance_event_id":"ge","verdict":"allow","risk_score":0.1,"action":"continue","fallback_used":false}`))
-			return
-		}
-		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-	}))
-	defer srv.Close()
+	srv := fakecore.New(t, fakecore.Script{})
 
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000001")
+	// v3 additionally caches the workload bearer at
+	// ~/.openbox/<tool>/workload-token.json (devconfig.WorkloadTokenCachePathFor),
+	// so this now needs OPENBOX_HOME too, or the SessionEnd flush's cold
+	// bootstrap+exchange would cache a token under the developer's real home.
+	t.Setenv(devconfig.EnvHome, dir)
+	t.Setenv(devconfig.EnvAgentID, fakecore.AgentID())
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
-	t.Setenv("OPENBOX_BASE_URL", srv.URL)
-	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
-	t.Setenv("OPENBOX_ED25519_SEED", "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+	t.Setenv("OPENBOX_BASE_URL", srv.URL())
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
@@ -619,9 +606,7 @@ func TestHookEndToEndSmoke(t *testing.T) {
 	for _, e := range events {
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader(e.payload)
-		mu.Lock()
-		before := got
-		mu.Unlock()
+		before := srv.V3EvaluateAttempts()
 		start := time.Now()
 		code := a.run([]string{"hook", "claude-code", e.hook})
 		elapsed := time.Since(start)
@@ -636,10 +621,7 @@ func TestHookEndToEndSmoke(t *testing.T) {
 				t.Errorf("%s hot-path hook took %v (> budget %v); is it blocking on the network?", e.hook, elapsed, hotPathBudget)
 			}
 			if !e.gating {
-				mu.Lock()
-				n := got - before
-				mu.Unlock()
-				if n != 0 {
+				if n := srv.V3EvaluateAttempts() - before; n != 0 {
 					t.Fatalf("non-gating hot-path hook %s caused egress (%d /evaluate calls); "+
 						"only the gate may block on the network (NFR-2)", e.hook, n)
 				}
@@ -647,11 +629,12 @@ func TestHookEndToEndSmoke(t *testing.T) {
 		}
 	}
 
-	mu.Lock()
-	n := got
-	delivered := append([]string(nil), bodies...)
-	mu.Unlock()
-	if n == 0 {
+	inbox := srv.Inbox()
+	delivered := make([]string, len(inbox))
+	for i, r := range inbox {
+		delivered[i] = string(r.Raw)
+	}
+	if len(inbox) == 0 {
 		t.Fatalf("mock /evaluate received no events; SessionEnd flush did not deliver through the unified binary")
 	}
 	drained, _ := os.ReadDir(spool)
@@ -685,21 +668,8 @@ func TestHookRealtimeDelivery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary + spawns detached flushers; skipped in -short")
 	}
-	var mu sync.Mutex
-	var keys []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate" {
-			_, _ = io.Copy(io.Discard, r.Body)
-			mu.Lock()
-			keys = append(keys, r.Header.Get("Idempotency-Key"))
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"governance_event_id":"ge","verdict":"allow","risk_score":0.1,"action":"continue","fallback_used":false}`))
-			return
-		}
-		t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-	}))
-	defer srv.Close()
+	srv := fakecore.NewReal(t, fakecore.Script{})
+	received := func() int { return srv.V3EvaluateAttempts() }
 
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "openbox")
@@ -707,8 +677,12 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		t.Fatalf("build openbox: %v\n%s", err, out)
 	}
 	spool := filepath.Join(dir, "spool")
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
 	env := append(os.Environ(),
-		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_AGENT_ID="+fakecore.AgentID(),
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		"OPENBOX_HOME="+dir,
@@ -716,9 +690,9 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
-		"OPENBOX_BASE_URL="+srv.URL,
-		"OPENBOX_API_KEY=obx_test_"+strings.Repeat("a", 48),
-		"OPENBOX_ED25519_SEED=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+		"OPENBOX_BASE_URL="+srv.URL(),
+		"OPENBOX_API_KEY="+fakecore.APIKey(),
+		"OPENBOX_WORKLOAD_PRIVATE_KEY="+workloadKey,
 	)
 	runHook := func(hook, payload string) {
 		t.Helper()
@@ -734,7 +708,6 @@ func TestHookRealtimeDelivery(t *testing.T) {
 			t.Fatalf("%s wrote to stdout: %q", hook, stdout.String())
 		}
 	}
-	received := func() int { mu.Lock(); defer mu.Unlock(); return len(keys) }
 	waitFor := func(desc string, cond func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(15 * time.Second)
@@ -768,13 +741,13 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		}
 		return true
 	})
-	mu.Lock()
-	defer mu.Unlock()
-	if len(keys) != 3 {
-		t.Errorf("want exactly 3 deliveries (Pre, Post, SessionEnd), got %d", len(keys))
+	inbox := srv.Inbox()
+	if len(inbox) != 3 {
+		t.Errorf("want exactly 3 deliveries (Pre, Post, SessionEnd), got %d", len(inbox))
 	}
 	seen := map[string]bool{}
-	for _, k := range keys {
+	for _, r := range inbox {
+		k := r.Headers.Get("Idempotency-Key")
 		if k == "" {
 			t.Error("a delivery carried no Idempotency-Key")
 		}
@@ -848,55 +821,34 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	}
 }
 
-const verifyTestSeed = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
-
-const verifyTestDID = "did:aip:00000000-0000-0000-0000-000000000042"
-
-func coreValidateOK(t *testing.T, seedB64 string) *memhttptest.Server {
+// coreValidateOK is a v3-aware fake core: real bootstrap + Keycloak token
+// exchange + GET /api/v3/auth/validate, over fakecore's process-wide
+// identity. A hand-rolled single-path v1-signature verifier cannot stand in
+// once the client speaks the v3 dance (see content_conformance_test.go's
+// claude-code-package copy of this same rationale).
+func coreValidateOK(t *testing.T) *fakecore.Server {
 	t.Helper()
-	seed, err := base64.StdEncoding.DecodeString(seedB64)
-	if err != nil {
-		t.Fatalf("decode seed: %v", err)
-	}
-	pub := ed25519.NewKeyFromSeed(seed).Public().(ed25519.PublicKey)
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != client.AuthValidatePath {
-			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-		body, _ := io.ReadAll(r.Body)
-		sum := sha256.Sum256(body)
-		wantSHA := hex.EncodeToString(sum[:])
-		canonical := "GET\n" + r.URL.Path + "\n" +
-			r.Header.Get("X-OpenBox-Agent-Timestamp") + "\n" +
-			r.Header.Get("X-OpenBox-Agent-Nonce") + "\n" + wantSHA
-		sig, decErr := base64.StdEncoding.DecodeString(r.Header.Get("X-OpenBox-Agent-Signature"))
-		if r.Header.Get("X-OpenBox-Body-SHA256") != wantSHA || decErr != nil ||
-			!ed25519.Verify(pub, []byte(canonical), sig) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = io.WriteString(w, `{"code":401,"message":"invalid token"}`)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"valid":true,"active":true,"agent_id":"a","environment":"test","message":"ok"}`)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	return fakecore.New(t, fakecore.Script{})
 }
 
 func setVerifyCreds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
 	t.Setenv("OPENBOX_BASE_URL", baseURL)
-	t.Setenv("OPENBOX_AGENT_DID", verifyTestDID)
-	t.Setenv("OPENBOX_API_KEY", "obx_test_"+strings.Repeat("a", 48))
-	t.Setenv("OPENBOX_ED25519_SEED", verifyTestSeed)
+	t.Setenv(devconfig.EnvAgentID, fakecore.AgentID())
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
 }
 
 // TestDevVerifyNoCredsSaysInitFirst: with nothing configured, verify exits
 // non-zero and tells the operator to run `openbox init` (never half-proceeds).
 func TestDevVerifyNoCredsSaysInitFirst(t *testing.T) {
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "none.json"))
-	for _, k := range []string{"OPENBOX_BASE_URL", "OPENBOX_AGENT_DID", "OPENBOX_API_KEY", "OPENBOX_ED25519_SEED", "OPENBOX_SECRET_FILE"} {
+	for _, k := range []string{"OPENBOX_BASE_URL", devconfig.EnvAgentID, devconfig.EnvAPIKeyDirect, devconfig.EnvWorkloadPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SECRET_FILE"} {
 		t.Setenv(k, "")
 	}
 	a, _, errb := testApp(nil)
@@ -1008,7 +960,7 @@ func setCodexHookEnv(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000001")
+	t.Setenv(devconfig.EnvAgentID, "7f3c9b2e-0000-5000-a000-000000000001")
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
 	t.Setenv("CODEX_HOME", filepath.Join(dir, "codex-home"))
@@ -1078,7 +1030,7 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 	spool := filepath.Join(dir, "spool")
 	fixtures := filepath.Join("..", "..", "internal", "adapters", "codex", "testdata")
 	env := append(os.Environ(),
-		"OPENBOX_AGENT_DID=did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+		"OPENBOX_AGENT_ID=7f3c9b2e-0000-5000-a000-000000000001",
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		"OPENBOX_HOME="+dir,
@@ -1166,14 +1118,14 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 		}
 	}
 	rawCfg, _ := os.ReadFile(cfgPath)
-	if strings.Contains(string(rawCfg), "obx_test_k") || strings.Contains(string(rawCfg), "c2VlZA==") {
+	if strings.Contains(string(rawCfg), "obx_test_k") || strings.Contains(string(rawCfg), testWorkloadKeyOnce) {
 		t.Errorf("dev config leaked a secret value:\n%s", rawCfg)
 	}
 	kv, err := devconfig.ParseEnvFile(filepath.Join(openboxHome, "codex", ".env"))
 	if err != nil {
 		t.Fatalf("read credential file: %v", err)
 	}
-	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_test_k" || kv[devconfig.EnvWorkloadPrivateKey] != testWorkloadKeyOnce {
 		t.Errorf("init modified the credential file: %v", kv)
 	}
 }
@@ -1258,7 +1210,7 @@ func TestInit_SaysWhichSessionsAreGoverned(t *testing.T) {
 	})
 }
 
-// seedCredentials writes a complete identity store for each named tool,
+// seedCredentials writes a complete v3 identity store for each named tool,
 // defaulting to claude-code. Identity is per tool now, so a test that runs
 // `--provider codex` has to say so or it seeds a store the command never
 // reads.
@@ -1268,40 +1220,73 @@ func seedCredentials(t *testing.T, tools ...string) {
 		tools = []string{defaultTestProvider}
 	}
 	if len(tools) > 1 && os.Getenv(devconfig.EnvConfigPath) != "" {
-		t.Fatal("seeding two tools under an OPENBOX_CONFIG pin would put both DIDs in one dev.json and the second would win; use isolateHomeOnly")
+		t.Fatal("seeding two tools under an OPENBOX_CONFIG pin would put both agent ids in one dev.json and the second would win; use isolateHomeOnly")
 	}
 	for _, tool := range tools {
-		seedToolCredentials(t, tool, testDIDFor(t, tool))
+		seedToolCredentials(t, tool, testAgentIDFor(t, tool))
 	}
 }
 
-// testDIDFor gives each tool its own DID, so a test asserting on a spooled
-// event can tell which store answered.
-func testDIDFor(t *testing.T, tool string) string {
+// testAgentIDFor gives each tool its own agent id, so a test asserting on a
+// spooled event can tell which store answered. testDIDFor is its attribution
+// DID, always derived through devconfig.AttributionDIDFor rather than
+// hardcoded, so a change to the derivation cannot silently desync a fixture
+// from the function it exercises.
+func testAgentIDFor(t *testing.T, tool string) string {
 	t.Helper()
 	switch tool {
 	case "claude-code":
-		return "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+		return "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 	case "codex":
-		return "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c9999"
+		return "3f2504e0-4f89-11d3-9a0c-0305e82c9999"
 	default:
-		t.Fatalf("no test DID for provider %q", tool)
+		t.Fatalf("no test agent id for provider %q", tool)
 		return ""
 	}
 }
 
-func seedToolCredentials(t *testing.T, tool, did string) {
+func testDIDFor(t *testing.T, tool string) string {
+	t.Helper()
+	did, err := devconfig.AttributionDIDFor(testAgentIDFor(t, tool))
+	if err != nil {
+		t.Fatalf("attribution DID for %s: %v", tool, err)
+	}
+	return did
+}
+
+// testWorkloadKeyOnce is a real, runtime-generated (never a literal) RSA key
+// shared by every seedToolCredentials call: several callers (doctor,
+// laneidentity, warnIfUnconfigured) build a real *client.Client from the
+// seeded store, and client.New parses the key before any network call, so a
+// placeholder string would make every one of them silently skip the tool.
+var testWorkloadKeyOnce = mustTestWorkloadKey()
+
+func mustTestWorkloadKey() string {
+	key, err := workloadauth.GenerateKey()
+	if err != nil {
+		panic(err)
+	}
+	s, err := workloadauth.EncodePrivateKey(key)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func seedToolCredentials(t *testing.T, tool, agentID string) {
 	t.Helper()
 	envPath, err := devconfig.EnvFilePathFor(tool)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := devconfig.WriteEnvFile(envPath, map[string]string{
-		devconfig.EnvAPIKeyDirect:    "obx_test_k",
-		devconfig.EnvAgentPrivateKey: testSeedB64}); err != nil {
+		devconfig.EnvAPIKeyDirect:       "obx_test_k",
+		devconfig.EnvWorkloadPrivateKey: testWorkloadKeyOnce}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(seedDevConfigPath(t, tool), devconfig.Update{DID: did}); err != nil {
+	if err := devconfig.WriteConfig(seedDevConfigPath(t, tool), devconfig.Update{
+		AgentID: agentID, IdentityMethod: devconfig.IdentityMethodKeycloakWorkload,
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1339,18 +1324,18 @@ func scriptedAuth(t *testing.T, a *app, answers ...string) *prompt.Scripted {
 // and `doctor` inherits it: same one call, reported where somebody looking for
 // a problem will actually see it.
 func TestDoctorReportsControlPlaneReachability(t *testing.T) {
-	srv := coreValidateOK(t, verifyTestSeed)
-	setVerifyCreds(t, srv.URL)
+	srv := coreValidateOK(t)
+	setVerifyCreds(t, srv.URL())
 	t.Setenv(envManagedSettingsPath, filepath.Join(t.TempDir(), "absent.json"))
 
 	out, code := runDoctorIn(t, t.TempDir())
 	if code != exitOK {
 		t.Fatalf("doctor exit = %d:\n%s", code, out)
 	}
-	if !strings.Contains(out, "authenticated as") || !strings.Contains(out, verifyTestDID) {
+	if !strings.Contains(out, "authenticated as") || !strings.Contains(out, "fake-workload-agent") {
 		t.Errorf("doctor does not report a verified identity:\n%s", out)
 	}
-	if strings.Contains(out, verifyTestSeed) || strings.Contains(out, "obx_test_") {
+	if strings.Contains(out, fakecore.WorkloadPrivateKey()) || strings.Contains(out, fakecore.APIKey()) {
 		t.Errorf("a credential value reached doctor's output:\n%s", out)
 	}
 }

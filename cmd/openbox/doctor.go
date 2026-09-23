@@ -959,10 +959,13 @@ func (a *app) reportStoreReachability(tool string) {
 	}
 
 	c, err := client.New(client.Config{
-		BaseURL:       creds.BaseURL,
-		APIKey:        creds.APIKey,
-		DID:           creds.DID,
-		PrivateKeyB64: creds.PrivateKeyB64,
+		BaseURL:            creds.BaseURL,
+		APIKey:             creds.APIKey,
+		WorkloadPrivateKey: creds.WorkloadPrivateKey,
+		// Memory: this proves the full cold-path chain (bootstrap + exchange)
+		// every run, rather than reporting a warm cache that could outlive a
+		// revocation.
+		TokenCachePath: "",
 	})
 	if err != nil {
 		a.row(tool, "NOT CHECKED; the local credentials are unusable: %v", err)
@@ -971,15 +974,17 @@ func (a *app) reportStoreReachability(tool string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), doctorReachTimeout)
 	defer cancel()
-	if err := c.Validate(ctx); err != nil {
-		// Status and guidance only. The error never carries the key, the seed,
-		// the nonce or the signature (INV-1).
+	result, err := c.ValidateDetailed(ctx)
+	if err != nil {
+		// Status and guidance only. The error never carries the key, the token,
+		// or the assertion (INV-1); a token-acquisition failure names its own
+		// stage (bootstrap/exchange) through the wrapped *workloadauth.Error.
 		a.row(tool, "NO; %v", err)
 		a.row("", "Events spool locally and deliver when this clears, so a short")
 		a.row("", "outage costs nothing. `openbox doctor` re-checks.")
 		return
 	}
-	a.row(tool, "reachable; authenticated as %s @ %s", creds.DID, creds.BaseURL)
+	a.row(tool, "reachable; authenticated as agent %s @ %s", result.AgentName, creds.BaseURL)
 }
 
 // doctorReachTimeout keeps the check short. Doctor is a report, and a report

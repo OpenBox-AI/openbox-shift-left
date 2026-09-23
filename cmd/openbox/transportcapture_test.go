@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"io"
 	"net"
 	"net/http"
@@ -180,7 +181,7 @@ func TestTransportCommandListensAndRecords(t *testing.T) {
 	openboxHome := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
 	t.Setenv("OPENBOX_HOME", openboxHome)
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
+	t.Setenv(devconfig.EnvAgentID, "7f3c9b2e-0000-5000-a000-00000000feed")
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	addr := freeLoopbackAddr(t)
@@ -349,7 +350,7 @@ func TestTheTransportDaemonResolvesItsOwnElection(t *testing.T) {
 
 			t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 			t.Setenv("OPENBOX_HOME", t.TempDir())
-			t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
+			t.Setenv(devconfig.EnvAgentID, "7f3c9b2e-0000-5000-a000-00000000feed")
 			t.Setenv("OPENBOX_REALTIME", "0")
 
 			ctx, cancel := context.WithCancel(context.Background())

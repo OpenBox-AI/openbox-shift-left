@@ -58,7 +58,7 @@ func (a *app) requireControlToken() (token, source string, code int) {
 				"  Already have this tool's agent? Re-run with a terminal and answer yes when it\n"+
 				"  offers to adopt one; that needs no organization credential.\n"+
 				"  Expected %s and %s in %s, or as environment variables.",
-			devconfig.EnvControlToken, devconfig.EnvAPIKeyDirect, devconfig.EnvAgentPrivateKey, envPath)
+			devconfig.EnvControlToken, devconfig.EnvAPIKeyDirect, devconfig.EnvWorkloadPrivateKey, envPath)
 	}
 	if problem := controlTokenProblem(token); problem != "" {
 		return "", "", a.errorf("%s\n  Nothing was installed.\n  That token came from %s.", problem, source)
@@ -178,12 +178,8 @@ func (a *app) credentialsPresent(kv map[string]string) bool {
 	if devconfig.EnvIdentityPresent() {
 		return true
 	}
-	haveKey := kv[devconfig.EnvAPIKeyDirect] != ""
-	havePrivateKey := kv[devconfig.EnvAgentPrivateKey] != ""
-	for _, alias := range []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
-		if kv[alias] != "" {
-			havePrivateKey = true
-		}
-	}
-	return haveKey && havePrivateKey
+	// A seed under the documented legacy name or a deprecated alias no longer
+	// satisfies this: it identifies a store devinit.register treats as legacy
+	// (ErrLegacyStore), not a complete v3 identity this gate should reuse.
+	return kv[devconfig.EnvAPIKeyDirect] != "" && kv[devconfig.EnvWorkloadPrivateKey] != ""
 }

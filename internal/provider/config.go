@@ -9,7 +9,8 @@ func ConfigUpdate(ref CredentialRef) devconfig.Update {
 	return devconfig.Update{
 		BaseURL:        ref.BaseURL,
 		DID:            ref.DID,
-		AgentID:        ref.AgentID,    // for `dev sync` / staleness
+		AgentID:        ref.AgentID, // for `dev sync` / staleness
+		IdentityMethod: ref.IdentityMethod,
 		BackendURL:     ref.BackendURL, // control-plane base for the policy read
 		ContentCapture: ref.ContentCapture,
 		InstallGitHook: &installGitHook,

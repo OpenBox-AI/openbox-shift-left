@@ -30,7 +30,7 @@ func TestConcurrentInstallIsRefusedRatherThanQueued(t *testing.T) {
 				PluginDir:    pluginDir,
 				ConfigPath:   filepath.Join(t.TempDir(), "dev.json"),
 				EngineBinary: src,
-			}.Install(CredentialRef{DID: testDID})
+			}.Install(CredentialRef{AgentID: testAgentID})
 		}(i)
 	}
 	close(start)
@@ -103,7 +103,7 @@ func TestStaleInstallLockIsReclaimed(t *testing.T) {
 
 	inst := Installer{
 		SettingsPath: filepath.Join(t.TempDir(), ".claude", "settings.json"), PluginDir: pluginDir, ConfigPath: filepath.Join(t.TempDir(), "dev.json"), EngineBinary: src}
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("a lock file nobody holds must not block an install, however new it looks: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestStaleInstallLockIsReclaimed(t *testing.T) {
 		t.Fatalf("acquire for the held half: %v", err)
 	}
 	defer release()
-	if err := inst.Install(CredentialRef{DID: testDID}); err == nil ||
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err == nil ||
 		!strings.Contains(err.Error(), "already installing") {
 		t.Errorf("a held lock must refuse the install, got: %v", err)
 	}

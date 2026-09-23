@@ -3,11 +3,9 @@ package claudecode
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"log"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,7 +182,7 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 
 func TestRunHook_EnforceGate(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 
@@ -216,7 +214,7 @@ func TestRunHook_EnforceGate(t *testing.T) {
 // concept).
 func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforce, "1")
@@ -648,24 +646,20 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 // enforcement record.
 func TestRunHook_EnforceApply_Block(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforce, "1")
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
 	t.Setenv(envEnforcementFile, enfFile)
 	t.Setenv(envContentCapture, "1")
-	blockRmRf := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		if strings.Contains(string(raw), "rm -rf") {
-			_, _ = w.Write([]byte(`{"verdict":"block","reason":"destructive recursive delete","policy_id":"test-policy"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
-	defer blockRmRf.Close()
-	evalCreds(t, blockRmRf.URL)
+	blockRmRf := fakecore.New(t, fakecore.Script{
+		Verdicts: map[string]string{
+			"toolu_danger": `{"verdict":"block","reason":"destructive recursive delete","policy_id":"test-policy"}`,
+		},
+		Default: `{"verdict":"allow"}`,
+	})
+	evalCreds(t, blockRmRf.URL())
 	t.Setenv(envContentCapture, "1")
 
 	run := func(payload string) string {
@@ -675,7 +669,7 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 		return stdout.String()
 	}
 
-	danger := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
+	danger := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_danger","tool_input":{"command":"rm -rf /tmp/x"}}`
 	out := run(danger)
 	d, reason := parsePermissionDecision(t, []byte(out))
 	if d != "deny" {
@@ -785,7 +779,7 @@ func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
 // policy governs outages only).
 func TestRunHook_EnforceFailClosed(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
@@ -1024,7 +1018,7 @@ func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
 // enforce-OFF is byte-identical (no ask even for the approval-required tool).
 func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
@@ -1167,7 +1161,7 @@ func TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator(t *testing.T)
 
 	runConfigHook(t, configPayload("cc-spy", "policy_settings", "/etc/claude/policy.json"))
 
-	if got := hits.Hits(); got != 0 {
+	if got := hits.V3EvaluateAttempts(); got != 0 {
 		t.Errorf("policy_settings made %d /evaluate call(s), want 0: the gate must never run for this "+
 			"source, not merely produce no visible output", got)
 	}

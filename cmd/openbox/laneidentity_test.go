@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
 // TestResolveProviderIdentitiesSkipsAnUnconfiguredProvider is the common
@@ -155,9 +157,17 @@ func seedIdentityWithCapture(t *testing.T, tool string, fake *fakecore.Server, c
 	if err != nil {
 		t.Fatal(err)
 	}
+	// WriteEnvFile's format cannot represent a multi-line value, so
+	// fakecore.WorkloadPrivateKey()'s PEM is normalized to the single-line
+	// base64 DER form the credential file (and OPENBOX_WORKLOAD_PRIVATE_KEY
+	// generally) actually stores.
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := devconfig.WriteEnvFile(envPath, map[string]string{
-		devconfig.EnvAPIKeyDirect:    "obx_test_k",
-		devconfig.EnvAgentPrivateKey: fake.SeedB64(),
+		devconfig.EnvAPIKeyDirect:       fakecore.APIKey(),
+		devconfig.EnvWorkloadPrivateKey: workloadKey,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +176,8 @@ func seedIdentityWithCapture(t *testing.T, tool string, fake *fakecore.Server, c
 		t.Fatal(err)
 	}
 	if err := devconfig.WriteConfig(cfgPath, devconfig.Update{
-		DID:            fake.DID(),
+		AgentID:        fakecore.AgentID(),
+		IdentityMethod: devconfig.IdentityMethodKeycloakWorkload,
 		BaseURL:        fake.URL(),
 		ContentCapture: capture,
 	}); err != nil {
@@ -206,6 +217,35 @@ func emitModelCall(t *testing.T, c *client.Client, tool, did string) {
 func hasActivityInput(r fakecore.Received) bool {
 	v, ok := r.Body["activity_input"]
 	return ok && v != nil
+}
+
+// TestLaneIdentityUsesMemoryCache a lane daemon is long-lived and holds its
+// workload token in memory for its whole life; it must never write to the
+// same on-disk cache file a short-lived hook process reads and writes,
+// because the two would race a concurrent Store/Invalidate against one file
+// (brainstorm Design). Proven by absence: after a real cold Emit through the
+// resolved client, this tool's on-disk cache path must not exist at all.
+func TestLaneIdentityUsesMemoryCache(t *testing.T) {
+	memhttptest.RequireBind(t)
+	isolateHomeOnly(t)
+	fake := fakecore.New(t, fakecore.Script{})
+	on := true
+	seedIdentityWithCapture(t, "claude-code", fake, &on)
+
+	identities := resolveProviderIdentities(nil)
+	cc, ok := identities["claude-code"]
+	if !ok {
+		t.Fatal("claude-code was seeded and must resolve")
+	}
+	emitModelCall(t, cc.Client, "claude-code", cc.DID)
+
+	cachePath, err := devconfig.WorkloadTokenCachePathFor("claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Errorf("a lane identity's token reached the on-disk cache at %s (err=%v); it must stay in memory", cachePath, err)
+	}
 }
 
 // TestResolveProviderIdentitiesPassesWarnAsTheClientsLogger is the Logger-

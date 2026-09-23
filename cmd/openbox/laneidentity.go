@@ -41,10 +41,14 @@ func resolveProviderIdentities(warn func(format string, args ...any)) map[string
 			continue
 		}
 		c, err := client.New(client.Config{
-			BaseURL:               creds.BaseURL,
-			APIKey:                creds.APIKey,
-			DID:                   creds.DID,
-			PrivateKeyB64:         creds.PrivateKeyB64,
+			BaseURL:            creds.BaseURL,
+			APIKey:             creds.APIKey,
+			WorkloadPrivateKey: creds.WorkloadPrivateKey,
+			// Memory, not creds.TokenCachePath: a lane daemon is a single long-lived
+			// process holding this token in memory for its whole life anyway, and a
+			// disk cache shared with the hook binary would let the two race a
+			// concurrent Store/Invalidate against the same file (brainstorm Design).
+			TokenCachePath:        "",
 			ContentCaptureEnabled: creds.ContentCaptureEnabled,
 			// Without this, client.Emit's own diagnostic lines (a delivery
 			// failure's detail, a dropped-unbuildable-event reason) fell back to

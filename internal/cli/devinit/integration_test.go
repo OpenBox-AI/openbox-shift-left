@@ -27,7 +27,11 @@ func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Ser
 		case r.Method == http.MethodPost && r.URL.Path == "/agent/create":
 			b, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(b, createBody)
-			_, _ = io.WriteString(w, `{"data":{"agent":{"id":"srv-agent","agent_name":"dev-x","did":"did:aip:server","tier":"Tier 2","trust_score":0.81},"token":"obx_test_`+strings.Repeat("a", 48)+`","identity":{"did":"did:aip:server","privateKey":"c2VlZA=="}}}`)
+			_, _ = io.WriteString(w, `{"data":{"agent":{"id":"srv-agent","agent_name":"dev-x","tier":"Tier 2","trust_score":0.81},`+
+				`"token":"obx_test_`+strings.Repeat("a", 48)+`",`+
+				`"identity":{"method":"keycloak_workload","source_type":"openbox","workload_identity_id":"wi-1",`+
+				`"credential_id":"cred-1","service_account_id":"sa-1","client_id":"client-1","kid":"kid-1",`+
+				`"token_endpoint":"https://idp.example/token","audience":"aud","private_key_available_from_openbox":false}}}`)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -60,7 +64,7 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 
 	res, err := Run(context.Background(),
 		Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: inst, Out: &out})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: inst, Out: &out})
 	if err != nil {
 		t.Fatalf("expected a clean install, got err=%v", err)
 	}
@@ -83,20 +87,26 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("parse dev config: %v", err)
 	}
-	if cfg.DID != "did:aip:server" {
-		t.Errorf("dev config DID = %q", cfg.DID)
+	if cfg.DID != "" {
+		t.Errorf("dev config DID = %q, want empty: a v3 store never persists one (D1)", cfg.DID)
+	}
+	if cfg.AgentID != "srv-agent" {
+		t.Errorf("dev config agent_id = %q, want srv-agent", cfg.AgentID)
+	}
+	if cfg.IdentityMethod != devconfig.IdentityMethodKeycloakWorkload {
+		t.Errorf("dev config identity_method = %q, want %s", cfg.IdentityMethod, devconfig.IdentityMethodKeycloakWorkload)
 	}
 
 	assertNoSecretInTree(t, pluginDir)
-	if strings.Contains(string(raw), "obx_") || strings.Contains(string(raw), "c2VlZA==") {
+	if strings.Contains(string(raw), "obx_") {
 		t.Errorf("dev config leaked a secret value:\n%s", raw)
 	}
 	kv := readCredentialFile(t)
 	if v := kv[devconfig.EnvAPIKeyDirect]; !strings.HasPrefix(v, "obx_test_") {
 		t.Errorf("api key not written: %q", v)
 	}
-	if v := kv[devconfig.EnvAgentPrivateKey]; v != "c2VlZA==" {
-		t.Errorf("private key not written: %q", v)
+	if v := kv[devconfig.EnvWorkloadPrivateKey]; v == "" {
+		t.Errorf("workload private key not written")
 	}
 }
 

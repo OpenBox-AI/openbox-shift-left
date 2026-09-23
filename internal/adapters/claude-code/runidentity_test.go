@@ -61,7 +61,7 @@ func TestSourceBumpTable(t *testing.T) {
 // continued_from_run_id.
 func TestSessionStartClearWithNoRecordStaysGeneration0(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
@@ -93,7 +93,7 @@ func TestSessionStartClearWithNoRecordStaysGeneration0(t *testing.T) {
 // re-read below is what rules that out.
 func TestSessionStartResumeBumpsOnTheSecondInvocation(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
 	sessionDir := t.TempDir()
@@ -147,7 +147,7 @@ func TestSessionStartResumeBumpsOnTheSecondInvocation(t *testing.T) {
 // asserting run_generation == chain length fleet-wide would be wrong).
 func TestRunIdentityChainAcrossGenerations(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
@@ -205,7 +205,7 @@ func TestRunIdentityChainAcrossGenerations(t *testing.T) {
 // the latch is keyed by the run id, which only a bump changes.
 func TestLatchEscapesOnlyABumpedGeneration(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())

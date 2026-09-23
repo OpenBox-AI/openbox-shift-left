@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
@@ -17,8 +18,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
-
-const testEvalKey = "obx_test_tier2000000000000000000000000000000"
 
 func TestIsHighRiskClass(t *testing.T) {
 	cases := map[string]bool{
@@ -304,17 +303,33 @@ func serveVerdict(t *testing.T, verdictJSON string) {
 	evalCreds(t, url)
 }
 
+// evalCreds points the resolver at the v3 workload identity fakecore's
+// process-wide fake Keycloak actually verifies: fakecore.WorkloadPrivateKey/
+// APIKey/AgentID, not a literal (the repo's standing rule; also lets a fake
+// core built with serveEvaluate's v1-only Script still accept the v3 routes,
+// since those verify against the process-wide identity regardless of the
+// per-instance seed).
 func evalCreds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv(envBaseURL, baseURL)
-	t.Setenv(envAPIKeyDirect, testEvalKey)
-	t.Setenv(envAgentPrivateKey, testPrivateKeyB64)
+	t.Setenv(envAPIKeyDirect, fakecore.APIKey())
+	t.Setenv(envWorkloadPrivateKey, fakecore.WorkloadPrivateKey())
+	t.Setenv(envAgentID, fakecore.AgentID())
 	t.Setenv(envContentCapture, "0")
+	// A stale cached token would point a client freshly pinned at a NEW
+	// fakecore instance's baseURL at a bearer that instance never issued (the
+	// on-disk cache path is keyed by HOME+tool, not by base URL, and several
+	// call sites share one isolateConfig'd HOME across subtests). D2 refuses a
+	// stale bearer with a 401 and never resends, so a leftover cache file would
+	// silently cost the whole subtest its one delivery attempt.
+	if p, err := devconfig.WorkloadTokenCachePath(); err == nil {
+		_ = os.Remove(p)
+	}
 }
 
 func TestEscalateTier2_RealVerdict(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	url, hits := serveEvaluate(t, `{"verdict":"block","reason":"tier2 exec policy","policy_id":"t2-pol"}`, 200, 0)
 	evalCreds(t, url)
 
@@ -323,8 +338,8 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 		ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
 	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
 
-	if hits.Hits() != 1 {
-		t.Fatalf("/evaluate hits = %d, want 1", hits.Hits())
+	if hits.V3EvaluateAttempts() != 1 {
+		t.Fatalf("/evaluate hits = %d, want 1", hits.V3EvaluateAttempts())
 	}
 	if dec.FailOpen {
 		t.Error("a real BLOCK from core must be hookflow.FailOpen=false")
@@ -339,7 +354,7 @@ func TestEscalateTier2_RealVerdict(t *testing.T) {
 
 func TestEscalateTier2_Outage(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	url, _ := serveEvaluate(t, `boom`, 500, 0)
 	evalCreds(t, url)
 
@@ -357,7 +372,7 @@ func TestEscalateTier2_Outage(t *testing.T) {
 
 func TestEscalateTier2_NoCredentials(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
 	t.Setenv(envBaseURL, url)
 	m := NewMapper(Identity{DeveloperDID: testDID})
@@ -367,14 +382,14 @@ func TestEscalateTier2_NoCredentials(t *testing.T) {
 	if !dec.FailOpen {
 		t.Error("missing credentials must degrade to a fail-open decision")
 	}
-	if hits.Hits() != 0 {
-		t.Errorf("no /evaluate call should be made without credentials; hits=%d", hits.Hits())
+	if hits.V3EvaluateAttempts() != 0 {
+		t.Errorf("no /evaluate call should be made without credentials; hits=%d", hits.V3EvaluateAttempts())
 	}
 }
 
 func TestEscalateTier2_BudgetBound(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	url, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 2*time.Second)
 	evalCreds(t, url)
 	m := NewMapper(Identity{DeveloperDID: testDID})
@@ -399,7 +414,7 @@ func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 // ──────
 func TestEnforcementConformance_Tier2(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
@@ -433,8 +448,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if !strings.Contains(reason, "tier2 exec policy") || !strings.Contains(reason, "t2-pol") {
 			t.Errorf("reason = %q, want the T2 policy reason + id", reason)
 		}
-		if hits.Hits() != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1", hits.Hits())
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1", hits.V3EvaluateAttempts())
 		}
 		if strings.Contains(out, "rm -rf") {
 			t.Errorf("stdout leaked the command (INV-2): %q", out)
@@ -450,8 +465,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if out := run(benignBash); strings.TrimSpace(out) != "" {
 			t.Errorf("a real T2 ALLOW must proceed (empty stdout); got %q", out)
 		}
-		if hits.Hits() != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1", hits.Hits())
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1", hits.V3EvaluateAttempts())
 		}
 	})
 
@@ -468,8 +483,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if !strings.Contains(reason, "edit policy") {
 			t.Errorf("reason = %q, want the server's policy reason", reason)
 		}
-		if hits.Hits() != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1 for Edit", hits.Hits())
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1 for Edit", hits.V3EvaluateAttempts())
 		}
 	})
 
@@ -513,8 +528,8 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
 			t.Fatalf("tier2=0 must not suppress the verdict; permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}
-		if hits.Hits() != 1 {
-			t.Errorf("/evaluate hits = %d, want 1; the opt-out is ignored", hits.Hits())
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want 1; the opt-out is ignored", hits.V3EvaluateAttempts())
 		}
 	})
 

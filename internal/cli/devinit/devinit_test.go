@@ -3,6 +3,9 @@ package devinit
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,8 +17,17 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
+
+// fixedTestKey is generated once per test binary (never a literal, per the
+// repo's standing rule) and shared by every register() call in this file via
+// fixedGenerateKey, so a test asserting on the written workload key does not
+// pay for a fresh 2048-bit keygen per case.
+var fixedTestKey, fixedTestKeyErr = rsa.GenerateKey(rand.Reader, 2048)
+
+func fixedGenerateKey() (*rsa.PrivateKey, error) { return fixedTestKey, fixedTestKeyErr }
 
 type fakeRegistrar struct {
 	createCalls, findCalls int
@@ -65,6 +77,10 @@ func isolateHome(t *testing.T) string {
 	t.Setenv(devconfig.EnvHome, dir)
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "dev.json"))
 	t.Setenv(devconfig.EnvDID, "")
+	t.Setenv(devconfig.EnvAgentID, "")
+	t.Setenv(devconfig.EnvAPIKeyDirect, "")
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, "")
+	t.Setenv(devconfig.EnvAgentPrivateKey, "")
 	bindProviderForTest(t, "claude-code")
 	return dir
 }
@@ -98,11 +114,14 @@ func validReg() *backend.Registration {
 	return &backend.Registration{
 		AgentID:    "agent-1",
 		AgentName:  "dev-x",
-		DID:        "did:aip:abc",
 		APIKey:     "obx_test_SECRETKEYVALUE",
-		PrivateKey: "PRIVATESEEDVALUE",
 		Tier:       "Tier 2",
 		TrustScore: "0.81",
+		Identity: backend.WorkloadIdentityInfo{
+			Method:     devconfig.IdentityMethodKeycloakWorkload,
+			SourceType: "openbox",
+			Kid:        "kid-xyz",
+		},
 	}
 }
 
@@ -113,7 +132,7 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	var out bytes.Buffer
 
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: reg, Installer: inst, Out: &out})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: inst, Out: &out})
 
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -125,8 +144,12 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	if got := kv[devconfig.EnvAPIKeyDirect]; got != "obx_test_SECRETKEYVALUE" {
 		t.Errorf("api key not written, got %q", got)
 	}
-	if got := kv[devconfig.EnvAgentPrivateKey]; got != "PRIVATESEEDVALUE" {
-		t.Errorf("private key not written, got %q", got)
+	wantWorkloadKey, err := workloadauth.EncodePrivateKey(fixedTestKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kv[devconfig.EnvWorkloadPrivateKey]; got != wantWorkloadKey {
+		t.Errorf("workload key not written, got %q want %q", got, wantWorkloadKey)
 	}
 	if got, ok := kv[devconfig.EnvDID]; ok {
 		t.Errorf("credential file carries the DID (%q); secrets and coordinates must not share a file", got)
@@ -134,7 +157,7 @@ func TestHappyPathStoresCredsNeverPrintsThem(t *testing.T) {
 	if len(kv) != 2 {
 		t.Errorf("credential file holds %d keys, want exactly the 2 secrets: %v", len(kv), kv)
 	}
-	if strings.Contains(out.String(), "obx_test_SECRETKEYVALUE") || strings.Contains(out.String(), "PRIVATESEEDVALUE") {
+	if strings.Contains(out.String(), "obx_test_SECRETKEYVALUE") || strings.Contains(out.String(), wantWorkloadKey) {
 		t.Errorf("secret leaked to output:\n%s", out.String())
 	}
 	if reg.lastReq.AgentType != "developer" || reg.lastReq.Icon == "" {
@@ -147,15 +170,18 @@ func TestConfigAppliedWhenInstallerAvailable(t *testing.T) {
 	reg := &fakeRegistrar{reg: validReg()}
 	inst := &fakeInstaller{}
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if !res.ConfigApplied || !inst.installed {
 		t.Errorf("config not applied: res=%+v installed=%v", res, inst.installed)
 	}
-	if inst.gotRef.DID != "did:aip:abc" {
+	if inst.gotRef.AgentID != "agent-1" {
 		t.Errorf("installer got bad ref: %+v", inst.gotRef)
+	}
+	if inst.gotRef.DID != "" {
+		t.Errorf("installer ref carries a DID (%q); a v3 registration never persists one (D1)", inst.gotRef.DID)
 	}
 }
 
@@ -172,6 +198,50 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 		t.Fatalf("credential file = %q, want the per-tool store %q", envPath, want)
 	}
 	if err := devconfig.WriteEnvFile(envPath, map[string]string{
+		devconfig.EnvAPIKeyDirect:       "obx_test_existing",
+		devconfig.EnvWorkloadPrivateKey: "wk_existing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const existingAgentID = "eeeeeeee-0000-5000-a000-0000000000ee"
+	// isolateHome pins OPENBOX_CONFIG to dir/dev.json; ResolveAgentID (via
+	// devconfig.load()) honours that override, same as the production hot path.
+	if err := devconfig.WriteConfig(filepath.Join(dir, "dev.json"), devconfig.Update{
+		AgentID: existingAgentID, IdentityMethod: devconfig.IdentityMethodKeycloakWorkload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &fakeRegistrar{reg: validReg()}
+	inst := &fakeInstaller{}
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("reuse err: %v", err)
+	}
+	if reg.createCalls != 0 || reg.findCalls != 0 {
+		t.Errorf("reuse should not hit the network: create=%d find=%d", reg.createCalls, reg.findCalls)
+	}
+	wantDID, err := devconfig.AttributionDIDFor(existingAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Reused || res.AgentID != existingAgentID || res.DID != wantDID {
+		t.Errorf("res = %+v, want AgentID %q DID %q", res, existingAgentID, wantDID)
+	}
+}
+
+// TestLegacyStoreDoesNotReuse a stored developer_did or a seed under the
+// current or a deprecated name never satisfies the reuse gate: the v3 binary
+// cannot speak for that identity at all, so it falls through to registering a
+// new one, same as an empty store.
+func TestLegacyStoreDoesNotReuse(t *testing.T) {
+	dir := isolateHome(t)
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
 		devconfig.EnvAPIKeyDirect:    "obx_test_existing",
 		devconfig.EnvAgentPrivateKey: "existingseed",
 	}); err != nil {
@@ -184,15 +254,15 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 	reg := &fakeRegistrar{reg: validReg()}
 	inst := &fakeInstaller{}
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: inst, Out: &bytes.Buffer{}})
 	if err != nil {
-		t.Fatalf("reuse err: %v", err)
+		t.Fatalf("run: %v", err)
 	}
-	if reg.createCalls != 0 || reg.findCalls != 0 {
-		t.Errorf("reuse should not hit the network: create=%d find=%d", reg.createCalls, reg.findCalls)
+	if res.Reused {
+		t.Fatal("a legacy store was reused; the v3 binary cannot speak for it")
 	}
-	if !res.Reused || res.DID != "did:aip:existing" {
-		t.Errorf("res = %+v", res)
+	if !res.Registered || reg.createCalls != 1 {
+		t.Errorf("want a fresh registration over the legacy store, got %+v (creates=%d)", res, reg.createCalls)
 	}
 }
 
@@ -203,7 +273,7 @@ func TestRemoteDuplicateBlocksWithoutForce(t *testing.T) {
 		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9", DID: "did:aip:old"}},
 	}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("expected duplicate error, got %v", err)
 	}
@@ -220,7 +290,7 @@ func TestRemoteLookupErrorDoesNotFallThroughToCreate(t *testing.T) {
 	// It must surface and stop.
 	reg := &fakeRegistrar{reg: validReg(), findErr: errors.New("connection refused")}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "agent/list failed") {
 		t.Fatalf("expected surfaced list error, got %v", err)
 	}
@@ -236,7 +306,7 @@ func TestAPIErrorHalts(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{createErr: &backend.APIError{StatusCode: 400, Body: "AIVSS config is required"}}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "HALT") || !strings.Contains(err.Error(), "400") {
 		t.Fatalf("expected HALT with 400, got %v", err)
 	}
@@ -267,7 +337,7 @@ func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 
 	reg := &fakeRegistrar{reg: validReg()}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "agent-1") || !strings.Contains(err.Error(), "rotate") {
 		t.Fatalf("expected resume guidance naming agent-1, got %v", err)
 	}
@@ -279,18 +349,60 @@ func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 	}
 }
 
-func TestMissingPrivateKeyErrors(t *testing.T) {
+// TestUnconfirmedIdentityMethodErrors a v3 registration generates its signing
+// key locally and never receives one from the backend (only the public JWK
+// ever leaves this machine), so the analogous "cannot store runtime
+// credentials" failure is the server not confirming a keycloak_workload
+// identity at all.
+func TestUnconfirmedIdentityMethodErrors(t *testing.T) {
 	isolateHome(t)
 	r := validReg()
-	r.PrivateKey = ""
+	r.Identity.Method = ""
 	reg := &fakeRegistrar{reg: r}
 	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
-	if err == nil || !strings.Contains(err.Error(), "signing key") {
-		t.Fatalf("expected signing-key error, got %v", err)
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), devconfig.IdentityMethodKeycloakWorkload) {
+		t.Fatalf("expected an unconfirmed-identity error, got %v", err)
 	}
 	if kv := readCredentialFile(t); len(kv) != 0 {
-		t.Errorf("no credentials should be written when the key is missing, got %v", kv)
+		t.Errorf("no credentials should be written when the identity is unconfirmed, got %v", kv)
+	}
+}
+
+// TestMissingTokenErrors mirrors the above for the other half of "cannot
+// store runtime credentials": a confirmed identity with no token to
+// authenticate as it.
+func TestMissingTokenErrors(t *testing.T) {
+	isolateHome(t)
+	r := validReg()
+	r.APIKey = ""
+	reg := &fakeRegistrar{reg: r}
+	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), devconfig.IdentityMethodKeycloakWorkload) {
+		t.Fatalf("expected an unconfirmed-identity error, got %v", err)
+	}
+	if kv := readCredentialFile(t); len(kv) != 0 {
+		t.Errorf("no credentials should be written when the token is missing, got %v", kv)
+	}
+}
+
+// TestGenerateKeyFailureErrors a keygen failure must surface named, and must
+// never reach Create: the server should not see a request this run cannot
+// finish.
+func TestGenerateKeyFailureErrors(t *testing.T) {
+	isolateHome(t)
+	reg := &fakeRegistrar{reg: validReg()}
+	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
+		Deps{
+			GenerateKey: func() (*rsa.PrivateKey, error) { return nil, errors.New("boom") },
+			Registrar:   reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{},
+		})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected the keygen error to surface, got %v", err)
+	}
+	if reg.createCalls != 0 {
+		t.Errorf("a keygen failure must not reach Create: create=%d", reg.createCalls)
 	}
 }
 
@@ -311,7 +423,7 @@ func TestTruncateIsRuneSafe(t *testing.T) {
 func TestUnknownProviderRejected(t *testing.T) {
 	isolateHome(t)
 	_, err := Run(context.Background(), Options{Provider: ""},
-		Deps{Registrar: &fakeRegistrar{}, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: &fakeRegistrar{}, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil {
 		t.Fatal("expected error for empty provider")
 	}
@@ -350,7 +462,7 @@ func TestDefaultAgentNameIsToolScoped(t *testing.T) {
 func TestNilRegistrarIsANamedError(t *testing.T) {
 	isolateHome(t)
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil {
 		t.Fatalf("Run with no registrar and no store returned no error (res=%+v)", res)
 	}
@@ -378,7 +490,7 @@ func TestReuseNeverFiresFromTheOrgStore(t *testing.T) {
 
 	reg := &fakeRegistrar{reg: validReg()}
 	res, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -403,7 +515,7 @@ func TestTheDuplicateNameHaltNamesTheCauseAndTheRemedy(t *testing.T) {
 		byName: map[string]*backend.AgentSummary{name: {ID: "old-9", DID: "did:aip:old"}},
 	}
 	_, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil {
 		t.Fatal("a name already taken in the org must halt, not mint a second agent")
 	}
@@ -442,7 +554,7 @@ func TestARejectedCredentialIsNotReportedAsAnOutage(t *testing.T) {
 			URL:        "https://api.openbox.ai/agent/list?all=true",
 		}}
 		_, err := Run(context.Background(), Options{Provider: "claude-code"},
-			Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+			Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 		if err == nil {
 			t.Fatalf("HTTP %d did not fail the run", status)
 		}
@@ -474,7 +586,7 @@ func TestAnUnreachableBackendStillReadsAsAnOutage(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{findErr: errors.New("dial tcp 10.0.0.1:443: connect: connection refused")}
 	_, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
 	if err == nil {
 		t.Fatal("a dial failure did not fail the run")
 	}
@@ -527,14 +639,104 @@ func TestAnUnscoredAgentPrintsNoTierRow(t *testing.T) {
 	isolateHome(t)
 	var out bytes.Buffer
 	reg := &backend.Registration{
-		AgentID: "a-1", AgentName: "dev", DID: "did:aip:x",
-		APIKey: "obx_test_k", PrivateKey: "c2VlZA==", TrustScore: "<nil>",
+		AgentID: "a-1", AgentName: "dev",
+		APIKey: "obx_test_k", TrustScore: "<nil>",
+		Identity: backend.WorkloadIdentityInfo{Method: devconfig.IdentityMethodKeycloakWorkload, Kid: "kid-a1"},
 	}
 	if _, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{Registrar: &fakeRegistrar{reg: reg}, Installer: &fakeInstaller{}, Out: &out}); err != nil {
+		Deps{GenerateKey: fixedGenerateKey, Registrar: &fakeRegistrar{reg: reg}, Installer: &fakeInstaller{}, Out: &out}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if s := out.String(); strings.Contains(s, "tier") || strings.Contains(s, "<nil>") {
 		t.Errorf("an unscored agent still prints a tier row:\n%s", s)
+	}
+}
+
+// TestInitRegistersWorkloadAgentWithPublicJWKOnly a fresh registration proves
+// possession of a locally-generated key by sending only its PUBLIC half: the
+// request carries IdentityVerification{keycloak_workload, generate, openbox,
+// <jwk>}, and nothing in the request -- marshaled, not sampled -- contains a
+// private key parameter (RFC 7518 "d", or the encoded private key itself).
+func TestInitRegistersWorkloadAgentWithPublicJWKOnly(t *testing.T) {
+	isolateHome(t)
+	reg := &fakeRegistrar{reg: validReg()}
+
+	if _, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	iv := reg.lastReq.IdentityVerification
+	if iv == nil {
+		t.Fatal("Create request carries no IdentityVerification")
+	}
+	if iv.Method != devconfig.IdentityMethodKeycloakWorkload {
+		t.Errorf("Method = %q, want %q", iv.Method, devconfig.IdentityMethodKeycloakWorkload)
+	}
+	if iv.Mode != "generate" {
+		t.Errorf("Mode = %q, want generate", iv.Mode)
+	}
+	if iv.SourceType != "openbox" {
+		t.Errorf("SourceType = %q, want openbox", iv.SourceType)
+	}
+	for _, k := range []string{"kty", "n", "e", "kid", "alg", "use"} {
+		if iv.PublicJWK[k] == "" {
+			t.Errorf("PublicJWK missing %q: %+v", k, iv.PublicJWK)
+		}
+	}
+	if _, hasD := iv.PublicJWK["d"]; hasD {
+		t.Error("PublicJWK carries the RFC 7518 private exponent \"d\"")
+	}
+
+	raw, err := json.Marshal(reg.lastReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privB64, err := workloadauth.EncodePrivateKey(fixedTestKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), privB64) || strings.Contains(string(raw), "PRIVATE KEY") {
+		t.Errorf("the create request leaked private key material: %s", raw)
+	}
+}
+
+// TestSecondInitReusesWithoutRegistering across two separate Run invocations
+// against the SAME store, Create and the key generator each fire exactly
+// once (on the first run); the second reuses offline, and the credential
+// file's bytes are identical before and after it.
+func TestSecondInitReusesWithoutRegistering(t *testing.T) {
+	isolateHome(t)
+	reg := &fakeRegistrar{reg: validReg()}
+	keygenCalls := 0
+	countingKeygen := func() (*rsa.PrivateKey, error) {
+		keygenCalls++
+		return fixedGenerateKey()
+	}
+
+	if _, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: countingKeygen, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if reg.createCalls != 1 || keygenCalls != 1 {
+		t.Fatalf("first run: creates=%d keygenCalls=%d, want 1 and 1", reg.createCalls, keygenCalls)
+	}
+	envBefore := readCredentialFile(t)
+
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: countingKeygen, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if !res.Reused || res.Registered {
+		t.Errorf("second run: res = %+v, want Reused and not Registered", res)
+	}
+	if reg.createCalls != 1 || keygenCalls != 1 {
+		t.Errorf("second run: creates=%d keygenCalls=%d, want unchanged at 1 and 1", reg.createCalls, keygenCalls)
+	}
+	envAfter := readCredentialFile(t)
+	if envBefore[devconfig.EnvAPIKeyDirect] != envAfter[devconfig.EnvAPIKeyDirect] ||
+		envBefore[devconfig.EnvWorkloadPrivateKey] != envAfter[devconfig.EnvWorkloadPrivateKey] {
+		t.Errorf("credential file changed across the reuse run: before=%v after=%v", envBefore, envAfter)
 	}
 }

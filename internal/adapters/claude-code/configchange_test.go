@@ -135,7 +135,7 @@ func configPayload(sid, source, filePath string) string {
 func setupConfigChangeEnv(t *testing.T) {
 	t.Helper()
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv("OPENBOX_HALT_DIR", t.TempDir())
@@ -238,7 +238,7 @@ func TestRunHook_ConfigChange_HaltLatchesAndReplays(t *testing.T) {
 		t.Fatal("the session must be latched after an emitted session halt")
 	}
 
-	before := hits.Hits()
+	before := hits.V3EvaluateAttempts()
 	out2, _ := runConfigHook(t, configPayload("cc-halt-1", "local_settings", "/repo/.claude/settings.local.json"))
 	var got2 userPromptSubmitOutput
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out2)), &got2); err != nil {
@@ -247,7 +247,7 @@ func TestRunHook_ConfigChange_HaltLatchesAndReplays(t *testing.T) {
 	if got2.Continue == nil || *got2.Continue {
 		t.Errorf("replayed halt = %+v, want continue:false again", got2)
 	}
-	if after := hits.Hits(); after != before {
+	if after := hits.V3EvaluateAttempts(); after != before {
 		t.Errorf("latched session made %d further /evaluate calls, want 0 (the latch is the decided state)", after-before)
 	}
 }
@@ -366,7 +366,7 @@ func TestRunHook_ConfigChange_RegistryNotTouched(t *testing.T) {
 func TestSurfaceFindings_UnreachableForConfigChange(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforce, "0") // observe-only path; findings guard is what's under test

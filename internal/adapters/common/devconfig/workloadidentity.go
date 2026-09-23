@@ -39,7 +39,7 @@ func WriteWorkloadIdentity(tool string, id WorkloadIdentity) error {
 	if err != nil {
 		return err
 	}
-	remove := append([]string{EnvAgentPrivateKey}, deprecatedPrivateKeyEnvNames...)
+	remove := append([]string{}, legacySeedEnvNames...)
 	if err := WriteEnvFile(envPath, map[string]string{
 		EnvAPIKeyDirect:       id.APIKey,
 		EnvWorkloadPrivateKey: id.PrivateKeyB64,

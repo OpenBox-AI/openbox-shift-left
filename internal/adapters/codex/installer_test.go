@@ -40,7 +40,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 	}
 
 	ref := CredentialRef{
-		DID: testDID,
+		AgentID: testAgentID,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -87,7 +87,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 	}
 
 	cfg, err := devconfig.Load(cfgPath)
-	if err != nil || cfg.DID != testDID {
+	if err != nil || cfg.AgentID != testAgentID {
 		t.Errorf("dev config wrong: %+v (err %v)", cfg, err)
 	}
 }
@@ -98,7 +98,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
 	inst, hooksPath, cfgPath := testInstaller(t)
 	ref := CredentialRef{
-		DID:     testDID,
+		AgentID: testAgentID,
 		BaseURL: "https://core.example.ai",
 	}
 	if err := inst.Install(ref); err != nil {
@@ -144,7 +144,7 @@ func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := CredentialRef{DID: testDID}
+	ref := CredentialRef{AgentID: testAgentID}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	first, _ := os.ReadFile(hooksPath)
@@ -223,7 +223,7 @@ func TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers(t *testing.T) {
 		t.Errorf("want exactly 1 fresh OpenBox PreToolUse handler, got %d:\n%s", n, s)
 	}
 
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}
 	second, _ := os.ReadFile(hooksPath)
@@ -269,7 +269,7 @@ func TestInstaller_RefusesUnparsableHooksFile(t *testing.T) {
 	if err := os.WriteFile(hooksPath, []byte("{corrupt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := inst.Install(CredentialRef{DID: testDID})
+	err := inst.Install(CredentialRef{AgentID: testAgentID})
 	if err == nil {
 		t.Fatal("install must refuse to clobber an unparsable hooks.json")
 	}
@@ -285,7 +285,7 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true
 	ref := CredentialRef{
-		DID:     testDID,
+		AgentID: testAgentID,
 		Enforce: &tru, Tier2: &tru, Findings: &tru,
 	}
 	if err := inst.Install(ref); err != nil {
@@ -305,10 +305,10 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 // carry them; the idempotent reuse path.
 func TestInstaller_PreservesPriorSyncCoordinates(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
-	if err := inst.Install(CredentialRef{DID: testDID, AgentID: "agent-1", BackendURL: "https://backend.example.ai"}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: "agent-1", BackendURL: "https://backend.example.ai"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+	if err := inst.Install(CredentialRef{AgentID: "agent-1"}); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := devconfig.Load(cfgPath)
@@ -317,10 +317,10 @@ func TestInstaller_PreservesPriorSyncCoordinates(t *testing.T) {
 	}
 }
 
-func TestInstaller_RequiresDID(t *testing.T) {
+func TestInstallRequiresAgentID(t *testing.T) {
 	inst, _, _ := testInstaller(t)
 	if err := inst.Install(CredentialRef{}); err == nil {
-		t.Error("install without a DID should error")
+		t.Error("install without an agent id should error")
 	}
 }
 
@@ -345,14 +345,13 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	tru := true
 
 	if err := inst.Install(CredentialRef{
-		DID:     testDID,
 		AgentID: "agent-1", BackendURL: "https://backend.example",
 		Enforce: &tru, Tier2: &tru, Findings: &tru,
 	}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if err := inst.Install(CredentialRef{
-		DID: testDID,
+		AgentID: "agent-1",
 	}); err != nil {
 		t.Fatalf("re-install: %v", err)
 	}

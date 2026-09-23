@@ -9,6 +9,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
@@ -225,9 +226,13 @@ func evalEnv(t *testing.T, fake *fakecore.Server, dir, spool string, p fakecore.
 	t.Setenv(devconfig.EnvSpoolDir, spool)
 	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
-	t.Setenv(devconfig.EnvDID, fake.DID())
-	t.Setenv(devconfig.EnvAPIKeyDirect, "obx_test_"+strings.Repeat("a", 48))
-	t.Setenv(devconfig.EnvAgentPrivateKey, fake.SeedB64())
+	t.Setenv(devconfig.EnvAgentID, fakecore.AgentID())
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv(devconfig.EnvHaltDir, filepath.Join(dir, "halts"))

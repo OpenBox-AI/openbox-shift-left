@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -74,9 +73,13 @@ const (
 	IdentityMethodKeycloakWorkload = "keycloak_workload"
 )
 
-// deprecatedPrivateKeyEnvNames reading both costs two map lookups and a
-// warning; breaking them would strand pipelines this repo cannot see.
-var deprecatedPrivateKeyEnvNames = []string{"OPENBOX_ED25519_SEED", "OPENBOX_SEED"}
+// legacySeedEnvNames are the Ed25519 seed env names a v1 store could hold,
+// under the documented name or a deprecated alias. Retired as a credential
+// source in phase 04 (no v3 resolver reads any of them), and kept only as a
+// legacy-store detection signal: LegacyStoreFor and WriteWorkloadIdentity
+// iterate this to find and purge a seed sitting beside (or instead of) a v3
+// workload key.
+var legacySeedEnvNames = []string{EnvAgentPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SEED"}
 
 // DevConfig is the non-secret coordinate file the installers write and the
 // hooks read (INV-1: it holds where the secrets live, never the secret
@@ -194,18 +197,19 @@ func load() (DevConfig, error) { return Load(DefaultConfigPath()) }
 // only in process memory on the flush path and must never be logged or
 // persisted.
 type Credentials struct {
-	BaseURL               string
-	APIKey                string
+	BaseURL string
+	APIKey  string
+	// DID is the in-memory attribution label (D1): derived from AgentID via
+	// AttributionDIDFor, never itself stored or read from a store. Never
+	// empty on a successful resolve.
 	DID                   string
-	PrivateKeyB64         string
 	ContentCaptureEnabled bool
-	// AgentID is the v3 workload agent id (dev.json's agent_id field, shared
-	// with the pre-existing policy-sync use). Populated additively; nothing
-	// resolves or enforces it as an identity source until phase 04.
+	// AgentID is the v3 workload agent id: env OPENBOX_AGENT_ID, else
+	// dev.json's agent_id field. Required; DID is derived from it.
 	AgentID string
 	// WorkloadPrivateKey is the RS256 client-assertion signing key
-	// (OPENBOX_WORKLOAD_PRIVATE_KEY: PKCS8 DER, base64 std). Populated
-	// additively, same store precedence as PrivateKeyB64 (env beats file).
+	// (OPENBOX_WORKLOAD_PRIVATE_KEY: PKCS8 DER, base64 std). Same store
+	// precedence as every other secret here: env beats the credential file.
 	WorkloadPrivateKey string
 	// TokenCachePath is this tool's workload-token.json cache path. Never a
 	// credential source itself (it is a cache, not a store); populated for a
@@ -213,39 +217,75 @@ type Credentials struct {
 	TokenCachePath string
 }
 
-// ResolveDID resolves only the developer DID (env, then config file); no
-// secret-store access. This is the hot path: observe/spool needs the DID to
-// attribute events but never the obx_ key or seed, so a tool-use hook does
-// zero secret I/O (INV-1).
+// ErrLegacyStore is returned by ResolveDID, ResolveCredentials and
+// ResolveCredentialsFor when a tool's store predates the v3 keycloak_workload
+// model (a stored developer_did, or an Ed25519 signing seed under the
+// documented or a deprecated name -- see LegacyStoreFor). The v3 binary cannot
+// speak for a legacy identity at all; the only remedy is re-registering it:
+// `openbox init --provider <tool>`.
+var ErrLegacyStore = errors.New("legacy (pre-IAMv3) identity store; hooks send nothing")
+
+// legacyStoreError wraps ErrLegacyStore with the reasons LegacyStoreFor (or
+// its shared detection, legacyStoreFromValues) found, and the tool-scoped
+// re-init remedy.
+func legacyStoreError(tool string, ls LegacyStore) error {
+	remedy := "`openbox init --provider <tool>`"
+	if tool != "" {
+		remedy = "`openbox init --provider " + tool + "`"
+	}
+	reasons := "no reason recorded"
+	if len(ls.Reasons) > 0 {
+		reasons = strings.Join(ls.Reasons, "; ")
+	}
+	return fmt.Errorf("%w (%s); run %s to register a v3 identity", ErrLegacyStore, reasons, remedy)
+}
+
+// ResolveDID resolves the in-memory attribution DID for a v3 workload
+// identity: env OPENBOX_AGENT_ID, else dev.json's agent_id, run through
+// AttributionDIDFor (D1). No secret-store access. This is the hot path:
+// observe/spool needs the DID to attribute events but never the obx_ key or
+// the workload signing key, so a tool-use hook does zero secret I/O (INV-1).
+//
+// OPENBOX_AGENT_DID is retired and never consulted (it named a v1 DID that
+// could disagree with the store, which is exactly the two-store bug this
+// derivation exists to make impossible). A stored developer_did means the
+// store predates v3 entirely: ErrLegacyStore, never a derived answer that
+// would silently disagree with what's on disk.
 func ResolveDID() (string, error) {
 	cfg, err := load()
 	if err != nil {
 		return "", err
 	}
-	did := FirstNonEmpty(os.Getenv(EnvDID), cfg.DID)
-	if did == "" {
-		return "", fmt.Errorf("no developer DID configured (run `openbox init`)")
+	if cfg.DID != "" {
+		return "", legacyStoreError(BoundProvider(), LegacyStore{Legacy: true, Reasons: []string{"dev.json holds a stored developer_did"}})
 	}
-	return did, nil
+	agentID := FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)
+	if agentID == "" {
+		return "", missingAgentIDError(BoundProvider())
+	}
+	return AttributionDIDFor(agentID)
 }
 
 // ResolveDIDOrEmpty resolves the developer DID and returns "" when nothing
-// configures one, for callers where an absent DID is a legitimate state to
-// report rather than an error to propagate; the install path, which may be
-// about to write one.
+// configures one OR the store is legacy, for callers where an absent DID is a
+// legitimate state to report rather than an error to propagate; the install
+// path, which may be about to write one.
 func ResolveDIDOrEmpty() string {
-	cfg, _ := load()
-	return FirstNonEmpty(os.Getenv(EnvDID), cfg.DID)
+	did, err := ResolveDID()
+	if err != nil {
+		return ""
+	}
+	return did
 }
 
 // ResolveCoordinates resolves the non-secret target coordinates; the core base
-// URL and the developer DID; from env then the dev config, with zero secret-
-// store access (INV-1).
+// URL and the derived developer DID; from env then the dev config, with zero
+// secret-store access (INV-1). A legacy store or a missing agent id resolves
+// the DID half to "", same as ResolveDIDOrEmpty.
 func ResolveCoordinates() (baseURL, did string) {
 	cfg, _ := load()
 	baseURL = FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL)
-	did = FirstNonEmpty(os.Getenv(EnvDID), cfg.DID)
-	return baseURL, did
+	return baseURL, ResolveDIDOrEmpty()
 }
 
 // SpoolDir is where hot-path events are spooled before flush: the
@@ -564,15 +604,31 @@ func ResolveCredentialsFor(tool string) (Credentials, error) {
 	return resolveCredentialsFrom(tool, cfgPath, envPath)
 }
 
+// resolveCredentialsFrom is the v3 flip: a legacy store (LegacyStoreFor's
+// detection, applied to the values this call already loaded) refuses outright
+// with ErrLegacyStore, since the v3 binary cannot speak for it at all. Order
+// matters beyond structure: the two secrets are checked BEFORE the agent id
+// coordinate, so a store missing only the coordinate fails with the
+// coordinate error and a store missing a secret fails with the secret error,
+// never the other one (TestEnvFileIsNotACoordinateSource's guard (c) pins
+// this).
 func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) {
 	cfg, err := Load(cfgPath)
 	if err != nil {
 		return Credentials{}, err
 	}
 
+	secrets, err := ParseEnvFile(envPath)
+	if err != nil {
+		return Credentials{}, err
+	}
+
+	if ls := legacyStoreFromValues(cfg, secrets); ls.Legacy {
+		return Credentials{}, legacyStoreError(tool, ls)
+	}
+
 	c := Credentials{
 		BaseURL: FirstNonEmpty(os.Getenv(EnvBaseURL), cfg.BaseURL, DefaultBaseURL),
-		DID:     FirstNonEmpty(os.Getenv(EnvDID), cfg.DID),
 		// Resolved from cfgPath -- THIS tool's own dev.json for
 		// ResolveCredentialsFor, the ambient bound tool's for ResolveCredentials
 		// -- through the same default -> managed (a locked key wins outright) ->
@@ -584,29 +640,31 @@ func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) 
 		// per-tool store.
 		ContentCaptureEnabled: resolveBoolAt("content_capture", func(c DevConfig) *bool { return c.ContentCapture }, true, EnvContentCapture, cfgPath),
 	}
-	if c.DID == "" {
-		return Credentials{}, fmt.Errorf("no developer DID configured (run `openbox init`)")
-	}
-
-	secrets, err := ParseEnvFile(envPath)
-	if err != nil {
-		return Credentials{}, err
-	}
 
 	c.APIKey = FirstNonEmpty(os.Getenv(EnvAPIKeyDirect), secrets[EnvAPIKeyDirect])
 	if c.APIKey == "" {
 		return Credentials{}, missingCredentialError(tool, "obx_ API key", EnvAPIKeyDirect, envPath)
 	}
 
-	c.PrivateKeyB64 = resolvePrivateKey(secrets)
-	if c.PrivateKeyB64 == "" {
-		return Credentials{}, missingCredentialError(tool, "Ed25519 signing key", EnvAgentPrivateKey, envPath)
+	c.WorkloadPrivateKey = FirstNonEmpty(os.Getenv(EnvWorkloadPrivateKey), secrets[EnvWorkloadPrivateKey])
+	if c.WorkloadPrivateKey == "" {
+		return Credentials{}, missingCredentialError(tool, "workload signing key", EnvWorkloadPrivateKey, envPath)
 	}
 
-	// v3 fields, populated additively and without enforcement: phase 04 flips
-	// this resolver onto them and deletes the DID/PrivateKeyB64 path above.
-	c.AgentID = FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)
-	c.WorkloadPrivateKey = FirstNonEmpty(os.Getenv(EnvWorkloadPrivateKey), secrets[EnvWorkloadPrivateKey])
+	// The agent id is a coordinate (INV-1: one store per field), so it is read
+	// from env or dev.json ONLY, never from the secrets file even when a
+	// coordinate-shaped value sits there (TestEnvFileIsNotACoordinateSource).
+	agentID := FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)
+	if agentID == "" {
+		return Credentials{}, missingAgentIDError(tool)
+	}
+	did, err := AttributionDIDFor(agentID)
+	if err != nil {
+		return Credentials{}, err
+	}
+	c.AgentID = agentID
+	c.DID = did
+
 	if p, err := WorkloadTokenCachePathFor(tool); err == nil {
 		c.TokenCachePath = p
 	}
@@ -614,9 +672,10 @@ func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) 
 	return c, nil
 }
 
-// EnvIdentityPresent reports whether the environment alone supplies a complete
-// agent identity: an API key and a signing seed, under the documented name or
-// a deprecated alias.
+// EnvIdentityPresent reports whether the environment alone supplies a
+// complete v3 workload identity: an API key and the workload signing key. A
+// legacy seed (current or deprecated alias) no longer counts: it identifies a
+// store the v3 binary cannot speak for, not an identity it can use.
 //
 // It exists so the install gate and the registration decision ask the same
 // question. They disagreed once: the gate accepted an environment identity and
@@ -625,60 +684,25 @@ func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) 
 // identity outranks every store at runtime, so minting an agent for such a
 // machine would create one nobody ever uses -- one per ephemeral CI runner.
 func EnvIdentityPresent() bool {
-	if os.Getenv(EnvAPIKeyDirect) == "" {
-		return false
-	}
-	if os.Getenv(EnvAgentPrivateKey) != "" {
-		return true
-	}
-	for _, alias := range deprecatedPrivateKeyEnvNames {
-		if os.Getenv(alias) != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// EnvWorkloadIdentityPresent reports whether the environment alone supplies a
-// complete v3 workload identity: an API key and the workload signing key. It
-// sits beside EnvIdentityPresent, asking the same question for the v3 shape,
-// until phase 04 folds the two together.
-func EnvWorkloadIdentityPresent() bool {
 	return os.Getenv(EnvAPIKeyDirect) != "" && os.Getenv(EnvWorkloadPrivateKey) != ""
 }
 
-func resolvePrivateKey(secrets map[string]string) string {
-	if v := os.Getenv(EnvAgentPrivateKey); v != "" {
-		return v
-	}
-	for _, alias := range deprecatedPrivateKeyEnvNames {
-		if v := os.Getenv(alias); v != "" {
-			warnDeprecatedPrivateKeyName(alias)
-			return v
-		}
-	}
-	if v := secrets[EnvAgentPrivateKey]; v != "" {
-		return v
-	}
-	for _, alias := range deprecatedPrivateKeyEnvNames {
-		if v := secrets[alias]; v != "" {
-			warnDeprecatedPrivateKeyName(alias)
-			return v
-		}
-	}
-	return ""
-}
+// ErrMissingAgentID is wrapped into the error resolveCredentialsFrom and
+// ResolveDID return when every secret required is present but no agent id
+// configures the coordinate they attribute to. Distinguishing it from a
+// missing-secret error is the whole point of
+// TestEnvFileIsNotACoordinateSource's guard (a): a caller must be able to
+// tell "no identity papers" apart from "papers, but nothing says who holds
+// them".
+var ErrMissingAgentID = errors.New("no agent id configured")
 
-// warnDeprecatedPrivateKeyName a deprecation notice must never become model
-// input.
-func warnDeprecatedPrivateKeyName(alias string) {
-	deprecatedNameWarnOnce.Do(func() {
-		fmt.Fprintf(os.Stderr, "openbox: %s is deprecated; use %s (same value, the name OpenBox documents)\n",
-			alias, EnvAgentPrivateKey)
-	})
+func missingAgentIDError(tool string) error {
+	remedy := "`openbox init --provider <tool>`"
+	if tool != "" {
+		remedy = "`openbox init --provider " + tool + "`"
+	}
+	return fmt.Errorf("%w: set %s, or run %s to register one", ErrMissingAgentID, EnvAgentID, remedy)
 }
-
-var deprecatedNameWarnOnce sync.Once
 
 func missingCredentialError(tool, what, envName, envPath string) error {
 	where := "~/.openbox/<tool>/.env"
@@ -692,16 +716,6 @@ func missingCredentialError(tool, what, envName, envPath string) error {
 	msg := fmt.Sprintf("no %s available: set %s, or run %s to write %s", what, envName, remedy, where)
 	if envPath == "" {
 		msg += fmt.Sprintf(" (no home directory could be resolved; set %s to an absolute path)", EnvHome)
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		msg += "\n  upgrading an existing install? credentials used to live in your keychain and are not migrated:" +
-			"\n    security find-generic-password -s ai.openbox.dev -a '<org>/<provider>/api_key' -w" +
-			"\n  " + remedy + " offers to adopt an existing agent; paste them there. If they are lost, decline and it registers anew"
-	case "linux":
-		msg += "\n  upgrading an existing install? credentials used to live in libsecret and are not migrated:" +
-			"\n    secret-tool lookup service ai.openbox.dev account '<org>/<provider>/api_key'" +
-			"\n  " + remedy + " offers to adopt an existing agent; paste them there. If they are lost, decline and it registers anew"
 	}
 	return errors.New(msg)
 }

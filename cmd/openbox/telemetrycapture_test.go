@@ -17,6 +17,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
 // TestTelemetryCommandActuallyRecords is the control test, and it is the
@@ -34,9 +35,7 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
-	t.Setenv(devconfig.EnvDID, fake.DID())
-	t.Setenv(devconfig.EnvAPIKeyDirect, "obx_"+strings.Repeat("f", 24))
-	t.Setenv(devconfig.EnvAgentPrivateKey, fake.SeedB64())
+	seedV3EnvIdentity(t)
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	addr := freeLoopbackAddr(t)
@@ -187,7 +186,7 @@ func TestTelemetryCommandRecordsNothingWhenNotElected(t *testing.T) {
 
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
+	t.Setenv(devconfig.EnvAgentID, "7f3c9b2e-0000-5000-a000-00000000feed")
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	addr := freeLoopbackAddr(t)
@@ -257,23 +256,7 @@ func TestTelemetryCommandRecordsCodexAndClaudeCodeSeparately(t *testing.T) {
 
 	seedIdentity := func(tool string, fake *fakecore.Server) {
 		t.Helper()
-		envPath, err := devconfig.EnvFilePathFor(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := devconfig.WriteEnvFile(envPath, map[string]string{
-			devconfig.EnvAPIKeyDirect:    "obx_" + strings.Repeat("f", 24),
-			devconfig.EnvAgentPrivateKey: fake.SeedB64(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		cfgPath, err := devconfig.DevConfigWritePathFor(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := devconfig.WriteConfig(cfgPath, devconfig.Update{DID: fake.DID(), BaseURL: fake.URL()}); err != nil {
-			t.Fatal(err)
-		}
+		seedV3ToolIdentity(t, tool, fake.URL())
 	}
 	seedIdentity("claude-code", ccFake)
 	seedIdentity("codex", codexFake)
@@ -382,9 +365,7 @@ func TestTelemetryCommandDrainsInFlightDeliveryOnShutdown(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{Delay: 500 * time.Millisecond})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
-	t.Setenv(devconfig.EnvDID, fake.DID())
-	t.Setenv(devconfig.EnvAPIKeyDirect, "obx_"+strings.Repeat("f", 24))
-	t.Setenv(devconfig.EnvAgentPrivateKey, fake.SeedB64())
+	seedV3EnvIdentity(t)
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	addr := freeLoopbackAddr(t)
@@ -451,9 +432,7 @@ func TestTelemetryCommandAbandonsAndCountsADeliveryPastTheDrainDeadline(t *testi
 	fake := fakecore.New(t, fakecore.Script{Delay: 2 * time.Second})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
-	t.Setenv(devconfig.EnvDID, fake.DID())
-	t.Setenv(devconfig.EnvAPIKeyDirect, "obx_"+strings.Repeat("f", 24))
-	t.Setenv(devconfig.EnvAgentPrivateKey, fake.SeedB64())
+	seedV3EnvIdentity(t)
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	addr := freeLoopbackAddr(t)
@@ -522,23 +501,7 @@ func TestTelemetryCommandHonoursEachToolsOwnRecordingPosture(t *testing.T) {
 
 	seedIdentity := func(tool string, fake *fakecore.Server) {
 		t.Helper()
-		envPath, err := devconfig.EnvFilePathFor(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := devconfig.WriteEnvFile(envPath, map[string]string{
-			devconfig.EnvAPIKeyDirect:    "obx_" + strings.Repeat("f", 24),
-			devconfig.EnvAgentPrivateKey: fake.SeedB64(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-		cfgPath, err := devconfig.DevConfigWritePathFor(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := devconfig.WriteConfig(cfgPath, devconfig.Update{DID: fake.DID(), BaseURL: fake.URL()}); err != nil {
-			t.Fatal(err)
-		}
+		seedV3ToolIdentity(t, tool, fake.URL())
 	}
 	seedIdentity("claude-code", ccFake)
 	seedIdentity("codex", codexFake)
@@ -657,6 +620,54 @@ func otlpCodexAPIRequest(conversationID, requestID string) string {
 	now := time.Now().UnixNano()
 	return fmt.Sprintf(`{"resourceLogs":[{"resource":{"attributes":[%s]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"%d","attributes":[%s]}]}]}]}`,
 		attr("service.name", "codex-cli"), now, attrs)
+}
+
+// seedV3EnvIdentity sets a complete v3 identity purely through the
+// environment, for the single-fake tests here: fakecore's process-wide
+// identity (workload key normalized to the single-line base64 DER form
+// WriteEnvFile-based fixtures use elsewhere, since the raw PEM contains
+// newlines this format cannot represent).
+func seedV3EnvIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv(devconfig.EnvAgentID, fakecore.AgentID())
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
+}
+
+// seedV3ToolIdentity writes a complete v3 identity to tool's own store, for
+// the two-fake tests proving each tool resolves its own identity. Every
+// fakecore.Server shares the same process-wide v3 identity, so tool
+// separation here comes from the store (per-tool .env/dev.json) and BaseURL,
+// not from a distinct credential.
+func seedV3ToolIdentity(t *testing.T, tool, baseURL string) {
+	t.Helper()
+	envPath, err := devconfig.EnvFilePathFor(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
+		devconfig.EnvAPIKeyDirect:       fakecore.APIKey(),
+		devconfig.EnvWorkloadPrivateKey: workloadKey,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath, err := devconfig.DevConfigWritePathFor(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteConfig(cfgPath, devconfig.Update{
+		AgentID: fakecore.AgentID(), IdentityMethod: devconfig.IdentityMethodKeycloakWorkload, BaseURL: baseURL,
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func freeLoopbackAddr(t *testing.T) string {

@@ -32,7 +32,7 @@ func writeAttestation(g Git, sessions []string, logf func(string, ...any)) {
 	}
 	ctx, ok := attestContext()
 	if !ok {
-		logf("attestation skipped: no developer credentials resolved on this machine " +
+		logf("attestation skipped: no attestation signing key on this machine " +
 			"(commit is still attributed by its trailer)")
 		return
 	}

@@ -3,20 +3,19 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -37,7 +36,7 @@ func TestGatewayCommandActuallyCaptures(t *testing.T) {
 
 	spoolDir := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spoolDir)
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-00000000feed")
+	t.Setenv(devconfig.EnvAgentID, "7f3c9b2e-0000-5000-a000-00000000feed")
 	t.Setenv("OPENBOX_REALTIME", "0")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -161,7 +160,7 @@ func TestGatewayWithoutADIDStillRelays(t *testing.T) {
 	defer upstream.Close()
 
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
-	t.Setenv("OPENBOX_AGENT_DID", "")
+	t.Setenv(devconfig.EnvAgentID, "")
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(t.TempDir(), "absent.json"))
 	t.Setenv("OPENBOX_REALTIME", "0")
 
@@ -288,31 +287,23 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// Every payload, not the last one: a relayed call posts both halves of its
-	// activity, and keeping only the most recent would assert half the evidence
-	// and silently ignore whether the other half went at all.
-	var mu sync.Mutex
-	var postedAll [][]byte
-	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		postedAll = append(postedAll, body)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"decision":"ALLOW"}`)
-	}))
-	defer core.Close()
+	// fakecore, not a hand-rolled catch-all: the client now speaks the v3
+	// bootstrap/exchange dance before it ever reaches /evaluate, and a
+	// single-path handler answering every method has no bootstrap document or
+	// token endpoint to offer.
+	core := fakecore.New(t, fakecore.Script{})
 
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-
+	home := t.TempDir()
+	t.Setenv(devconfig.EnvHome, home)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
-	t.Setenv("OPENBOX_AGENT_DID", "did:aip:7f3c9b2e-0000-5000-a000-000000000w1r")
-	t.Setenv("OPENBOX_API_KEY", "obx_test")
-	t.Setenv("OPENBOX_AGENT_PRIVATE_KEY", base64.StdEncoding.EncodeToString(priv.Seed()))
-	t.Setenv("OPENBOX_BASE_URL", core.URL)
+	t.Setenv(devconfig.EnvAgentID, fakecore.AgentID())
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
+	t.Setenv("OPENBOX_BASE_URL", core.URL())
 	t.Setenv("OPENBOX_CONTENT_CAPTURE", "1")
 	t.Setenv("OPENBOX_REALTIME", "0")
 
@@ -353,8 +344,11 @@ func TestSpooledGatewayEventReachesTheWire(t *testing.T) {
 	if code := flush.run([]string{"hook", "claude-code", "flush"}); code != exitOK {
 		t.Fatalf("flush exited %d: %s", code, flushErr.String())
 	}
-	mu.Lock()
-	defer mu.Unlock()
+	inbox := core.Inbox()
+	postedAll := make([][]byte, len(inbox))
+	for i, r := range inbox {
+		postedAll[i] = r.Raw
+	}
 	if len(postedAll) == 0 {
 		t.Fatal("the flush delivered nothing; the gateway's spool and the adapter's flush do not agree on a location")
 	}

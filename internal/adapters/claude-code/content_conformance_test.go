@@ -3,15 +3,12 @@ package claudecode
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"log"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -19,33 +16,37 @@ import (
 // evidence for the content gate on the fields this adapter used to throw away.
 func TestContentCaptureConformance(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
 
-	serveCapturing := func(t *testing.T) *[]string {
+	// serveCapturing is a v3-aware fake core (real bootstrap + Keycloak token
+	// exchange + evaluate, over fakecore's process-wide identity) that answers
+	// every accepted /evaluate request "allow" and records its raw wire body.
+	// A hand-rolled single-path memhttptest handler cannot stand in for this
+	// once the client speaks the v3 dance: it would answer the bootstrap
+	// document and the token exchange with the same canned evaluate verdict,
+	// so the client's cold path fails before ever building an evaluate request.
+	serveCapturing := func(t *testing.T) func() []string {
 		t.Helper()
-		var mu sync.Mutex
-		var bodies []string
-		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw, _ := io.ReadAll(r.Body)
-			mu.Lock()
-			bodies = append(bodies, string(raw))
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-		}))
-		t.Cleanup(srv.Close)
-		evalCreds(t, srv.URL)
-		return &bodies
+		srv := fakecore.New(t, fakecore.Script{})
+		evalCreds(t, srv.URL())
+		return func() []string {
+			inbox := srv.Inbox()
+			bodies := make([]string, len(inbox))
+			for i, r := range inbox {
+				bodies[i] = string(r.Raw)
+			}
+			return bodies
+		}
 	}
 
 	// `capture` is set after serveCapturing, deliberately: serveCapturing calls
 	// evalCreds, which forces content capture OFF.
 	observeThenFlush := func(t *testing.T, session, capture, hook, payload string) []string {
 		t.Helper()
-		bodies := serveCapturing(t)
+		getBodies := serveCapturing(t)
 		t.Setenv(envContentCapture, capture)
 		t.Setenv(envRealtime, "0")
 		t.Setenv(envEnforce, "0") // observe path; no gate, no deferred spool
@@ -54,7 +55,7 @@ func TestContentCaptureConformance(t *testing.T) {
 		RunHook("SessionEnd", strings.NewReader(
 			`{"hook_event_name":"SessionEnd","session_id":"`+session+`","cwd":"/tmp","reason":"other"}`),
 			&out, log.New(&bytes.Buffer{}, "", 0))
-		return *bodies
+		return getBodies()
 	}
 
 	activityOutput := func(t *testing.T, bodies []string) (map[string]any, bool) {
@@ -826,7 +827,7 @@ func TestContentCaptureConformance(t *testing.T) {
 //     if
 func TestContentCaptureCredentialCoverage(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
@@ -880,18 +881,8 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var mu sync.Mutex
-			var bodies []string
-			srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				raw, _ := io.ReadAll(r.Body)
-				mu.Lock()
-				bodies = append(bodies, string(raw))
-				mu.Unlock()
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-			}))
-			t.Cleanup(srv.Close)
-			evalCreds(t, srv.URL)
+			srv := fakecore.New(t, fakecore.Script{})
+			evalCreds(t, srv.URL())
 			t.Setenv(envContentCapture, "1")
 			t.Setenv(envRealtime, "0")
 			t.Setenv(envEnforce, "0")
@@ -916,12 +907,13 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 				`{"hook_event_name":"SessionEnd","session_id":"`+sid+`","cwd":"/tmp","reason":"other"}`),
 				&out, log.New(&bytes.Buffer{}, "", 0))
 
-			if len(bodies) == 0 {
+			inbox := srv.Inbox()
+			if len(inbox) == 0 {
 				t.Fatal("nothing reached /evaluate; the case proves nothing")
 			}
 			var leaked bool
-			for _, b := range bodies {
-				if strings.Contains(b, tc.secret) {
+			for _, r := range inbox {
+				if strings.Contains(string(r.Raw), tc.secret) {
 					leaked = true
 				}
 			}

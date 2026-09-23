@@ -7,8 +7,8 @@ import (
 )
 
 type localCredentials struct {
-	apiKey     string
-	privateKey string
+	apiKey      string
+	workloadKey string
 }
 
 // readLocalCredentials an unparseable file IS an error; silently treating it
@@ -31,19 +31,19 @@ func readLocalCredentials() (localCredentials, error) {
 		return localCredentials{}, err
 	}
 	return localCredentials{
-		apiKey:     kv[devconfig.EnvAPIKeyDirect],
-		privateKey: kv[devconfig.EnvAgentPrivateKey],
+		apiKey:      kv[devconfig.EnvAPIKeyDirect],
+		workloadKey: kv[devconfig.EnvWorkloadPrivateKey],
 	}, nil
 }
 
-func writeLocalCredentials(apiKey, privateKey string) error {
+func writeLocalCredentials(apiKey, workloadKey string) error {
 	path, err := devconfig.EnvFilePath()
 	if err != nil {
 		return err
 	}
 	return devconfig.WriteEnvFile(path, map[string]string{
-		devconfig.EnvAPIKeyDirect:    apiKey,
-		devconfig.EnvAgentPrivateKey: privateKey,
+		devconfig.EnvAPIKeyDirect:       apiKey,
+		devconfig.EnvWorkloadPrivateKey: workloadKey,
 	})
 }
 
@@ -59,13 +59,13 @@ func credentialFileLabel() string {
 	return "~/.openbox/<tool>/.env"
 }
 
-func didOrNone(did string) string {
-	if did == "" {
+func agentIDOrNone(agentID string) string {
+	if agentID == "" {
 		// Not "re-run init": this message prints from the reuse branch, so a
 		// re-run reuses again and says the same thing. Deleting the credential
 		// file is what sends the next run down the branch that can fix it.
-		return fmt.Sprintf("no DID in this tool's dev.json; delete %s and re-run init, or export %s",
-			credentialFileLabel(), devconfig.EnvDID)
+		return fmt.Sprintf("no agent id in this tool's dev.json; delete %s and re-run init, or export %s",
+			credentialFileLabel(), devconfig.EnvAgentID)
 	}
-	return did
+	return agentID
 }

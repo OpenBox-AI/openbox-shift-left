@@ -24,7 +24,7 @@ var ErrUnknown = errors.New("unknown provider")
 // which identity this machine governs as, and the org posture to persist into
 // the tool's dev config. It never carries a credential value (INV-1).
 type CredentialRef struct {
-	DID            string // did:aip:... (not secret)
+	DID            string // did:aip:... (not secret); empty for a v3 keycloak_workload identity (D1: never stored)
 	BaseURL        string // optional core base URL; empty ⇒ adapter default
 	ContentCapture *bool  // org content posture; nil ⇒ the adapter default (content capture ON). Set to &false to pin metadata-only.
 	InstallGitHook bool   // persist the ambient commit-hook install preference
@@ -33,6 +33,14 @@ type CredentialRef struct {
 	// sync` and the session-start staleness check read to fetch this agent's
 	// current policy.
 	AgentID string
+	// IdentityMethod, when it equals devconfig.IdentityMethodKeycloakWorkload,
+	// marks the installer's own dev-config write as a v3 identity (the write
+	// devinit.WriteWorkloadIdentity already made to the canonical per-tool
+	// path may target a different file than the installer's ConfigPath, e.g.
+	// under a test's own override -- ConfigUpdate carries it through so both
+	// writes agree). Empty leaves it alone, same as every other string field
+	// here.
+	IdentityMethod string
 	// BackendURL is the openbox-backend control-plane base (distinct from
 	// BaseURL, the core data-plane base).
 	BackendURL string

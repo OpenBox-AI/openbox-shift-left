@@ -36,7 +36,7 @@ func TestGatingHooksAreNeverAsync(t *testing.T) {
 
 	t.Run("no registered gating hook carries async", func(t *testing.T) {
 		inst, hooksPath, _ := testInstaller(t)
-		if err := inst.Install(CredentialRef{DID: testDID}); err != nil {
+		if err := inst.Install(CredentialRef{AgentID: testAgentID}); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		hooks, _ := readHooks(t, hooksPath)["hooks"].(map[string]any)

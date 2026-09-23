@@ -2,19 +2,16 @@ package codex
 
 import (
 	"bytes"
-	"encoding/base64"
-	"io"
 	"log"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
 func setHookEnv(t *testing.T) string {
@@ -23,7 +20,7 @@ func setHookEnv(t *testing.T) string {
 	spool := filepath.Join(dir, "spool")
 	t.Setenv(devconfig.EnvHome, dir)
 	bindForTest(t, "codex")
-	t.Setenv("OPENBOX_AGENT_DID", testDID)
+	t.Setenv(devconfig.EnvAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_CONFIG", filepath.Join(dir, "none.json"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
@@ -95,9 +92,33 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 		t.Errorf("misuse spooled something: %v", entries)
 	}
 
-	t.Setenv("OPENBOX_AGENT_DID", "")
+	t.Setenv(devconfig.EnvAgentID, "")
 	if stdout, stderr := runHook(t, "PreToolUse", `{"session_id":"th-1","tool_name":"Bash"}`); stdout != "" || !strings.Contains(stderr, "no identity") {
 		t.Errorf("missing identity: stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+// TestLegacyStoreHookSendsNothing a stored developer_did means the store
+// predates v3 entirely (D1): ResolveIdentity refuses with ErrLegacyStore, the
+// mapper never even sees the event, and the hook stays exactly as silent as
+// it is for a genuinely unconfigured machine -- an unmapped event, an empty
+// spool, no request.
+func TestLegacyStoreHookSendsNothing(t *testing.T) {
+	spool := setHookEnv(t)
+	if err := devconfig.WriteConfig(DefaultConfigPath(), devconfig.Update{DID: "did:aip:legacy-store"}); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := runHook(t, "PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"th-legacy","cwd":"/r","tool_name":"Bash","tool_use_id":"c1"}`)
+	if stdout != "" {
+		t.Fatalf("stdout must stay empty, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "no identity") {
+		t.Errorf("expected a no-identity drop notice, got %q", stderr)
+	}
+	entries, _ := os.ReadDir(spool)
+	if len(entries) != 0 {
+		t.Errorf("a legacy store's event reached the spool: %v", entries)
 	}
 }
 
@@ -106,17 +127,14 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 // content on the wire; and stdout stays empty throughout.
 func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 	setHookEnv(t)
-	var mu bytesBuffer
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		mu.append(raw)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
-	defer srv.Close()
-	t.Setenv("OPENBOX_BASE_URL", srv.URL) // loopback http allowed (INV-1 guard)
-	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
-	t.Setenv("OPENBOX_ED25519_SEED", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	srv := fakecore.New(t, fakecore.Script{})
+	t.Setenv("OPENBOX_BASE_URL", srv.URL())
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
 	// That decision evaluates every gated call inline, and an escalation does
 	// attach content when capture is on (E7), so leaving the default here would
 	// assert the absence of something the design now deliberately sends.
@@ -134,13 +152,13 @@ func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 		t.Fatalf("SessionEnd stdout: %q", stdout)
 	}
 
-	bodies := mu.get()
-	if len(bodies) != 2 { // ToolCall + SessionEnded
-		t.Fatalf("expected 2 delivered events, got %d", len(bodies))
+	inbox := srv.Inbox()
+	if len(inbox) != 2 { // ToolCall + SessionEnded
+		t.Fatalf("expected 2 delivered events, got %d", len(inbox))
 	}
-	for _, b := range bodies {
-		if strings.Contains(string(b), secret) {
-			t.Fatalf("content leaked to the wire: %s", b)
+	for _, r := range inbox {
+		if strings.Contains(string(r.Raw), secret) {
+			t.Fatalf("content leaked to the wire: %s", r.Raw)
 		}
 	}
 }
@@ -170,23 +188,4 @@ func TestRunHook_OfflineFlushFailsOpen(t *testing.T) {
 	if !found {
 		t.Errorf("spool should retain events after a failed flush: %v", entries)
 	}
-}
-
-type bytesBuffer struct {
-	mu     sync.Mutex
-	bodies [][]byte
-}
-
-func (b *bytesBuffer) append(raw []byte) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.bodies = append(b.bodies, raw)
-}
-
-func (b *bytesBuffer) get() [][]byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := make([][]byte, len(b.bodies))
-	copy(out, b.bodies)
-	return out
 }

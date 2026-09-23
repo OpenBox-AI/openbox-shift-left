@@ -1,9 +1,6 @@
 package main
 
 import (
-	"os"
-
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 )
 
@@ -35,18 +32,10 @@ func attestProvider(getenv func(string) string) string {
 	return ""
 }
 
+// attestContext always reports ok=false: a v3 keycloak_workload store carries
+// no Ed25519 attestation seed (ruling 1, plan Unresolved Q3; core owns the
+// eventual redesign). The commit still proceeds and is attributed by its
+// trailer; attesthook.go's writeAttestation logs why signing was skipped.
 func attestContext() (obgit.AttestContext, bool) {
-	creds, err := devconfig.ResolveCredentials()
-	if err != nil || creds.DID == "" || creds.PrivateKeyB64 == "" {
-		return obgit.AttestContext{}, false
-	}
-
-	ctx := obgit.AttestContext{
-		DID:           creds.DID,
-		PrivateKeyB64: creds.PrivateKeyB64,
-		Adapter:       "openbox-cli",
-		ThreadID:      os.Getenv(obgit.EnvCodexThreadID),
-	}
-
-	return ctx, true
+	return obgit.AttestContext{}, false
 }

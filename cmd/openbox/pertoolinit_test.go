@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
 // testOrgToken and the minted key below are assembled rather than written
@@ -56,11 +59,14 @@ func (r *countingReg) Create(_ context.Context, req backend.CreateAgentRequest) 
 	return &backend.Registration{
 		AgentID:    "srv-agent-" + suffix,
 		AgentName:  req.AgentName,
-		DID:        "did:aip:aaaaaaaa-bbbb-cccc-dddd-eeeeeeee" + suffix,
 		APIKey:     mintedKeyPrefix + suffix,
-		PrivateKey: testSeedB64,
 		Tier:       "Tier 2",
 		TrustScore: "0.81",
+		Identity: backend.WorkloadIdentityInfo{
+			Method:     devconfig.IdentityMethodKeycloakWorkload,
+			SourceType: "openbox",
+			Kid:        "kid-" + suffix,
+		},
 	}, nil
 }
 
@@ -131,13 +137,13 @@ func TestInitRegistersPerToolThenReusesOffline(t *testing.T) {
 	if reg.creates != 2 {
 		t.Fatalf("Create called %d times, want a second agent for codex", reg.creates)
 	}
-	ccDID := didFromStore(t, home, "claude-code")
-	cxDID := didFromStore(t, home, "codex")
-	if ccDID == "" || cxDID == "" {
-		t.Fatalf("a store has no DID: claude-code=%q codex=%q", ccDID, cxDID)
+	ccAgentID := agentIDFromStore(t, home, "claude-code")
+	cxAgentID := agentIDFromStore(t, home, "codex")
+	if ccAgentID == "" || cxAgentID == "" {
+		t.Fatalf("a store has no agent id: claude-code=%q codex=%q", ccAgentID, cxAgentID)
 	}
-	if ccDID == cxDID {
-		t.Errorf("both tools registered the same DID %q", ccDID)
+	if ccAgentID == cxAgentID {
+		t.Errorf("both tools registered the same agent id %q", ccAgentID)
 	}
 	ccAfter, err := os.ReadFile(ccEnv)
 	if err != nil {
@@ -403,8 +409,8 @@ func TestLegacyStorePlusTokenRegistersFresh(t *testing.T) {
 	if reg.creates != 1 {
 		t.Fatalf("the org-level store was reused; a per-tool read must not reach it (%d creates)", reg.creates)
 	}
-	if got := didFromStore(t, home, "claude-code"); got == legacyDID {
-		t.Errorf("the tool adopted the org DID %q instead of minting its own", got)
+	if got := agentIDFromStore(t, home, "claude-code"); got == "" {
+		t.Error("the tool never minted its own agent id")
 	}
 	orgEnvAfter, err := os.ReadFile(orgEnv)
 	if err != nil {
@@ -453,13 +459,16 @@ func clearAgentEnv(t *testing.T) {
 	}
 }
 
-func didFromStore(t *testing.T, home, tool string) string {
+// agentIDFromStore reads back the coordinate a v3 registration actually
+// persists. A v3 store never sets developer_did (D1: the attribution label is
+// derived, never stored), so this replaces the pre-flip didFromStore.
+func agentIDFromStore(t *testing.T, home, tool string) string {
 	t.Helper()
 	cfg, err := devconfig.Load(filepath.Join(home, tool, "dev.json"))
 	if err != nil {
 		t.Fatalf("read %s config: %v", tool, err)
 	}
-	return cfg.DID
+	return cfg.AgentID
 }
 
 // TestInitRegistersAndInstalls inverts what `auth` used to prove. Registration
@@ -492,12 +501,12 @@ func TestInitRegistersAndInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kv[devconfig.EnvAPIKeyDirect] == "" || kv[devconfig.EnvAgentPrivateKey] == "" {
+	if kv[devconfig.EnvAPIKeyDirect] == "" || kv[devconfig.EnvWorkloadPrivateKey] == "" {
 		t.Errorf("the minted credentials were not stored: %v", kv)
 	}
 	// Minted values are written to a 0600 file and never printed (INV-1).
 	if strings.Contains(out.String(), kv[devconfig.EnvAPIKeyDirect]) ||
-		strings.Contains(out.String(), kv[devconfig.EnvAgentPrivateKey]) {
+		strings.Contains(out.String(), kv[devconfig.EnvWorkloadPrivateKey]) {
 		t.Errorf("a minted secret reached stdout:\n%s", out.String())
 	}
 }
@@ -531,7 +540,7 @@ func TestTheAgentNameIsPerToolOnTheWire(t *testing.T) {
 	}
 }
 
-// TestInitInstallsAgainstAnEnvironmentIdentity the documented four-variable
+// TestInitInstallsAgainstAnEnvironmentIdentity the documented three-variable
 // route, which is what a CI image uses. It broke silently once: the install
 // gate accepted an environment identity and devinit's reuse branch looked only
 // at the file, so the run reached registration with no registrar wired and was
@@ -546,8 +555,8 @@ func TestInitInstallsAgainstAnEnvironmentIdentity(t *testing.T) {
 	requireUnbound(t)
 	t.Setenv(devconfig.EnvControlToken, "")
 	t.Setenv(devconfig.EnvAPIKeyDirect, "obx"+"_from_the_environment")
-	t.Setenv(devconfig.EnvAgentPrivateKey, testSeedB64)
-	t.Setenv(devconfig.EnvDID, "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301")
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, testWorkloadKeyOnce)
+	t.Setenv(devconfig.EnvAgentID, "3f2504e0-4f89-11d3-9a0c-0305e82c3301")
 
 	a, out, errb := testApp(nil)
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
@@ -648,5 +657,171 @@ func TestTheRegistrarTargetsTheEnvironmentBackend(t *testing.T) {
 	}
 	if target != "https://api.internal.example" {
 		t.Errorf("the registrar targeted %q, want the exported backend URL", target)
+	}
+}
+
+// TestReuseGatesAgree is the disagreement `init`'s own gate (scope.go's
+// credentialsPresent) and devinit.register's own reuse check once had:
+// the gate accepted an environment identity and devinit looked only at the
+// file, so a machine provisioned entirely through exported variables reached
+// registration with no registrar wired and was told it had hit a build bug.
+// Each row proves the two ask the same question, in both directions:
+// wantReuse=true is proven by a registrar that panics if devinit ever reaches
+// it, and wantReuse=false is proven by a registrar that must actually be
+// called.
+func TestReuseGatesAgree(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantReuse bool
+	}{
+		{
+			name:      "file v3",
+			setup:     func(t *testing.T, home string) { seedCredentials(t, "claude-code") },
+			wantReuse: true,
+		},
+		{
+			name: "env v3",
+			setup: func(t *testing.T, home string) {
+				t.Setenv(devconfig.EnvAPIKeyDirect, "obx_env")
+				t.Setenv(devconfig.EnvWorkloadPrivateKey, testWorkloadKeyOnce)
+				t.Setenv(devconfig.EnvAgentID, testAgentIDFor(t, "claude-code"))
+			},
+			wantReuse: true,
+		},
+		{
+			name: "legacy file",
+			setup: func(t *testing.T, home string) {
+				envPath, err := devconfig.EnvFilePathFor("claude-code")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := devconfig.WriteEnvFile(envPath, map[string]string{
+					devconfig.EnvAPIKeyDirect:    "obx_legacy",
+					devconfig.EnvAgentPrivateKey: testSeedB64,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"),
+					devconfig.Update{DID: "did:aip:legacy"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantReuse: false,
+		},
+		{
+			name: "env seed only",
+			setup: func(t *testing.T, home string) {
+				t.Setenv(devconfig.EnvAPIKeyDirect, "obx_env")
+				t.Setenv(devconfig.EnvAgentPrivateKey, testSeedB64)
+			},
+			wantReuse: false,
+		},
+		{
+			name: "seed-alias row: exported alias, no workload key",
+			setup: func(t *testing.T, home string) {
+				t.Setenv(devconfig.EnvAPIKeyDirect, "obx_env")
+				t.Setenv("OPENBOX_ED25519_SEED", testSeedB64)
+			},
+			wantReuse: false,
+		},
+		{
+			name: "seed-alias row: alias in the credential file",
+			setup: func(t *testing.T, home string) {
+				envPath, err := devconfig.EnvFilePathFor("claude-code")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := devconfig.WriteEnvFile(envPath, map[string]string{
+					devconfig.EnvAPIKeyDirect: "obx_legacy",
+					"OPENBOX_ED25519_SEED":    testSeedB64,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantReuse: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := isolateHomeOnly(t)
+			clearAgentEnv(t)
+			tc.setup(t, home)
+
+			a, _, errb := testApp(nil)
+			plan, code := a.requireCredentials()
+			if code != exitOK {
+				t.Fatalf("requireCredentials: %s", errb.String())
+			}
+			if plan.reuse != tc.wantReuse {
+				t.Fatalf("scope gate reuse = %v, want %v", plan.reuse, tc.wantReuse)
+			}
+
+			b, _, errb2 := testApp(nil)
+			reg := &countingReg{byName: map[string]*backend.AgentSummary{}}
+			if tc.wantReuse {
+				// devinit must never reach the registrar; if the two gates
+				// disagreed and it tried to register, this panics the test.
+				b.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+			} else {
+				t.Setenv(devconfig.EnvControlToken, testOrgToken)
+				b.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
+			}
+			b.newPrompt = declineAdopt(t)
+			if code := b.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+				t.Fatalf("init exit = %d; stderr=%q", code, errb2.String())
+			}
+			if !tc.wantReuse && reg.creates != 1 {
+				t.Errorf("scope gate said no usable store, but devinit registered %d times, want 1", reg.creates)
+			}
+		})
+	}
+}
+
+// TestInitThenHookReachesV3 is the end-to-end proof the table above only
+// implies: `init` against a fake registrar, writing the identity a real hook
+// then authenticates with, reaches fakecore's v3 /evaluate exactly once. The
+// registered key has to BE fakecore's own process-wide key (via
+// a.newWorkloadKey), because fakecore's fake Keycloak verifies the client
+// assertion against its own public key, never whatever devinit generated.
+func TestInitThenHookReachesV3(t *testing.T) {
+	isolateHomeOnly(t)
+	clearAgentEnv(t)
+	t.Setenv(devconfig.EnvControlToken, testOrgToken)
+
+	fake := fakecore.New(t, fakecore.Script{})
+	key, err := workloadauth.ParsePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &fakeReg{reg: &backend.Registration{
+		AgentID:   fakecore.AgentID(),
+		AgentName: "dev-x",
+		APIKey:    fakecore.APIKey(),
+		Identity:  backend.WorkloadIdentityInfo{Method: devconfig.IdentityMethodKeycloakWorkload, Kid: "kid-v3"},
+	}}
+
+	a, _, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
+	a.newPrompt = declineAdopt(t)
+	a.newWorkloadKey = func() (*rsa.PrivateKey, error) { return key, nil }
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
+	}
+	if reg.create != 1 {
+		t.Fatalf("Create called %d times, want 1", reg.create)
+	}
+
+	t.Setenv(devconfig.EnvBaseURL, fake.URL())
+	b, out, berrb := testApp(nil)
+	b.stdin = strings.NewReader(`{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`)
+	if code := b.run([]string{"hook", "claude-code", "UserPromptSubmit"}); code != exitOK {
+		t.Fatalf("hook exit = %d; stderr=%q", code, berrb.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout must stay empty, got %q", out.String())
+	}
+	if n := fake.V3EvaluateAttempts(); n != 1 {
+		t.Errorf("/evaluate attempts = %d, want exactly 1", n)
 	}
 }

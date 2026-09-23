@@ -26,8 +26,13 @@ const (
 	envFindingsCursor  = devconfig.EnvFindingsCursor
 	envEnforcementFile = devconfig.EnvEnforcementFile
 	envAPIKeyDirect    = devconfig.EnvAPIKeyDirect
-	envAgentPrivateKey = devconfig.EnvAgentPrivateKey
-	envConfigPath      = devconfig.EnvConfigPath
+	// envAgentPrivateKey is the legacy (v1) Ed25519 seed name; kept only as a
+	// legacy-store fixture value in tests (devconfig.LegacyStoreFor's own
+	// signal), never read by this adapter's resolver anymore.
+	envAgentPrivateKey    = devconfig.EnvAgentPrivateKey
+	envWorkloadPrivateKey = devconfig.EnvWorkloadPrivateKey
+	envAgentID            = devconfig.EnvAgentID
+	envConfigPath         = devconfig.EnvConfigPath
 
 	defaultBaseURL = devconfig.DefaultBaseURL
 )
@@ -42,23 +47,28 @@ func DefaultConfigPath() string { return devconfig.DefaultConfigPath() }
 
 // Credentials is the resolved runtime identity for the hook binary.
 type Credentials struct {
-	BaseURL               string
-	APIKey                string
+	BaseURL string
+	APIKey  string
+	// DID is the in-memory attribution label (D1), derived from AgentID; never
+	// itself a store value.
 	DID                   string
-	PrivateKeyB64         string
+	AgentID               string
+	WorkloadPrivateKey    string
+	TokenCachePath        string
 	ContentCaptureEnabled bool
 }
 
 // Identity is the non-secret projection used by the Mapper.
 func (c Credentials) Identity() Identity { return Identity{DeveloperDID: c.DID} }
 
-// NewClient builds the AIP-signed transport from the resolved credentials.
+// NewClient builds the v3 workload-authenticated transport from the resolved
+// credentials.
 func (c Credentials) NewClient(logger client.Logger) (*client.Client, error) {
 	return client.New(client.Config{
 		BaseURL:               c.BaseURL,
 		APIKey:                c.APIKey,
-		DID:                   c.DID,
-		PrivateKeyB64:         c.PrivateKeyB64,
+		WorkloadPrivateKey:    c.WorkloadPrivateKey,
+		TokenCachePath:        c.TokenCachePath,
 		ContentCaptureEnabled: c.ContentCaptureEnabled,
 		Logger:                logger,
 	})
@@ -159,7 +169,9 @@ func ResolveCredentials() (Credentials, error) {
 		BaseURL:               dc.BaseURL,
 		APIKey:                dc.APIKey,
 		DID:                   dc.DID,
-		PrivateKeyB64:         dc.PrivateKeyB64,
+		AgentID:               dc.AgentID,
+		WorkloadPrivateKey:    dc.WorkloadPrivateKey,
+		TokenCachePath:        dc.TokenCachePath,
 		ContentCaptureEnabled: dc.ContentCaptureEnabled,
 	}, nil
 }

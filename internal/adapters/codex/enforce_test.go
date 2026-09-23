@@ -2,7 +2,6 @@ package codex
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
@@ -15,6 +14,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
@@ -60,11 +60,23 @@ func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, upda
 // drifting per adapter.
 func serveVerdict(t *testing.T, verdictJSON string) {
 	t.Helper()
-	seedB64 := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	f := fakecore.New(t, fakecore.Script{Default: verdictJSON, SeedB64: seedB64})
+	f := fakecore.New(t, fakecore.Script{Default: verdictJSON})
 	t.Setenv("OPENBOX_BASE_URL", f.URL()) // loopback http allowed (INV-1 guard)
-	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
-	t.Setenv("OPENBOX_ED25519_SEED", seedB64)
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
+	// A stale cached token would point a client freshly pinned at a NEW
+	// fakecore instance's baseURL at a bearer that instance never issued (the
+	// on-disk cache path is keyed by HOME+tool, not by base URL, and several
+	// call sites share one isolateEnforce'd HOME across subtests). D2 refuses
+	// a stale bearer with a 401 and never resends, so a leftover cache file
+	// would silently cost the whole subtest its one delivery attempt.
+	if p, err := devconfig.WorkloadTokenCachePath(); err == nil {
+		_ = os.Remove(p)
+	}
 }
 
 func TestResolveEnforce_Codex(t *testing.T) {

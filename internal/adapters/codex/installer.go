@@ -65,8 +65,8 @@ func (Installer) Available() bool { return true }
 // (recognized by ownershipMarkers), never duplicates them, and never modifies
 // or removes a foreign/imported entry.
 func (i Installer) Install(ref CredentialRef) error {
-	if ref.DID == "" {
-		return fmt.Errorf("codex install: CredentialRef.DID is required")
+	if ref.AgentID == "" {
+		return fmt.Errorf("codex install: CredentialRef.AgentID is required")
 	}
 	if err := i.writeHooks(); err != nil {
 		return err

@@ -2,25 +2,42 @@ package devconfig
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// testDID is a decorative did:aip: value for fixtures unrelated to identity
+// resolution (a raw dev.json a bool-flag or posture test writes just to give
+// the file a shape); it is never asserted through AttributionDIDFor. Identity
+// tests use testAgentID and derive their expected DID from it directly.
 const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
+
+// testAgentID is the fixed v3 agent id identity tests configure; its
+// attribution DID is always computed via AttributionDIDFor rather than
+// hardcoded, so a change to the derivation cannot silently desync a test from
+// the function it is testing.
+const testAgentID = "7f3c9b2e-1111-5000-a000-000000000002"
+
+// testWorkloadKey is a placeholder workload-signing-key value. devconfig never
+// parses it (that's workloadauth's job, one layer up), so any non-empty,
+// non-secret-shaped string proves the field is wired without needing a real
+// RSA key.
+const testWorkloadKey = "wk_test_not_a_real_key"
 
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
 	t.Setenv(EnvHome, t.TempDir())
 	bindForTest(t, "claude-code")
-	for _, name := range append([]string{EnvAPIKeyDirect, EnvAgentPrivateKey}, deprecatedPrivateKeyEnvNames...) {
+	for _, name := range append([]string{EnvAPIKeyDirect, EnvWorkloadPrivateKey, EnvAgentID, EnvDID}, legacySeedEnvNames...) {
 		t.Setenv(name, "")
 	}
-	// The deprecated keys are read with LookupEnv, so an empty value still
-	// counts as set: unset them, or a developer who still exports a legacy key
-	// gets a different fixture from one who does not.
+	// The legacy seed names are read with LookupEnv, so an empty value still
+	// counts as set: unset them, or a developer who still exports one gets a
+	// different fixture from one who does not.
 	for _, name := range []string{EnvTier2, EnvTier2Timeout, EnvRequireVerified} {
 		t.Setenv(name, "")
 		os.Unsetenv(name)
@@ -51,36 +68,95 @@ func writeEnvFileForTest(t *testing.T, kv map[string]string) {
 	}
 }
 
-func TestResolveDID(t *testing.T) {
+// wantDID is AttributionDIDFor(agentID), fatal on error. Every identity test
+// derives its expectation this way rather than hardcoding a did:aip: literal,
+// so a change to the derivation cannot silently desync a test from the
+// function it exercises.
+func wantDID(t *testing.T, agentID string) string {
+	t.Helper()
+	did, err := AttributionDIDFor(agentID)
+	if err != nil {
+		t.Fatalf("AttributionDIDFor(%q): %v", agentID, err)
+	}
+	return did
+}
+
+// TestResolveDIDDerivesFromAgentID pins the flip (phase 04 D1): the DID is no
+// longer read from a store, it is derived from the agent id -- env first,
+// dev.json's agent_id as the fallback.
+func TestResolveDIDDerivesFromAgentID(t *testing.T) {
+	t.Run("env", func(t *testing.T) {
+		isolateConfig(t)
+		t.Setenv(EnvAgentID, testAgentID)
+		did, err := ResolveDID()
+		if err != nil {
+			t.Fatalf("resolve DID: %v", err)
+		}
+		if want := wantDID(t, testAgentID); did != want {
+			t.Errorf("DID = %q, want %q", did, want)
+		}
+	})
+
+	t.Run("config file fallback", func(t *testing.T) {
+		cfgPath := filepath.Join(t.TempDir(), "dev.json")
+		if err := os.WriteFile(cfgPath, []byte(`{"agent_id":"`+testAgentID+`"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(EnvConfigPath, cfgPath)
+		t.Setenv(EnvAgentID, "") // no env override → must come from the file
+		did, err := ResolveDID()
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if want := wantDID(t, testAgentID); did != want {
+			t.Errorf("DID from config = %q, want %q", did, want)
+		}
+	})
+
+	t.Run("neither configures one", func(t *testing.T) {
+		isolateConfig(t)
+		if _, err := ResolveDID(); err == nil {
+			t.Error("expected an error when no agent id is configured")
+		} else if !errors.Is(err, ErrMissingAgentID) {
+			t.Errorf("error = %v, want ErrMissingAgentID", err)
+		}
+	})
+}
+
+// TestResolveDIDRefusesLegacyStore a stored developer_did means the store
+// predates v3 entirely: ResolveDID must refuse with ErrLegacyStore rather than
+// derive an answer that would silently disagree with what's on disk.
+func TestResolveDIDRefusesLegacyStore(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	if err := os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","agent_id":"`+testAgentID+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvConfigPath, cfgPath)
+	if _, err := ResolveDID(); !errors.Is(err, ErrLegacyStore) {
+		t.Errorf("err = %v, want ErrLegacyStore", err)
+	}
+	if got := ResolveDIDOrEmpty(); got != "" {
+		t.Errorf("ResolveDIDOrEmpty() = %q on a legacy store, want \"\"", got)
+	}
+	if baseURL, did := ResolveCoordinates(); did != "" {
+		t.Errorf("ResolveCoordinates() did = %q on a legacy store, want \"\" (base url %q)", did, baseURL)
+	}
+}
+
+// TestAgentDIDEnvIsIgnored OPENBOX_AGENT_DID is retired: it named a v1 DID
+// that could disagree with the store, which is exactly the two-store bug the
+// derivation exists to make impossible.
+func TestAgentDIDEnvIsIgnored(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAgentID, testAgentID)
+	t.Setenv(EnvDID, "did:aip:some-other-value-the-resolver-must-never-return")
+
 	did, err := ResolveDID()
 	if err != nil {
 		t.Fatalf("resolve DID: %v", err)
 	}
-	if did != testDID {
-		t.Errorf("DID = %q, want %q", did, testDID)
-	}
-
-	t.Setenv(EnvDID, "")
-	if _, err := ResolveDID(); err == nil {
-		t.Error("expected error when no DID configured")
-	}
-}
-
-func TestResolveDIDFromConfigFile(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "dev.json")
-	if err := os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(EnvConfigPath, cfgPath)
-	t.Setenv(EnvDID, "") // no env override → must come from the file
-	did, err := ResolveDID()
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if did != testDID {
-		t.Errorf("DID from config = %q, want %q", did, testDID)
+	if want := wantDID(t, testAgentID); did != want {
+		t.Errorf("DID = %q, want the derived value %q; OPENBOX_AGENT_DID must be ignored", did, want)
 	}
 }
 
@@ -89,13 +165,13 @@ func TestResolveDIDFromConfigFile(t *testing.T) {
 // anything to disk.
 func TestResolveCredentials_RealEnvBeatsFile(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAgentID, testAgentID)
 	writeEnvFileForTest(t, map[string]string{
-		EnvAPIKeyDirect:    "obx_from_file",
-		EnvAgentPrivateKey: "ZmlsZQ==",
+		EnvAPIKeyDirect:       "obx_from_file",
+		EnvWorkloadPrivateKey: "wk_from_file",
 	})
 	t.Setenv(EnvAPIKeyDirect, "obx_from_env")
-	t.Setenv(EnvAgentPrivateKey, "ZW52")
+	t.Setenv(EnvWorkloadPrivateKey, "wk_from_env")
 	t.Setenv(EnvBaseURL, "https://core.example.ai")
 	t.Setenv(EnvContentCapture, "true")
 
@@ -103,7 +179,7 @@ func TestResolveCredentials_RealEnvBeatsFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_env" || c.PrivateKeyB64 != "ZW52" {
+	if c.APIKey != "obx_from_env" || c.WorkloadPrivateKey != "wk_from_env" {
 		t.Errorf("creds = %+v, want the environment to win over the file", c)
 	}
 	if c.BaseURL != "https://core.example.ai" {
@@ -112,87 +188,147 @@ func TestResolveCredentials_RealEnvBeatsFile(t *testing.T) {
 	if !c.ContentCaptureEnabled {
 		t.Error("content capture should be enabled")
 	}
+	if want := wantDID(t, testAgentID); c.DID != want {
+		t.Errorf("DID = %q, want %q", c.DID, want)
+	}
 }
 
 // TestResolveCredentials_FromCredentialFile with no environment override, both
 // secrets come from ~/.openbox/.env; the position the deleted OS secret store
-// used to hold.
+// used to hold. The agent id comes from dev.json, since it is a coordinate,
+// never the secrets file.
 func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	if err := WriteConfig(mustDevConfigPath(t), Update{AgentID: testAgentID}); err != nil {
+		t.Fatal(err)
+	}
 	writeEnvFileForTest(t, map[string]string{
-		EnvAPIKeyDirect:    "obx_from_file",
-		EnvAgentPrivateKey: "ZmlsZQ==",
+		EnvAPIKeyDirect:       "obx_from_file",
+		EnvWorkloadPrivateKey: "wk_from_file",
 	})
 
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_file" || c.PrivateKeyB64 != "ZmlsZQ==" {
+	if c.APIKey != "obx_from_file" || c.WorkloadPrivateKey != "wk_from_file" {
 		t.Errorf("creds from file = %+v", c)
 	}
 	if c.BaseURL != DefaultBaseURL {
 		t.Errorf("base url default = %q, want %q", c.BaseURL, DefaultBaseURL)
 	}
+	if want := wantDID(t, testAgentID); c.DID != want {
+		t.Errorf("DID = %q, want %q", c.DID, want)
+	}
 }
 
-// TestEnvFileIsNotACoordinateSource tHE tripwire for the second-store bug
-// (that decision, D2). The credential file is for secrets only: a coordinate
-// written into it must be ignored, while the same coordinate as a real
-// environment variable is honoured.
+// mustDevConfigPath is DefaultConfigPath(), fatal on nothing to resolve
+// (isolateConfig always binds, so this always has an answer in tests).
+func mustDevConfigPath(t *testing.T) string {
+	t.Helper()
+	return DefaultConfigPath()
+}
+
+// TestEnvFileIsNotACoordinateSource the tripwire for the second-store bug
+// (that decision, D2), rewritten for the v3 shape: the credential file
+// carries the two secrets and, deliberately, a coordinate-shaped value too;
+// resolution must reach the coordinate gate on the agent id from env/dev.json
+// alone, never from anything sitting in .env.
+//
+// (a) proves ResolveCredentials fails on the MISSING AGENT ID, not a missing
+// secret, when the file's coordinate is the only thing that could have
+// supplied one.
+// (b) proves the real environment variable, not the file's value, is what
+// answers once it is set, and that the file's OPENBOX_BASE_URL is likewise
+// never read as a coordinate.
+// (c) is the guard: with the two secrets removed, the same fixture must fail
+// for a MISSING SECRET instead, proving (a) actually reached the coordinate
+// gate rather than failing earlier for an unrelated reason.
 func TestEnvFileIsNotACoordinateSource(t *testing.T) {
-	isolateConfig(t)
-	writeEnvFileForTest(t, map[string]string{
-		EnvAPIKeyDirect:    "obx_k",
-		EnvAgentPrivateKey: "ZmlsZQ==",
-		EnvDID:             "did:aip:from-the-env-file",
-		EnvBaseURL:         "https://wrong.example",
+	uuidA := "aaaaaaaa-0000-5000-a000-00000000000a"
+	uuidB := "bbbbbbbb-0000-5000-a000-00000000000b"
+
+	t.Run("a: fails for the missing agent id, not a missing secret", func(t *testing.T) {
+		isolateConfig(t)
+		writeEnvFileForTest(t, map[string]string{
+			EnvAPIKeyDirect:       "obx_k",
+			EnvWorkloadPrivateKey: "wk_k",
+			EnvAgentID:            uuidA,
+			EnvBaseURL:            "https://wrong.example",
+		})
+		_, err := ResolveCredentials()
+		if err == nil {
+			t.Fatal("an agent id in .env was treated as a coordinate source; that is the two-store bug that decision removed")
+		}
+		if !errors.Is(err, ErrMissingAgentID) {
+			t.Errorf("err = %v, want ErrMissingAgentID (the resolver must have reached the coordinate gate, not a secret gate)", err)
+		}
 	})
 
-	t.Setenv(EnvDID, "")
-	if _, err := ResolveCredentials(); err == nil {
-		t.Fatal("a DID in.env was treated as a coordinate source; that is the two-store bug that decision removed")
-	}
+	t.Run("b: the real environment variable answers, never the file's", func(t *testing.T) {
+		isolateConfig(t)
+		writeEnvFileForTest(t, map[string]string{
+			EnvAPIKeyDirect:       "obx_k",
+			EnvWorkloadPrivateKey: "wk_k",
+			EnvAgentID:            uuidA,
+			EnvBaseURL:            "https://wrong.example",
+		})
+		t.Setenv(EnvAgentID, uuidB)
 
-	t.Setenv(EnvDID, testDID)
-	c, err := ResolveCredentials()
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if c.DID != testDID {
-		t.Errorf("DID = %q, want the environment value %q", c.DID, testDID)
-	}
-	if c.BaseURL != DefaultBaseURL {
-		t.Errorf("base URL = %q, want the built-in default; .env must not supply a coordinate", c.BaseURL)
-	}
+		c, err := ResolveCredentials()
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		want := wantDID(t, uuidB)
+		if c.DID != want {
+			t.Errorf("DID = %q, want the environment agent id's %q, never uuid A's %q", c.DID, want, wantDID(t, uuidA))
+		}
+		if c.BaseURL != DefaultBaseURL {
+			t.Errorf("base URL = %q, want the built-in default; .env must not supply a coordinate", c.BaseURL)
+		}
+	})
+
+	t.Run("c: guard -- without the file's secrets, the same fixture fails for a secret instead", func(t *testing.T) {
+		isolateConfig(t)
+		writeEnvFileForTest(t, map[string]string{
+			EnvAgentID: uuidA,
+			EnvBaseURL: "https://wrong.example",
+		})
+		_, err := ResolveCredentials()
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if errors.Is(err, ErrMissingAgentID) {
+			t.Errorf("err = %v, want a missing-secret error, not ErrMissingAgentID: this proves (a) reached the coordinate gate rather than short-circuiting earlier", err)
+		}
+	})
 }
 
-// TestCredentialFileAloneIsNotSufficient a .env alone is deliberately NOT
-// enough to run: it carries no DID, so the failure is the clear no-DID error
-// rather than something obscure later.
-func TestCredentialFileAloneIsNotSufficient(t *testing.T) {
+// TestCredentialFileAloneIsNotSufficientForAgentID a .env alone is
+// deliberately not enough to run: an agent id is a coordinate, and the file
+// never supplies one, so the failure names the missing agent id, not
+// something obscure later.
+func TestCredentialFileAloneIsNotSufficientForAgentID(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, "")
 	writeEnvFileForTest(t, map[string]string{
-		EnvAPIKeyDirect:    "obx_k",
-		EnvAgentPrivateKey: "ZmlsZQ==",
+		EnvAPIKeyDirect:       "obx_k",
+		EnvWorkloadPrivateKey: "wk_k",
 	})
 	_, err := ResolveCredentials()
 	if err == nil {
-		t.Fatal("expected the no-DID error")
+		t.Fatal("expected the missing-agent-id error")
 	}
-	if !strings.Contains(err.Error(), "DID") {
-		t.Errorf("error = %q, want it to name the missing DID", err)
+	if !errors.Is(err, ErrMissingAgentID) {
+		t.Errorf("err = %v, want ErrMissingAgentID", err)
 	}
 }
 
 // TestResolveCredentials_CRLFStrippedFromCredentialFile a crlf-authored .env
-// must not leave \r on a base64 signing key: it fails signature verification
-// with an error naming neither the file nor the character.
+// must not leave \r on the workload signing key: it would fail assertion
+// signing with an error naming neither the file nor the character.
 func TestResolveCredentials_CRLFStrippedFromCredentialFile(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAgentID, testAgentID)
 	path, err := EnvFilePath()
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +336,7 @@ func TestResolveCredentials_CRLFStrippedFromCredentialFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	body := EnvAPIKeyDirect + "=obx_k\r\n" + EnvAgentPrivateKey + "=YmFzZTY0\r\n"
+	body := EnvAPIKeyDirect + "=obx_k\r\n" + EnvWorkloadPrivateKey + "=YmFzZTY0\r\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -208,63 +344,62 @@ func TestResolveCredentials_CRLFStrippedFromCredentialFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.PrivateKeyB64 != "YmFzZTY0" {
-		t.Errorf("private key = %q, want no trailing carriage return", c.PrivateKeyB64)
+	if c.WorkloadPrivateKey != "YmFzZTY0" {
+		t.Errorf("workload key = %q, want no trailing carriage return", c.WorkloadPrivateKey)
 	}
 }
 
-// TestResolveCredentials_DeprecatedPrivateKeyNames the deprecated names keep
-// working so nobody's CI breaks on upgrade.
-func TestResolveCredentials_DeprecatedPrivateKeyNames(t *testing.T) {
-	for _, alias := range deprecatedPrivateKeyEnvNames {
-		t.Run(alias+"/env", func(t *testing.T) {
+// TestSeedAliasesNoLongerSatisfyIdentity an Ed25519 seed, under the documented
+// name or a deprecated alias, never satisfies a v3 identity: it either marks
+// the store legacy (found in the credential file, LegacyStoreFor's own
+// signal) or, exported only as an environment variable with no matching file
+// marker, simply is not a workload key, so resolution fails on the missing
+// one exactly as if nothing were exported at all.
+func TestSeedAliasesNoLongerSatisfyIdentity(t *testing.T) {
+	for _, alias := range legacySeedEnvNames {
+		t.Run(alias+"/file is legacy", func(t *testing.T) {
 			isolateConfig(t)
-			t.Setenv(EnvDID, testDID)
+			t.Setenv(EnvAgentID, testAgentID)
+			writeEnvFileForTest(t, map[string]string{EnvAPIKeyDirect: "obx_k", alias: "c2VlZA=="})
+			_, err := ResolveCredentials()
+			if !errors.Is(err, ErrLegacyStore) {
+				t.Errorf("err = %v, want ErrLegacyStore (a seed in the credential file marks the store legacy)", err)
+			}
+		})
+		t.Run(alias+"/env alone is not a workload key", func(t *testing.T) {
+			isolateConfig(t)
+			t.Setenv(EnvAgentID, testAgentID)
 			t.Setenv(EnvAPIKeyDirect, "obx_k")
-			t.Setenv(alias, "YWxpYXM=")
-			c, err := ResolveCredentials()
-			if err != nil {
-				t.Fatalf("resolve: %v", err)
+			t.Setenv(alias, "c2VlZA==")
+			_, err := ResolveCredentials()
+			if err == nil {
+				t.Fatal("a seed alias satisfied a v3 identity with no workload key present")
 			}
-			if c.PrivateKeyB64 != "YWxpYXM=" {
-				t.Errorf("private key = %q, want the deprecated %s to still be read", c.PrivateKeyB64, alias)
-			}
-		})
-		t.Run(alias+"/file", func(t *testing.T) {
-			isolateConfig(t)
-			t.Setenv(EnvDID, testDID)
-			writeEnvFileForTest(t, map[string]string{EnvAPIKeyDirect: "obx_k", alias: "YWxpYXM="})
-			c, err := ResolveCredentials()
-			if err != nil {
-				t.Fatalf("resolve: %v", err)
-			}
-			if c.PrivateKeyB64 != "YWxpYXM=" {
-				t.Errorf("private key = %q, want the deprecated %s to still be read from the file", c.PrivateKeyB64, alias)
+			if errors.Is(err, ErrLegacyStore) {
+				t.Errorf("err = %v, want a missing-workload-key error: an exported alias with no file marker is not a legacy STORE", err)
 			}
 		})
 	}
 }
 
-// TestResolveCredentials_DocumentedNameBeatsAlias the documented name wins
-// over a deprecated alias when both are set.
-func TestResolveCredentials_DocumentedNameBeatsAlias(t *testing.T) {
+// TestCredentialsRequireWorkloadKey an API key alone, with an agent id and no
+// workload key anywhere, is not a complete v3 identity.
+func TestCredentialsRequireWorkloadKey(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAgentID, testAgentID)
 	t.Setenv(EnvAPIKeyDirect, "obx_k")
-	t.Setenv(EnvAgentPrivateKey, "Y3VycmVudA==")
-	t.Setenv("OPENBOX_ED25519_SEED", "b2xk")
-	c, err := ResolveCredentials()
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
+	_, err := ResolveCredentials()
+	if err == nil {
+		t.Fatal("expected an error when no workload key is configured")
 	}
-	if c.PrivateKeyB64 != "Y3VycmVudA==" {
-		t.Errorf("private key = %q, want the documented name to win", c.PrivateKeyB64)
+	if !strings.Contains(err.Error(), EnvWorkloadPrivateKey) {
+		t.Errorf("error = %q, want it to name %s", err, EnvWorkloadPrivateKey)
 	}
 }
 
 func TestResolveCredentials_MissingSecret(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAgentID, testAgentID)
 	_, err := ResolveCredentials()
 	if err == nil {
 		t.Fatal("expected an error when no api key source is configured")
@@ -285,7 +420,6 @@ func TestResolveCredentials_MissingSecret(t *testing.T) {
 // this one is read exactly when the machine is already not working.
 func TestTheMissingCredentialRemedyNamesTheBoundTool(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
 	release, err := BindProvider("codex")
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +440,7 @@ func TestTheMissingCredentialRemedyNamesTheBoundTool(t *testing.T) {
 // registration problem they do not have.
 func TestResolveCredentials_UnparseableFileIsAnError(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(EnvDID, testDID)
+	t.Setenv(EnvAgentID, testAgentID)
 	path, err := EnvFilePath()
 	if err != nil {
 		t.Fatal(err)
@@ -320,6 +454,29 @@ func TestResolveCredentials_UnparseableFileIsAnError(t *testing.T) {
 	}
 	if _, err := ResolveCredentials(); err == nil {
 		t.Fatal("a duplicate-key credential file resolved as if it were empty")
+	}
+}
+
+// TestEnvIdentityPresentMeansWorkloadKey EnvIdentityPresent now asks the v3
+// question outright: an exported seed (current or deprecated alias), with no
+// workload key, must not read as a present identity.
+func TestEnvIdentityPresentMeansWorkloadKey(t *testing.T) {
+	isolateConfig(t)
+	if EnvIdentityPresent() {
+		t.Error("nothing exported; must be false")
+	}
+	t.Setenv(EnvAPIKeyDirect, "obx_k")
+	if EnvIdentityPresent() {
+		t.Error("API key alone must not be enough")
+	}
+	t.Setenv(EnvAgentPrivateKey, "c2VlZA==")
+	if EnvIdentityPresent() {
+		t.Error("a seed under the documented legacy name must not satisfy a v3 identity")
+	}
+	t.Setenv(EnvAgentPrivateKey, "")
+	t.Setenv(EnvWorkloadPrivateKey, "wk_k")
+	if !EnvIdentityPresent() {
+		t.Error("an API key + a workload key must be a present identity")
 	}
 }
 

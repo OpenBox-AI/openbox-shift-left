@@ -21,6 +21,9 @@ func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
 		"DID": true, "BaseURL": true, "ContentCapture": true, "InstallGitHook": true,
 		"AgentID": true, "BackendURL": true, "ProjectDir": true,
 		"Enforce": true, "Tier2": true, "Findings": true,
+		// IdentityMethod is "keycloak_workload" or "", a store-shape marker, not
+		// a credential (devconfig.IdentityMethodKeycloakWorkload).
+		"IdentityMethod": true,
 	}
 	rt := reflect.TypeOf(CredentialRef{})
 	for i := 0; i < rt.NumField(); i++ {

@@ -44,8 +44,8 @@ func (Installer) Available() bool { return true }
 
 // Install materializes the plugin bundle and writes the dev config.
 func (i Installer) Install(ref CredentialRef) error {
-	if ref.DID == "" {
-		return fmt.Errorf("claude-code install: CredentialRef.DID is required")
+	if ref.AgentID == "" {
+		return fmt.Errorf("claude-code install: CredentialRef.AgentID is required")
 	}
 	release, err := i.acquireInstallLock()
 	if err != nil {

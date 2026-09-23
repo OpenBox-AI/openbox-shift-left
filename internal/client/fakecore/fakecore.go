@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"time"
@@ -104,9 +105,13 @@ func (r Received) metaString(key string) string {
 
 // Server is a running fake core.
 type Server struct {
-	t      TB
-	srv    *memhttptest.Server
-	script Script
+	t TB
+	// srv is set by New (in-process, memhttptest); realSrv by NewReal (a real
+	// OS socket, for the rare test that spawns a genuine child process). Never
+	// both.
+	srv     *memhttptest.Server
+	realSrv *httptest.Server
+	script  Script
 
 	pub     ed25519.PublicKey
 	seedB64 string
@@ -139,6 +144,28 @@ type Server struct {
 // shared with the signer would let a broken signer pass.
 func New(t TB, s Script) *Server {
 	t.Helper()
+	f := newUnstarted(t, s)
+	f.srv = memhttptest.NewServer(t, http.HandlerFunc(f.serve))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+// NewReal is New, bound to a real OS socket (httptest.NewServer) instead of
+// memhttptest's in-process pipes. memhttptest's own doc comment names its
+// blind spot: "a child process" and "code that builds its own http.Transport"
+// cannot reach an in-memory listener at all, because it lives behind THIS
+// test binary's http.DefaultTransport. The handful of tests that spawn a
+// real, separately-built `openbox` binary (e.g. to prove a detached realtime
+// flusher delivers) need this instead of New.
+func NewReal(t TB, s Script) *Server {
+	t.Helper()
+	f := newUnstarted(t, s)
+	f.realSrv = httptest.NewServer(http.HandlerFunc(f.serve))
+	t.Cleanup(f.realSrv.Close)
+	return f
+}
+
+func newUnstarted(t TB, s Script) *Server {
 	seed := make([]byte, ed25519.SeedSize)
 	if s.SeedB64 != "" {
 		decoded, err := base64.StdEncoding.DecodeString(s.SeedB64)
@@ -150,20 +177,22 @@ func New(t TB, s Script) *Server {
 		t.Fatalf("fakecore: generate seed: %v", err)
 	}
 	priv := ed25519.NewKeyFromSeed(seed)
-	f := &Server{
+	return &Server{
 		t:       t,
 		script:  s.withDefaults(),
 		pub:     priv.Public().(ed25519.PublicKey),
 		seedB64: base64.StdEncoding.EncodeToString(seed),
 		did:     "did:aip:00000000-0000-4000-8000-00000000f00d",
 	}
-	f.srv = memhttptest.NewServer(t, http.HandlerFunc(f.serve))
-	t.Cleanup(f.srv.Close)
-	return f
 }
 
 // URL is the base URL to point OPENBOX_BASE_URL at.
-func (f *Server) URL() string { return f.srv.URL }
+func (f *Server) URL() string {
+	if f.realSrv != nil {
+		return f.realSrv.URL
+	}
+	return f.srv.URL
+}
 
 // SeedB64 is the private key the client must sign with to be accepted.
 func (f *Server) SeedB64() string { return f.seedB64 }

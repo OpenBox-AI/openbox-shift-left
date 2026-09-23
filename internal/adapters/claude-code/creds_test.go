@@ -1,29 +1,65 @@
 package claudecode
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
 
+// TestLegacyStoreHookSendsNothing a stored developer_did means the store
+// predates v3 entirely (D1): ResolveIdentity refuses with ErrLegacyStore, the
+// mapper never even sees the event, and the hook stays exactly as silent as
+// it is for a genuinely unconfigured machine -- an unmapped event, an empty
+// spool, no request.
+func TestLegacyStoreHookSendsNothing(t *testing.T) {
+	isolateConfig(t)
+	spool := t.TempDir()
+	t.Setenv("OPENBOX_SPOOL_DIR", spool)
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	if err := devconfig.WriteConfig(DefaultConfigPath(), devconfig.Update{DID: "did:aip:legacy-store"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	var errb bytes.Buffer
+	RunHook("PreToolUse", strings.NewReader(
+		`{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"ls"}}`),
+		&out, log.New(&errb, "", 0))
+
+	if out.Len() != 0 {
+		t.Fatalf("stdout must stay empty, got %q", out.String())
+	}
+	if !strings.Contains(errb.String(), "no identity") {
+		t.Errorf("expected a no-identity drop notice, got %q", errb.String())
+	}
+	entries, _ := os.ReadDir(spool)
+	if len(entries) != 0 {
+		t.Errorf("a legacy store's event reached the spool: %v", entries)
+	}
+}
+
 // TestResolveCredentials_FromCredentialFile proves the hook reads
 // ~/.openbox/<tool>/.env, which is where `openbox init` writes credentials and the
-// position the deleted OS secret store used to hold.
+// position the deleted OS secret store used to hold. The agent id, a
+// coordinate, comes from dev.json, never from the credential file.
 func TestResolveCredentials_FromCredentialFile(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	writeDevConfigAgentID(t, testAgentID)
 	writeCredentialFile(t, map[string]string{
-		envAPIKeyDirect:    "obx_from_file",
-		envAgentPrivateKey: "c2VlZGZyb21maWxl",
+		envAPIKeyDirect:       "obx_from_file",
+		envWorkloadPrivateKey: "wk_from_file",
 	})
 
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_file" || c.PrivateKeyB64 != "c2VlZGZyb21maWxl" {
+	if c.APIKey != "obx_from_file" || c.WorkloadPrivateKey != "wk_from_file" {
 		t.Errorf("creds from credential file = %+v", c)
 	}
 }
@@ -56,8 +92,19 @@ func isolateConfig(t *testing.T) {
 	pinIfUnset(devconfig.EnvPendingApprovalDir, filepath.Join(sinks, "pending-approvals"))
 	pinIfUnset("OPENBOX_ADVISORY_FILE", filepath.Join(sinks, "advisories.jsonl"))
 
-	for _, name := range []string{envAPIKeyDirect, envAgentPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SEED"} {
+	for _, name := range append([]string{envAPIKeyDirect, envWorkloadPrivateKey, envAgentID, envDID, envAgentPrivateKey},
+		"OPENBOX_ED25519_SEED", "OPENBOX_SEED") {
 		t.Setenv(name, "")
+	}
+}
+
+// writeDevConfigAgentID writes the bound tool's dev.json with only agent_id
+// set, honouring the OPENBOX_CONFIG pin exactly the way ResolveCredentials
+// itself resolves the path.
+func writeDevConfigAgentID(t *testing.T, agentID string) {
+	t.Helper()
+	if err := devconfig.WriteConfig(DefaultConfigPath(), devconfig.Update{AgentID: agentID}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -74,7 +121,7 @@ func writeCredentialFile(t *testing.T, kv map[string]string) {
 
 func TestResolveIdentity(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	id, err := ResolveIdentity()
 	if err != nil {
 		t.Fatalf("resolve identity: %v", err)
@@ -86,20 +133,20 @@ func TestResolveIdentity(t *testing.T) {
 
 func TestResolveIdentityMissing(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, "")
+	t.Setenv(envAgentID, "")
 	if _, err := ResolveIdentity(); err == nil {
-		t.Error("expected error when no DID configured")
+		t.Error("expected error when no agent id configured")
 	}
 }
 
 func TestResolveIdentityFromConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "dev.json")
-	if err := os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`"}`), 0o600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(`{"agent_id":"`+testAgentID+`"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(envConfigPath, cfgPath)
-	t.Setenv(envDID, "") // no env override → must come from the file
+	t.Setenv(envAgentID, "") // no env override → must come from the file
 	id, err := ResolveIdentity()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -111,9 +158,9 @@ func TestResolveIdentityFromConfigFile(t *testing.T) {
 
 func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv(envAPIKeyDirect, "obx_test_key")
-	t.Setenv(envAgentPrivateKey, "c2VlZA==")
+	t.Setenv(envWorkloadPrivateKey, "wk_test_key")
 	t.Setenv(envBaseURL, "https://core.example.ai")
 	t.Setenv(envContentCapture, "true")
 
@@ -121,7 +168,7 @@ func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_test_key" || c.PrivateKeyB64 != "c2VlZA==" {
+	if c.APIKey != "obx_test_key" || c.WorkloadPrivateKey != "wk_test_key" {
 		t.Errorf("creds = %+v", c)
 	}
 	if c.BaseURL != "https://core.example.ai" {
@@ -140,19 +187,19 @@ func TestResolveCredentials_DirectEnvOverride(t *testing.T) {
 // disk.
 func TestResolveCredentials_RealEnvBeatsCredentialFile(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	writeCredentialFile(t, map[string]string{
-		envAPIKeyDirect:    "obx_from_file",
-		envAgentPrivateKey: "ZmlsZQ==",
+		envAPIKeyDirect:       "obx_from_file",
+		envWorkloadPrivateKey: "wk_from_file",
 	})
 	t.Setenv(envAPIKeyDirect, "obx_from_env")
-	t.Setenv(envAgentPrivateKey, "ZW52")
+	t.Setenv(envWorkloadPrivateKey, "wk_from_env")
 
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if c.APIKey != "obx_from_env" || c.PrivateKeyB64 != "ZW52" {
+	if c.APIKey != "obx_from_env" || c.WorkloadPrivateKey != "wk_from_env" {
 		t.Errorf("creds = %+v, want the environment to win", c)
 	}
 	if c.BaseURL != defaultBaseURL {
@@ -164,11 +211,11 @@ func TestResolveCredentials_EnvDisablesConfigContentCapture(t *testing.T) {
 	isolateConfig(t) // binds: a hook resolves its credentials under its own tool
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "dev.json")
-	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","content_capture":true}`), 0o600)
+	_ = os.WriteFile(cfgPath, []byte(`{"agent_id":"`+testAgentID+`","content_capture":true}`), 0o600)
 	t.Setenv(envConfigPath, cfgPath)
-	t.Setenv(envDID, "")
+	t.Setenv(envAgentID, "")
 	t.Setenv(envAPIKeyDirect, "obx_k")
-	t.Setenv(envAgentPrivateKey, "c2VlZA==")
+	t.Setenv(envWorkloadPrivateKey, "wk_k")
 	t.Setenv(envContentCapture, "false")
 
 	c, err := ResolveCredentials()
@@ -185,9 +232,9 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 	if !ResolveContentCapture() {
 		t.Error("ResolveContentCapture default must be ON (absent config)")
 	}
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv(envAPIKeyDirect, "obx_k")
-	t.Setenv(envAgentPrivateKey, "c2VlZA==")
+	t.Setenv(envWorkloadPrivateKey, "wk_k")
 	c, err := ResolveCredentials()
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -196,7 +243,7 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 		t.Error("ResolveCredentials ContentCaptureEnabled default must be ON")
 	}
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
-	_ = os.WriteFile(cfgPath, []byte(`{"developer_did":"`+testDID+`","content_capture":false}`), 0o600)
+	_ = os.WriteFile(cfgPath, []byte(`{"agent_id":"`+testAgentID+`","content_capture":false}`), 0o600)
 	t.Setenv(envConfigPath, cfgPath)
 	if ResolveContentCapture() {
 		t.Error("explicit content_capture:false must opt out")
@@ -267,7 +314,7 @@ func TestResolveFailClosed(t *testing.T) {
 
 func TestResolveCredentials_MissingSecret(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	if _, err := ResolveCredentials(); err == nil {
 		t.Error("expected error when no api key source is configured")
 	}

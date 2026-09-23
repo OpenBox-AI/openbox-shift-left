@@ -6,13 +6,11 @@ import (
 	"io"
 	"io/fs"
 	"log"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"time"
@@ -27,7 +25,7 @@ import (
 
 func TestEnforcementConformance(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
@@ -117,8 +115,8 @@ func TestEnforcementConformance(t *testing.T) {
 		if out := run(t, benign); strings.TrimSpace(out) != "" {
 			t.Errorf("fail-closed must NOT block a real allow; got %q", out)
 		}
-		if hits.Hits() != 1 {
-			t.Errorf("/evaluate hits = %d, want 1; the allow must come from the server", hits.Hits())
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want 1; the allow must come from the server", hits.V3EvaluateAttempts())
 		}
 	})
 
@@ -171,43 +169,45 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	}
 
-	serveCapturing := func(t *testing.T, verdict string) *[]string {
+	// serveCapturing is a v3-aware fake core (see content_conformance_test.go's
+	// own copy for why a hand-rolled single-path handler cannot stand in once
+	// the client speaks the v3 bootstrap/exchange dance).
+	serveCapturing := func(t *testing.T, verdict string) *fakecore.Server {
 		t.Helper()
-		var mu sync.Mutex
-		var bodies []string
-		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw, _ := io.ReadAll(r.Body)
-			mu.Lock()
-			bodies = append(bodies, string(raw))
-			mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(verdict))
-		}))
-		t.Cleanup(srv.Close)
-		evalCreds(t, srv.URL)
-		return &bodies
+		srv := fakecore.New(t, fakecore.Script{Default: verdict})
+		evalCreds(t, srv.URL())
+		return srv
+	}
+	rawBodies := func(srv *fakecore.Server) []string {
+		inbox := srv.Inbox()
+		out := make([]string, len(inbox))
+		for i, r := range inbox {
+			out[i] = string(r.Raw)
+		}
+		return out
 	}
 
 	// Never weaken this to a substring check on a decision.
 	t.Run("C18 a secret in a Write body never reaches /evaluate (E8)", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
-		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "1") // content ON: the body is attached
 		os.Unsetenv(envSecretDetection)  // detection default ON
 		run(t, secretWrite)
 
-		if len(*bodies) == 0 {
+		bodies := rawBodies(srv)
+		if len(bodies) == 0 {
 			t.Fatal("no /evaluate call; a gated Write must be evaluated ")
 		}
-		for i, b := range *bodies {
+		for i, b := range bodies {
 			if strings.Contains(b, awsSecret) {
 				t.Errorf("the raw secret reached /evaluate in body #%d; redaction must "+
 					"run BEFORE attachment: %s", i, b)
 			}
 		}
-		joined := strings.Join(*bodies, "")
+		joined := strings.Join(bodies, "")
 		if !strings.Contains(joined, "OPENBOX_REDACTED") {
 			t.Errorf("no redacted body attached; the case proves nothing if content never "+
 				"egressed at all: %s", joined)
@@ -216,7 +216,7 @@ func TestEnforcementConformance(t *testing.T) {
 
 	t.Run("C19 content_capture:false attaches no content, any class", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
-		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "0")
@@ -231,10 +231,11 @@ func TestEnforcementConformance(t *testing.T) {
 		} {
 			run(t, payload)
 		}
-		if len(*bodies) == 0 {
+		bodies := rawBodies(srv)
+		if len(bodies) == 0 {
 			t.Fatal("no /evaluate calls; every class is gated")
 		}
-		for i, b := range *bodies {
+		for i, b := range bodies {
 			if strings.Contains(b, canary) {
 				t.Errorf("content egressed with capture OFF in body #%d: %s", i, b)
 			}
@@ -247,7 +248,7 @@ func TestEnforcementConformance(t *testing.T) {
 	// Never weaken this to a substring check on a decision; see C18 above.
 	t.Run("C57 an Agent subagent prompt's secret never reaches /evaluate; a Bash command's still does", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
-		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "1") // content ON: the body is attached
@@ -260,11 +261,11 @@ func TestEnforcementConformance(t *testing.T) {
 		agentPayload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Agent","tool_input":{"description":"fetch logs","subagent_type":"code-reviewer","prompt":"use key ` +
 			awsSecret + ` and password=\"` + corpusCredentialText + `\" to fetch the deploy logs"}}`
 		run(t, agentPayload)
-		agentCalls := len(*bodies)
+		agentCalls := len(rawBodies(srv))
 		if agentCalls == 0 {
 			t.Fatal("no /evaluate call for the Agent spawn; a gated Agent call must be evaluated")
 		}
-		agentBodies := strings.Join((*bodies)[:agentCalls], "")
+		agentBodies := strings.Join(rawBodies(srv)[:agentCalls], "")
 		if strings.Contains(agentBodies, awsSecret) || strings.Contains(agentBodies, corpusCredentialText) {
 			t.Errorf("the subagent prompt's secret reached /evaluate; redaction must run BEFORE "+
 				"attachment, same as any other gated class (docs/data-and-privacy.md:37 "+
@@ -283,7 +284,7 @@ func TestEnforcementConformance(t *testing.T) {
 		bashPayload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"export AWS_ACCESS_KEY_ID=` +
 			awsSecret + `"}}`
 		run(t, bashPayload)
-		bashBodies := strings.Join((*bodies)[agentCalls:], "")
+		bashBodies := strings.Join(rawBodies(srv)[agentCalls:], "")
 		if bashBodies == "" {
 			t.Fatal("no /evaluate call for the Bash control")
 		}
@@ -296,7 +297,7 @@ func TestEnforcementConformance(t *testing.T) {
 
 	observeThenFlush := func(t *testing.T, hook, payload string) []string {
 		t.Helper()
-		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envRealtime, "0")
 		t.Setenv(envEnforce, "0") // observe path; no gate, no deferred spool
 		var out bytes.Buffer
@@ -304,7 +305,7 @@ func TestEnforcementConformance(t *testing.T) {
 		RunHook("SessionEnd", strings.NewReader(
 			`{"hook_event_name":"SessionEnd","session_id":"s-status","cwd":"/tmp","reason":"other"}`),
 			&out, log.New(&bytes.Buffer{}, "", 0))
-		return *bodies
+		return rawBodies(srv)
 	}
 
 	t.Run("C20 a completed tool call reports status \"completed\" on the outbound bytes", func(t *testing.T) {
@@ -347,7 +348,7 @@ func TestEnforcementConformance(t *testing.T) {
 
 	observeSeqThenFlush := func(t *testing.T, session string, steps ...[2]string) []string {
 		t.Helper()
-		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envRealtime, "0")
 		t.Setenv(envEnforce, "0")
 		var out bytes.Buffer
@@ -357,7 +358,7 @@ func TestEnforcementConformance(t *testing.T) {
 		RunHook("SessionEnd", strings.NewReader(
 			`{"hook_event_name":"SessionEnd","session_id":"`+session+`","cwd":"/tmp","reason":"other"}`),
 			&out, log.New(&bytes.Buffer{}, "", 0))
-		return *bodies
+		return rawBodies(srv)
 	}
 
 	t.Run("C22 a failed tool call reports status \"failed\" with a real duration", func(t *testing.T) {
@@ -443,7 +444,7 @@ func TestEnforcementConformance(t *testing.T) {
 	// evalCreds, which forces content capture OFF.
 	stopThenFlush := func(t *testing.T, session, transcript, assistantMessage, capture string) []string {
 		t.Helper()
-		bodies := serveCapturing(t, `{"verdict":"allow"}`)
+		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envContentCapture, capture)
 		t.Setenv(envRealtime, "0")
 		t.Setenv(envEnforce, "0")
@@ -467,7 +468,7 @@ func TestEnforcementConformance(t *testing.T) {
 		RunHook("SessionEnd", strings.NewReader(
 			`{"hook_event_name":"SessionEnd","session_id":"`+session+`","cwd":"/tmp","reason":"other"}`),
 			&out, log.New(&bytes.Buffer{}, "", 0))
-		return *bodies
+		return rawBodies(srv)
 	}
 
 	// The subject moved, and it moved because the old one never worked: the
@@ -609,7 +610,7 @@ func TestEnforcementConformance(t *testing.T) {
 // ──────────────────────────────
 func TestSessionHaltConformance(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
@@ -663,7 +664,7 @@ func TestSessionHaltConformance(t *testing.T) {
 			t.Fatal("the session must be latched after an emitted session halt")
 		}
 
-		before := hits.Hits()
+		before := hits.V3EvaluateAttempts()
 		got2 := parseToolOut(t, run(t, "PreToolUse", toolPayload("halt-s1", "echo two")))
 		if !stopped(got2.Continue) || got2.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
 			t.Errorf("latched PreToolUse render = %+v, want continue:false + deny", got2)
@@ -672,7 +673,7 @@ func TestSessionHaltConformance(t *testing.T) {
 		if !stopped(gotP.Continue) || gotP.Decision != ccPromptDecisionBlock {
 			t.Errorf("latched UserPromptSubmit render = %+v, want continue:false + decision:block", gotP)
 		}
-		if after := hits.Hits(); after != before {
+		if after := hits.V3EvaluateAttempts(); after != before {
 			t.Errorf("latched session made %d further /evaluate calls, want 0; the latch is the decided state", after-before)
 		}
 
@@ -727,9 +728,9 @@ func TestSessionHaltConformance(t *testing.T) {
 		if _, halted := hookflow.SessionHalted("halt-s3"); halted {
 			t.Error("a BLOCK must not latch the session")
 		}
-		before := hits.Hits()
+		before := hits.V3EvaluateAttempts()
 		_ = run(t, "UserPromptSubmit", promptPayload("halt-s3", "second ask"))
-		if after := hits.Hits(); after != before+1 {
+		if after := hits.V3EvaluateAttempts(); after != before+1 {
 			t.Errorf("un-latched session made %d further calls, want exactly 1", after-before)
 		}
 	})

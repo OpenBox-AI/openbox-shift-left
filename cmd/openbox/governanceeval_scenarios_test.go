@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
@@ -329,8 +329,18 @@ func TestGovernanceEvalRejectsAWrongKey(t *testing.T) {
 	evalEnv(t, fake, dir, spool, sc.Posture)
 	// A throwaway key the fake has never seen. Generated here rather than
 	// committed: a fixture seed shared with the signer would let a broken
-	// signer pass.
-	t.Setenv(devconfig.EnvAgentPrivateKey, base64.StdEncoding.EncodeToString([]byte(strings.Repeat("w", 32))))
+	// signer pass. The bootstrap/exchange dance still succeeds (it verifies
+	// only the API key), so what actually gets refused is the ASSERTION,
+	// signed with a key whose JWK thumbprint core's Keycloak never registered.
+	wrongKey, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongKeyB64, err := workloadauth.EncodePrivateKey(wrongKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, wrongKeyB64)
 
 	for _, p := range sc.Payloads {
 		a, _, _ := testApp(nil)
@@ -341,14 +351,14 @@ func TestGovernanceEvalRejectsAWrongKey(t *testing.T) {
 	if n := len(fake.Inbox()); n != 0 {
 		t.Errorf("the fake accepted %d wrongly-signed request(s); it verifies nothing", n)
 	}
-	if fake.Hits() == 0 {
-		t.Fatal("nothing reached the fake at all, so the rejection proves nothing")
+	if fake.ExchangeHits() == 0 {
+		t.Fatal("nothing reached the token endpoint at all, so the rejection proves nothing")
 	}
-	if got := fake.Rejections(); len(got) == 0 || !strings.Contains(got[0], "signature") {
-		t.Errorf("rejection reason should name the signature; got %v", got)
+	if fake.V3EvaluateAttempts() != 0 {
+		t.Errorf("a failed token exchange must never reach /evaluate at all; got %d attempts", fake.V3EvaluateAttempts())
 	}
 	if !spoolStillHolds(t, spool) {
-		t.Error("the spool was drained despite a 401; a 401 must not spend a delivery attempt, because core answers it for a database fault as well as a bad key")
+		t.Error("the spool was drained despite a rejected assertion; a token-acquisition failure must not spend a delivery attempt, because core answers a bad key with the same shape as an outage of its own")
 	}
 }
 

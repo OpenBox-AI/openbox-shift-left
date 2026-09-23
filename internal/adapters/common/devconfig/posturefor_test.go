@@ -159,8 +159,8 @@ func TestResolveCredentialsForUsesTheNamedToolsOwnContentCapture(t *testing.T) {
 	off := false
 	for _, tool := range []string{"claude-code", "codex"} {
 		if err := WriteEnvFile(mustEnvFilePathFor(t, tool), map[string]string{
-			EnvAPIKeyDirect:    "obx_test_k",
-			EnvAgentPrivateKey: testSeedB64ForPostureTest,
+			EnvAPIKeyDirect:       "obx_test_k",
+			EnvWorkloadPrivateKey: testWorkloadKeyB64ForPostureTest,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -169,14 +169,14 @@ func TestResolveCredentialsForUsesTheNamedToolsOwnContentCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(ccPath, Update{DID: "did:aip:cc"}); err != nil {
+	if err := WriteConfig(ccPath, Update{AgentID: "cccccccc-0000-5000-a000-0000000000cc"}); err != nil {
 		t.Fatal(err)
 	}
 	codexPath, err := DevConfigPathFor("codex")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(codexPath, Update{DID: "did:aip:codex", ContentCapture: &off}); err != nil {
+	if err := WriteConfig(codexPath, Update{AgentID: "dddddddd-0000-5000-a000-0000000000dd", ContentCapture: &off}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,6 +205,6 @@ func mustEnvFilePathFor(t *testing.T, tool string) string {
 	return p
 }
 
-// testSeedB64ForPostureTest is an arbitrary, syntactically valid Ed25519 seed
+// testWorkloadKeyB64ForPostureTest is an arbitrary placeholder workload-key
 // fixture; nothing in this file ever signs with it.
-const testSeedB64ForPostureTest = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+const testWorkloadKeyB64ForPostureTest = "wk_test_not_a_real_key"

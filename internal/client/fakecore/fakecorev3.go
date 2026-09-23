@@ -234,7 +234,7 @@ func (f *Server) serveV3Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issuer := f.srv.URL + "/realms/fake"
+	issuer := f.URL() + "/realms/fake"
 	if down {
 		// A loopback address memhttptest never registers: a real dial that
 		// gets a real connection-refused, so the client's exchange call fails
@@ -290,7 +290,7 @@ func (f *Server) serveV3Token(w http.ResponseWriter, r *http.Request, raw []byte
 		return
 	}
 
-	wantAudience := f.srv.URL + "/realms/fake" + "/protocol/openid-connect/token"
+	wantAudience := f.URL() + "/realms/fake" + "/protocol/openid-connect/token"
 	if err := verifyV3AssertionIndependently(form.Get("client_assertion"), &v3PrivKey.PublicKey, v3ClientIDStr, wantAudience, time.Now()); err != nil {
 		f.writeJSONV3(w, http.StatusBadRequest, map[string]any{"error": "invalid_client", "error_description": err.Error()})
 		return
@@ -363,13 +363,32 @@ func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []b
 	}
 
 	f.mu.Lock()
+	if f.outage {
+		f.scripted++
+		f.mu.Unlock()
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
 	status, verdict := f.script.answer(rec.ToolUseID())
 	if status >= 200 && status < 300 {
 		f.inbox = append(f.inbox, rec)
 	} else {
 		f.scripted++
 	}
+	delay := f.script.Delay
 	f.mu.Unlock()
+
+	// Same knob as the v1 route (fakecore.go's serveEvaluate): a scenario
+	// scripting a slow control plane to exercise a caller's own budget timeout
+	// must get the same behavior regardless of which mode the client under
+	// test speaks.
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

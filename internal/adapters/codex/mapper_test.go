@@ -7,10 +7,28 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-const testDID = "did:aip:7f3c9b2e-0000-5000-a000-000000000001"
+// testAgentID is the fixed v3 agent id every fixture in this package
+// configures (via envAgentID or dev.json's agent_id); testDID is its
+// attribution DID, always derived through devconfig.AttributionDIDFor rather
+// than hardcoded, so a change to the derivation cannot silently desync a
+// fixture from the function it exercises. A site that constructs an Identity
+// directly (never touching devconfig resolution) uses testDID exactly as
+// before; it is still just a did:aip: string.
+const testAgentID = "7f3c9b2e-1111-5000-a000-000000000002"
+
+var testDID = mustTestDID()
+
+func mustTestDID() string {
+	did, err := devconfig.AttributionDIDFor(testAgentID)
+	if err != nil {
+		panic(err)
+	}
+	return did
+}
 
 func testMapper() Mapper {
 	m := NewMapper(Identity{DeveloperDID: testDID})

@@ -17,7 +17,7 @@ func turnEnv(t *testing.T, finopsOn bool) string {
 	t.Helper()
 	spool := t.TempDir()
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(devconfig.EnvRealtime, "0")

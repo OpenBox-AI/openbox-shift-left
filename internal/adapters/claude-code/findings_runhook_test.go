@@ -70,7 +70,7 @@ func nopLogger() *log.Logger { return log.New(&bytes.Buffer{}, "", 0) }
 func TestRunHook_FindingsSurfacedOnPostToolUseAndPrompt(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	seedAdvisories(t, adv,
@@ -102,7 +102,7 @@ func TestRunHook_FindingsSurfacedOnPostToolUseAndPrompt(t *testing.T) {
 func TestRunHook_FindingsOffIsByteIdentical(t *testing.T) {
 	adv, _ := findingsEnv(t, false) // findings OFF
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true, RiskScore: 0.9})
@@ -123,7 +123,7 @@ func TestRunHook_FindingsOffIsByteIdentical(t *testing.T) {
 func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true})
@@ -145,7 +145,7 @@ func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 func TestRunHook_FindingsNeverSurfacedOnObserveOnlyNewHooks(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
 	t.Setenv(envEnforce, "0") // observe-only path; the findings guard is what's under test

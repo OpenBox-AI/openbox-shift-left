@@ -44,7 +44,7 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfig(t)
 			t.Setenv(devconfig.EnvPendingApprovalDir, t.TempDir())
-			t.Setenv(envDID, testDID)
+			t.Setenv(envAgentID, testAgentID)
 			for k, v := range tc.env {
 				t.Setenv(k, v)
 			}
@@ -68,7 +68,7 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 // time.
 func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {
 	isolateConfig(t)
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 
 	derive := func(toolUseID string) client.ApprovalKey {
 		id, err := ResolveIdentity()
@@ -112,7 +112,7 @@ func TestRunRewake_SurvivesAnUnusablePayload(t *testing.T) {
 	t.Setenv(devconfig.EnvPendingApprovalDir, t.TempDir())
 	t.Setenv(devconfig.EnvEnforce, "1")
 	t.Setenv(devconfig.EnvTier2, "1")
-	t.Setenv(envDID, testDID)
+	t.Setenv(envAgentID, testAgentID)
 
 	var wake bytes.Buffer
 	if code := RunRewake(strings.NewReader("not json"), &wake, log.New(&bytes.Buffer{}, "", 0)); code != 0 {

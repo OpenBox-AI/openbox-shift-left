@@ -1,7 +1,6 @@
 package devconfig
 
 import (
-	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -251,9 +250,9 @@ func TestManaged_DocKeyIsNotASetting(t *testing.T) {
 func credsEnvForManagedTest(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv(EnvHome, dir)
-	t.Setenv(EnvDID, "did:aip:"+strings.Repeat("a", 8))
+	t.Setenv(EnvAgentID, "aaaaaaaa-0000-5000-a000-00000000000a")
 	t.Setenv(EnvAPIKeyDirect, "obx_"+strings.Repeat("k", 8))
-	t.Setenv(EnvAgentPrivateKey, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv(EnvWorkloadPrivateKey, "wk_"+strings.Repeat("k", 8))
 }
 
 // TestResolveCredentials_HonoursALockedManagedContentCapture the client's

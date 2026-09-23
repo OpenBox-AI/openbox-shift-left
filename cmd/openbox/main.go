@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"fmt"
 	"net/http"
@@ -47,6 +48,12 @@ type app struct {
 	// a test that could supply answers but not get past RequireTerminal could
 	// not drive the command at all.
 	newPrompt func() (prompt.Prompter, error)
+	// newWorkloadKey generates the RSA key a fresh v3 registration proves
+	// possession of; nil in production, which devinit.Deps.GenerateKey reads
+	// as "use workloadauth.GenerateKey". The seam exists for a test that must
+	// prove the registered key is the one a hook run afterward actually
+	// signs with (e.g. against a fake core with its own fixed identity).
+	newWorkloadKey func() (*rsa.PrivateKey, error)
 
 	gatewayReady func(net.Addr)
 	gatewayCtx   context.Context
@@ -193,12 +200,17 @@ func (a *app) runHook(args []string) (code int) {
 // And it is a developer-facing notice, never an event; nothing here reaches
 // the spool or the enforcement sink.
 func (a *app) warnIfUnconfigured(name string, logger *log.Logger) {
-	if devconfig.ResolveDIDOrEmpty() == "" {
+	did, err := devconfig.ResolveDID()
+	switch {
+	case errors.Is(err, devconfig.ErrLegacyStore):
+		logger.Printf("%s has a legacy (pre-IAMv3) identity; hooks send nothing. Run `openbox init --provider %s`", name, name)
+		return
+	case did == "":
 		logger.Printf("no agent identity for %s on this machine; governance is inactive. Run `openbox init --provider %s`", name, name)
 		return
 	}
-	// A DID alone is not an identity. A half-written store, a restored backup
-	// or a hand-deleted credential file all leave the DID behind, and every
+	// An agent id alone is not an identity. A half-written store, a restored
+	// backup or a hand-deleted credential file all leave it behind, and every
 	// gated call then fails to resolve and fails open -- silently, which is the
 	// state this line exists to explain. Stat, never parse: the hot path does
 	// zero secret I/O (INV-1), and existence is the whole question.
@@ -211,7 +223,7 @@ func (a *app) warnIfUnconfigured(name string, logger *log.Logger) {
 		return
 	}
 	if _, err := os.Stat(envPath); err != nil {
-		logger.Printf("%s has a DID but no credential file at %s; governance is inactive. Run `openbox init --provider %s`",
+		logger.Printf("%s has an agent id but no credential file at %s; governance is inactive. Run `openbox init --provider %s`",
 			name, envPath, name)
 	}
 }
@@ -306,7 +318,7 @@ func (a *app) runDevInit(args []string) int {
 		return code
 	}
 
-	d := devinit.Deps{Installer: inst, Out: a.stdout}
+	d := devinit.Deps{Installer: inst, Out: a.stdout, GenerateKey: a.newWorkloadKey}
 	var tokenFrom string
 	if !plan.reuse {
 		// Adopt first, and before the token check: pasting an agent's own key
@@ -316,7 +328,14 @@ func (a *app) runDevInit(args []string) int {
 		if code != exitOK {
 			return code
 		}
-		if !adopted {
+		if adopted {
+			// adopt just wrote this tool's store; devinit's own reuse check reads
+			// a v3 shape adopt does not write (it is still the pre-v3 DID+seed
+			// prompt, unchanged here -- phase 05 redesigns it), so without this the
+			// pasted identity would fall straight through into a fresh
+			// registration with no registrar wired.
+			o.AssumeExistingStore = true
+		} else {
 			token, tokenSource, code := a.requireControlToken()
 			if code != exitOK {
 				return code

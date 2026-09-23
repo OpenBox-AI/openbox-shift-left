@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -190,8 +189,14 @@ func TestHookWithNoIdentityWarnsAndContinues(t *testing.T) {
 	if !strings.Contains(got, "init --provider claude-code") {
 		t.Errorf("the warning does not name the fix; stderr was:\n%s", got)
 	}
-	if n := strings.Count(got, "init --provider"); n != 1 {
-		t.Errorf("want exactly one warning line, got %d:\n%s", n, got)
+	// Two lines now, not one: warnIfUnconfigured's once-per-run notice, and the
+	// per-event mapper drop (claude-code/hookrun.go), which now also names the
+	// fix because devconfig's missing-agent-id error (the v3 flip) is specific
+	// about the remedy where the old generic "no developer DID configured"
+	// error was not. Both are accurate; a reader who only sees one event's
+	// stderr still gets guidance.
+	if n := strings.Count(got, "init --provider"); n != 2 {
+		t.Errorf("want exactly two warning lines naming the fix, got %d:\n%s", n, got)
 	}
 	// It is a developer-facing notice, not an event: nothing about it may reach
 	// the spool.
@@ -200,6 +205,48 @@ func TestHookWithNoIdentityWarnsAndContinues(t *testing.T) {
 		for _, e := range entries {
 			raw, _ := os.ReadFile(filepath.Join(spool, e.Name()))
 			if strings.Contains(string(raw), "init --provider") {
+				t.Errorf("the warning reached the spool:\n%s", raw)
+			}
+		}
+	}
+}
+
+// TestWarnNamesLegacyStore a stored developer_did means the store predates
+// v3 entirely: warnIfUnconfigured must name it specifically ("legacy
+// (pre-IAMv3) identity; hooks send nothing"), not the generic "no agent
+// identity" line a genuinely unconfigured machine gets -- the two remedies
+// are the same command, but the causes are different and the operator
+// deserves to know which one they are looking at.
+func TestWarnNamesLegacyStore(t *testing.T) {
+	home := isolateHomeOnly(t)
+	spool := perToolHookEnv(t)
+	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"),
+		devconfig.Update{DID: "did:aip:legacy-store"}); err != nil {
+		t.Fatal(err)
+	}
+
+	a, out, errb := testApp(nil)
+	a.stdin = strings.NewReader(`{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"ls"}}`)
+	code := a.run([]string{"hook", "claude-code", "PreToolUse"})
+
+	if code != exitOK {
+		t.Fatalf("hook exit = %d, want 0: a legacy store must never block a tool call", code)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout must stay empty, got %q", out.String())
+	}
+	got := errb.String()
+	if !strings.Contains(got, "legacy (pre-IAMv3) identity") {
+		t.Errorf("the warning does not name the store as legacy; stderr was:\n%s", got)
+	}
+	if !strings.Contains(got, "init --provider claude-code") {
+		t.Errorf("the warning does not name the fix; stderr was:\n%s", got)
+	}
+	entries, err := os.ReadDir(spool)
+	if err == nil {
+		for _, e := range entries {
+			raw, _ := os.ReadFile(filepath.Join(spool, e.Name()))
+			if strings.Contains(string(raw), "legacy") {
 				t.Errorf("the warning reached the spool:\n%s", raw)
 			}
 		}
@@ -249,31 +296,25 @@ func TestAttestProviderMarkerRule(t *testing.T) {
 	}
 }
 
-// TestAttestBindsFromToolMarkers the rule above, through the real hook: the
-// tool whose marker is set is the tool whose signing key ends up on the
-// attestation, and no marker means no attestation rather than a guess.
-func TestAttestBindsFromToolMarkers(t *testing.T) {
+// TestAttestContextSkipsWithoutSeed a v3 keycloak_workload store carries no
+// Ed25519 attestation seed (ruling 1; plan Unresolved Q3), so attestContext
+// always reports ok=false now, whatever tool marker is set: the commit still
+// proceeds, the trailer alone attributes it, exit stays 0, and the skip is
+// explained on stderr rather than silent.
+func TestAttestContextSkipsWithoutSeed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("drives a real git repo; skipped in -short")
 	}
 	for _, tc := range []struct {
 		name   string
 		marker map[string]string
-		want   string
 	}{
-		{"codex", map[string]string{obgit.EnvCodexThreadID: "th-1"}, "codex"},
-		{"claude-code", map[string]string{"CLAUDECODE": "1"}, "claude-code"},
-		{"no marker", map[string]string{}, ""},
+		{"codex", map[string]string{obgit.EnvCodexThreadID: "th-1"}},
+		{"claude-code", map[string]string{"CLAUDECODE": "1"}},
+		{"no marker", map[string]string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Unbound for the no-marker case: a commit hook starts life not
-			// knowing which tool it is acting for, and a fixture that bound one
-			// would answer the question this case exists to ask.
-			if tc.want == "" {
-				isolateHomeUnbound(t)
-			} else {
-				isolateHomeOnly(t)
-			}
+			isolateHomeOnly(t)
 			perToolHookEnv(t)
 			seedCredentials(t, "claude-code", "codex")
 			repo := gitRepoWithACommit(t)
@@ -283,24 +324,14 @@ func TestAttestBindsFromToolMarkers(t *testing.T) {
 				t.Fatalf("hook git post-commit exit = %d; stderr=%q", code, errb.String())
 			}
 
-			note := attestationNote(t, repo)
-			if tc.want == "" {
-				if note != "" {
-					t.Fatalf("an unmarked commit was attested anyway:\n%s", note)
-				}
-				if !strings.Contains(errb.String(), "attestation skipped") {
-					t.Errorf("no attestation and no explanation; stderr was:\n%s", errb.String())
-				}
-				return
+			if note := attestationNote(t, repo); note != "" {
+				t.Fatalf("a v3 store attested anyway (no seed to sign with):\n%s", note)
 			}
-			var att struct {
-				DID string `json:"did"`
+			if !strings.Contains(errb.String(), "attestation skipped") {
+				t.Errorf("no attestation and no explanation; stderr was:\n%s", errb.String())
 			}
-			if err := json.Unmarshal([]byte(note), &att); err != nil {
-				t.Fatalf("parse attestation note %q: %v", note, err)
-			}
-			if want := testDIDFor(t, tc.want); att.DID != want {
-				t.Fatalf("attestation signed as %q, want %s's DID %q", att.DID, tc.want, want)
+			if !strings.Contains(errb.String(), "no attestation signing key") {
+				t.Errorf("the skip reason does not name a missing signing key (commit is still attributed by its trailer); stderr was:\n%s", errb.String())
 			}
 		})
 	}
@@ -1106,8 +1137,8 @@ func TestFlushGatePassesOnAnEnvironmentOnlyIdentity(t *testing.T) {
 	}
 	// The identity is entirely in the environment; no credential file exists.
 	t.Setenv(devconfig.EnvAPIKeyDirect, "obx"+"_from_the_environment")
-	t.Setenv(devconfig.EnvAgentPrivateKey, testSeedB64)
-	t.Setenv(devconfig.EnvDID, testDIDFor(t, "claude-code"))
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, testWorkloadKeyOnce)
+	t.Setenv(devconfig.EnvAgentID, testAgentIDFor(t, "claude-code"))
 	for _, tool := range []string{"claude-code", "codex"} {
 		if _, err := os.Stat(filepath.Join(home, tool, ".env")); !os.IsNotExist(err) {
 			t.Fatalf("the fixture has a credential file for %s; this case would prove nothing", tool)

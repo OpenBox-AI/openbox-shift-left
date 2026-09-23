@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
@@ -14,6 +13,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
 // serveVerdictServer is serveVerdict's sibling that hands the server back, so a
@@ -21,11 +21,14 @@ import (
 // assert the evaluate server was never called.
 func serveVerdictServer(t *testing.T, verdictJSON string) *fakecore.Server {
 	t.Helper()
-	seedB64 := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	f := fakecore.New(t, fakecore.Script{Default: verdictJSON, SeedB64: seedB64})
+	f := fakecore.New(t, fakecore.Script{Default: verdictJSON})
 	t.Setenv("OPENBOX_BASE_URL", f.URL())
-	t.Setenv("OPENBOX_API_KEY", "obx_test_key")
-	t.Setenv("OPENBOX_ED25519_SEED", seedB64)
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
 	return f
 }
 
