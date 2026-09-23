@@ -12,6 +12,7 @@ import (
 	"time"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
@@ -131,8 +132,11 @@ func (m *Mapper) toolNameOrDefault() string {
 }
 
 // defaultSessionAttr is what an unset Mapper.sessionAttr resolves to -- the
-// attribute every mapper read before this field existed.
-const defaultSessionAttr = "session.id"
+// attribute every mapper read before this field existed. Named through
+// sessionkey rather than as a second copy of the literal; the
+// value is unchanged (sessionkey.OTelAttr's own default), so every existing
+// caller stays byte-identical.
+var defaultSessionAttr = sessionkey.OTelAttr(sessionkey.ClaudeCode)
 
 func (m *Mapper) sessionAttrOrDefault() string {
 	if m.sessionAttr == "" {

@@ -12,11 +12,16 @@ import (
 	"time"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
-const sessionHeader = "X-Claude-Code-Session-Id"
+// sessionHeader named through sessionkey rather than as a
+// second copy of the literal: this emitter is Claude Code's own proxy-lane
+// producer, so it reads that provider's one cell of the table. The value is
+// unchanged, so every existing test here stays byte-identical.
+var sessionHeader = sessionkey.ProxyHeader(sessionkey.ClaudeCode)
 
 // agentHeader unlike the session header it is conditional; Claude Code emits
 // it only when an agent context exists; so its absence is normal and must

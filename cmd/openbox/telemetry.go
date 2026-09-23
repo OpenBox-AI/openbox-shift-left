@@ -14,6 +14,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
@@ -163,7 +164,7 @@ func (a *app) runTelemetry(args []string) int {
 		codexElectedNow := func() bool { return codexRecording() && codexElect() }
 		codexEmitter = &telemetryemit.Emitter{
 			Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: codexElectedNow}).
-				WithSessionAttr("conversation.id").WithToolName(string(provider.Codex)),
+				WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)),
 			DID:  func() string { return identities[string(provider.Codex)].DID },
 			Warn: logger.Printf,
 			Deliver: func(ctx context.Context, ev client.DevEvent) bool {
