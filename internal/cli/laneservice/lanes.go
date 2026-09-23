@@ -1,6 +1,9 @@
 package laneservice
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 var grace = strconv.Itoa(StopTimeout) + "s"
 
@@ -101,6 +104,29 @@ func (s Spec) WithCodexSettings(configPath string) Spec {
 	args := make([]Arg, len(s.Args), len(s.Args)+2)
 	copy(args, s.Args)
 	s.Args = append(args, Literal(CodexSettingsFlag), Value(configPath))
+	return s
+}
+
+// ProvidersFlag carries the transport lane's provider union into the unit,
+// mirroring transport.Config.Providers' own nil/empty distinction: a caller
+// passing nil gets s back with its Args untouched (today's default, unit
+// args byte-identical for every existing test), and one passing a non-nil,
+// possibly zero-length, slice gets an explicit --providers value -- "" for
+// zero providers, so a machine that uninstalled every governed tool starts a
+// lane that intercepts nothing rather than falling back to claude-code.
+const ProvidersFlag = "--providers"
+
+// WithProviders returns a copy of s whose unit carries the provider union as
+// a comma-separated value, appended after whatever WithEnv/withVerbose
+// already built -- the same shape WithCodexSettings uses for its own
+// optional trailing flag.
+func (s Spec) WithProviders(providers []string) Spec {
+	if providers == nil {
+		return s
+	}
+	args := make([]Arg, len(s.Args), len(s.Args)+2)
+	copy(args, s.Args)
+	s.Args = append(args, Literal(ProvidersFlag), Value(strings.Join(providers, ",")))
 	return s
 }
 

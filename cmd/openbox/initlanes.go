@@ -52,6 +52,10 @@ type laneReport struct {
 	settings string
 	// addrs is each installed lane's address, for the one summary row.
 	addrs map[string]string
+	// systemPAC is the transport lane's own system PAC/CA-trust outcome
+	// (systempac.go), zero-value (Class == "") whenever the transport lane
+	// was not installed at all or never reached its own activate step.
+	systemPAC activation.Outcome
 }
 
 // row prints one label/value line of the install report. The whole report is
@@ -137,6 +141,7 @@ func (r laneReport) print(a *app) {
 		// transport lane that did not start would be a false disclosure.
 		a.note(r.captureNotes()...)
 		a.note("What leaves this machine is gated by content_capture.")
+		r.printSystemPAC(a)
 	}
 	for _, lane := range r.failed {
 		a.row("NOT UP", "%s; see the warning above. `openbox doctor` reports where this", lane)
@@ -239,6 +244,7 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 			report.installed = append(report.installed, "transport")
 			report.addrs["transport"] = req.transportAddr
 			report.keys += keys
+			report.systemPAC = a.lastSystemPACOutcome
 		}
 	}
 	return report
@@ -324,7 +330,13 @@ func (a *app) runRemovals(home string, req removalRequest) removalResult {
 	// a live transport lane into a total TLS failure rather than a removable one.
 	if req.purge {
 		if res.ok() {
-			a.purgeLaneData(home, req.uninstall)
+			// System PAC deactivation (restore scopes, untrust, delete cert by
+			// SHA-1) BEFORE purgeLaneData deletes the CA files: CLAUDE.md's
+			// "trust-before-PAC ordering" requires untrusting a CA before its
+			// files are gone. A machine that never activated it has no record
+			// and this is a no-op.
+			keepRecord := a.deactivateSystemPAC(home)
+			a.purgeLaneData(home, req.uninstall, keepRecord)
 		} else {
 			a.row("kept", "the activation record and the CA: a lane is still routed, and")
 			a.row("", "that record is the only thing that can restore its env keys.")
@@ -356,7 +368,11 @@ func isUnsupportedPlatform(err error) bool {
 // purgeLaneData deletes the artifacts the lanes created. Nothing outside
 // ~/.openbox is ever touched here; the settings file is restored by the
 // activation record, key by key, and never truncated.
-func (a *app) purgeLaneData(home string, uninstalling bool) {
+// keepRecord leaves the activation record in place (the CA files still go:
+// a trusted certificate without its key cannot mint anything). It is set
+// when the system proxy or CA trust could not be restored, because the
+// record is then the only description of what is still on the machine.
+func (a *app) purgeLaneData(home string, uninstalling, keepRecord bool) {
 	openboxHome, err := devconfig.Home()
 	if err != nil {
 		fmt.Fprintf(a.stderr, "warning: cannot resolve the OpenBox config dir, so its artifacts were left in place: %v\n", err)
@@ -368,7 +384,12 @@ func (a *app) purgeLaneData(home string, uninstalling bool) {
 		laneservice.Telemetry("", "", false).LogPath(home),
 		laneservice.Transport("", "", false).LogPath(home),
 		gatewayservice.LogPath(home),
-		activation.RecordPath(home),
+	}
+	if keepRecord {
+		a.row("kept", "%s: the system proxy and CA trust were not restored;", activation.RecordPath(home))
+		a.row("", "re-run `openbox uninstall` to retry, or run the commands above.")
+	} else {
+		paths = append(paths, activation.RecordPath(home))
 	}
 	for _, path := range paths {
 		if !fileExists(path) {

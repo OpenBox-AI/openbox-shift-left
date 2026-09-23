@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"log"
 	"net/http"
@@ -49,9 +50,20 @@ func (a *app) runTransport(args []string) int {
 	verbose := fs.Bool("verbose", false, "report every CONNECT and the capture outcome of every relayed call")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to the governed tool's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
+	providersFlag := fs.String("providers", "", "comma-separated provider names whose host-table union this lane intercepts and PACs. Absent keeps transport.Config's own default (today's claude-code-only lane); passed with an empty value intercepts nothing, for a machine with every provider uninstalled")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
+	// fs.Visit only visits a flag that appeared on the command line, which is
+	// what tells "absent" (nil Providers, the daemon's own default) apart
+	// from "--providers ''" (an explicitly empty union): *providersFlag alone
+	// cannot distinguish the two, since both leave it at "".
+	providersSeen := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "providers" {
+			providersSeen = true
+		}
+	})
 
 	logger := log.New(a.stderr, "", 0)
 
@@ -140,7 +152,7 @@ func (a *app) runTransport(args []string) int {
 	if *verbose {
 		opts = append(opts, transport.WithVerbose(logger.Printf))
 	}
-	p, err := transport.New(transport.Config{Addr: *addr}, ca, em, opts...)
+	p, err := transport.New(transport.Config{Addr: *addr, Providers: providersFromFlag(providersSeen, *providersFlag)}, ca, em, opts...)
 	if err != nil {
 		return a.errorf("%v", err)
 	}
@@ -219,6 +231,27 @@ func (a *app) runTransport(args []string) int {
 	statusPersister.Flush(pool.Dropped())
 	logger.Printf("openbox transport: stopped; delivery pool dropped=%d", pool.Dropped())
 	return exitOK
+}
+
+// providersFromFlag turns --providers' raw value into transport.Config's own
+// nil/present-but-empty distinction: seen is false when the flag never
+// appeared on argv (nil, so Config.Validate applies its claude-code
+// default), and true whenever it did, even with an empty or all-blank value
+// (a non-nil, zero-length slice, so Validate intercepts nothing rather than
+// defaulting). Entries are trimmed and blanks dropped so a trailing comma or
+// stray space in a hand-typed unit does not turn into an empty provider
+// name Config has to reject.
+func providersFromFlag(seen bool, raw string) []string {
+	if !seen {
+		return nil
+	}
+	out := []string{}
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // gatedFn is the gated-class selector transport.WithGate takes: every POST,

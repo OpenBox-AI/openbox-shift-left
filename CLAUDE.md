@@ -143,8 +143,17 @@ bound): containment is the per-provider intercept allowlist
 (`internal/transport/hosttable.go`), not the certificate. `CA.CanIssueFor` is
 what keeps a machine still holding an older constrained CA blind-tunnelling a
 host outside that constraint instead of failing the handshake; `openbox init`
-does not yet re-issue that legacy CA itself, only `doctor` names the finding.
-The relay's cross-lane HALT latch resolves a session off
+now re-issues that legacy CA itself (`internal/transport/careissue.go`,
+before the transport unit reinstalls), idempotent, and `doctor` still names
+the finding until it runs. On macOS, `openbox init` also activates a
+system-wide PAC and trusts this CA in the System keychain
+(`cmd/openbox/systempac.go`, `internal/cli/activation/sysmacos.go`): **trust
+the CA and read it back before writing the PAC** (a distrusted leaf makes `;
+DIRECT` meaningless), and **record every prior value before the first
+privileged write**, with a `Pending` marker, so a killed run leaves something
+the next `init` can reconcile rather than stranding a half-applied trust/PAC
+pair. Both orderings are invariants, not preferences. The relay's cross-lane
+HALT latch resolves a session off
 `sessionkey.ResolveProxy`'s carrier header (Claude Code's
 `X-Claude-Code-Session-Id`; Codex's thread id off `x-client-request-id`,
 never its `session-id` header, which is a prompt-cache key), so that header

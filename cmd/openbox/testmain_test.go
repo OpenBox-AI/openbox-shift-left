@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 )
 
@@ -108,6 +110,23 @@ func refuseTheRealSupervisor() {
 	uninstallLaneUnitFn = func(laneservice.Spec, string, string) error { panic(escaped + " (uninstallLaneUnit)") }
 	installUnitFn = func(string, string, string, string, string, bool) error { panic(escaped + " (installUnit)") }
 	uninstallUnitFn = func(string, string) error { panic(escaped + " (uninstallUnit)") }
+	// The system PAC step shells to sudo, networksetup and security; refused by
+	// default for the same reason as everything above. fakeSupervisor and
+	// newLaneHarness are the only fixtures that opt back in (with a no-op, not
+	// a real Runner), and a dedicated systempac_test.go test restores the real
+	// activation functions and drives systemPACRunner with its own fake.
+	activateSystemPACFn = func(context.Context, activation.Runner, activation.Plan) (activation.Outcome, error) {
+		panic(escaped + " (activateSystemPAC)")
+	}
+	deactivateSystemPACFn = func(context.Context, activation.Runner, activation.SystemEntry) (activation.Report, error) {
+		panic(escaped + " (deactivateSystemPAC)")
+	}
+	liveSystemPACFn = func(context.Context, activation.Runner) ([]activation.ScopeState, error) {
+		panic(escaped + " (liveSystemPAC)")
+	}
+	systemPACRunner = func(context.Context, string, ...string) ([]byte, error) {
+		panic(escaped + " (systemPACRunner)")
+	}
 }
 
 func filesUnder(root string, skipDirs []string) []string {

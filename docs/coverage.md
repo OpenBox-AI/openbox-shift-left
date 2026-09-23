@@ -230,9 +230,9 @@ feeding both the allowlist and a `GET /proxy.pac` endpoint the relay now
 serves; the CA is unconstrained (owner ruling 2026-09-22). A machine still
 holding an older, constrained CA keeps working — it tunnels rather than
 intercepts any host it cannot mint for, and `openbox doctor` names those hosts
-as a "legacy constrained CA" finding until it is re-issued, which `init` does
-not yet do automatically. See [Architecture](architecture.md)'s decision
-record.
+as a "legacy constrained CA" finding until it is re-issued, which a plain
+`init` re-run now does automatically. See [Architecture](architecture.md)'s
+decision record.
 
 The `:otel:` (telemetry) lane now has a Codex arm too: `init --provider codex`
 writes an OpenBox-owned `[otel]` block into `$CODEX_HOME/config.toml`
@@ -295,7 +295,7 @@ than a softer version of the same absence:
 | Token-count probe told apart from a completion, and then dropped | ✅ classified `token_count`, never spooled | ✅ classified `token_count`, never spooled | n/a; this lane sees no probes |
 | Refuse a call on a verdict | ⚠️ written, **dormant** | ✅ **latch-only** (cross-lane HALT, no `/evaluate` round trip); server-verdict refusal still **dormant** (§5) | ❌ impossible; out of path |
 | Terminal CLI | ✅ | ✅ | ✅ |
-| **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed**; not routed, and now **detected** as unrouted | ⬜ intended, **unconfirmed** |
+| **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed** on Linux/Windows; on **macOS**, ROUTED through the relay via the system PAC (P1) but produces **no governance event** (headerless call, no chat mapper yet) | ⬜ intended, **unconfirmed** |
 | Subscription-OAuth session | ⬜ open | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
 | Suppressible by the governed tool | no; in path | no; in path | **yes**; the tool reports its own calls |
 | Strongest evidence to date | socket-verified relay; no live stack | **replay** (bind-free) | **replay** (bind-free), intake's JSON path crossed by a synthetic export, **protobuf path; what production uses; untested** |
@@ -327,27 +327,28 @@ against a real client; the desktop cell is intent, and only a run against a
 live stack and a real desktop client can turn it into a measurement. Nothing in
 this repository can. Do not read "built for it" as "covers it".
 
-**The desktop app is still not routed, and that is now visible instead of
-silent.** Observed live: the desktop process holds **direct** `:443` connections
-to the provider while the `claude` CLI holds connections only to the relay's
-loopback port. Its model calls are not relayed, not captured, and produce no
-governance events. What changed is only the reporting: `openbox doctor` names a
-desktop app that is running and not routed through the relay, and words it as a
-**coverage gap** rather than as bypass -- a machine where nobody intended desktop
-coverage looks identical to one being evaded, so accusing would be dishonest.
+**On macOS, the desktop app and browser sessions are now ROUTED, but still not
+RECORDED.** `openbox init` activates a system-wide PAC once the transport lane
+is up (`cmd/openbox/systempac.go`, `internal/cli/activation/sysmacos.go`): it
+sets the PAC URL on every enabled network service and trusts the relay's CA in
+the System keychain. P1 measured that Claude Desktop and Chrome both follow
+that PAC on macOS 26, so a CONNECT from either now reaches the relay rather
+than going direct -- routing is no longer the gap it was. What is still
+missing is the **recording**: the relay's capture path keys on a session-id
+header (`X-Claude-Code-Session-Id`) the CLI sends and desktop/browser calls do
+not, so those calls are relayed and TLS-terminated but never mapped to a
+governance event -- an owner decision (plan `three-lanes-one-session`, item 7)
+accepted this gap explicitly rather than blocking on it, pending the headerless
+chat mapper. `openbox doctor` still cannot claim desktop coverage; it can now
+only say the traffic reaches the relay, not that anything was recorded from it.
 
-Routing it is **not implemented**, deliberately rather than by omission. How the
-desktop app resolves proxy settings and a trust anchor is unmeasured: it is
-Electron, so an embedded Chromium network stack may read the OS trust store and
-ignore `NODE_EXTRA_CA_CERTS` entirely, and if it honours only the system proxy
-then routing it means touching machine-wide network configuration -- a different
-blast radius from an env block in a dotfile, and arguably MDM territory rather
-than a developer command. Writing a router for a mechanism nobody has measured
-would be worse than writing none. The cheapest path to the answer is recovering
-*how* the 2026-08-27 `openbox-logger` run routed desktop successfully, since that
-measurement has already been paid for once. The detection is macOS-only; Windows
-is in scope for discovery and not for implementation, and `doctor` says
-"unknown", never "covered".
+Linux and Windows keep the pre-existing gap in full: routing is **not
+implemented** there either, deliberately rather than by omission -- their
+P5-linux/P5-win probes have not run, so `openbox init` reports "not yet
+supported on this OS in this build" and touches no OS-level proxy or trust
+setting on either platform. How each browser/desktop stack resolves its proxy
+settings and trust anchor there remains unmeasured, and `doctor` says
+"unknown", never "covered", for both.
 
 **Environment routing is also not durable against the tool that owns the file**,
 and that too is now detected rather than assumed. Observed during one planning

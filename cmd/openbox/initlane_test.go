@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -37,12 +38,33 @@ func newLaneHarness(t *testing.T) *laneHarness {
 	origListen, origFree := waitForListenerFn, waitForPortFreeFn
 	origInstall, origUninstall := installLaneUnitFn, uninstallLaneUnitFn
 	origGwInstall, origGwUninstall := installUnitFn, uninstallUnitFn
+	origActivatePAC, origDeactivatePAC, origLivePAC, origPACRunner :=
+		activateSystemPACFn, deactivateSystemPACFn, liveSystemPACFn, systemPACRunner
 	t.Cleanup(func() {
 		run, currentUID = origRun, origUID
 		waitForListenerFn, waitForPortFreeFn = origListen, origFree
 		installLaneUnitFn, uninstallLaneUnitFn = origInstall, origUninstall
 		installUnitFn, uninstallUnitFn = origGwInstall, origGwUninstall
+		activateSystemPACFn, deactivateSystemPACFn, liveSystemPACFn, systemPACRunner =
+			origActivatePAC, origDeactivatePAC, origLivePAC, origPACRunner
 	})
+
+	// No-op by default, matching fakeSupervisor's own reasoning: this harness
+	// backs the lower-level setupTransport/setupTelemetry tests, none of
+	// which are about the system PAC step. A dedicated test restores the real
+	// functions and drives systemPACRunner (systempac_test.go).
+	activateSystemPACFn = func(context.Context, activation.Runner, activation.Plan) (activation.Outcome, error) {
+		return activation.Outcome{}, nil
+	}
+	deactivateSystemPACFn = func(context.Context, activation.Runner, activation.SystemEntry) (activation.Report, error) {
+		return activation.Report{}, nil
+	}
+	liveSystemPACFn = func(context.Context, activation.Runner) ([]activation.ScopeState, error) {
+		return nil, nil
+	}
+	systemPACRunner = func(context.Context, string, ...string) ([]byte, error) {
+		return nil, errors.New("newLaneHarness: systemPACRunner should not be invoked; this fixture stubs activateSystemPACFn/deactivateSystemPACFn/liveSystemPACFn instead")
+	}
 
 	currentUID = func() string { return "501" }
 	// See fakeSupervisor: the test binary is a go-build artifact, which

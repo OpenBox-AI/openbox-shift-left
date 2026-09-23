@@ -266,7 +266,9 @@ func (a *app) setupCodexTelemetry(homeDir, addr string, verbose bool) (int, erro
 }
 
 func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
-	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose).WithEnv(a.laneUnitEnv())
+	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose).
+		WithProviders(transportSystemPACProviders).
+		WithEnv(a.laneUnitEnv())
 	binPath, err := a.selfPath()
 	if err != nil {
 		return 0, err
@@ -277,6 +279,13 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
 	}
 	caPath, _ := transport.CAPaths(openboxHome)
 	settings := claudeSettingsPath(homeDir)
+
+	// Reset per call: setupTransport's own activate closure is the only writer,
+	// and only when it is actually reached (readiness proven, env keys
+	// written) -- see runSystemPACActivation's own doc for why a listen
+	// failure or a rollback must never touch this. A stale value from an
+	// earlier call in the same process must never be read as this one's.
+	a.lastSystemPACOutcome = activation.Outcome{}
 
 	return a.setupLane(laneInstall{
 		label:         "transport",
@@ -299,6 +308,12 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
 			if err != nil {
 				return activated{}, err
 			}
+			// The system PAC step, strictly after the env keys above: a failure
+			// here must leave a working, env-routed transport lane rather than
+			// rolling back what already succeeded. Its outcome is read back by
+			// setupLanes via a.lastSystemPACOutcome once this call returns; see
+			// setupTransport's own reset of that field.
+			a.lastSystemPACOutcome = a.runSystemPACActivation(homeDir, addr, caPath)
 			return activated{keys: len(keys), replaced: res.Replaced}, nil
 		},
 	})

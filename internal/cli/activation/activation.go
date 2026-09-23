@@ -60,6 +60,14 @@ type Entry struct {
 type Record struct {
 	Schema string          `json:"schema"`
 	Lanes  map[Lane]*Entry `json:"lanes"`
+	// System is the machine-wide PAC/CA-trust activation (systemproxy.go), a
+	// sibling to Lanes rather than a fourth lane: it is not settings-file
+	// scoped and its Deactivate shape (per-service prior state, one CA trust
+	// entry) does not fit Entry. A record written before this field existed
+	// unmarshals it as nil -- encoding/json leaves an absent key at its zero
+	// value -- so no schema bump and no migration step were needed for a
+	// machine's first system-scope activation to start from a clean nil.
+	System *SystemEntry `json:"system,omitempty"`
 }
 
 // Applied reports what an activation changed.

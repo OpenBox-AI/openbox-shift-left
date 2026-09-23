@@ -591,12 +591,28 @@ byte-for-byte, and `openbox uninstall` removes only the block it owns.
 | `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` an older gateway install displaced, so retiring or removing it restores your org's own relay instead of deleting it. A URL, no credential |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
 | `telemetry-delivery-status.json`, `transport-delivery-status.json` | `~/.openbox/` | how many of that lane's own model-call records its in-process delivery pool has dropped, and since when; `openbox doctor` reads this for its dropped-record row. No content, no credentials |
-| `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. No credentials |
+| `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. **On macOS**, it also carries a `system` entry once `openbox init` activates the system PAC: which network services it touched and their prior auto-proxy URL/state, and the CA's SHA-1 and keychain path — the record `openbox uninstall` restores from before untrusting and deleting the CA. No credentials |
 | `claude-code-prior-settings.json` | `~/.openbox/` | `0600`. What Claude Code's `showThinkingSummaries` held before `init` forced it: whether the key was there at all, and its raw JSON value, so a removal puts back exactly those bytes rather than a boolean OpenBox reinterpreted. One key, no credential. It is a settings key rather than an environment key, which is why it is not in `activation.json` |
-| `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted. It has no more at-rest protection than `.env` does: anything running as you can read it. It is generated **unconstrained** (owner ruling 2026-09-22, reversing an earlier name-constraint bound), so with it a leaked key can mint a certificate for **any** site this machine is made to trust the CA for; containment is the per-provider intercept allowlist instead of the certificate — see [Architecture](architecture.md)'s decision record. A machine still holding an older, constrained CA keeps working: it tunnels rather than intercepts any host it cannot mint for, and `openbox doctor` names those hosts as a "legacy constrained CA" finding until the CA is re-issued (deleting both files and reinstalling; `openbox init` does not yet re-issue one automatically). `openbox uninstall` deletes it rather than leaving it behind a relay that is gone |
+| `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted. It has no more at-rest protection than `.env` does: anything running as you can read it. It is generated **unconstrained** (owner ruling 2026-09-22, reversing an earlier name-constraint bound), so with it a leaked key can mint a certificate for **any** site this machine is made to trust the CA for; containment is the per-provider intercept allowlist instead of the certificate — see [Architecture](architecture.md)'s decision record. A machine still holding an older, constrained CA keeps working: it tunnels rather than intercepts any host it cannot mint for, and `openbox doctor` names those hosts as a "legacy constrained CA" finding until the CA is re-issued; a plain `openbox init` re-run now does that itself. `openbox uninstall` untrusts the CA (macOS: removes it from the System keychain by SHA-1 first) then deletes it rather than leaving it behind a relay that is gone |
 
 | File | What it holds |
 |---|---|
+## macOS: outside these directories
+
+`openbox init` on macOS also changes two things that are not files under
+`~/.openbox/` at all, both reversed by `openbox uninstall`:
+
+- **A System keychain trust entry** for the transport CA (`security
+  add-trusted-cert -d -r trustRoot`), so desktop apps and browser sessions
+  trust it too, not only the tool `NODE_EXTRA_CA_CERTS` points at.
+- **Each enabled network service's auto-proxy setting** (`networksetup
+  -setautoproxyurl`/`-setautoproxystate`), pointed at the relay's PAC
+  endpoint. Whatever was there before (including "off") is recorded in
+  `activation.json`'s `system` entry and restored on uninstall.
+
+Neither happens on Linux or Windows yet, and neither happens on macOS without
+your `sudo` password, asked once per `openbox init` run that needs it.
+
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories*; never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |

@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -171,12 +173,36 @@ func fakeSupervisor(t *testing.T, openboxHome string) {
 	origProbe, origListen, origFree := portOccupied, waitForListenerFn, waitForPortFreeFn
 	origInstall, origUninstall := installLaneUnitFn, uninstallLaneUnitFn
 	origGwInstall, origGwUninstall := installUnitFn, uninstallUnitFn
+	origActivatePAC, origDeactivatePAC, origLivePAC, origPACRunner :=
+		activateSystemPACFn, deactivateSystemPACFn, liveSystemPACFn, systemPACRunner
 	t.Cleanup(func() {
 		run, currentUID = origRun, origUID
 		portOccupied, waitForListenerFn, waitForPortFreeFn = origProbe, origListen, origFree
 		installLaneUnitFn, uninstallLaneUnitFn = origInstall, origUninstall
 		installUnitFn, uninstallUnitFn = origGwInstall, origGwUninstall
+		activateSystemPACFn, deactivateSystemPACFn, liveSystemPACFn, systemPACRunner =
+			origActivatePAC, origDeactivatePAC, origLivePAC, origPACRunner
 	})
+
+	// The system PAC step is a no-op by default: none of this package's ~30
+	// init/uninstall invocations are ABOUT it, and every one of them still
+	// reaches setupTransport's own activate closure (once the CA below is
+	// seeded), which would otherwise authorize for real and shell out to
+	// sudo. A test that IS about this step restores the real
+	// activation.ActivateSystemPAC/DeactivateSystemPAC/LiveSystemPAC and
+	// drives systemPACRunner itself (see systempac_test.go).
+	activateSystemPACFn = func(context.Context, activation.Runner, activation.Plan) (activation.Outcome, error) {
+		return activation.Outcome{}, nil
+	}
+	deactivateSystemPACFn = func(context.Context, activation.Runner, activation.SystemEntry) (activation.Report, error) {
+		return activation.Report{}, nil
+	}
+	liveSystemPACFn = func(context.Context, activation.Runner) ([]activation.ScopeState, error) {
+		return nil, nil
+	}
+	systemPACRunner = func(context.Context, string, ...string) ([]byte, error) {
+		return nil, fmt.Errorf("fakeSupervisor: systemPACRunner should not be invoked; this fixture stubs activateSystemPACFn/deactivateSystemPACFn/liveSystemPACFn instead")
+	}
 
 	run = func(string, ...string) error { return nil }
 	currentUID = func() string { return "501" }

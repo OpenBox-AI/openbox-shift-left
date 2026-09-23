@@ -351,10 +351,22 @@ Being precise here is part of the product.
   OTLP **telemetry** receiver (`:otel:`) and an in-path CONNECT/TLS
   **transport** relay (`:proxy:`) alongside the hooks; `openbox uninstall` backs
   every lane out. A per-provider host table drives both the intercept
-  allowlist and a `GET /proxy.pac` endpoint the relay now serves (below); no
-  system PAC is activated at the OS level yet, so nothing today points a
-  browser or tool's proxy setting at it — that activation is separate, later
-  work. What that buys, and what it does not:
+  allowlist and a `GET /proxy.pac` endpoint the relay now serves (below). **On
+  macOS**, `openbox init` activates that PAC at the OS level itself, once the
+  transport lane is up and its env keys are written (`cmd/openbox/systempac.go`,
+  `internal/cli/activation/sysmacos.go`): one `sudo` authentication in the TTY,
+  trust the CA in the System keychain and read it back, then set the PAC URL
+  on every *enabled* network service and read that back too — record-before-write,
+  with a `Pending` marker so a killed run can be reconciled, and any failure
+  after a scope's PAC was set rolls that scope back. Declining, or having no
+  controlling terminal at all, leaves the lane installed and env-routed with
+  no half-state; `openbox doctor` reports the live per-scope state and any
+  drift, and `openbox uninstall` restores every scope and untrusts the CA
+  before deleting it. A second `openbox init` that finds its own prior
+  activation still matching the live state re-prompts for nothing. **Linux and
+  Windows report "not yet supported on this OS in this build" and make no OS
+  write at all** — their P5-linux/P5-win probes have not run. What that buys,
+  and what it does not:
   - **The evidence is replay, not operation.** Real recorded traffic runs
     through the
     shipped code path on a host that cannot bind a socket, with the relay's upstream
@@ -424,18 +436,31 @@ Being precise here is part of the product.
     controls: `0600` file permission on macOS/Linux (no at-rest protection on
     Windows), `openbox uninstall` deletes the CA rather than leaving a trusted
     signing key behind a relay that is gone, the relay binds loopback-only, and
-    trust today is env-scoped (`NODE_EXTRA_CA_CERTS` written into the tool's
-    settings environment, `internal/cli/activation/keys.go`) rather than a
-    system keychain.
+    trust for the governed tool itself is env-scoped (`NODE_EXTRA_CA_CERTS`
+    written into the tool's settings environment,
+    `internal/cli/activation/keys.go`). **On macOS only**, `openbox init` also
+    trusts the same CA in the System keychain
+    (`security add-trusted-cert -d -r trustRoot`) as part of activating the
+    system PAC (above), which is a second, wider blast radius the install
+    report discloses every time activation is attempted or active: desktop
+    apps *and* browser sessions on the union's hosts are now TLS-terminated by
+    this relay too, using the same unconstrained key; a stopped relay still
+    leaves the PAC's `; DIRECT` fallback in place, which is not egress
+    control; and macOS may raise a second, separate confirmation for the trust
+    change beyond the one `sudo` prompt. Linux and Windows keep env-scoped
+    trust only, for now — no system keychain, no browser coverage.
     **A machine still holding an old constrained CA keeps working**: `CA.
     CanIssueFor` gates `Proxy.intercepts`, so a host the legacy CA cannot mint
     for stays blind-tunnelled rather than failing the handshake, even after the
     allowlist widens to name it. `openbox doctor` reports this as a "legacy
-    constrained CA" finding naming the affected hosts and the remedy that works
-    today: delete both CA files, re-run `openbox init` (which generates a fresh,
-    unconstrained CA because `LoadOrCreateCA` only creates one when both files
-    are absent), then restart the tool so it re-reads `NODE_EXTRA_CA_CERTS`.
-    Automatic re-issue on `init` is planned, not shipped.
+    constrained CA" finding naming the affected hosts and the remedy: re-run
+    `openbox init`, which now re-issues the CA itself
+    (`internal/transport/careissue.go`'s `ReissueIfNeeded`, called before the
+    transport unit is reinstalled) — deleting both legacy files and generating
+    a fresh, unconstrained pair under the same filenames — then restart the
+    tool so it re-reads `NODE_EXTRA_CA_CERTS`. Idempotent: a machine whose CA
+    already needed no re-issue, or that already went through it once, is
+    untouched on every later `init`.
   - **The lane does not chain through a corporate proxy.** `transport.New`
     clears the
     six proxy environment variables in its constructor, because a daemon that

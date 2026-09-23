@@ -9,6 +9,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
@@ -55,6 +56,13 @@ type app struct {
 
 	transportReady func(addr string)
 	transportCtx   context.Context
+
+	// lastSystemPACOutcome is setupTransport's own out-of-band return for its
+	// system PAC activation step (systempac.go): written by its activate
+	// closure, read immediately after by setupLanes. A dedicated field rather
+	// than widening setupTransport's own (int, error) signature, which ~20
+	// call sites across this package's tests share unchanged.
+	lastSystemPACOutcome activation.Outcome
 }
 
 func defaultApp() *app {
@@ -355,6 +363,15 @@ func (a *app) runDevInit(args []string) int {
 	// regression.
 	var laneReport laneReport
 	if laneCapable(o.Provider) {
+		// Before the transport unit is (re)installed: a legacy constrained CA
+		// re-issued AFTER the unit started would leave a daemon serving a
+		// certificate no longer on disk. Only the transport lane (Claude Code
+		// only) ever uses this CA at all.
+		if provider.Name(o.Provider) == provider.ClaudeCode {
+			if err := a.reissueLegacyCAIfNeeded(); err != nil {
+				fmt.Fprintf(a.stderr, "warning: could not re-issue the legacy CA: %v\n", err)
+			}
+		}
 		laneReport = a.setupLanes(laneRequest{
 			telemetry: true,
 			// Claude Code only: Codex's transport/proxy arm is the system PAC,

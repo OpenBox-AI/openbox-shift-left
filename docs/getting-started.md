@@ -413,6 +413,60 @@ new token.
 openbox doctor   # which lane is elected and why, and whether it is listening
 ```
 
+### System-wide PAC and CA trust (macOS)
+
+Once the transport lane above is listening, `openbox init` on macOS goes one
+step further: it activates a system-wide PAC and trusts the relay's CA in the
+System keychain, so desktop apps and browser sessions on the same governed
+hosts are covered too, not only the CLI you ran `init` from. Linux and Windows
+are not there yet; `init` prints "not yet supported on this OS in this build"
+and touches nothing at the OS level on those platforms.
+
+What happens, in order: **trust the CA and read it back first**, then set the
+PAC URL (`http://127.0.0.1:<port>/proxy.pac`) on every *enabled* network
+service and read that back too. You will be asked for your **sudo password
+once**; macOS may ask **once more** to confirm the trust change. Every prior
+value is recorded before the first write, so a killed run leaves something
+`openbox init` can reconcile on the next try, and any failure partway through
+rolls back what it already changed.
+
+Four outcomes, all of which leave your lane installed and env-routed either
+way:
+
+- **Activated** — the PAC and trust took; the install report says so and names
+  the disclosure below.
+- **Declined** — you said no to the prompt. The report prints the exact manual
+  commands to finish it yourself later.
+- **Failed** — something after authorization did not work (a scope's PAC
+  write, the trust read-back). Also prints manual commands where the failure
+  point has them.
+- **Not attempted** — no controlling terminal was available to ask at all
+  (for example, a fully non-interactive CI run). Nothing was touched.
+
+A second `openbox init` that finds its own prior activation still matching
+what is actually live does **not** prompt again.
+
+**What this means for your data, stated plainly:** desktop apps *and* browser
+sessions on the governed hosts now pass through a local relay that decrypts
+them with an OpenBox-held key. The CA is unconstrained, so a leaked
+`~/.openbox` key could mint a certificate for any site this Mac is made to
+trust it for — file mode `0600` is the protection, and `openbox uninstall`
+removes the key. The PAC's `; DIRECT` fallback means a stopped relay lets that
+traffic through uninspected; that is not egress control.
+
+`openbox uninstall` reverses this **before** deleting the CA: it restores each
+network service to what it held before (or switches it back off, when the
+prior value was `(null)` — macOS cannot write an empty URL back), untrusts the
+CA, and only then deletes the certificate and key. A declined or failed
+restore still deletes the CA **key** — a trusted certificate with no matching
+key cannot mint anything new — and prints the manual commands, with the
+certificate's SHA-1, to clear the now-dangling trust entry by hand.
+
+```bash
+openbox doctor   # a "System PAC" section: the live per-scope state, drift
+                  # against the record, and whether the CA is trusted by SHA-1
+```
+
 ### Self-hosted OpenBox
 
 Set **both** URLs at `auth` time, by answering both prompts ("Backend URL

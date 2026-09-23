@@ -129,10 +129,25 @@ allowlist the relay enforces on top of it (see
 certificate for **any** site this machine is made to trust the CA for, not
 only an intercepted one. A machine still holding an older, constrained CA is
 narrower by accident rather than by design: `openbox doctor` names it a
-"legacy constrained CA" finding, and clearing it today means deleting both CA
-files and letting the next `openbox init` generate a fresh one — `init` does
-not yet re-issue one for you. No document should imply this key is protected
-from a process running as you, on either shape of CA.
+"legacy constrained CA" finding, and clearing it is a plain `openbox init`
+re-run now — it re-issues the CA itself (deletes both legacy files, generates
+a fresh unconstrained pair under the same names) before the transport unit
+comes back up, then restart the tool. No document should imply this key is
+protected from a process running as you, on either shape of CA.
+
+**On macOS, this same CA is also trusted system-wide.** Once `openbox init`
+activates the system PAC (see [Getting started](getting-started.md)'s "System-wide
+PAC and CA trust" section), the CA is added to the **System keychain**
+(`security add-trusted-cert -d -r trustRoot`), which is a wider blast radius
+than the per-tool `NODE_EXTRA_CA_CERTS` trust every platform already gets: any
+process on the machine that consults the System keychain — not only the
+governed tool — now treats this key's certificates as valid, including
+desktop apps and every browser. `openbox uninstall` untrusts the CA (by its
+SHA-1 fingerprint) before deleting the key; a declined or failed untrust still
+deletes the key, since a trusted certificate with no matching key cannot mint
+anything new, and prints the manual command (with the SHA-1) to clear the
+now-dangling System-keychain entry by hand. Linux and Windows keep
+env-scoped trust only, for now.
 
 ## Secret detection stays local
 

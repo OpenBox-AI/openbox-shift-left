@@ -146,6 +146,7 @@ func (a *app) runDoctor(args []string) int {
 
 	a.reportGateway()
 	a.reportLanes()
+	a.reportSystemPAC()
 	a.reportCoverage()
 	a.reportSpool()
 
@@ -477,10 +478,9 @@ func (a *app) reportLanes() {
 		if caPath, _ := transport.CAPaths(openboxHome); fileExists(caPath) {
 			a.row("relay CA", "%s", caPath)
 			if ca, err := transport.LoadOrCreateCA(openboxHome); err == nil && transport.CANeedsReissue(ca) {
-				_, keyPath := transport.CAPaths(openboxHome)
 				a.row("WARNING", "legacy constrained CA: %s tunnelled, not intercepted, until it is "+
-					"re-issued: delete %s and %s, re-run `openbox init`, then restart the tool",
-					strings.Join(legacyTunnelledHosts(ca), ", "), caPath, keyPath)
+					"re-issued: re-run `openbox init` to re-issue it, then restart the tool",
+					strings.Join(legacyTunnelledHosts(ca), ", "))
 			}
 		}
 	}
@@ -617,6 +617,8 @@ func (a *app) reportCodexProxy() {
 	a.row("status", "UNVERIFIED; assumed routed by the system PAC, not this repo's in-path relay")
 	a.row("", "No env key, no shell-profile write and no in-path relay are installed for")
 	a.row("", "Codex's transport arm. Only the telemetry lane above is built.")
+	a.row("", "Codex surfaces are not intercepted by the system PAC activated above: CA")
+	a.row("", "acceptance by Codex/ChatGPT is unverified.")
 }
 
 // legacyTunnelledHosts names the host-table entries a legacy constrained CA
