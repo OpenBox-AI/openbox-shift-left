@@ -45,11 +45,18 @@ jq -e '
   .backend_url == "http://127.0.0.1:3000" and
   .base_url == "http://127.0.0.1:8086"
 ' "$config_file" >/dev/null
-jq -e '
-  .name == "openbox-security-evaluation" and
-  .version == "1.0.0" and
-  .digest == "sha256:c519954fa2eca7fb735b36af76cf09c99a23ef5f78dc8b867f187336fce5a094"
-' "$skill_dir/bundle.json" >/dev/null
+# The installed skill must be byte-for-byte the bundle this checkout ships.
+# Compared against the repo's own manifest rather than a literal: a hardcoded
+# version and digest here drifted on every skill release, and this check then
+# failed silently under `set -e` while callers read only the tail.
+canonical_bundles=("$repo_root"/cli/internal/securityskill/bundles/openbox-security-evaluation/*/bundle.json)
+(( ${#canonical_bundles} == 1 )) || { print -u2 "expected exactly one canonical skill bundle"; exit 1; }
+expected_skill="$(jq -c '{name, version, digest}' "${canonical_bundles[1]}")"
+installed_skill="$(jq -c '{name, version, digest}' "$skill_dir/bundle.json")"
+if [[ "$installed_skill" != "$expected_skill" ]]; then
+  print -u2 "installed skill $installed_skill does not match this checkout's $expected_skill"
+  exit 1
+fi
 
 print "demo preflight passed"
 print "next: ./testbed/project-assurance/mastra-security-demo/launch-claude.zsh"
