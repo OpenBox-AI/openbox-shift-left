@@ -39,6 +39,16 @@ const (
 	approvalPath = "/api/v1/governance/approval"
 )
 
+// The v3 workload-identity routes, alongside the v1 ones above (phase 04
+// slice 4a, additive; v1 stays live until slice 4d deletes it).
+const (
+	v3BootstrapPath = "/api/v3/auth/bootstrap"
+	v3TokenPath     = "/realms/fake/protocol/openid-connect/token"
+	v3EvaluatePath  = "/api/v3/governance/evaluate"
+	v3ApprovalPath  = "/api/v3/governance/approval"
+	v3ValidatePath  = "/api/v3/auth/validate"
+)
+
 // Header names core reads. Same rationale as the paths above.
 const (
 	hdrAgentDID   = "X-OpenBox-Agent-DID"
@@ -110,6 +120,18 @@ type Server struct {
 	rejected      []string
 	approval      func(Received) (int, string)
 	approvalPolls int
+
+	// v3 workload-identity extension state (phase 04 slice 4a, additive).
+	v3BootstrapHits       int
+	v3ExchangeHits        int
+	v3EvaluateAttempts    int
+	v3TokenEndpointDown   bool
+	v3Revoked             bool
+	v3IssuedTokens        map[string]bool
+	v3BootstrapFailStatus int
+	v3BootstrapFailReason string
+	v3ExchangeFailStatus  int
+	v3ExchangeFailError   string
 }
 
 // New starts a fake core and mints the keypair the client under test must sign
@@ -203,6 +225,16 @@ func (f *Server) serve(w http.ResponseWriter, r *http.Request) {
 		f.serveEvaluate(w, r, raw)
 	case approvalPath:
 		f.serveApproval(w, r, raw)
+	case v3BootstrapPath:
+		f.serveV3Bootstrap(w, r)
+	case v3TokenPath:
+		f.serveV3Token(w, r, raw)
+	case v3EvaluatePath:
+		f.serveV3Evaluate(w, r, raw)
+	case v3ApprovalPath:
+		f.serveV3Approval(w, r, raw)
+	case v3ValidatePath:
+		f.serveV3Validate(w, r)
 	default:
 		// Recorded and answered, never left to hang: a route the fake does not
 		// know is a defect in the test or a new client route, and either way the
