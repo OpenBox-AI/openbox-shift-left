@@ -17,6 +17,11 @@ type Update struct {
 	DID        string
 	AgentID    string
 	BackendURL string
+	// IdentityMethod, when it equals IdentityMethodKeycloakWorkload, marks this
+	// write as a v3 registration: WriteConfig sets it and clears any legacy
+	// developer_did on disk, since a v3 identity has no DID to keep. Empty
+	// leaves cfg.IdentityMethod alone, same as every other string field here.
+	IdentityMethod string
 
 	// ContentCapture posture and preferences. Nil ⇒ leave whatever is on disk (or
 	// the product default on a first install); non-nil ⇒ this run chose it
@@ -38,6 +43,13 @@ func WriteConfig(path string, u Update) error {
 	setString(&cfg.DID, u.DID)
 	setString(&cfg.AgentID, u.AgentID)
 	setString(&cfg.BackendURL, u.BackendURL)
+	setString(&cfg.IdentityMethod, u.IdentityMethod)
+	if u.IdentityMethod == IdentityMethodKeycloakWorkload {
+		// setString cannot clear a field (WriteEnvFile's map merge has the same
+		// shape); a re-init over a legacy store would otherwise keep its DID
+		// forever, since a v3 identity never supplies one to overwrite it with.
+		cfg.DID = ""
+	}
 
 	setBoolPtr(&cfg.Enforce, u.Enforce)
 	setBool(&cfg.InstallGitHook, u.InstallGitHook)

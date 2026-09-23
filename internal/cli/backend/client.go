@@ -78,6 +78,22 @@ type CreateAgentRequest struct {
 	Tags        []string       `json:"tags,omitempty"`
 	AivssConfig aivss.Config   `json:"aivss_config"`
 	Config      map[string]any `json:"config,omitempty"`
+	// IdentityVerification requests a keycloak_workload identity be issued
+	// (mode "generate") or linked (mode "link"). Nil omits the field
+	// entirely, so a v1 openbox_did request stays byte-identical; method
+	// defaults to openbox_did on the backend when absent.
+	IdentityVerification *IdentityVerification `json:"identity_verification,omitempty"`
+}
+
+// IdentityVerification is CreateAgentIdentityVerificationDto's generate-mode
+// subset: method/mode/source_type plus the public half of the RSA keypair.
+// Only PublicJWK leaves the machine -- never a private parameter (d, p, q,
+// dp, dq, qi).
+type IdentityVerification struct {
+	Method     string            `json:"method"`
+	Mode       string            `json:"mode"`
+	SourceType string            `json:"source_type"`
+	PublicJWK  map[string]string `json:"public_jwk"`
 }
 
 type createResponse struct {
@@ -87,8 +103,26 @@ type createResponse struct {
 		Identity struct {
 			DID        string `json:"did"`
 			PrivateKey string `json:"privateKey"`
+			WorkloadIdentityInfo
 		} `json:"identity"`
 	} `json:"data"`
+}
+
+// WorkloadIdentityInfo is the non-secret half of buildCreateResponse()
+// (agent-registration-identity.service.ts:471-485): everything needed to
+// authenticate with the issued keycloak_workload identity, never a private
+// key or credential secret.
+type WorkloadIdentityInfo struct {
+	Method                         string `json:"method"`
+	SourceType                     string `json:"source_type"`
+	WorkloadIdentityID             string `json:"workload_identity_id"`
+	CredentialID                   string `json:"credential_id"`
+	ServiceAccountID               string `json:"service_account_id"`
+	ClientID                       string `json:"client_id"`
+	Kid                            string `json:"kid"`
+	TokenEndpoint                  string `json:"token_endpoint"`
+	Audience                       string `json:"audience"`
+	PrivateKeyAvailableFromOpenBox bool   `json:"private_key_available_from_openbox"`
 }
 
 type agentBody struct {
@@ -112,6 +146,9 @@ type Registration struct {
 	PrivateKey string // base64 raw 32-byte Ed25519 seed; shown once
 	Tier       string
 	TrustScore string
+	// Identity is the workload identity info from a keycloak_workload create
+	// (empty on an openbox_did v1 create). Phase 05 reads it.
+	Identity WorkloadIdentityInfo
 }
 
 // Create registers a developer agent.
@@ -132,6 +169,7 @@ func (c *Client) Create(ctx context.Context, req CreateAgentRequest) (*Registrat
 		PrivateKey: out.Data.Identity.PrivateKey,
 		Tier:       out.Data.Agent.Tier,
 		TrustScore: fmt.Sprint(out.Data.Agent.TrustScore),
+		Identity:   out.Data.Identity.WorkloadIdentityInfo,
 	}
 	return reg, nil
 }

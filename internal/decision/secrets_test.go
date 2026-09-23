@@ -1,6 +1,10 @@
 package decision
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"regexp"
 	"slices"
@@ -266,6 +270,77 @@ func TestRedact_ValueEndingInBackslash(t *testing.T) {
 			t.Errorf("a value of only backslashes must not report a redaction: out=%q changed=%v", out, changed)
 		}
 	})
+}
+
+// workloadPrivateKeyFixture generates a real PKCS8 DER key at runtime, never a
+// literal in source: a literal ≥64-char base64 value here would itself be
+// rewritten by the local write-time redactor hook once this rule exists
+// (measured behaviour: see the "local hook redacts your own edits" finding).
+func workloadPrivateKeyFixture(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal pkcs8: %v", err)
+	}
+	b64 := base64.StdEncoding.EncodeToString(der)
+	if len(b64) < 64 {
+		t.Fatalf("fixture too short to exercise the ≥64-char rule: %d chars", len(b64))
+	}
+	return b64
+}
+
+// TestWorkloadPrivateKeyAssignmentIsRedactedDeterministically the
+// OPENBOX_WORKLOAD_PRIVATE_KEY value (a ~1.2KB base64 PKCS8 DER key) must not
+// depend on the entropy floor: it gets its own secret_assignment rule, keyed
+// on the private_key keyword and a base64-charset, ≥64-char value.
+func TestWorkloadPrivateKeyAssignmentIsRedactedDeterministically(t *testing.T) {
+	b64 := workloadPrivateKeyFixture(t)
+	d := newSecretDetector()
+
+	for _, tc := range []struct{ name, in string }{
+		{"single-quoted, as WriteEnvFile emits", "OPENBOX_WORKLOAD_PRIVATE_KEY='" + b64 + "'"},
+		{"export, unquoted", "export OPENBOX_WORKLOAD_PRIVATE_KEY=" + b64},
+		{"nested json", `"private_key": "` + b64 + `"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, cats, changed := d.Redact(tc.in)
+			if !changed {
+				t.Fatalf("not redacted at all: %s", tc.in)
+			}
+			if strings.Contains(out, b64) {
+				t.Errorf("key survived: %s", out)
+			}
+			if !containsCat(cats, "secret_assignment") {
+				t.Errorf("categories = %v, want secret_assignment (deterministic), not a fall-through", cats)
+			}
+			if containsCat(cats, "entropy") {
+				t.Errorf("categories = %v; the deterministic rule must fire before entropy ever sees this value", cats)
+			}
+		})
+	}
+}
+
+// TestPrivateKeyRuleIgnoresGoFieldAssignments the value group is restricted to
+// the base64 charset at 64+ chars specifically so this plan's own Go source
+// (a struct field assignment, a `:=` declaration, a short string literal)
+// survives untouched; a `.` or `(` in real Go code breaks the charset run well
+// under the 64-char floor.
+func TestPrivateKeyRuleIgnoresGoFieldAssignments(t *testing.T) {
+	d := newSecretDetector()
+	for _, in := range []string{
+		"WorkloadPrivateKey: creds.WorkloadPrivateKey,",
+		"privateKey := x509.ParsePKCS8PrivateKey(der)",
+		`PrivateKey: "short"`,
+	} {
+		out, cats, changed := d.Redact(in)
+		if changed {
+			t.Errorf("false positive: %q redacted -> %q (cats=%v)", in, out, cats)
+		}
+	}
 }
 
 func containsCat(cats []string, want string) bool {

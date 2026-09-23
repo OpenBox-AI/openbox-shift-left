@@ -21,6 +21,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/elazarl/goproxy v1.9.0
 	github.com/gofrs/flock v0.13.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/renameio/v2 v2.0.2
 	github.com/google/uuid v1.6.0

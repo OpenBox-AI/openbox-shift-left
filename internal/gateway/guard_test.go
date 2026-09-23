@@ -24,6 +24,8 @@ var forbiddenLiterals = []string{
 	"OPENAI_API_KEY",
 	"OPENBOX_AGENT_PRIVATE_KEY",
 	"OPENBOX_ED25519_SEED",
+	"OPENBOX_WORKLOAD_PRIVATE_KEY",
+	"workload-token",
 	".openbox",
 	"api_key",
 }

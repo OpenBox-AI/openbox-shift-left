@@ -53,9 +53,13 @@ func ParseEnvFile(path string) (map[string]string, error) {
 	return kv, nil
 }
 
-// WriteEnvFile merges kv over whatever is already at path and writes the
-// result atomically, 0600, under a 0700 parent.
-func WriteEnvFile(path string, kv map[string]string) error {
+// WriteEnvFile merges kv over whatever is already at path, deletes any key
+// named in remove, and writes the result atomically, 0600, under a 0700
+// parent. remove is applied after the merge, so a re-init can replace a
+// legacy credential (a seed, an old-name alias) outright rather than leaving
+// it beside the new one; WriteConfig's setString cannot express that either,
+// which is why both write paths need an explicit clear.
+func WriteEnvFile(path string, kv map[string]string, remove ...string) error {
 	existing, err := ParseEnvFile(path)
 	if err != nil {
 		// Surface it so the user fixes or moves it deliberately.
@@ -67,6 +71,9 @@ func WriteEnvFile(path string, kv map[string]string) error {
 	}
 	for k, v := range kv {
 		merged[k] = v
+	}
+	for _, k := range remove {
+		delete(merged, k)
 	}
 
 	keys := make([]string, 0, len(merged))

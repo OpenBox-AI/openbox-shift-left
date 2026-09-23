@@ -353,6 +353,64 @@ func TestRefusedWriteLeavesAnExistingFileIntact(t *testing.T) {
 	}
 }
 
+// TestWriteEnvFileRemovesNamedKeys the variadic remove parameter deletes a
+// named key even when it was already on disk, so a re-init can replace a
+// legacy signing key outright instead of leaving it beside the new one.
+func TestWriteEnvFileRemovesNamedKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := WriteEnvFile(path, map[string]string{
+		"OPENBOX_API_KEY":           "obx_old",
+		"OPENBOX_AGENT_PRIVATE_KEY": "b2xkc2VlZA==",
+		"OPENBOX_ED25519_SEED":      "bGVnYWN5",
+		"KEEP_ME":                   "still here",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteEnvFile(path, map[string]string{
+		"OPENBOX_API_KEY": "obx_new",
+	}, "OPENBOX_AGENT_PRIVATE_KEY", "OPENBOX_ED25519_SEED"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ParseEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["OPENBOX_API_KEY"] != "obx_new" {
+		t.Errorf("OPENBOX_API_KEY = %q, want obx_new", got["OPENBOX_API_KEY"])
+	}
+	if _, ok := got["OPENBOX_AGENT_PRIVATE_KEY"]; ok {
+		t.Error("OPENBOX_AGENT_PRIVATE_KEY survived a call that named it for removal")
+	}
+	if _, ok := got["OPENBOX_ED25519_SEED"]; ok {
+		t.Error("OPENBOX_ED25519_SEED survived a call that named it for removal")
+	}
+	if got["KEEP_ME"] != "still here" {
+		t.Errorf("KEEP_ME = %q, an unrelated key must survive", got["KEEP_ME"])
+	}
+}
+
+// TestWriteEnvFileWithoutRemoveIsUnchanged the two-argument call every
+// existing caller (auth.go, adopt.go, credfile.go) makes today must still
+// compile and behave exactly as before now that remove is variadic.
+func TestWriteEnvFileWithoutRemoveIsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := WriteEnvFile(path, map[string]string{"OPENBOX_API_KEY": "obx_a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteEnvFile(path, map[string]string{"OPENBOX_AGENT_DID": "did:aip:kept"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseEnvFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["OPENBOX_API_KEY"] != "obx_a" || got["OPENBOX_AGENT_DID"] != "did:aip:kept" {
+		t.Errorf("kv = %v, want both keys merged as before (no removal)", got)
+	}
+}
+
 // TestParseEnvFileErrorEchoesTheOffendingLine godotenv's parse error echoes
 // the offending line, and this file is credentials. The hand-rolled parser
 // named the file and line number and never the content, and this suite

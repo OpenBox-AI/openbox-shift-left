@@ -54,6 +54,15 @@ func newSecretDetector() *secretDetector {
 		{category: "ai_api_key", re: regexp.MustCompile(`\bsk-(?:ant-)?[A-Za-z0-9_\-]{20,}\b`)},
 		{category: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\b`)},
 		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|auth[_-]?token|client[_-]?secret)[\\"']*\s*[:=]\s*[\\"']*)([^\s"',;]{8,})(["']?)`)},
+		// private[_-]?key gets its own entry rather than joining the generic
+		// list above: the generic value group is charset-agnostic at 8+ chars,
+		// which would also match this plan's own Go source
+		// (`WorkloadPrivateKey: creds.WorkloadPrivateKey,`). Restricting the
+		// value group to the base64 charset at 64+ chars catches a real
+		// PKCS8 DER key (over a kilobyte of base64) while a Go identifier --
+		// short, and delimited by `.` or `(`, neither in the charset -- never
+		// reaches that length here.
+		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:private[_-]?key)[\\"']*\s*[:=]\s*[\\"']*)([A-Za-z0-9+/=_-]{64,})(["']?)`)},
 	}}
 }
 

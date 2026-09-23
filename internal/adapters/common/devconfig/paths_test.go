@@ -334,6 +334,50 @@ func TestBindRejectsAPathTraversalName(t *testing.T) {
 	}
 }
 
+// TestWorkloadTokenCachePathForDerivesFromIdentityDir the cache lives beside
+// the rest of one tool's identity, never a separate location LegacyStoreFor
+// or resolveCredentialsFrom could mistake for a store.
+func TestWorkloadTokenCachePathForDerivesFromIdentityDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+
+	got, err := WorkloadTokenCachePathFor("codex")
+	if err != nil {
+		t.Fatalf("WorkloadTokenCachePathFor(codex): %v", err)
+	}
+	if want := filepath.Join(home, "codex", "workload-token.json"); got != want {
+		t.Fatalf("WorkloadTokenCachePathFor(codex) = %q, want %q", got, want)
+	}
+}
+
+// TestWorkloadTokenCachePathIsTheBoundForm mirrors EnvFilePath/EnvFilePathFor:
+// the bound form answers for whichever tool is bound, and refuses when
+// nothing is.
+func TestWorkloadTokenCachePathIsTheBoundForm(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+
+	if _, err := WorkloadTokenCachePath(); err == nil {
+		t.Fatal("WorkloadTokenCachePath() succeeded with nothing bound; want ErrProviderUnbound")
+	} else if !errors.Is(err, ErrProviderUnbound) {
+		t.Errorf("error = %v, want ErrProviderUnbound", err)
+	}
+
+	release, err := BindProvider("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	got, err := WorkloadTokenCachePath()
+	if err != nil {
+		t.Fatalf("WorkloadTokenCachePath(): %v", err)
+	}
+	if want := filepath.Join(home, "codex", "workload-token.json"); got != want {
+		t.Fatalf("WorkloadTokenCachePath() = %q, want %q", got, want)
+	}
+}
+
 // TestUnboundEnvFilePathIsAnError the gate, and it is a security control
 // rather than tidiness. Without it a command that forgets to bind reads the
 // org-level .env -- which holds a credential authorizing agent creation across

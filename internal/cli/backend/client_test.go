@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"testing"
 
@@ -118,6 +120,185 @@ func TestCreateAPIError(t *testing.T) {
 	}
 	if apiErr.StatusCode != 400 {
 		t.Errorf("status = %d, want 400", apiErr.StatusCode)
+	}
+}
+
+// TestCreateSendsIdentityVerificationVerbatim story-phase-03-step-1: the
+// identity_verification block reaches the wire with exactly the requested
+// keys, and only the public JWK -- never a private RSA parameter.
+func TestCreateSendsIdentityVerificationVerbatim(t *testing.T) {
+	var gotBody map[string]any
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a"},"token":"t","identity":{}}}`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "obx_key_x", "cli")
+	_, err := c.Create(context.Background(), CreateAgentRequest{
+		AgentName:   "dev",
+		AgentType:   "developer",
+		Icon:        "🧑‍💻",
+		AivssConfig: aivss.DefaultDeveloperProfile(),
+		IdentityVerification: &IdentityVerification{
+			Method:     "keycloak_workload",
+			Mode:       "generate",
+			SourceType: "openbox",
+			PublicJWK: map[string]string{
+				"kty": "RSA",
+				"n":   "modulus-b64url",
+				"e":   "AQAB",
+				"kid": "kid-1",
+				"alg": "RS256",
+				"use": "sig",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	iv, ok := gotBody["identity_verification"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity_verification missing or wrong shape in %+v", gotBody)
+	}
+	if iv["method"] != "keycloak_workload" || iv["mode"] != "generate" || iv["source_type"] != "openbox" {
+		t.Errorf("identity_verification top-level fields = %+v", iv)
+	}
+	jwk, ok := iv["public_jwk"].(map[string]any)
+	if !ok {
+		t.Fatalf("public_jwk missing or wrong shape in %+v", iv)
+	}
+	for _, want := range []string{"kty", "n", "e", "kid", "alg", "use"} {
+		if _, present := jwk[want]; !present {
+			t.Errorf("public_jwk missing %q: %+v", want, jwk)
+		}
+	}
+	for _, forbidden := range []string{"d", "p", "q", "dp", "dq", "qi"} {
+		if _, present := jwk[forbidden]; present {
+			t.Errorf("public_jwk must never carry the private parameter %q", forbidden)
+		}
+	}
+}
+
+// TestCreateParsesWorkloadIdentity story-phase-03-step-2: a response shaped
+// like agent-registration-identity.service.ts:471-484 parses into
+// Registration.Identity, non-secret fields only.
+func TestCreateParsesWorkloadIdentity(t *testing.T) {
+	workloadID := uuid.NewString()
+	credentialID := uuid.NewString()
+	serviceAccountID := uuid.NewString()
+	clientID := "openbox-agent-" + uuid.NewString()
+	kid := uuid.NewString()
+
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a-1","agent_name":"dev"},"token":"obx_test_`+repeat("a", 48)+`",`+
+			`"identity":{"method":"keycloak_workload","source_type":"openbox",`+
+			`"workload_identity_id":"`+workloadID+`","credential_id":"`+credentialID+`",`+
+			`"service_account_id":"`+serviceAccountID+`","client_id":"`+clientID+`","kid":"`+kid+`",`+
+			`"token_endpoint":"https://identity.node.lat/realms/openbox/protocol/openid-connect/token",`+
+			`"audience":"openbox-core","private_key_available_from_openbox":false}}}`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "obx_key_x", "cli")
+	reg, err := c.Create(context.Background(), CreateAgentRequest{AgentName: "dev"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	want := WorkloadIdentityInfo{
+		Method:                         "keycloak_workload",
+		SourceType:                     "openbox",
+		WorkloadIdentityID:             workloadID,
+		CredentialID:                   credentialID,
+		ServiceAccountID:               serviceAccountID,
+		ClientID:                       clientID,
+		Kid:                            kid,
+		TokenEndpoint:                  "https://identity.node.lat/realms/openbox/protocol/openid-connect/token",
+		Audience:                       "openbox-core",
+		PrivateKeyAvailableFromOpenBox: false,
+	}
+	if reg.Identity != want {
+		t.Errorf("Registration.Identity = %+v, want %+v", reg.Identity, want)
+	}
+}
+
+// TestCreateOmitsIdentityVerificationWhenNil pins the v1 request byte-
+// identical until phase 05 fills IdentityVerification on every call.
+func TestCreateOmitsIdentityVerificationWhenNil(t *testing.T) {
+	var raw []byte
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a"},"token":"t","identity":{}}}`)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "obx_key_x", "cli")
+	if _, err := c.Create(context.Background(), CreateAgentRequest{AgentName: "dev", AgentType: "developer"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if strings.Contains(string(raw), "identity_verification") {
+		t.Errorf("request body must omit identity_verification when nil, got %s", raw)
+	}
+}
+
+// TestClassifyCreateConflict story-phase-03-step-4: the create 409s carry no
+// reason_code, so the classifier reads the message string. Decision 1
+// (validation-log.md): the ExternalIdP primary match is the :198 source-
+// mismatch string a non-OpenBox org actually returns for source_type=openbox;
+// "New identities must be created…" is the secondary match.
+func TestClassifyCreateConflict(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want CreateConflict
+	}{
+		{
+			name: "idp not initialized",
+			err:  &APIError{StatusCode: 409, Body: `{"message":"The organization identity provider must be initialized before creating a workload-authenticated agent"}`},
+			want: IdPNotInitialized,
+		},
+		{
+			name: "external idp primary: source mismatch (:198)",
+			err:  &APIError{StatusCode: 409, Body: `{"message":"The selected identity does not belong to the active identity provider"}`},
+			want: ExternalIdP,
+		},
+		{
+			name: "external idp secondary: generate on external provider",
+			err:  &APIError{StatusCode: 409, Body: `{"message":"New identities must be created in the active external provider"}`},
+			want: ExternalIdP,
+		},
+		{
+			name: "idp changed mid-registration, retryable",
+			err:  &APIError{StatusCode: 409, Body: `{"message":"The active identity provider changed during agent registration"}`},
+			want: IdPChangedRetry,
+		},
+		{
+			name: "unknown 409 falls through",
+			err:  &APIError{StatusCode: 409, Body: `{"message":"The selected workload identity is not active, verified, and eligible"}`},
+			want: Other409,
+		},
+		{
+			name: "400 is not a create conflict",
+			err:  &APIError{StatusCode: 400, Body: `{"message":"Agent with name \"dev\" already exists in this organization"}`},
+			want: None,
+		},
+		{
+			name: "non-APIError is not a create conflict",
+			err:  errors.New("boom"),
+			want: None,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifyCreateConflict(tt.err); got != tt.want {
+				t.Errorf("ClassifyCreateConflict(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
 

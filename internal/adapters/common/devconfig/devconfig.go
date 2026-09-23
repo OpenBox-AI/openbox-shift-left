@@ -45,9 +45,14 @@ const (
 	EnvHaltDir      = "OPENBOX_HALT_DIR"
 	EnvAPIKeyDirect = "OPENBOX_API_KEY"
 	// EnvAgentPrivateKey is the Ed25519 signing key, under the name the OpenBox
-	// platform documents for its own SDK.
+	// platform documents for its own SDK. Legacy (v1) only from phase 04 on; kept
+	// readable as a legacy marker (LegacyStoreFor) and a deprecated-alias source
+	// until then.
 	EnvAgentPrivateKey = "OPENBOX_AGENT_PRIVATE_KEY"
-	EnvConfigPath      = "OPENBOX_CONFIG"
+	// EnvWorkloadPrivateKey is the v3 keycloak_workload RS256 client-assertion
+	// signing key: PKCS8 DER, base64 std.
+	EnvWorkloadPrivateKey = "OPENBOX_WORKLOAD_PRIVATE_KEY"
+	EnvConfigPath         = "OPENBOX_CONFIG"
 	// EnvOrgSigningPubKey policy-bundle signing key pins (E8-S6).
 	EnvOrgSigningPubKey = "OPENBOX_ORG_SIGNING_PUBKEY"
 	EnvOrgSigningKeyID  = "OPENBOX_ORG_SIGNING_KEY_ID"
@@ -62,6 +67,11 @@ const (
 	// DefaultBackendURL is the control-plane base used when nothing configures
 	// one.
 	DefaultBackendURL = "https://api.openbox.ai"
+
+	// IdentityMethodKeycloakWorkload marks a dev.json written for a v3
+	// keycloak_workload agent, as opposed to a legacy (v1) store. Its presence
+	// is never itself the legacy discriminator; see LegacyStoreFor.
+	IdentityMethodKeycloakWorkload = "keycloak_workload"
 )
 
 // deprecatedPrivateKeyEnvNames reading both costs two map lookups and a
@@ -130,6 +140,11 @@ type DevConfig struct {
 	// key (E8-S6 /).
 	OrgSigningKeyID  string `json:"org_signing_key_id,omitempty"`
 	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
+	// IdentityMethod is "keycloak_workload" for a v3 store; empty or any other
+	// value reads as legacy alongside the DID/seed markers LegacyStoreFor also
+	// checks. dev.json never stores the derived attribution DID (D1): this field
+	// is the only identity-shape marker that lives here.
+	IdentityMethod string `json:"identity_method,omitempty"`
 }
 
 // DefaultConfigPath is where the hook looks for the dev config when
@@ -184,6 +199,18 @@ type Credentials struct {
 	DID                   string
 	PrivateKeyB64         string
 	ContentCaptureEnabled bool
+	// AgentID is the v3 workload agent id (dev.json's agent_id field, shared
+	// with the pre-existing policy-sync use). Populated additively; nothing
+	// resolves or enforces it as an identity source until phase 04.
+	AgentID string
+	// WorkloadPrivateKey is the RS256 client-assertion signing key
+	// (OPENBOX_WORKLOAD_PRIVATE_KEY: PKCS8 DER, base64 std). Populated
+	// additively, same store precedence as PrivateKeyB64 (env beats file).
+	WorkloadPrivateKey string
+	// TokenCachePath is this tool's workload-token.json cache path. Never a
+	// credential source itself (it is a cache, not a store); populated for a
+	// caller that needs to know where the bearer cache lives.
+	TokenCachePath string
 }
 
 // ResolveDID resolves only the developer DID (env, then config file); no
@@ -576,6 +603,14 @@ func resolveCredentialsFrom(tool, cfgPath, envPath string) (Credentials, error) 
 		return Credentials{}, missingCredentialError(tool, "Ed25519 signing key", EnvAgentPrivateKey, envPath)
 	}
 
+	// v3 fields, populated additively and without enforcement: phase 04 flips
+	// this resolver onto them and deletes the DID/PrivateKeyB64 path above.
+	c.AgentID = FirstNonEmpty(os.Getenv(EnvAgentID), cfg.AgentID)
+	c.WorkloadPrivateKey = FirstNonEmpty(os.Getenv(EnvWorkloadPrivateKey), secrets[EnvWorkloadPrivateKey])
+	if p, err := WorkloadTokenCachePathFor(tool); err == nil {
+		c.TokenCachePath = p
+	}
+
 	return c, nil
 }
 
@@ -602,6 +637,14 @@ func EnvIdentityPresent() bool {
 		}
 	}
 	return false
+}
+
+// EnvWorkloadIdentityPresent reports whether the environment alone supplies a
+// complete v3 workload identity: an API key and the workload signing key. It
+// sits beside EnvIdentityPresent, asking the same question for the v3 shape,
+// until phase 04 folds the two together.
+func EnvWorkloadIdentityPresent() bool {
+	return os.Getenv(EnvAPIKeyDirect) != "" && os.Getenv(EnvWorkloadPrivateKey) != ""
 }
 
 func resolvePrivateKey(secrets map[string]string) string {

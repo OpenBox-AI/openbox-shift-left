@@ -182,6 +182,33 @@ func EnvFilePathFor(tool string) (string, error) {
 	return filepath.Join(dir, ".env"), nil
 }
 
+// workloadTokenCacheFileName is the v3 bearer-token cache's file name under a
+// tool's identity directory. A cache, not a store (see the package doc): it is
+// never a source for any field other than itself, and WriteWorkloadIdentity
+// deletes it on every identity write to prevent a cross-identity bearer reuse.
+const workloadTokenCacheFileName = "workload-token.json"
+
+// WorkloadTokenCachePathFor names one tool's workload-token cache without
+// binding, the same shape as EnvFilePathFor/DevConfigPathFor.
+func WorkloadTokenCachePathFor(tool string) (string, error) {
+	dir, err := identityDirFor(tool)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, workloadTokenCacheFileName), nil
+}
+
+// WorkloadTokenCachePath is the bound form of WorkloadTokenCachePathFor,
+// refusing when nothing is bound for the same reason EnvFilePath does: an
+// unbound caller has no tool-scoped answer to give.
+func WorkloadTokenCachePath() (string, error) {
+	tool := BoundProvider()
+	if tool == "" {
+		return "", ErrProviderUnbound
+	}
+	return WorkloadTokenCachePathFor(tool)
+}
+
 // DevConfigPath is where to read the dev config: $OPENBOX_CONFIG when set,
 // else the bound tool's ~/.openbox/<tool>/dev.json. Unbound it is
 // ~/.openbox/dev.json, falling back to the legacy location while an unmigrated

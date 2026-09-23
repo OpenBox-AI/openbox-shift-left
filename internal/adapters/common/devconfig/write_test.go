@@ -183,6 +183,56 @@ func TestWriteConfig_FilePermissionsAreOwnerOnly(t *testing.T) {
 	}
 }
 
+// TestWriteConfigClearsLegacyDIDOnWorkloadIdentity a re-init into a legacy
+// store must not leave the old DID sitting beside the new identity_method:
+// setString cannot clear a field, so this needs the explicit clear.
+func TestWriteConfigClearsLegacyDIDOnWorkloadIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dev.json")
+	if err := WriteConfig(path, Update{DID: "did:aip:legacy"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mustLoad(t, path).DID; got != "did:aip:legacy" {
+		t.Fatalf("seed did not take: DID = %q", got)
+	}
+
+	if err := WriteConfig(path, Update{
+		AgentID:        "agent-1",
+		IdentityMethod: IdentityMethodKeycloakWorkload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustLoad(t, path)
+	if cfg.DID != "" {
+		t.Errorf("DID = %q, want it cleared by a keycloak_workload write", cfg.DID)
+	}
+	if cfg.IdentityMethod != IdentityMethodKeycloakWorkload {
+		t.Errorf("identity_method = %q, want %q", cfg.IdentityMethod, IdentityMethodKeycloakWorkload)
+	}
+	if cfg.AgentID != "agent-1" {
+		t.Errorf("agent_id = %q, want agent-1", cfg.AgentID)
+	}
+}
+
+// TestWriteConfigKeepsDIDWithoutIdentityMethod no behaviour change for
+// today's callers: an Update that never mentions IdentityMethod must not
+// touch the DID, which is exactly what every existing caller does.
+func TestWriteConfigKeepsDIDWithoutIdentityMethod(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dev.json")
+	if err := WriteConfig(path, Update{DID: "did:aip:x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteConfig(path, Update{BaseURL: "https://core.example"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustLoad(t, path)
+	if cfg.DID != "did:aip:x" {
+		t.Errorf("DID = %q, want it left alone by a write that never mentions identity_method", cfg.DID)
+	}
+	if cfg.IdentityMethod != "" {
+		t.Errorf("identity_method = %q, want empty", cfg.IdentityMethod)
+	}
+}
+
 func mustLoad(t *testing.T, path string) DevConfig {
 	t.Helper()
 	cfg, err := Load(path)
