@@ -1,28 +1,22 @@
 // Package acceptance holds the core-acceptance contract test. That is E7-S2's
-// retirement, made executable. It lives in its own module (not conformance/,
-// which is deliberately dependency-free and offline) so it can reuse the SL-3
-// client's AIP signing via a local `replace`; no new external dependency, no
-// change to client/ egress.
+// retirement, made executable, now against the workload-identity client
+// rather than v1 AIP signing.
 package acceptancetest
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
 // devEventTypes deliberately orders the v1.8 vocabulary (33 entries: the
@@ -117,6 +111,11 @@ func minimalEvent(et client.EventType, did, sessionID string) client.DevEvent {
 		ev.Span = &client.Span{SemanticType: "internal", Stage: "started"}
 	case client.EventToolResult:
 		ev.Span = &client.Span{SemanticType: "internal", Stage: "completed"}
+	case client.EventTurnStarted, client.EventTurnCompleted:
+		// Both map onto Activity* wire types (payload.go), which require a
+		// non-empty activity_id; turnActivityIDFor derives one from TurnIndex.
+		turnIndex := 0
+		ev.TurnIndex = &turnIndex
 	case client.EventCommitCreated:
 		ev.Metadata = map[string]any{"commit_sha": "0000000000000000000000000000000000000000", "repo": "openbox-ai/acceptance"}
 	case client.EventDeploy:
@@ -151,16 +150,21 @@ func probeTypes(t *testing.T, ctx context.Context, c *client.Client, did string)
 func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 	baseURL := firstEnv("OPENBOX_URL", "OPENBOX_BASE_URL")
 	apiKey := os.Getenv("OPENBOX_API_KEY")
-	did := os.Getenv("OPENBOX_AGENT_DID")
-	seed := os.Getenv("OPENBOX_ED25519_SEED")
+	agentID := os.Getenv("OPENBOX_AGENT_ID")
+	workloadKey := os.Getenv("OPENBOX_WORKLOAD_PRIVATE_KEY")
 
-	if baseURL == "" || apiKey == "" || did == "" || seed == "" {
+	if baseURL == "" || apiKey == "" || agentID == "" || workloadKey == "" {
 		t.Skip("skipping live core-acceptance test: set OPENBOX_URL (or OPENBOX_BASE_URL), " +
-			"OPENBOX_API_KEY, OPENBOX_AGENT_DID, OPENBOX_ED25519_SEED to run it against a live core")
+			"OPENBOX_API_KEY, OPENBOX_AGENT_ID, OPENBOX_WORKLOAD_PRIVATE_KEY to run it against a live core")
+	}
+
+	did, err := devconfig.AttributionDIDFor(agentID)
+	if err != nil {
+		t.Fatalf("derive attribution DID from OPENBOX_AGENT_ID: %v", err)
 	}
 
 	log := &captureLogger{}
-	c, err := client.New(client.Config{BaseURL: baseURL, APIKey: apiKey, DID: did, PrivateKeyB64: seed, Logger: log})
+	c, err := client.New(client.Config{BaseURL: baseURL, APIKey: apiKey, WorkloadPrivateKey: workloadKey, Logger: log})
 	if err != nil {
 		t.Fatalf("build client: %v", err)
 	}
@@ -193,40 +197,22 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 	}
 }
 
-// TestAcceptanceEmitsOnlyStockWireTypes pins the retirement offline: a fake
-// stock core that accept-lists only the base wire types (and 400s anything
-// else) must see NO rejection; proving the client emits no developer-specific
-// event_type (the EXT-core accept-list is genuinely unnecessary).
+// TestAcceptanceEmitsOnlyStockWireTypes pins the retirement offline: every
+// event the client actually put on the wire, against a real fakecore, must be
+// one of the base wire types (proving the client emits no developer-specific
+// event_type; the EXT-core accept-list is genuinely unnecessary). The fake
+// accepts everything here -- the assertion is what it recorded, not what it
+// refused.
 func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
-	var seenTypes sync.Map // event_type -> struct{}: what the client actually put on the wire
-
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == client.AuthValidatePath:
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"code":200,"message":"ok"}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/governance/evaluate":
-			var payload struct {
-				EventType string `json:"event_type"`
-			}
-			_ = json.NewDecoder(r.Body).Decode(&payload)
-			seenTypes.Store(payload.EventType, struct{}{})
-			if stockWireTypes[payload.EventType] {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(`{"verdict":"allow","action":"continue"}`))
-				return
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"code":400,"message":"invalid event_type: %s"}`, payload.EventType)))
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
-
-	did := "did:aip:00000000-0000-0000-0000-000000000000"
+	fc := fakecore.New(t, fakecore.Script{})
+	did := fakecore.AttributionDID()
 	log := &captureLogger{}
-	c, err := client.New(client.Config{BaseURL: srv.URL, APIKey: "obx_test_stockcore", DID: did, PrivateKeyB64: ephemeralPrivateKeyB64(t), Logger: log})
+	c, err := client.New(client.Config{
+		BaseURL:            fc.URL(),
+		APIKey:             fakecore.APIKey(),
+		WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
+		Logger:             log,
+	})
 	if err != nil {
 		t.Fatalf("build client: %v", err)
 	}
@@ -241,29 +227,23 @@ func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 	rejected, inconclusive := probeTypes(t, ctx, c, did)
 
 	if len(rejected) != 0 {
-		t.Fatalf("stock-core fake rejected %v; the client emitted a non-stock wire type (EXT-core would still be needed). "+
-			"Every dev event must map to a base type in stockWireTypes.", rejected)
+		t.Fatalf("fakecore rejected %v with a 400 invalid event_type; the client emitted a "+
+			"non-stock wire type (EXT-core would still be needed). Every dev event must map to a "+
+			"base type in stockWireTypes.", rejected)
 	}
 	if len(inconclusive) != 0 {
-		t.Fatalf("unexpected inconclusive drops against the fake stock core: %v\n\nclient drop log:\n%s", inconclusive, log)
+		t.Fatalf("unexpected inconclusive drops against fakecore: %v\n\nclient drop log:\n%s", inconclusive, log)
 	}
 
-	seenTypes.Range(func(k, _ any) bool {
-		et := k.(string)
+	seenTypes := map[string]struct{}{} // what the client actually put on the wire
+	for _, r := range fc.Inbox() {
+		seenTypes[r.EventType()] = struct{}{}
+	}
+	for et := range seenTypes {
 		if !stockWireTypes[et] {
 			t.Errorf("client emitted non-stock wire event_type %q; must be one of the base accept-listed types", et)
 		}
-		return true
-	})
-}
-
-func ephemeralPrivateKeyB64(t *testing.T) string {
-	t.Helper()
-	seed := make([]byte, ed25519.SeedSize)
-	if _, err := rand.Read(seed); err != nil {
-		t.Fatalf("mint ephemeral seed: %v", err)
 	}
-	return base64.StdEncoding.EncodeToString(seed)
 }
 
 func firstEnv(keys ...string) string {

@@ -49,7 +49,7 @@ func DefaultConfigPath() string { return devconfig.DefaultConfigPath() }
 type Credentials struct {
 	BaseURL string
 	APIKey  string
-	// DID is the in-memory attribution label (D1), derived from AgentID; never
+	// DID is the in-memory attribution label, derived from AgentID; never
 	// itself a store value.
 	DID                   string
 	AgentID               string

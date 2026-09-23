@@ -228,7 +228,7 @@ func TestCreateParsesWorkloadIdentity(t *testing.T) {
 }
 
 // TestCreateOmitsIdentityVerificationWhenNil pins the v1 request byte-
-// identical until phase 05 fills IdentityVerification on every call.
+// identical while a caller leaves IdentityVerification unset.
 func TestCreateOmitsIdentityVerificationWhenNil(t *testing.T) {
 	var raw []byte
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -2,14 +2,39 @@ package fakecore
 
 import (
 	"bytes"
-	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"net/http"
 	"strings"
 	"testing"
 )
+
+// v3AuthedRequest builds a POST to v3EvaluatePath the way the client does: a
+// real bootstrap + RS256-signed exchange, then the obx_ API key and the
+// exchanged workload bearer on the request itself -- so the fake's own auth
+// check is exercised rather than bypassed.
+func v3AuthedRequest(t *testing.T, f *Server, body []byte) *http.Request {
+	t.Helper()
+	ensureV3Identity()
+	doc := fetchV3BootstrapDoc(t, f)
+	clientID, _ := doc["client_id"].(string)
+	tokenEndpoint, _ := doc["token_endpoint"].(string)
+	assertion := signV3TestAssertion(t, v3PrivKey, doc, clientID, nil)
+	status, resp := postV3Token(t, tokenEndpoint, clientID, assertion)
+	if status != http.StatusOK {
+		t.Fatalf("token exchange failed: %d %v", status, resp)
+	}
+	token, _ := resp["access_token"].(string)
+	if token == "" {
+		t.Fatal("token exchange returned no access_token")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, f.URL()+v3EvaluatePath, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+APIKey())
+	req.Header.Set("X-OpenBox-Workload-Token", token)
+	return req
+}
 
 // TestFakecoreNeverDedupes pins review rule 3, and it is load-bearing for more
 // than tidiness: the gate/observe election test asserts that a call reaches the
@@ -31,11 +56,11 @@ func TestFakecoreNeverDedupes(t *testing.T) {
 	}
 }
 
-// post signs and sends a request the way the client does, so the fake's own
-// verification is exercised rather than bypassed.
+// post authenticates and sends a request the way the client does, so the
+// fake's own verification is exercised rather than bypassed.
 func post(t *testing.T, f *Server, body []byte, idemKey string) {
 	t.Helper()
-	req := signedRequest(t, f, body)
+	req := v3AuthedRequest(t, f, body)
 	req.Header.Set("Idempotency-Key", idemKey)
 	resp, err := (&http.Client{Transport: http.DefaultTransport}).Do(req)
 	if err != nil {
@@ -43,15 +68,15 @@ func post(t *testing.T, f *Server, body []byte, idemKey string) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d; the fake refused a well-formed signed request: %v", resp.StatusCode, strings.Join(f.Rejections(), "; "))
+		t.Fatalf("status = %d; the fake refused a well-formed authenticated request: %v", resp.StatusCode, strings.Join(f.Rejections(), "; "))
 	}
 }
 
-// postExpecting sends a correctly signed request and requires a given status,
-// for the bodies the fake is meant to refuse on inspection.
+// postExpecting sends a correctly authenticated request and requires a given
+// status, for the bodies the fake is meant to refuse on inspection.
 func postExpecting(t *testing.T, f *Server, body []byte, want int) {
 	t.Helper()
-	resp, err := (&http.Client{Transport: http.DefaultTransport}).Do(signedRequest(t, f, body))
+	resp, err := (&http.Client{Transport: http.DefaultTransport}).Do(v3AuthedRequest(t, f, body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
 	}
@@ -59,33 +84,6 @@ func postExpecting(t *testing.T, f *Server, body []byte, want int) {
 	if resp.StatusCode != want {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, want)
 	}
-}
-
-// signedRequest builds a request signed the way the client signs, so a test
-// bending one header changes exactly one thing.
-func signedRequest(t *testing.T, f *Server, body []byte) *http.Request {
-	t.Helper()
-	seed, err := base64.StdEncoding.DecodeString(f.SeedB64())
-	if err != nil {
-		t.Fatalf("decode seed: %v", err)
-	}
-	priv := ed25519.NewKeyFromSeed(seed)
-	sum := sha256.Sum256(body)
-	bodySHA := hex.EncodeToString(sum[:])
-	const ts, nonce = "2026-09-14T00:00:00Z", "n"
-	canonical := "POST\n" + evaluatePath + "\n" + ts + "\n" + nonce + "\n" + bodySHA
-
-	req, err := http.NewRequest(http.MethodPost, f.URL()+evaluatePath, bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("request: %v", err)
-	}
-	req.Header.Set(hdrAgentDID, f.DID())
-	req.Header.Set(hdrAgentTS, ts)
-	req.Header.Set(hdrAgentNonce, nonce)
-	req.Header.Set(hdrBodySHA, bodySHA)
-	req.Header.Set(hdrAgentSig, base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(canonical))))
-
-	return req
 }
 
 // TestFakecoreRefusesWhatCoreWouldRefuse proves the door is wired, not just
@@ -120,23 +118,25 @@ func TestFakecoreRefusesWhatCoreWouldRefuse(t *testing.T) {
 	}
 }
 
-// TestFakecoreRefusesABadSignature covers each verification failure on its own,
-// so a change that collapsed them into one check would be visible.
-func TestFakecoreRefusesABadSignature(t *testing.T) {
+// TestFakecoreRefusesUnauthenticatedEvaluate covers each auth failure mode on
+// its own, so a change that collapsed them into one check would be visible.
+// There is no request signature to bend anymore -- a workload request
+// carries no signed canonical string; the envelope is the obx_ API key on
+// Authorization plus the exchanged workload bearer, and the fake must reject
+// each independently of the other.
+func TestFakecoreRefusesUnauthenticatedEvaluate(t *testing.T) {
 	body := []byte(`{"source":"developer-runtime","event_type":"WorkflowStarted","workflow_id":"w","run_id":"r","timestamp":"t"}`)
 	for _, tc := range []struct {
 		name string
-		bend func(http.Header)
-		want string
+		bend func(h http.Header)
 	}{
-		{"the digest header does not match the body", func(h http.Header) { h.Set(hdrBodySHA, strings.Repeat("0", 64)) }, "body digest"},
-		{"no agent DID", func(h http.Header) { h.Set(hdrAgentDID, "") }, "agent DID"},
-		{"a signature that is not base64", func(h http.Header) { h.Set(hdrAgentSig, "!!!not base64!!!") }, "not base64"},
-		{"a signature from a key the fake does not know", func(h http.Header) { h.Set(hdrAgentSig, base64.StdEncoding.EncodeToString(make([]byte, 64))) }, "does not verify"},
+		{"wrong API key", func(h http.Header) { h.Set("Authorization", "Bearer obx_not_the_real_key") }},
+		{"no workload token", func(h http.Header) { h.Del("X-OpenBox-Workload-Token") }},
+		{"a token this server never issued", func(h http.Header) { h.Set("X-OpenBox-Workload-Token", "fake-workload-token-never-issued") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := New(t, Script{})
-			req := signedRequest(t, f, body)
+			req := v3AuthedRequest(t, f, body)
 			tc.bend(req.Header)
 			resp, err := (&http.Client{Transport: http.DefaultTransport}).Do(req)
 			if err != nil {
@@ -146,8 +146,39 @@ func TestFakecoreRefusesABadSignature(t *testing.T) {
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Errorf("status = %d, want 401", resp.StatusCode)
 			}
-			if got := strings.Join(f.Rejections(), " | "); !strings.Contains(got, tc.want) {
-				t.Errorf("rejection reason %q does not mention %q", got, tc.want)
+			if n := len(f.Inbox()); n != 0 {
+				t.Errorf("an unauthenticated request reached the inbox")
+			}
+		})
+	}
+}
+
+// TestFakecoreRejectsV1Routes proves the deleted protocol is gone from the
+// fake too: any /api/v1/* hit is answered (never left to hang) and recorded
+// as a rejection named "v1 route", so a stale fixture or a client regression
+// that still speaks it is loud rather than silently accepted.
+func TestFakecoreRejectsV1Routes(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/governance/evaluate",
+		"/api/v1/governance/approval",
+		"/api/v1/auth/validate",
+	} {
+		t.Run(path, func(t *testing.T) {
+			f := New(t, Script{})
+			resp, err := http.Post(f.URL()+path, "application/json", bytes.NewReader([]byte(`{}`)))
+			if err != nil {
+				t.Fatalf("post %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Errorf("status = %d, want 404", resp.StatusCode)
+			}
+			got := strings.Join(f.Rejections(), " | ")
+			if !strings.Contains(got, "v1 route") {
+				t.Errorf("rejection reasons %q do not mention %q", got, "v1 route")
+			}
+			if n := len(f.Inbox()); n != 0 {
+				t.Errorf("a v1 route hit reached the inbox")
 			}
 		})
 	}

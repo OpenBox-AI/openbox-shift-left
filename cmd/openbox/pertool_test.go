@@ -297,7 +297,7 @@ func TestAttestProviderMarkerRule(t *testing.T) {
 }
 
 // TestAttestContextSkipsWithoutSeed a v3 keycloak_workload store carries no
-// Ed25519 attestation seed (ruling 1; plan Unresolved Q3), so attestContext
+// Ed25519 attestation seed, so attestContext
 // always reports ok=false now, whatever tool marker is set: the commit still
 // proceeds, the trailer alone attributes it, exit stays 0, and the skip is
 // explained on stderr rather than silent.

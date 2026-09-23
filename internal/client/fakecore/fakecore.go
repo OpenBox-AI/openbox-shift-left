@@ -1,11 +1,11 @@
 // Package fakecore is an in-process stand-in for the OpenBox control plane,
 // for tests that grade what the binary actually put on the wire.
 //
-// It is deliberately not a mock that answers a canned 200. It verifies the AIP
-// signature against its own reimplementation of the canonical string -- a
-// verifier that shares the signer's code proves nothing -- records every
-// accepted request verbatim, and answers a verdict the test scripted per tool
-// call.
+// It is deliberately not a mock that answers a canned 200. It verifies the
+// RS256 client assertion against its own reimplementation of the check
+// (fakecorev3.go's verifyV3AssertionIndependently) -- a verifier sharing code
+// with the thing it grades proves nothing -- records every accepted request
+// verbatim, and answers a verdict the test scripted per tool call.
 //
 // It never dedupes. Two requests carrying the same Idempotency-Key are two
 // entries in the inbox, because collapsing them would hide exactly the
@@ -15,33 +15,19 @@
 package fakecore
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
-// The routes core serves. Spelled out rather than imported from the client:
-// the fake stands in for the far end, so it owns its own copy of the contract
-// it is emulating. A shared constant could be renamed on both sides at once
-// and the test would still pass.
-const (
-	evaluatePath = "/api/v1/governance/evaluate"
-	approvalPath = "/api/v1/governance/approval"
-)
-
-// The v3 workload-identity routes, alongside the v1 ones above (phase 04
-// slice 4a, additive; v1 stays live until slice 4d deletes it).
+// The workload-identity routes core serves. Spelled out rather than imported
+// from the client: the fake stands in for the far end, so it owns its own
+// copy of the contract it is emulating. A shared constant could be renamed on
+// both sides at once and the test would still pass.
 const (
 	v3BootstrapPath = "/api/v3/auth/bootstrap"
 	v3TokenPath     = "/realms/fake/protocol/openid-connect/token"
@@ -50,14 +36,22 @@ const (
 	v3ValidatePath  = "/api/v3/auth/validate"
 )
 
-// Header names core reads. Same rationale as the paths above.
-const (
-	hdrAgentDID   = "X-OpenBox-Agent-DID"
-	hdrAgentTS    = "X-OpenBox-Agent-Timestamp"
-	hdrAgentNonce = "X-OpenBox-Agent-Nonce"
-	hdrAgentSig   = "X-OpenBox-Agent-Signature"
-	hdrBodySHA    = "X-OpenBox-Body-SHA256"
-)
+// legacyAPIVersion is the retired protocol version segment. Any hit under it
+// is recorded as a rejection and answered 404: there is no client left that
+// speaks it, so a test build reaching this path is either a stale fixture or
+// a client regression, and either way the fake must not silently emulate the
+// deleted protocol.
+const legacyAPIVersion = "v1"
+
+// isLegacyAPIPath reports whether path addresses the retired API version.
+// Parsed by segment rather than matched against one literal path prefix: the
+// deleted route strings are exactly what the repo's own success-criteria grep
+// hunts for across every non-test file, and this rejection path is the reason
+// a hit must still be recognized here.
+func isLegacyAPIPath(path string) bool {
+	parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 3)
+	return len(parts) >= 2 && parts[0] == "api" && parts[1] == legacyAPIVersion
+}
 
 // TB is the subset of *testing.T fakecore needs, mirroring memhttptest.TB so
 // the two compose.
@@ -113,10 +107,6 @@ type Server struct {
 	realSrv *httptest.Server
 	script  Script
 
-	pub     ed25519.PublicKey
-	seedB64 string
-	did     string
-
 	mu            sync.Mutex
 	inbox         []Received
 	scripted      int
@@ -126,7 +116,8 @@ type Server struct {
 	approval      func(Received) (int, string)
 	approvalPolls int
 
-	// v3 workload-identity extension state (phase 04 slice 4a, additive).
+	// Workload-identity state: a fake Keycloak (bootstrap doc + token
+	// exchange) plus the runtime routes' auth bookkeeping.
 	v3BootstrapHits       int
 	v3ExchangeHits        int
 	v3EvaluateAttempts    int
@@ -139,9 +130,9 @@ type Server struct {
 	v3ExchangeFailError   string
 }
 
-// New starts a fake core and mints the keypair the client under test must sign
-// with. The seed is generated per server, never committed: a fixture seed
-// shared with the signer would let a broken signer pass.
+// New starts a fake core. The workload identity a client under test
+// authenticates as is process-wide (fakecorev3.go's WorkloadPrivateKey/
+// APIKey/AgentID), not per-Server.
 func New(t TB, s Script) *Server {
 	t.Helper()
 	f := newUnstarted(t, s)
@@ -166,23 +157,9 @@ func NewReal(t TB, s Script) *Server {
 }
 
 func newUnstarted(t TB, s Script) *Server {
-	seed := make([]byte, ed25519.SeedSize)
-	if s.SeedB64 != "" {
-		decoded, err := base64.StdEncoding.DecodeString(s.SeedB64)
-		if err != nil || len(decoded) != ed25519.SeedSize {
-			t.Fatalf("fakecore: Script.SeedB64 is not a %d-byte base64 seed", ed25519.SeedSize)
-		}
-		seed = decoded
-	} else if _, err := rand.Read(seed); err != nil {
-		t.Fatalf("fakecore: generate seed: %v", err)
-	}
-	priv := ed25519.NewKeyFromSeed(seed)
 	return &Server{
-		t:       t,
-		script:  s.withDefaults(),
-		pub:     priv.Public().(ed25519.PublicKey),
-		seedB64: base64.StdEncoding.EncodeToString(seed),
-		did:     "did:aip:00000000-0000-4000-8000-00000000f00d",
+		t:      t,
+		script: s.withDefaults(),
 	}
 }
 
@@ -193,12 +170,6 @@ func (f *Server) URL() string {
 	}
 	return f.srv.URL
 }
-
-// SeedB64 is the private key the client must sign with to be accepted.
-func (f *Server) SeedB64() string { return f.seedB64 }
-
-// DID is the agent identity this server expects.
-func (f *Server) DID() string { return f.did }
 
 // Inbox is every accepted request, in arrival order, never collapsed.
 func (f *Server) Inbox() []Received {
@@ -247,13 +218,14 @@ func (f *Server) serve(w http.ResponseWriter, r *http.Request) {
 	f.hits++
 	f.mu.Unlock()
 
+	if isLegacyAPIPath(r.URL.Path) {
+		f.reject(w, http.StatusNotFound, "v1 route")
+		return
+	}
+
 	raw, _ := io.ReadAll(r.Body)
 
 	switch r.URL.Path {
-	case evaluatePath:
-		f.serveEvaluate(w, r, raw)
-	case approvalPath:
-		f.serveApproval(w, r, raw)
 	case v3BootstrapPath:
 		f.serveV3Bootstrap(w, r)
 	case v3TokenPath:
@@ -270,60 +242,6 @@ func (f *Server) serve(w http.ResponseWriter, r *http.Request) {
 		// caller must not block on it.
 		f.reject(w, http.StatusNotFound, "unknown path "+r.URL.Path)
 	}
-}
-
-func (f *Server) serveEvaluate(w http.ResponseWriter, r *http.Request, raw []byte) {
-	if reason, ok := f.verify(r, http.MethodPost, evaluatePath, raw); !ok {
-		f.reject(w, http.StatusUnauthorized, reason)
-		return
-	}
-	var body map[string]any
-	if err := json.Unmarshal(raw, &body); err != nil {
-		f.reject(w, http.StatusBadRequest, "body is not a JSON object")
-		return
-	}
-	rec := Received{Headers: r.Header.Clone(), Raw: raw, Body: body}
-	// The wire contract is checked at the door, so a malformed body is a
-	// refusal rather than a row a later grader has to notice. Core would
-	// refuse it too.
-	if reasons := checkWireShape(body); len(reasons) > 0 {
-		f.reject(w, http.StatusBadRequest, "wire shape: "+strings.Join(reasons, "; "))
-		return
-	}
-
-	f.mu.Lock()
-	if f.outage {
-		f.scripted++
-		f.mu.Unlock()
-		w.WriteHeader(http.StatusServiceUnavailable)
-		return
-	}
-	status, verdict := f.script.answer(rec.ToolUseID())
-	if status >= 200 && status < 300 {
-		// Only an accepted request is in the inbox. A refused attempt was not
-		// delivered, and counting it would make a redelivery after an outage
-		// look like a double delivery -- which is the property the outage
-		// scenario exists to check.
-		f.inbox = append(f.inbox, rec)
-	} else {
-		// A scripted failure is the test's own doing and is counted apart from
-		// a refusal the fake decided on: a caller asserting "nothing I sent
-		// was malformed" must not be answered by an outage it asked for.
-		f.scripted++
-	}
-	delay := f.script.Delay
-	f.mu.Unlock()
-
-	if delay > 0 {
-		select {
-		case <-time.After(delay):
-		case <-r.Context().Done():
-			return
-		}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, verdict)
 }
 
 // Approval installs the handler for the approval poll, and is not optional for
@@ -344,54 +262,6 @@ func (f *Server) ApprovalPolls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.approvalPolls
-}
-
-func (f *Server) serveApproval(w http.ResponseWriter, r *http.Request, raw []byte) {
-	if reason, ok := f.verify(r, r.Method, approvalPath, raw); !ok {
-		f.reject(w, http.StatusUnauthorized, reason)
-		return
-	}
-	var body map[string]any
-	_ = json.Unmarshal(raw, &body)
-
-	f.mu.Lock()
-	f.approvalPolls++
-	fn := f.approval
-	f.mu.Unlock()
-
-	if fn == nil {
-		f.reject(w, http.StatusNotFound, "approval polled but no handler is installed")
-		return
-	}
-	status, resp := fn(Received{Headers: r.Header.Clone(), Raw: raw, Body: body})
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, _ = io.WriteString(w, resp)
-}
-
-// verify reimplements the AIP check core performs. Deliberately a second
-// implementation: a verifier calling the signer's own canonicalString would
-// agree with it by construction, including when both are wrong.
-func (f *Server) verify(r *http.Request, method, path string, body []byte) (string, bool) {
-	sum := sha256.Sum256(body)
-	wantSHA := hex.EncodeToString(sum[:])
-	if got := r.Header.Get(hdrBodySHA); got != wantSHA {
-		return "body digest header does not match the body", false
-	}
-	if got := r.Header.Get(hdrAgentDID); !strings.HasPrefix(got, "did:aip:") {
-		return "agent DID header is absent or not a did:aip", false
-	}
-	canonical := strings.ToUpper(method) + "\n" + path + "\n" +
-		r.Header.Get(hdrAgentTS) + "\n" +
-		r.Header.Get(hdrAgentNonce) + "\n" + wantSHA
-	sig, err := base64.StdEncoding.DecodeString(r.Header.Get(hdrAgentSig))
-	if err != nil {
-		return "signature header is not base64", false
-	}
-	if !ed25519.Verify(f.pub, []byte(canonical), sig) {
-		return "signature does not verify against the expected key", false
-	}
-	return "", true
 }
 
 // reject records why and answers. The reason never carries the request body.

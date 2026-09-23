@@ -40,7 +40,7 @@ func (s Spool) recordDiscard(basePath string, events int, reason string) {
 
 // DiscardAll removes every event currently waiting in this spool -- session,
 // recovery and in-flight rotated (`.flushing.`) files alike -- and records
-// the total under reason in the discard ledger. It exists for D5: when
+// the total under reason in the discard ledger. It exists because when
 // `openbox init`/`adopt` writes a v3 identity over a legacy one, whatever
 // that tool had queued under the old identity can never be delivered under
 // the new one (the control plane ties every event to the credential that

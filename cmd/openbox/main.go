@@ -332,9 +332,9 @@ func (a *app) runDevInit(args []string) int {
 		if adopted {
 			// adopt just wrote this tool's store; devinit's own reuse check reads
 			// a v3 shape adopt does not write (it is still the pre-v3 DID+seed
-			// prompt, unchanged here -- phase 05 redesigns it), so without this the
-			// pasted identity would fall straight through into a fresh
-			// registration with no registrar wired.
+			// prompt, unchanged here), so without this the pasted identity would
+			// fall straight through into a fresh registration with no registrar
+			// wired.
 			o.AssumeExistingStore = true
 		} else {
 			token, tokenSource, code := a.requireControlToken()
@@ -417,7 +417,7 @@ func (a *app) runDevInit(args []string) int {
 	return exitOK
 }
 
-// discardLegacySpool implements devinit.Deps.DiscardLegacySpool (D5): the
+// discardLegacySpool implements devinit.Deps.DiscardLegacySpool: the
 // named provider's own spool directory, discarded under the spool lock and
 // recorded in its discard ledger. register() calls this only after a
 // successful WriteWorkloadIdentity, and only for a tool whose store was

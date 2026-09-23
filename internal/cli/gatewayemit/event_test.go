@@ -2,19 +2,14 @@ package gatewayemit
 
 import (
 	"context"
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 )
 
@@ -233,23 +228,11 @@ func TestCaptureOffStripsBodiesButKeepsTheFingerprint(t *testing.T) {
 func postThroughRealClient(t *testing.T, ev client.DevEvent, contentOn bool) []byte {
 	t.Helper()
 
-	var captured []byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		captured, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"decision":"ALLOW"}`)
-	}))
-	defer srv.Close()
-
-	_, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
+	fc := fakecore.New(t, fakecore.Script{})
 	cl, err := client.New(client.Config{
-		BaseURL:               srv.URL,
-		APIKey:                "obx_test",
-		DID:                   testDID,
-		PrivateKeyB64:         base64.StdEncoding.EncodeToString(priv.Seed()),
+		BaseURL:               fc.URL(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: contentOn,
 	})
 	if err != nil {
@@ -258,8 +241,9 @@ func postThroughRealClient(t *testing.T, ev client.DevEvent, contentOn bool) []b
 	if _, err := cl.Emit(context.Background(), ev); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
-	if len(captured) == 0 {
+	inbox := fc.Inbox()
+	if len(inbox) == 0 {
 		t.Fatal("nothing was POSTed")
 	}
-	return captured
+	return inbox[len(inbox)-1].Raw
 }

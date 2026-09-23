@@ -112,7 +112,7 @@ func TestTurn_ThreeStopsEmitThreePairs(t *testing.T) {
 // activity_id is derived at the payload layer, so asserting turn_index in the
 // spool is not asserting the id the control plane dedupes on.
 func TestWire_TurnPairSharesOneActivityID(t *testing.T) {
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
 
@@ -128,8 +128,8 @@ func TestWire_TurnPairSharesOneActivityID(t *testing.T) {
 
 	ids := map[string][]string{}
 	var order []string
-	for _, raw := range *bodies {
-		p := decodeBody(t, raw)
+	for _, r := range fc.Inbox() {
+		p := decodeBody(t, r.Raw)
 		id, _ := p["activity_id"].(string)
 		et, _ := p["event_type"].(string)
 		if _, seen := ids[id]; !seen {

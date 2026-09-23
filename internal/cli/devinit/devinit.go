@@ -66,8 +66,8 @@ type Options struct {
 	// Without this, a freshly adopted store falls through register's v3 reuse
 	// check (adopt writes no workload key) into a fresh registration with no
 	// registrar wired, discarding what the operator just pasted. Adopt's own
-	// prompts and messages are unchanged here; phase 05 owns their v3-native
-	// redesign.
+	// prompts and messages are unchanged here; their v3-native redesign is a
+	// separate, later concern.
 	AssumeExistingStore bool
 }
 
@@ -93,7 +93,7 @@ type Deps struct {
 // code.
 type Result struct {
 	AgentID   string
-	DID       string // the derived attribution label (D1), best-effort; "" if AgentID itself is not a UUID
+	DID       string // the derived attribution label, best-effort; "" if AgentID itself is not a UUID
 	AgentName string
 	// IdentityKid is the registered keycloak_workload key's RFC 7638
 	// thumbprint, printed in place of a DID for a fresh registration.
@@ -326,7 +326,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 	res.AgentID, res.Registered = reg.AgentID, true
 	res.IdentityKid = reg.Identity.Kid
-	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness; ref.DID stays unset (D1: never stored)
+	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness; ref.DID stays unset (never stored)
 	ref.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
 
 	if reg.Identity.Method != devconfig.IdentityMethodKeycloakWorkload || reg.APIKey == "" {

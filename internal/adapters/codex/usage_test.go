@@ -2,12 +2,8 @@ package codex
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,9 +11,8 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
-
-var finopsTestSeed = base64.StdEncoding.EncodeToString(make([]byte, 32))
 
 // sentinels are the unique content markers seeded into every content-bearing
 // location of testdata/rollout-poisoned.jsonl. The finops parser must extract
@@ -171,19 +166,11 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		}
 	}
 
-	var body []byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
+	fc := fakecore.New(t, fakecore.Script{})
 	cl, err := client.New(client.Config{
-		BaseURL:               srv.URL,
-		APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
-		DID:                   testDID,
-		PrivateKeyB64:         finopsTestSeed,
+		BaseURL:               fc.URL(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: true, // adversarial: stripper OFF
 	})
 	if err != nil {
@@ -192,9 +179,11 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	if _, err := cl.Emit(context.Background(), ev); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
-	if len(body) == 0 {
+	inbox := fc.Inbox()
+	if len(inbox) == 0 {
 		t.Fatal("no request body captured")
 	}
+	body := inbox[0].Raw
 	for _, s := range sentinels {
 		if strings.Contains(string(body), s) {
 			t.Fatalf("INV-2 breach: sentinel %q on the wire: %s", s, body)
@@ -505,9 +494,9 @@ func TestFinops_ConformanceWithTokens(t *testing.T) {
 		t.Errorf("expected token total on the conformance shape: %s", raw)
 	}
 
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	emit(t, cl, ev)
-	payload := decodeBody(t, (*bodies)[0])
+	payload := decodeBody(t, fc.Inbox()[0].Raw)
 	if payload["event_type"] != "WorkflowCompleted" {
 		t.Errorf("SessionEnded should map to WorkflowCompleted, got %v", payload["event_type"])
 	}

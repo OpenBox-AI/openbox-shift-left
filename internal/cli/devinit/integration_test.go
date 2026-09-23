@@ -88,7 +88,7 @@ func TestEndToEndClaudeCodeRealInstall(t *testing.T) {
 		t.Fatalf("parse dev config: %v", err)
 	}
 	if cfg.DID != "" {
-		t.Errorf("dev config DID = %q, want empty: a v3 store never persists one (D1)", cfg.DID)
+		t.Errorf("dev config DID = %q, want empty: a v3 store never persists one", cfg.DID)
 	}
 	if cfg.AgentID != "srv-agent" {
 		t.Errorf("dev config agent_id = %q, want srv-agent", cfg.AgentID)

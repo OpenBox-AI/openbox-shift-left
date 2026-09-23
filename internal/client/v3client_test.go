@@ -36,7 +36,8 @@ func newV3TestClient(t *testing.T, baseURL, cachePath string) (*Client, *capture
 // TestEmitSendsWorkloadEnvelopeOnV3 pins the exact header set a v3 evaluate
 // request carries: the obx_ API key, the exchanged workload bearer, the SDK
 // identity and the idempotency key -- and NONE of v1's DID/signature/body-hash
-// headers, since a v3 request carries no attribution coordinate at all (D1).
+// headers, since a v3 request carries no attribution coordinate at all: it is
+// derived in memory and never sent.
 func TestEmitSendsWorkloadEnvelopeOnV3(t *testing.T) {
 	fc := fakecore.New(t, fakecore.Script{})
 	c, _ := newV3TestClient(t, fc.URL(), "")
@@ -129,7 +130,7 @@ func TestColdEmitBootstrapsAndExchangesOnce(t *testing.T) {
 	}
 }
 
-// TestCached401InvalidatesWithoutResend is D2: a cached token that a runtime
+// TestCached401InvalidatesWithoutResend: a cached token that a runtime
 // route now rejects is never resent. It deletes the cache file so the next
 // call goes cold, and it costs the retry loop exactly one POST, not two.
 func TestCached401InvalidatesWithoutResend(t *testing.T) {
@@ -179,8 +180,8 @@ func TestCached401InvalidatesWithoutResend(t *testing.T) {
 	}
 }
 
-// TestFresh401IsHeldNotRefused covers the fromCache=false half of D2: a
-// just-acquired token a runtime route rejects is also held, not refused, and
+// TestFresh401IsHeldNotRefused covers the fromCache=false half of the same
+// rule: a just-acquired token a runtime route rejects is also held, not refused, and
 // also not resent.
 func TestFresh401IsHeldNotRefused(t *testing.T) {
 	fc := fakecore.New(t, fakecore.Script{})

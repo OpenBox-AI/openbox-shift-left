@@ -81,7 +81,7 @@ func wantDID(t *testing.T, agentID string) string {
 	return did
 }
 
-// TestResolveDIDDerivesFromAgentID pins the flip (phase 04 D1): the DID is no
+// TestResolveDIDDerivesFromAgentID pins the flip to v3: the DID is no
 // longer read from a store, it is derived from the agent id -- env first,
 // dev.json's agent_id as the fallback.
 func TestResolveDIDDerivesFromAgentID(t *testing.T) {
@@ -229,8 +229,8 @@ func mustDevConfigPath(t *testing.T) string {
 	return DefaultConfigPath()
 }
 
-// TestEnvFileIsNotACoordinateSource the tripwire for the second-store bug
-// (that decision, D2), rewritten for the v3 shape: the credential file
+// TestEnvFileIsNotACoordinateSource the tripwire for the second-store bug,
+// rewritten for the v3 shape: the credential file
 // carries the two secrets and, deliberately, a coordinate-shaped value too;
 // resolution must reach the coordinate gate on the agent id from env/dev.json
 // alone, never from anything sitting in .env.

@@ -33,9 +33,8 @@ func attestProvider(getenv func(string) string) string {
 }
 
 // attestContext always reports ok=false: a v3 keycloak_workload store carries
-// no Ed25519 attestation seed (ruling 1, plan Unresolved Q3; core owns the
-// eventual redesign). The commit still proceeds and is attributed by its
-// trailer; attesthook.go's writeAttestation logs why signing was skipped.
+// no Ed25519 attestation seed. The commit still proceeds and is attributed by
+// its trailer; attesthook.go's writeAttestation logs why signing was skipped.
 func attestContext() (obgit.AttestContext, bool) {
 	return obgit.AttestContext{}, false
 }

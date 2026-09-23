@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -17,6 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway/gatewaytest"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
@@ -138,25 +137,11 @@ func TestOversizedRecordedBodyIsCappedOnTheWire(t *testing.T) {
 	ex := loadExchange(t, "messages-json.json")
 	reqRunes := utf8.RuneCountInString(ex.Request.Body)
 
-	var posted []string
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		posted = append(posted, string(raw))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"verdict":"allow"}`)
-	}))
-	t.Cleanup(srv.Close)
-
-	_, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatalf("keygen: %v", err)
-	}
+	fc := fakecore.New(t, fakecore.Script{})
 	c, err := client.New(client.Config{
-		BaseURL:               srv.URL,
-		APIKey:                "obx_" + strings.Repeat("f", 24),
-		DID:                   "did:aip:7f3c9b2e-0000-5000-a000-00000000feed",
-		PrivateKeyB64:         base64.StdEncoding.EncodeToString(priv.Seed()),
-		HTTP:                  srv.Client(),
+		BaseURL:               fc.URL(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: true,
 	})
 	if err != nil {
@@ -184,11 +169,12 @@ func TestOversizedRecordedBodyIsCappedOnTheWire(t *testing.T) {
 	if _, err := c.Emit(context.Background(), ev); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
+	posted := fc.Inbox()
 	if len(posted) == 0 {
 		t.Fatal("nothing was POSTed; the assertion below would be vacuous")
 	}
 
-	body := posted[0]
+	body := string(posted[0].Raw)
 	if utf8.RuneCountInString(body) > reqRunes {
 		t.Errorf("the POSTed payload (%d runes) is larger than the request body it carries (%d); "+
 			"the cap did not act", utf8.RuneCountInString(body), reqRunes)

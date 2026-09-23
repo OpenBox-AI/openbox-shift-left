@@ -169,7 +169,7 @@ func isNegativeCacheStatus(status int) bool {
 	}
 }
 
-// cappedLifetime bounds a server's expires_in at maxCacheLifetime, per D3.
+// cappedLifetime bounds a server's expires_in at maxCacheLifetime.
 func cappedLifetime(expiresInSeconds float64) time.Duration {
 	if expiresInSeconds > maxCacheLifetime.Seconds() {
 		expiresInSeconds = maxCacheLifetime.Seconds()

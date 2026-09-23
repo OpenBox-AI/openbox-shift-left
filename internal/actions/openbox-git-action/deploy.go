@@ -23,7 +23,7 @@ type DeployMeta struct {
 
 // BuildDeployEvent maps a Resolution + deploy context onto the normalized
 // DevEvent the client emits (contract event_type = Deploy).
-//   - DeveloperDID is the derived attribution label (D1), never a signing
+//   - DeveloperDID is the derived attribution label, never a signing
 //     identity: core validates the request via the workload bearer, not via
 //     this value.
 //   - Deploy_did is a synthetic lineage label

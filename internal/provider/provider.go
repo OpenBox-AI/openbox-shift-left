@@ -24,7 +24,7 @@ var ErrUnknown = errors.New("unknown provider")
 // which identity this machine governs as, and the org posture to persist into
 // the tool's dev config. It never carries a credential value (INV-1).
 type CredentialRef struct {
-	DID            string // did:aip:... (not secret); empty for a v3 keycloak_workload identity (D1: never stored)
+	DID            string // did:aip:... (not secret); empty for a v3 keycloak_workload identity (never stored)
 	BaseURL        string // optional core base URL; empty ⇒ adapter default
 	ContentCapture *bool  // org content posture; nil ⇒ the adapter default (content capture ON). Set to &false to pin metadata-only.
 	InstallGitHook bool   // persist the ambient commit-hook install preference

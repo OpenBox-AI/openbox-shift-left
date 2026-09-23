@@ -51,7 +51,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// DeveloperDID is derived, never read off the wire (D1): a workload agent
+	// DeveloperDID is derived, never read off the wire: a workload agent
 	// has no DID at the backend. An exported OPENBOX_DID is optional going
 	// forward, but if a CI config still carries one from before this machine's
 	// last (re-)init, it must agree with what OPENBOX_AGENT_ID derives to, or

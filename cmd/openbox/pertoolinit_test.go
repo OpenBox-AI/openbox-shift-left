@@ -460,7 +460,7 @@ func clearAgentEnv(t *testing.T) {
 }
 
 // agentIDFromStore reads back the coordinate a v3 registration actually
-// persists. A v3 store never sets developer_did (D1: the attribution label is
+// persists. A v3 store never sets developer_did (the attribution label is
 // derived, never stored), so this replaces the pre-flip didFromStore.
 func agentIDFromStore(t *testing.T, home, tool string) string {
 	t.Helper()

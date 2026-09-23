@@ -181,7 +181,7 @@ func TestConfigAppliedWhenInstallerAvailable(t *testing.T) {
 		t.Errorf("installer got bad ref: %+v", inst.gotRef)
 	}
 	if inst.gotRef.DID != "" {
-		t.Errorf("installer ref carries a DID (%q); a v3 registration never persists one (D1)", inst.gotRef.DID)
+		t.Errorf("installer ref carries a DID (%q); a v3 registration never persists one", inst.gotRef.DID)
 	}
 }
 

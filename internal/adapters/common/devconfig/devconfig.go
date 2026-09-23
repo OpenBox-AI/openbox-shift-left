@@ -44,9 +44,9 @@ const (
 	EnvHaltDir      = "OPENBOX_HALT_DIR"
 	EnvAPIKeyDirect = "OPENBOX_API_KEY"
 	// EnvAgentPrivateKey is the Ed25519 signing key, under the name the OpenBox
-	// platform documents for its own SDK. Legacy (v1) only from phase 04 on; kept
-	// readable as a legacy marker (LegacyStoreFor) and a deprecated-alias source
-	// until then.
+	// platform documents for its own SDK. Retired as a credential source now
+	// that v3 is the only identity; kept readable only as a legacy marker
+	// (LegacyStoreFor) and a deprecated-alias source.
 	EnvAgentPrivateKey = "OPENBOX_AGENT_PRIVATE_KEY"
 	// EnvWorkloadPrivateKey is the v3 keycloak_workload RS256 client-assertion
 	// signing key: PKCS8 DER, base64 std.
@@ -75,10 +75,9 @@ const (
 
 // legacySeedEnvNames are the Ed25519 seed env names a v1 store could hold,
 // under the documented name or a deprecated alias. Retired as a credential
-// source in phase 04 (no v3 resolver reads any of them), and kept only as a
-// legacy-store detection signal: LegacyStoreFor and WriteWorkloadIdentity
-// iterate this to find and purge a seed sitting beside (or instead of) a v3
-// workload key.
+// source (no v3 resolver reads any of them), and kept only as a legacy-store
+// detection signal: LegacyStoreFor and WriteWorkloadIdentity iterate this to
+// find and purge a seed sitting beside (or instead of) a v3 workload key.
 var legacySeedEnvNames = []string{EnvAgentPrivateKey, "OPENBOX_ED25519_SEED", "OPENBOX_SEED"}
 
 // DevConfig is the non-secret coordinate file the installers write and the
@@ -145,7 +144,7 @@ type DevConfig struct {
 	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
 	// IdentityMethod is "keycloak_workload" for a v3 store; empty or any other
 	// value reads as legacy alongside the DID/seed markers LegacyStoreFor also
-	// checks. dev.json never stores the derived attribution DID (D1): this field
+	// checks. dev.json never stores the derived attribution DID: this field
 	// is the only identity-shape marker that lives here.
 	IdentityMethod string `json:"identity_method,omitempty"`
 }
@@ -199,7 +198,7 @@ func load() (DevConfig, error) { return Load(DefaultConfigPath()) }
 type Credentials struct {
 	BaseURL string
 	APIKey  string
-	// DID is the in-memory attribution label (D1): derived from AgentID via
+	// DID is the in-memory attribution label: derived from AgentID via
 	// AttributionDIDFor, never itself stored or read from a store. Never
 	// empty on a successful resolve.
 	DID                   string
@@ -242,7 +241,7 @@ func legacyStoreError(tool string, ls LegacyStore) error {
 
 // ResolveDID resolves the in-memory attribution DID for a v3 workload
 // identity: env OPENBOX_AGENT_ID, else dev.json's agent_id, run through
-// AttributionDIDFor (D1). No secret-store access. This is the hot path:
+// AttributionDIDFor. No secret-store access. This is the hot path:
 // observe/spool needs the DID to attribute events but never the obx_ key or
 // the workload signing key, so a tool-use hook does zero secret I/O (INV-1).
 //

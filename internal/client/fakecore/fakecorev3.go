@@ -1,9 +1,9 @@
 package fakecore
 
-// fakecorev3.go is the v3 workload-identity half of the fake control plane
-// (phase 04 slice 4a, additive): a fake Keycloak (bootstrap doc + token
-// exchange) and the v3 governance/validate routes, alongside the v1 ones in
-// fakecore.go. It stays on the same import wall (guard_test.go's
+// fakecorev3.go is the workload-identity half of the fake control plane: a
+// fake Keycloak (bootstrap doc + token exchange) and the governance/validate
+// routes, alongside the route dispatch and shared plumbing in fakecore.go.
+// It stays on the same import wall (guard_test.go's
 // TestFakecoreKeepsItsImportWall): the RS256 assertion is verified with
 // crypto/rsa directly here, a second implementation of the same check
 // internal/client/workloadauth performs, and the attribution DID derivation
@@ -36,8 +36,8 @@ import (
 const v3ClientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
 // v3AttributionAIPNamespace restates devconfig.AttributionAIPNamespace
-// (VERIFIED, Validation Session 1: core openbox_did.go:30, backend
-// aip-namespace.ts). TestFakecoreAttributionDIDMatchesTheVerifiedVector pins
+// (verified against core openbox_did.go:30 and backend aip-namespace.ts).
+// TestFakecoreAttributionDIDMatchesTheVerifiedVector pins
 // the same vector devconfig's own TestAttributionDIDMatchesCoreDerivation
 // asserts, so a drift here is caught without importing devconfig.
 const v3AttributionAIPNamespace = "b6e4a1d3-7c02-4e8a-9d1f-5a3b7c2d8e0f"
@@ -337,7 +337,7 @@ func (f *Server) v3AuthOK(r *http.Request) bool {
 }
 
 // writeV3Unauthorized answers the flat v3 401 core sends for evaluate,
-// approval and validate: no reason_code, ever (D2).
+// approval and validate: no reason_code, ever.
 func (f *Server) writeV3Unauthorized(w http.ResponseWriter) {
 	f.writeJSONV3(w, http.StatusUnauthorized, map[string]any{"code": 401, "message": "invalid token or agent identity"})
 }

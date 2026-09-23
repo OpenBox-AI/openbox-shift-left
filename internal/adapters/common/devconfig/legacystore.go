@@ -2,8 +2,8 @@ package devconfig
 
 // LegacyStore reports whether one tool's identity store predates the v3
 // keycloak_workload model. Legacy iff dev.json holds a stored developer_did
-// (D1: the attribution label is derived at read time, so dev.json never
-// stores one under a v3 identity) or the credential file holds an Ed25519
+// (the attribution label is derived at read time, so dev.json never stores
+// one under a v3 identity) or the credential file holds an Ed25519
 // signing seed under the current or a deprecated name. Reasons names every
 // signal that fired, for doctor and the hook warning to print verbatim.
 type LegacyStore struct {

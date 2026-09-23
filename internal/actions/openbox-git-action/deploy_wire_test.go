@@ -2,30 +2,14 @@ package gitaction
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
-
-// signingSeedB64 derives a throwaway signing seed in code. Never a pasted
-// base64 literal: this repo's redactor rewrites developer files, and a
-// credential-shaped constant in a fixture is the thing that trips it.
-func signingSeedB64(t *testing.T) string {
-	t.Helper()
-	_, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	return base64.StdEncoding.EncodeToString(priv.Seed())
-}
 
 // richResolution is what BuildDeployEvent actually produces in the field, as
 // opposed to the three-key fixture the wire golden uses: an attributed deploy
@@ -57,20 +41,12 @@ func richResolution() Resolution {
 // signal_args, which is what OPA and Guardrails read, so this asserts on the
 // bytes that actually reach /evaluate rather than on the struct.
 func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
-	var bodies [][]byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, raw)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
-	defer srv.Close()
+	fc := fakecore.New(t, fakecore.Script{})
 
 	cl, err := client.New(client.Config{
-		BaseURL:       srv.URL,
-		APIKey:        "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
-		DID:           "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
-		PrivateKeyB64: signingSeedB64(t),
+		BaseURL:            fc.URL(),
+		APIKey:             fakecore.APIKey(),
+		WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
 	})
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
@@ -85,8 +61,9 @@ func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
 	if _, err := cl.Emit(context.Background(), ev); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
-	if len(bodies) != 1 {
-		t.Fatalf("expected 1 wire body, got %d", len(bodies))
+	inbox := fc.Inbox()
+	if len(inbox) != 1 {
+		t.Fatalf("expected 1 wire body, got %d", len(inbox))
 	}
 
 	var p struct {
@@ -94,8 +71,8 @@ func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
 		SignalArgs map[string]any `json:"signal_args"`
 		Metadata   map[string]any `json:"metadata"`
 	}
-	if err := json.Unmarshal(bodies[0], &p); err != nil {
-		t.Fatalf("decode wire body: %v\n%s", err, bodies[0])
+	if err := json.Unmarshal(inbox[0].Raw, &p); err != nil {
+		t.Fatalf("decode wire body: %v\n%s", err, inbox[0].Raw)
 	}
 	if p.SignalName != "deploy" {
 		t.Fatalf("signal_name = %q, want deploy", p.SignalName)

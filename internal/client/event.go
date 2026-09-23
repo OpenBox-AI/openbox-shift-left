@@ -1,9 +1,9 @@
 // Package client is the OpenBox developer-runtime data-plane client: the
 // shared transport every adapter and the git action use to emit a normalized
 // developer event to OpenBox; build the openbox-core GovernanceEventPayload,
-// AIP Ed25519-sign the request, POST it to /api/v1/governance/evaluate, and
-// parse the verdict.
-//   - INV-1: the obx_ API key and the Ed25519 signing seed are never logged or
+// authenticate with the workload identity's exchanged bearer, POST it to
+// /api/v3/governance/evaluate, and parse the verdict.
+//   - INV-1: the obx_ API key and the workload private key are never logged or
 //     placed on an argv; they live only in the Client and request headers.
 //   - INV-2: content (prompt/output/file/tool bodies) is stripped before
 //     egress unless content-capture is explicitly enabled for the org.

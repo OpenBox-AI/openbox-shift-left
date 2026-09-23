@@ -117,9 +117,8 @@ func TestSpooledTransportEventReachesTheWire(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{})
 	c, err := client.New(client.Config{
 		BaseURL:               fake.URL(),
-		APIKey:                "obx_" + strings.Repeat("f", 24),
-		DID:                   fake.DID(),
-		PrivateKeyB64:         fake.SeedB64(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: true,
 	})
 	if err != nil {

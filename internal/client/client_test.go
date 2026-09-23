@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,32 @@ import (
 )
 
 const testAPIKey = "obx_test_" + "0123456789abcdef0123456789abcdef0123456789abcdef"
+
+// fakeTokenSource is the tokens test seam (Config.tokens): a fixed bearer with
+// no network call at all, for a test whose subject is retry/idempotency/
+// fail-open behavior at the transport layer, not the workload-identity
+// acquisition flow itself (v3clientdualmode_test.go's fakecore-backed tests
+// cover that).
+type fakeTokenSource struct {
+	mu          sync.Mutex
+	token       string
+	fromCache   bool
+	err         error
+	invalidated int
+}
+
+func (f *fakeTokenSource) Token(context.Context) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.token, f.fromCache, f.err
+}
+
+func (f *fakeTokenSource) Invalidate() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.invalidated++
+	return nil
+}
 
 type captureLogger struct {
 	mu    sync.Mutex
@@ -39,14 +64,29 @@ func durPtr(d time.Duration) *time.Duration { return &d }
 
 func intPtr(i int) *int { return &i }
 
+// testDID is an attribution-label fixture (DevEvent.DeveloperDID), unrelated
+// to the client's own credentials -- a v3 request carries no DID at all: it
+// is derived in memory and never sent.
+const testDID = "did:aip:00000000-0000-0000-0000-000000000001"
+
+// testWorkloadKey is never parsed: every test client here installs the tokens
+// seam (fakeTokenSource), so New's WorkloadPrivateKey-required check is
+// satisfied without a real key ever reaching workloadauth.
+const testWorkloadKey = "test-workload-private-key-placeholder"
+
+// testWorkloadToken is fakeTokenSource's fixed bearer; INV-1 leak checks
+// assert it never reaches a log line, the same role testPrivateKeyB64 played
+// before the workload identity flip.
+const testWorkloadToken = "test-workload-bearer-token"
+
 func newTestClient(t *testing.T, baseURL string, contentOn bool) (*Client, *captureLogger) {
 	t.Helper()
 	log := &captureLogger{}
 	c, err := New(Config{
 		BaseURL:               baseURL,
 		APIKey:                testAPIKey,
-		DID:                   testDID,
-		PrivateKeyB64:         testPrivateKeyB64,
+		WorkloadPrivateKey:    testWorkloadKey,
+		tokens:                &fakeTokenSource{token: testWorkloadToken},
 		ContentCaptureEnabled: contentOn,
 		RetryBase:             durPtr(time.Millisecond), // keep retry tests fast
 		Logger:                log,
@@ -70,7 +110,11 @@ func sampleEvent() DevEvent {
 	}
 }
 
-func coreMirrorServer(t *testing.T, pub ed25519.PublicKey, onRequest func(n int) (status int, verdict string)) (*memhttptest.Server, *[]governanceEventPayload, *int) {
+// coreMirrorServer answers the workload envelope (Authorization: obx_ key,
+// X-OpenBox-Workload-Token: the fakeTokenSource bearer) newTestClient sends;
+// there is no signature to verify (that is v3clientdualmode_test.go's own
+// concern, against a real fakecore.Server).
+func coreMirrorServer(t *testing.T, onRequest func(n int) (status int, verdict string)) (*memhttptest.Server, *[]governanceEventPayload, *int) {
 	t.Helper()
 	var mu sync.Mutex
 	var payloads []governanceEventPayload
@@ -87,12 +131,10 @@ func coreMirrorServer(t *testing.T, pub ed25519.PublicKey, onRequest func(n int)
 		if got := r.Header.Get(headerAuthorization); got != "Bearer "+testAPIKey {
 			t.Errorf("Authorization = %q", got)
 		}
-		body, _ := io.ReadAll(r.Body)
-		if err := verifyLikeCore(pub, r.Method, r.URL.Path, body, r.Header); err != nil {
-			t.Errorf("core-mirror rejected signature: %v", err)
-			w.WriteHeader(401)
-			return
+		if got := r.Header.Get(headerWorkloadToken); got != testWorkloadToken {
+			t.Errorf("workload token header = %q, want %q", got, testWorkloadToken)
 		}
+		body, _ := io.ReadAll(r.Body)
 		var p governanceEventPayload
 		if err := json.Unmarshal(body, &p); err != nil {
 			t.Errorf("payload unmarshal: %v", err)
@@ -118,12 +160,8 @@ func coreMirrorServer(t *testing.T, pub ed25519.PublicKey, onRequest func(n int)
 	return srv, &payloads, &calls
 }
 
-func pub(t *testing.T) ed25519.PublicKey {
-	return mustSigner(t).priv.Public().(ed25519.PublicKey)
-}
-
-func TestEmit_HappyPath_SignedAndParsed(t *testing.T) {
-	srv, payloads, calls := coreMirrorServer(t, pub(t), nil)
+func TestEmit_HappyPath_AuthenticatedAndParsed(t *testing.T) {
+	srv, payloads, calls := coreMirrorServer(t, nil)
 	c, _ := newTestClient(t, srv.URL, false)
 
 	v, err := c.Emit(context.Background(), sampleEvent())
@@ -166,7 +204,7 @@ func TestEmit_VerdictParsing(t *testing.T) {
 		"halt":             VerdictHalt,
 	}
 	for wire, want := range cases {
-		srv, _, _ := coreMirrorServer(t, pub(t), func(int) (int, string) { return 200, wire })
+		srv, _, _ := coreMirrorServer(t, func(int) (int, string) { return 200, wire })
 		c, _ := newTestClient(t, srv.URL, false)
 		got, err := c.Emit(context.Background(), sampleEvent())
 		if err != nil {
@@ -192,13 +230,13 @@ func TestEmit_FailOpen_Unreachable(t *testing.T) {
 	if !strings.Contains(log.all(), "evt-1") {
 		t.Errorf("expected a drop log mentioning the event id; got %q", log.all())
 	}
-	if strings.Contains(log.all(), testAPIKey) || strings.Contains(log.all(), testPrivateKeyB64) {
+	if strings.Contains(log.all(), testAPIKey) || strings.Contains(log.all(), testWorkloadToken) {
 		t.Error("INV-1 violation: secret material leaked into logs")
 	}
 }
 
 func TestEmit_RetriesThenSucceeds(t *testing.T) {
-	srv, _, calls := coreMirrorServer(t, pub(t), func(n int) (int, string) {
+	srv, _, calls := coreMirrorServer(t, func(n int) (int, string) {
 		if n < 3 {
 			return 500, ""
 		}
@@ -218,7 +256,7 @@ func TestEmit_RetriesThenSucceeds(t *testing.T) {
 }
 
 func TestEmit_5xxExhausted_FailsOpen(t *testing.T) {
-	srv, _, calls := coreMirrorServer(t, pub(t), func(int) (int, string) { return 503, "" })
+	srv, _, calls := coreMirrorServer(t, func(int) (int, string) { return 503, "" })
 	c, _ := newTestClient(t, srv.URL, false)
 	v, err := c.Emit(context.Background(), sampleEvent())
 	if !errors.Is(err, ErrDelivery) {
@@ -233,7 +271,7 @@ func TestEmit_5xxExhausted_FailsOpen(t *testing.T) {
 }
 
 func TestEmit_4xxNotRetried(t *testing.T) {
-	srv, _, calls := coreMirrorServer(t, pub(t), func(int) (int, string) { return 400, "" })
+	srv, _, calls := coreMirrorServer(t, func(int) (int, string) { return 400, "" })
 	c, _ := newTestClient(t, srv.URL, false)
 	v, err := c.Emit(context.Background(), sampleEvent())
 	if !errors.Is(err, ErrDelivery) {
@@ -248,7 +286,7 @@ func TestEmit_4xxNotRetried(t *testing.T) {
 }
 
 func TestEmit_EmptyEventID_IsCallerError(t *testing.T) {
-	srv, _, _ := coreMirrorServer(t, pub(t), nil)
+	srv, _, _ := coreMirrorServer(t, nil)
 	c, _ := newTestClient(t, srv.URL, false)
 	ev := sampleEvent()
 	ev.EventID = ""
@@ -258,7 +296,7 @@ func TestEmit_EmptyEventID_IsCallerError(t *testing.T) {
 }
 
 func TestEmit_EmptySessionID_IsCallerError(t *testing.T) {
-	srv, _, _ := coreMirrorServer(t, pub(t), nil)
+	srv, _, _ := coreMirrorServer(t, nil)
 	c, _ := newTestClient(t, srv.URL, false)
 	ev := sampleEvent()
 	ev.SessionID = ""
@@ -268,7 +306,7 @@ func TestEmit_EmptySessionID_IsCallerError(t *testing.T) {
 }
 
 func TestNew_RejectsPlaintextNonLoopback(t *testing.T) {
-	base := Config{APIKey: testAPIKey, DID: testDID, PrivateKeyB64: testPrivateKeyB64}
+	base := Config{APIKey: testAPIKey, WorkloadPrivateKey: testWorkloadKey, tokens: &fakeTokenSource{token: testWorkloadToken}}
 	base.BaseURL = "http://core.openbox.ai"
 	if _, err := New(base); err == nil {
 		t.Error("expected New to reject http:// to a non-loopback host")
@@ -281,14 +319,17 @@ func TestNew_RejectsPlaintextNonLoopback(t *testing.T) {
 	}
 }
 
-func TestNew_RejectsMalformedDID(t *testing.T) {
-	if _, err := New(Config{BaseURL: "https://c", APIKey: testAPIKey, DID: "urn:bogus:1", PrivateKeyB64: testPrivateKeyB64}); err == nil {
-		t.Error("expected New to reject a non-did:aip: DID")
+// TestNew_RequiresWorkloadPrivateKey is the flip's replacement for the deleted
+// v1 malformed-DID check: WorkloadPrivateKey is the only credential besides
+// the API key New validates the presence of before any network call.
+func TestNew_RequiresWorkloadPrivateKey(t *testing.T) {
+	if _, err := New(Config{BaseURL: "https://c", APIKey: testAPIKey}); err == nil {
+		t.Error("expected New to reject a missing WorkloadPrivateKey")
 	}
 }
 
 func TestEmit_RetryReusesSameEventID(t *testing.T) {
-	srv, payloads, _ := coreMirrorServer(t, pub(t), func(n int) (int, string) {
+	srv, payloads, _ := coreMirrorServer(t, func(n int) (int, string) {
 		if n < 2 {
 			return 500, ""
 		}

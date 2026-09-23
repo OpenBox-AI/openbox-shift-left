@@ -10,10 +10,10 @@ import (
 	"testing"
 )
 
-// TestValidate_HappyPath_SignedGET drives the real Validate → signed GET path
-// against a core mirror that verifies the AIP signature exactly as openbox-
-// core would (empty-body SHA, canonical GET string, Ed25519 verify).
-func TestValidate_HappyPath_SignedGET(t *testing.T) {
+// TestValidate_HappyPath_AuthenticatedGET drives the real Validate → workload
+// GET path against a core mirror that checks the envelope (obx_ key + workload
+// bearer) exactly as ValidateDetailed builds it.
+func TestValidate_HappyPath_AuthenticatedGET(t *testing.T) {
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %s, want GET", r.Method)
@@ -24,26 +24,23 @@ func TestValidate_HappyPath_SignedGET(t *testing.T) {
 		if got := r.Header.Get(headerAuthorization); got != "Bearer "+testAPIKey {
 			t.Errorf("Authorization = %q", got)
 		}
-		body, _ := io.ReadAll(r.Body)
-		if err := verifyLikeCore(pub(t), r.Method, r.URL.Path, body, r.Header); err != nil {
-			t.Errorf("core-mirror rejected the signed GET: %v", err)
-			w.WriteHeader(http.StatusUnauthorized)
-			return
+		if got := r.Header.Get(headerWorkloadToken); got != testWorkloadToken {
+			t.Errorf("workload token header = %q, want %q", got, testWorkloadToken)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"valid":true,"active":true,"agent_id":"a","environment":"test","message":"ok"}`)
+		_, _ = io.WriteString(w, `{"valid":true,"active":true,"agent_id":"a","agent_name":"test-agent"}`)
 	}))
 	defer srv.Close()
 
 	c, _ := newTestClient(t, srv.URL, false)
 	if err := c.Validate(context.Background()); err != nil {
-		t.Fatalf("Validate returned error on a valid signed GET: %v", err)
+		t.Fatalf("Validate returned error on a valid authenticated GET: %v", err)
 	}
 }
 
-// TestValidate_MapsNon200 covers the reasons a reachability check must render as an
-// actionable ✗: the stock-core collapsed 401/500 responses (reason codes are
-// NOT in the body) and the forward-compat reason-code envelope.
+// TestValidate_MapsNon200 covers the reasons a reachability check must render
+// as an actionable ✗: a flat runtime 401 (core carries no reason code on
+// that route) and the forward-compat bootstrap reason-code envelope.
 func TestValidate_MapsNon200(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -51,10 +48,10 @@ func TestValidate_MapsNon200(t *testing.T) {
 		body   string
 		want   string // substring the mapped diagnostic must contain
 	}{
-		{"401 invalid token", 401, `{"code":401,"message":"invalid token"}`, "identity rejected"},
-		{"401 missing auth", 401, `{"code":401,"message":"missing authorization token"}`, "no Authorization bearer"},
-		{"500 verifier unavailable", 500, `{"code":500,"message":"internal server error: agent DID identity verifier unavailable"}`, "signing_required=false"},
-		{"forward-compat signature_invalid", 401, `{"reason_code":"signature_invalid"}`, "signed bytes were rejected"},
+		{"401 invalid token", 401, `{"code":401,"message":"invalid token"}`, "run `openbox doctor`"},
+		{"401 no message", 401, `{"code":401}`, "run `openbox doctor`"},
+		{"500 internal error", 500, `{"code":500,"message":"internal server error"}`, "internal server error"},
+		{"forward-compat agent_inactive", 403, `{"reason_code":"agent_inactive"}`, "deactivated by an operator"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -75,7 +72,7 @@ func TestValidate_MapsNon200(t *testing.T) {
 			if ve.Status != tc.status {
 				t.Errorf("ValidateError.Status = %d, want %d", ve.Status, tc.status)
 			}
-			if strings.Contains(err.Error(), testAPIKey) || strings.Contains(err.Error(), testPrivateKeyB64) {
+			if strings.Contains(err.Error(), testAPIKey) || strings.Contains(err.Error(), testWorkloadToken) {
 				t.Error("INV-1 violation: secret material leaked into the validate diagnostic")
 			}
 		})

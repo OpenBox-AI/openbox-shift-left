@@ -2,28 +2,13 @@ package telemetryemit
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
-
-func testSeed() string {
-	seed := make([]byte, ed25519.SeedSize)
-	for i := range seed {
-		seed[i] = byte(i)
-	}
-	return base64.StdEncoding.EncodeToString(seed)
-}
-
-var testCoreKey = "obx_" + "test_sentinel"
 
 // sentinels are the poisoned attribute values. That would route content around
 // the content gate entirely, under key names contentMetadataKeys has never
@@ -42,22 +27,12 @@ var sentinels = map[string]string{
 
 func emitThrough(t *testing.T, captureOn bool, ev client.DevEvent) string {
 	t.Helper()
-	var mu sync.Mutex
-	var bodies []string
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		bodies = append(bodies, string(raw))
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
+	fc := fakecore.New(t, fakecore.Script{})
 
 	c, err := client.New(client.Config{
-		BaseURL:               srv.URL,
-		APIKey:                testCoreKey,
-		DID:                   testDID,
-		PrivateKeyB64:         testSeed(),
+		BaseURL:               fc.URL(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: captureOn,
 	})
 	if err != nil {
@@ -66,10 +41,13 @@ func emitThrough(t *testing.T, captureOn bool, ev client.DevEvent) string {
 	if _, err := c.Emit(context.Background(), ev); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(bodies) == 0 {
+	inbox := fc.Inbox()
+	if len(inbox) == 0 {
 		t.Fatal("nothing was POSTed")
+	}
+	bodies := make([]string, len(inbox))
+	for i, r := range inbox {
+		bodies[i] = string(r.Raw)
 	}
 	return strings.Join(bodies, "\n")
 }

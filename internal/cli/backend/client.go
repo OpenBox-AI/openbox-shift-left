@@ -147,7 +147,7 @@ type Registration struct {
 	Tier       string
 	TrustScore string
 	// Identity is the workload identity info from a keycloak_workload create
-	// (empty on an openbox_did v1 create). Phase 05 reads it.
+	// (empty on an openbox_did v1 create). Not yet read by any caller.
 	Identity WorkloadIdentityInfo
 }
 

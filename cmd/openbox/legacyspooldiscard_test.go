@@ -48,7 +48,7 @@ func legacySpoolEvent(session, id string) client.DevEvent {
 	}
 }
 
-// TestInitDiscardsEventsQueuedUnderLegacyIdentity is D5: a tool with a legacy
+// TestInitDiscardsEventsQueuedUnderLegacyIdentity: a tool with a legacy
 // store and a spooled backlog gets that backlog discarded -- never delivered,
 // since the write that follows replaces the very identity that authenticated
 // it -- the moment init writes the v3 identity over it, counted and recorded

@@ -99,7 +99,7 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 }
 
 // TestLegacyStoreHookSendsNothing a stored developer_did means the store
-// predates v3 entirely (D1): ResolveIdentity refuses with ErrLegacyStore, the
+// predates v3 entirely: ResolveIdentity refuses with ErrLegacyStore, the
 // mapper never even sees the event, and the hook stays exactly as silent as
 // it is for a genuinely unconfigured machine -- an unmapped event, an empty
 // spool, no request.

@@ -18,10 +18,6 @@ type Script struct {
 	AlwaysStatus int
 	// Delay holds each response, for the timeout paths.
 	Delay time.Duration
-	// SeedB64, when set, is the key the fake verifies against instead of
-	// minting its own. Call sites with an existing fixed test identity keep it
-	// and gain real verification.
-	SeedB64 string
 }
 
 const allowVerdict = `{"governance_event_id":"ge","verdict":"allow","risk_score":0.1,"action":"continue","fallback_used":false}`

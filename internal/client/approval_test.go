@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"io"
@@ -13,7 +12,7 @@ import (
 	"time"
 )
 
-func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, string)) (*memhttptest.Server, *ApprovalKey) {
+func approvalServer(t *testing.T, respond func() (int, string)) (*memhttptest.Server, *ApprovalKey) {
 	t.Helper()
 	var got ApprovalKey
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,12 +22,10 @@ func approvalServer(t *testing.T, pub ed25519.PublicKey, respond func() (int, st
 		if h := r.Header.Get(headerAuthorization); h != "Bearer "+testAPIKey {
 			t.Errorf("Authorization = %q; the poll must be agent-authenticated like /evaluate", h)
 		}
-		body, _ := io.ReadAll(r.Body)
-		if err := verifyLikeCore(pub, r.Method, r.URL.Path, body, r.Header); err != nil {
-			t.Errorf("core-mirror rejected the poll signature: %v", err)
-			w.WriteHeader(401)
-			return
+		if h := r.Header.Get(headerWorkloadToken); h != testWorkloadToken {
+			t.Errorf("workload token header = %q, want %q", h, testWorkloadToken)
 		}
+		body, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Errorf("poll body unmarshal: %v", err)
 		}
@@ -101,7 +98,7 @@ func TestPollApproval_PendingAndDecided(t *testing.T) {
 			VerdictHalt, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			srv, gotKey := approvalServer(t, pub(t), func() (int, string) { return 200, tc.resp })
+			srv, gotKey := approvalServer(t, func() (int, string) { return 200, tc.resp })
 			c, _ := newTestClient(t, srv.URL, false)
 
 			want := ApprovalKeyFor(sampleEvent())
@@ -152,7 +149,7 @@ func TestApprovalStatus_DecidedRequiresTheWindow(t *testing.T) {
 }
 
 func TestPollApproval_NotFoundIsDistinctFromAnOutage(t *testing.T) {
-	srv, _ := approvalServer(t, pub(t), func() (int, string) { return 404, `{"error":"not found"}` })
+	srv, _ := approvalServer(t, func() (int, string) { return 404, `{"error":"not found"}` })
 	c, _ := newTestClient(t, srv.URL, false)
 
 	_, err := c.PollApproval(context.Background(), ApprovalKeyFor(sampleEvent()))
@@ -165,7 +162,7 @@ func TestPollApproval_NotFoundIsDistinctFromAnOutage(t *testing.T) {
 }
 
 func TestPollApproval_ServerErrorIsADeliveryFailure(t *testing.T) {
-	srv, _ := approvalServer(t, pub(t), func() (int, string) { return 500, `{"error":"boom"}` })
+	srv, _ := approvalServer(t, func() (int, string) { return 500, `{"error":"boom"}` })
 	c, _ := newTestClient(t, srv.URL, false)
 
 	if _, err := c.PollApproval(context.Background(), ApprovalKeyFor(sampleEvent())); !errors.Is(err, ErrDelivery) {
@@ -177,7 +174,7 @@ func TestPollApproval_ServerErrorIsADeliveryFailure(t *testing.T) {
 // caller's poll interval is the retry.
 func TestPollApproval_MakesOneAttempt(t *testing.T) {
 	calls := 0
-	srv, _ := approvalServer(t, pub(t), func() (int, string) {
+	srv, _ := approvalServer(t, func() (int, string) {
 		calls++
 		return 500, `{"error":"boom"}`
 	})
@@ -200,7 +197,7 @@ func TestPollApproval_RejectsAPartialKey(t *testing.T) {
 // never "allow": a hold that guessed would either block a granted call or
 // release a pending one.
 func TestPollApproval_UnparseableStatusErrors(t *testing.T) {
-	srv, _ := approvalServer(t, pub(t), func() (int, string) { return 200, `not json` })
+	srv, _ := approvalServer(t, func() (int, string) { return 200, `not json` })
 	c, _ := newTestClient(t, srv.URL, false)
 
 	st, err := c.PollApproval(context.Background(), ApprovalKeyFor(sampleEvent()))

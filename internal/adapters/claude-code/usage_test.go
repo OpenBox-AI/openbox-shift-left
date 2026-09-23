@@ -3,10 +3,7 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,10 +14,9 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
-
-const testPrivateKeyB64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 
 // poisonedTranscript is a jsonl transcript shaped like a real Claude Code
 // transcript (verified against ~/.claude/projects/*.jsonl; including the
@@ -582,19 +578,11 @@ func TestTurnWindow_NegativeCountsClamped(t *testing.T) {
 func TestFinops_NoContentOnWire(t *testing.T) {
 	path := writeTranscript(t, poisonedTranscript)
 
-	var bodies [][]byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, b)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
+	fc := fakecore.New(t, fakecore.Script{})
 	cl, err := client.New(client.Config{
-		BaseURL:               srv.URL,
-		APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
-		DID:                   testDID,
-		PrivateKeyB64:         testPrivateKeyB64,
+		BaseURL:               fc.URL(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: true, // adversarial: stripper OFF
 	})
 	if err != nil {
@@ -653,10 +641,12 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 			t.Fatalf("Emit(%s): %v", e.name, err)
 		}
 	}
+	bodies := fc.Inbox()
 	if len(bodies) != len(events) {
 		t.Fatalf("captured %d request bodies, want %d", len(bodies), len(events))
 	}
-	for i, body := range bodies {
+	for i, r := range bodies {
+		body := r.Raw
 		if len(body) == 0 {
 			t.Fatalf("%s: empty request body", events[i].name)
 		}
@@ -675,7 +665,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		}
 	}
 
-	completedBody := string(bodies[2])
+	completedBody := string(bodies[2].Raw)
 	if !strings.Contains(completedBody, `"model":"claude-opus-4-8"`) {
 		t.Errorf("the model id did not reach the wire: %s", completedBody)
 	}
@@ -694,8 +684,8 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(string(bodies[0]), strconv.Itoa(wantTotal)) {
-		t.Errorf("expected token total %d on the SessionEnded wire body, got: %s", wantTotal, bodies[0])
+	if !strings.Contains(string(bodies[0].Raw), strconv.Itoa(wantTotal)) {
+		t.Errorf("expected token total %d on the SessionEnded wire body, got: %s", wantTotal, bodies[0].Raw)
 	}
 
 	// Three claims must hold at once; the assistant text still comes from the
@@ -711,14 +701,15 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	if !ok {
 		t.Fatal("MapTurn(capture on) not ok")
 	}
-	bodies = nil
+	beforeCapture := len(fc.Inbox())
 	if _, err := cl.Emit(context.Background(), capturedTurn); err != nil {
 		t.Fatalf("Emit(captured turn): %v", err)
 	}
-	if len(bodies) != 1 {
-		t.Fatalf("captured %d bodies for the content turn, want 1", len(bodies))
+	afterCapture := fc.Inbox()
+	if len(afterCapture) != beforeCapture+1 {
+		t.Fatalf("captured %d new bodies for the content turn, want 1", len(afterCapture)-beforeCapture)
 	}
-	capturedBody := string(bodies[0])
+	capturedBody := string(afterCapture[len(afterCapture)-1].Raw)
 	for _, s := range sentinels {
 		if strings.Contains(capturedBody, s) {
 			t.Fatalf("INV-2 breach: transcript sentinel %q reached the wire on a "+
@@ -762,18 +753,11 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 			`"usage":{"input_tokens":1,"output_tokens":1}}}` + "\n"
 		capPath := writeTranscript(t, poisoned)
 
-		var got [][]byte
-		capSrv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			b, _ := io.ReadAll(r.Body)
-			got = append(got, b)
-			_, _ = w.Write([]byte(`{}`))
-		}))
-		defer capSrv.Close()
+		capFc := fakecore.New(t, fakecore.Script{})
 		capClient, err := client.New(client.Config{
-			BaseURL:               capSrv.URL,
-			APIKey:                "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
-			DID:                   testDID,
-			PrivateKeyB64:         testPrivateKeyB64,
+			BaseURL:               capFc.URL(),
+			APIKey:                fakecore.APIKey(),
+			WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 			ContentCaptureEnabled: true,
 		})
 		if err != nil {
@@ -797,10 +781,11 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 		if _, err := capClient.Emit(context.Background(), completed); err != nil {
 			t.Fatalf("Emit: %v", err)
 		}
+		got := capFc.Inbox()
 		if len(got) != 1 {
 			t.Fatalf("captured %d bodies, want 1", len(got))
 		}
-		body := string(got[0])
+		body := string(got[0].Raw)
 
 		if strings.Contains(body, awsKey) {
 			t.Errorf("the raw credential reached the wire inside a thinking block; "+

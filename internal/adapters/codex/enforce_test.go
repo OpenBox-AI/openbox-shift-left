@@ -71,9 +71,10 @@ func serveVerdict(t *testing.T, verdictJSON string) {
 	// A stale cached token would point a client freshly pinned at a NEW
 	// fakecore instance's baseURL at a bearer that instance never issued (the
 	// on-disk cache path is keyed by HOME+tool, not by base URL, and several
-	// call sites share one isolateEnforce'd HOME across subtests). D2 refuses
-	// a stale bearer with a 401 and never resends, so a leftover cache file
-	// would silently cost the whole subtest its one delivery attempt.
+	// call sites share one isolateEnforce'd HOME across subtests). A 401 is
+	// never resent (a stale bearer is refused and its cache invalidated,
+	// never retried), so a leftover cache file would silently cost the whole
+	// subtest its one delivery attempt.
 	if p, err := devconfig.WorkloadTokenCachePath(); err == nil {
 		_ = os.Remove(p)
 	}

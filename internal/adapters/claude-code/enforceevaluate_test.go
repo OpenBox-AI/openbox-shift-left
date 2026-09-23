@@ -283,16 +283,13 @@ func TestInstalledHookTimeoutMatchesWhatIsRegistered(t *testing.T) {
 }
 
 // serveEvaluate delegates to the shared fake core rather than standing up a
-// fourth mock. The fake verifies the AIP signature against the same fixed test
-// identity evalCreds installs, so every call site here now proves its request
-// was signed as well as what it answered.
+// fourth mock.
 func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Duration) (url string, srv *fakecore.Server) {
 	t.Helper()
 	f := fakecore.New(t, fakecore.Script{
 		Default:      verdictJSON,
 		AlwaysStatus: status,
 		Delay:        delay,
-		SeedB64:      testPrivateKeyB64,
 	})
 	return f.URL(), f
 }
@@ -303,12 +300,9 @@ func serveVerdict(t *testing.T, verdictJSON string) {
 	evalCreds(t, url)
 }
 
-// evalCreds points the resolver at the v3 workload identity fakecore's
+// evalCreds points the resolver at the workload identity fakecore's
 // process-wide fake Keycloak actually verifies: fakecore.WorkloadPrivateKey/
-// APIKey/AgentID, not a literal (the repo's standing rule; also lets a fake
-// core built with serveEvaluate's v1-only Script still accept the v3 routes,
-// since those verify against the process-wide identity regardless of the
-// per-instance seed).
+// APIKey/AgentID, not a literal (the repo's standing rule).
 func evalCreds(t *testing.T, baseURL string) {
 	t.Helper()
 	t.Setenv(envBaseURL, baseURL)
@@ -319,9 +313,10 @@ func evalCreds(t *testing.T, baseURL string) {
 	// A stale cached token would point a client freshly pinned at a NEW
 	// fakecore instance's baseURL at a bearer that instance never issued (the
 	// on-disk cache path is keyed by HOME+tool, not by base URL, and several
-	// call sites share one isolateConfig'd HOME across subtests). D2 refuses a
-	// stale bearer with a 401 and never resends, so a leftover cache file would
-	// silently cost the whole subtest its one delivery attempt.
+	// call sites share one isolateConfig'd HOME across subtests). A 401 is
+	// never resent (a stale bearer would be refused and its cache invalidated,
+	// never retried), so a leftover cache file would silently cost the whole
+	// subtest its one delivery attempt.
 	if p, err := devconfig.WorkloadTokenCachePath(); err == nil {
 		_ = os.Remove(p)
 	}

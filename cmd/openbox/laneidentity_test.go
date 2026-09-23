@@ -222,9 +222,9 @@ func hasActivityInput(r fakecore.Received) bool {
 // TestLaneIdentityUsesMemoryCache a lane daemon is long-lived and holds its
 // workload token in memory for its whole life; it must never write to the
 // same on-disk cache file a short-lived hook process reads and writes,
-// because the two would race a concurrent Store/Invalidate against one file
-// (brainstorm Design). Proven by absence: after a real cold Emit through the
-// resolved client, this tool's on-disk cache path must not exist at all.
+// because the two would race a concurrent Store/Invalidate against one file.
+// Proven by absence: after a real cold Emit through the resolved client,
+// this tool's on-disk cache path must not exist at all.
 func TestLaneIdentityUsesMemoryCache(t *testing.T) {
 	memhttptest.RequireBind(t)
 	isolateHomeOnly(t)

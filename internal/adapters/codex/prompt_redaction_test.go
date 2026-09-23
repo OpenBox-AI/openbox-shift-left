@@ -126,7 +126,7 @@ func TestRunHook_PromptCaptureOffAttachesNothing(t *testing.T) {
 func TestWire_PromptIsRedactedOnTheOutboundBytes(t *testing.T) {
 	// Content capture must be on at the CLIENT too, or Emit strips Content before
 	// egress (INV-2) and the case would pass vacuously on an empty body.
-	cl, bodies := newWireCapture(t, func(c *client.Config) { c.ContentCaptureEnabled = true })
+	cl, fc := newWireCapture(t, func(c *client.Config) { c.ContentCaptureEnabled = true })
 
 	m := testMapper()
 	m.NewID = nil
@@ -145,10 +145,11 @@ func TestWire_PromptIsRedactedOnTheOutboundBytes(t *testing.T) {
 	}
 	emit(t, cl, ev)
 
-	if len(*bodies) != 1 {
-		t.Fatalf("expected exactly 1 wire body, got %d", len(*bodies))
+	bodies := fc.Inbox()
+	if len(bodies) != 1 {
+		t.Fatalf("expected exactly 1 wire body, got %d", len(bodies))
 	}
-	wire := string((*bodies)[0])
+	wire := string(bodies[0].Raw)
 	if strings.Contains(wire, secret) {
 		t.Errorf("the credential reached the wire unredacted:\n%s", wire)
 	}

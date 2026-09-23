@@ -3,12 +3,10 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
 // notificationPrompt is a synthetic <task-notification> wrapper shaped like
@@ -82,19 +80,12 @@ func TestMachineInjectedPrompt(t *testing.T) {
 // absent from "the marshalled JSON" has to run here, not on json.Marshal(ev).
 func wireBodyFor(t *testing.T, ev client.DevEvent, clientContentCapture bool) map[string]any {
 	t.Helper()
-	var raw []byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ = io.ReadAll(r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
-	defer srv.Close()
+	fc := fakecore.New(t, fakecore.Script{})
 
 	cl, err := client.New(client.Config{
-		BaseURL:               srv.URL,
-		APIKey:                "test-api-key-not-a-real-secret",
-		DID:                   testDID,
-		PrivateKeyB64:         testPrivateKeyB64,
+		BaseURL:               fc.URL(),
+		APIKey:                fakecore.APIKey(),
+		WorkloadPrivateKey:    fakecore.WorkloadPrivateKey(),
 		ContentCaptureEnabled: clientContentCapture,
 	})
 	if err != nil {
@@ -103,6 +94,12 @@ func wireBodyFor(t *testing.T, ev client.DevEvent, clientContentCapture bool) ma
 	if _, err := cl.Emit(context.Background(), ev); err != nil {
 		t.Fatalf("Emit: %v", err)
 	}
+
+	inbox := fc.Inbox()
+	if len(inbox) == 0 {
+		t.Fatal("nothing was POSTed")
+	}
+	raw := inbox[len(inbox)-1].Raw
 
 	var payload map[string]any
 	if err := json.Unmarshal(raw, &payload); err != nil {

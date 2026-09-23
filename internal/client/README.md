@@ -1,4 +1,4 @@
-# OpenBox client; AIP-signed `/evaluate` transport
+# OpenBox client; workload-identity-authenticated `/evaluate` transport
 
 The shared, reusable data-plane client every developer-runtime adapter
 (`internal/adapters/claude-code`, `internal/adapters/codex`) and the git action
@@ -6,22 +6,29 @@ use to emit a normalized developer event to OpenBox.
 
 ```
 normalized DevEvent ─▶ strip content (INV-2) ─▶ build GovernanceEventPayload
-                     ─▶ AIP Ed25519 sign ─▶ POST /api/v1/governance/evaluate
+                     ─▶ acquire workload bearer (cached, or cold bootstrap+
+                       exchange) ─▶ POST /api/v3/governance/evaluate
                      ─▶ parse verdict (observe: ignored in Phase 1)
 ```
 
 It is deliberately **not** the control-plane client. Onboarding/registration
-(`POST /agent/create`, human/org credential) lives in `internal/cli/backend`. This package is the **agent's own** runtime transport: auth is the
-agent's `obx_` runtime key + an Ed25519 AIP signature.
+(`POST /agent/create`, human/org credential) lives in `internal/cli/backend`.
+This package is the **agent's own** runtime transport: auth is the agent's
+`obx_` runtime key on `Authorization` plus a Keycloak-issued workload bearer
+on `X-OpenBox-Workload-Token`, acquired and cached by
+`internal/client/workloadauth`. There is no request signature: the envelope
+carries no DID, timestamp, nonce or body-hash header, and no attribution
+coordinate at all (the DID is derived in memory from the agent id and never
+sent).
 
 ## Usage
 
 ```go
 c, err := client.New(client.Config{
-    BaseURL: "https://core.openbox.ai",
-    APIKey:  obxRuntimeKey,   // obx_(live|test)_…; from the secret store (INV-1)
-    DID:     agentDID,        // did:aip:…
-    SeedB64: ed25519SeedB64,  // base64 raw 32-byte seed; from ~/.openbox/.env
+    BaseURL:            "https://core.openbox.ai",
+    APIKey:             obxRuntimeKey,      // obx_(live|test)_…; from the secret store (INV-1)
+    WorkloadPrivateKey: workloadPrivateKey, // PEM (PKCS#8) or base64 DER RSA key; from ~/.openbox/.env
+    TokenCachePath:     tokenCachePath,     // "" selects an in-memory cache (lane daemons, git-action, doctor)
     // ContentCaptureEnabled is this struct's zero value, so it is false here.
     // That is the LIBRARY default, not the product's: callers resolve the
     // posture through devconfig, where an unset content_capture means ON.
@@ -53,7 +60,7 @@ verdict, err := c.Emit(ctx, client.DevEvent{
 
 | Invariant | Where |
 |---|---|
-| **INV-1** obx_ key + Ed25519 seed never logged/leaked | `signing.go` (seed stays in `signer`); `client.go` logs only ids/types/errors; plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
+| **INV-1** obx_ key + workload private key + bearer never logged/leaked | the private key lives only in `workloadauth.Authenticator`; `client.go` logs only ids/types/errors via `describeDrop`/`describeWorkloadError` (stage/status/reason/guidance, never the token); plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
 | **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit`. The posture is the caller's: `devconfig` resolves it, and an unset `content_capture` resolves to ON |
 | **INV-3** fail-open on transport | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error. Fail-open *here* is not fail-open end to end: what an unknown verdict means for the call is the org's failure policy, applied after this returns |
 | **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe; adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **Server-side dedupe is partial**; see below |
@@ -83,9 +90,7 @@ The client owns **half** the idempotency contract and guarantees it:
   record.
 - **On the wire twice.** It rides in `metadata.event_id` **and** in a standard
   `Idempotency-Key` request header (`== EventID`), constant across every retry.
-  The header is inert until core consumes it and is not part of the AIP
-  canonical string, so it never perturbs signature verification (verified
-  against openbox-core `BuildAgentIdentityCanonicalRequest`).
+  The header is inert until core consumes it.
 - **Client at-most-once.** A retry re-sends the identical key (never a fresh
   one); the spool never re-sends an acked event across rotate/flush/recovery.
 
@@ -102,14 +107,13 @@ dedupe on the `event_id` / `Idempotency-Key` value.
 
 ## Cross-repo alignment (verified via Explore, 2026-07-08)
 
-- **Signing** matches `openbox-temporal-sdk-python/openbox/request_signing.py`
-  byte-for-byte: canonical `UPPER(METHOD)\nPATH\nTIMESTAMP\nNONCE\nBODY_SHA256`,
-  Ed25519 over raw UTF-8 (no pre-hash), std-base64 signature,
-  `token_urlsafe(24)` nonce, lowercase-hex body SHA-256, `+00:00`-offset
-  timestamp; and against openbox-core's server-side verifier
-  `BuildAgentIdentityCanonicalRequest` (`services/agent.go:93`). The
-  `client_test.go` mock **re-verifies every request exactly as core does**
-  (`verifyLikeCore` mirrors `agent.go:165-184`).
+- **Workload identity** is a Keycloak-issued bearer, acquired via
+  `internal/client/workloadauth`: a cached token is reused as-is; a cold call
+  bootstraps (`GET /api/v3/auth/bootstrap`), builds an RS256 client assertion,
+  and exchanges it at the org's Keycloak token endpoint. `fakecore`'s v3 half
+  (`internal/client/fakecore/fakecorev3.go`) re-verifies the assertion
+  independently (`crypto/rsa`, never `workloadauth`'s own code) rather than
+  trusting anything the caller asserts about itself.
 - **Payload** mirrors the subset of core's `GovernanceEventPayload`
   (`internal/content/governance.go:186`) the client sets:
   `source="developer-runtime"`, `run_id`=session, `workflow_id`=workspace/DID,

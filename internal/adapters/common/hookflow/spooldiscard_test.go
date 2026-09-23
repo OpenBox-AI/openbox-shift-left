@@ -19,7 +19,7 @@ func rawLine(t *testing.T, session, id string) []byte {
 	return line[:len(line)-1] // drop the trailing '\n' jsonLine appends
 }
 
-// TestSpoolDiscardAllRemovesEverySpooledFile is D5's guarantee: a legacy
+// TestSpoolDiscardAllRemovesEverySpooledFile guarantees a legacy
 // identity's whole backlog -- an ordinary session file, a carried-over
 // recovery file, and an in-flight rotated (".flushing.") file left by a
 // killed drain -- is removed in one call, counted once, and recorded in the

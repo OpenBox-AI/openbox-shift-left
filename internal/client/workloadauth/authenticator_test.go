@@ -112,7 +112,7 @@ func TestExpiredEntryDoesBootstrapAgain(t *testing.T) {
 		t.Fatalf("first Token: tok=%q fromCache=%v err=%v", tok1, fromCache, err)
 	}
 
-	// Advance past the document/token's shared lifetime (D3): a cold process
+	// Advance past the document/token's shared lifetime: a cold process
 	// after expiry makes one bootstrap and one exchange, never a
 	// refresh-only path, because there is no separate bootstrap cache.
 	fakeNow = fakeNow.Add(400 * time.Second)

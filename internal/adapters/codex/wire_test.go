@@ -2,46 +2,28 @@ package codex
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"io"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
-// testAPIKey is assembled at run time for the same reason awsSecretFixture is:
-// this repo's own local hook rewrites secret-shaped literals on disk, and it
-// already silently replaced this value once with a ${OPENBOX_REDACTED_*} marker.
-// Nothing failed, because client.New only checks non-empty and the in-memory
-// server does not validate the key -- which is exactly why it went unnoticed.
-func testAPIKey() string { return "obx_" + "test_key" }
-
-// newWireCapture builds a real client pointed at an in-memory server and hands
-// back every request body it sent. opts mutate the Config before construction;
-// with none the client keeps the product default of content capture OFF, which
-// is what the existing shape assertions rely on.
-func newWireCapture(t *testing.T, opts ...func(*client.Config)) (*client.Client, *[][]byte) {
+// newWireCapture builds a real client pointed at fakecore and hands back the
+// fake so a test can read every accepted request from its inbox. opts mutate
+// the Config before construction; with none the client keeps the product
+// default of content capture OFF, which is what the existing shape
+// assertions rely on.
+func newWireCapture(t *testing.T, opts ...func(*client.Config)) (*client.Client, *fakecore.Server) {
 	t.Helper()
-	var bodies [][]byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, raw)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
-	t.Cleanup(srv.Close)
+	fc := fakecore.New(t, fakecore.Script{})
 
-	seed := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	cfg := client.Config{
-		BaseURL:       srv.URL, // loopback http is allowed by the INV-1 TLS guard
-		APIKey:        testAPIKey(),
-		DID:           testDID,
-		PrivateKeyB64: seed,
+		BaseURL:            fc.URL(),
+		APIKey:             fakecore.APIKey(),
+		WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -50,7 +32,7 @@ func newWireCapture(t *testing.T, opts ...func(*client.Config)) (*client.Client,
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
 	}
-	return cl, &bodies
+	return cl, fc
 }
 
 func emit(t *testing.T, cl *client.Client, ev client.DevEvent) {
@@ -101,7 +83,7 @@ func assertActivityWireShape(t *testing.T, payload map[string]any, wantType stri
 // tool_use_id buys, now carried by activity_id alone since there is no
 // span_id.
 func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
 
@@ -111,8 +93,9 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 	for _, ev := range []client.DevEvent{pre1, post1, pre2} {
 		emit(t, cl, ev)
 	}
-	if len(*bodies) != 3 {
-		t.Fatalf("expected 3 wire bodies, got %d", len(*bodies))
+	bodies := fc.Inbox()
+	if len(bodies) != 3 {
+		t.Fatalf("expected 3 wire bodies, got %d", len(bodies))
 	}
 
 	activityID := func(raw []byte, wantType string) string {
@@ -122,9 +105,9 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 		return id
 	}
 
-	started := activityID((*bodies)[0], "ActivityStarted")
-	completed := activityID((*bodies)[1], "ActivityCompleted")
-	second := activityID((*bodies)[2], "ActivityStarted")
+	started := activityID(bodies[0].Raw, "ActivityStarted")
+	completed := activityID(bodies[1].Raw, "ActivityCompleted")
+	second := activityID(bodies[2].Raw, "ActivityStarted")
 
 	if started != completed {
 		t.Errorf("pre/post of one tool_use_id must share activity_id: %s vs %s", started, completed)
@@ -139,13 +122,13 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 // activity_id but never appears as a wire field outside metadata, which is the
 // one deliberate carrier (a structural identifier, and the audit channel).
 func TestWire_ToolUseIDNeverRidesTheWire(t *testing.T) {
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
 
 	pre, _ := m.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "Bash", ToolUseID: "call-sentinel-xyz"})
 	emit(t, cl, pre)
-	payload := decodeBody(t, (*bodies)[0])
+	payload := decodeBody(t, fc.Inbox()[0].Raw)
 
 	meta, _ := payload["metadata"].(map[string]any)
 	if meta == nil || meta["tool_use_id"] != "call-sentinel-xyz" {
@@ -161,13 +144,13 @@ func TestWire_ToolUseIDNeverRidesTheWire(t *testing.T) {
 // TestWire_MCPIdentifiersRideActivityInput: the mcp server/tool identifiers
 // used to ride the span's mcp family fields.
 func TestWire_MCPIdentifiersRideActivityInput(t *testing.T) {
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
 
 	pre, _ := m.Map(HookPreToolUse, &HookEvent{SessionID: "th-1", ToolName: "mcp__github__create_issue", ToolUseID: "call-9"})
 	emit(t, cl, pre)
-	payload := decodeBody(t, (*bodies)[0])
+	payload := decodeBody(t, fc.Inbox()[0].Raw)
 	assertActivityWireShape(t, payload, "ActivityStarted")
 
 	in, _ := payload["activity_input"].(map[string]any)
@@ -184,7 +167,7 @@ func TestWire_MCPIdentifiersRideActivityInput(t *testing.T) {
 // events ride the base Workflow*/SignalReceived wire types with workflow_type
 // set on signals too, and are span-less.
 func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
 
@@ -194,6 +177,7 @@ func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
 	for _, ev := range []client.DevEvent{ss, ps, se} {
 		emit(t, cl, ev)
 	}
+	bodies := fc.Inbox()
 
 	want := []struct{ wireType, signalName string }{
 		{"WorkflowStarted", ""},
@@ -201,7 +185,7 @@ func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
 		{"WorkflowCompleted", ""},
 	}
 	for i, w := range want {
-		payload := decodeBody(t, (*bodies)[i])
+		payload := decodeBody(t, bodies[i].Raw)
 		if payload["event_type"] != w.wireType {
 			t.Errorf("body[%d] event_type = %v, want %s", i, payload["event_type"], w.wireType)
 		}
@@ -224,7 +208,7 @@ func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
 // tool_input and the prompt (with content-capture OFF) never reaches the wire
 // bytes.
 func TestWire_NoContentLeakEndToEnd(t *testing.T) {
-	cl, bodies := newWireCapture(t)
+	cl, fc := newWireCapture(t)
 	m := testMapper()
 	m.NewID = nil
 	m.CaptureContent = false
@@ -237,10 +221,10 @@ func TestWire_NoContentLeakEndToEnd(t *testing.T) {
 	emit(t, cl, pre)
 	emit(t, cl, ps)
 
-	for i, raw := range *bodies {
+	for i, r := range fc.Inbox() {
 		for _, secret := range []string{cmdSecret, promptSecret} {
-			if strings.Contains(string(raw), secret) {
-				t.Fatalf("content leaked to wire body[%d]: %s", i, raw)
+			if strings.Contains(string(r.Raw), secret) {
+				t.Fatalf("content leaked to wire body[%d]: %s", i, r.Raw)
 			}
 		}
 	}

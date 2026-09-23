@@ -3,15 +3,13 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
 type parityStatus string
@@ -209,20 +207,12 @@ func assertActivityWireShape(t *testing.T, payload map[string]any, wantType stri
 // is what puts them on one dashboard row and what makes one approval cover
 // both halves and any retry.
 func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
-	var bodies [][]byte
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		bodies = append(bodies, raw)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"verdict":"allow"}`))
-	}))
-	defer srv.Close()
+	fc := fakecore.New(t, fakecore.Script{})
 
 	cl, err := client.New(client.Config{
-		BaseURL:       srv.URL,
-		APIKey:        "obx_test_0123456789abcdef0123456789abcdef0123456789abcdef",
-		DID:           testDID,
-		PrivateKeyB64: testPrivateKeyB64,
+		BaseURL:            fc.URL(),
+		APIKey:             fakecore.APIKey(),
+		WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
 	})
 	if err != nil {
 		t.Fatalf("client.New: %v", err)
@@ -244,8 +234,9 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 			t.Fatalf("Emit: %v", err)
 		}
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("expected 2 wire bodies, got %d", len(bodies))
+	inbox := fc.Inbox()
+	if len(inbox) != 2 {
+		t.Fatalf("expected 2 wire bodies, got %d", len(inbox))
 	}
 
 	activityID := func(raw []byte, wantType string) string {
@@ -258,8 +249,8 @@ func TestWire_ToolEventsAreActivityPairs(t *testing.T) {
 		return id
 	}
 
-	started := activityID(bodies[0], "ActivityStarted")
-	completed := activityID(bodies[1], "ActivityCompleted")
+	started := activityID(inbox[0].Raw, "ActivityStarted")
+	completed := activityID(inbox[1].Raw, "ActivityCompleted")
 	if started != completed {
 		t.Errorf("the two halves of one tool call must share activity_id: %s vs %s", started, completed)
 	}

@@ -11,9 +11,9 @@ import (
 	"testing"
 )
 
-// TestDiagnose_ForwardCompatReasonCodes feeds each SDK reason code as a string
-// body field (the shape a future EXT-core would emit) and asserts the mapped,
-// actionable guidance.
+// TestDiagnose_ForwardCompatReasonCodes feeds each bootstrap reason code as a
+// string body field (the shape the workload-identity bootstrap route emits on
+// failure) and asserts the mapped, actionable guidance.
 func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -21,15 +21,13 @@ func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 		body   string
 		want   string // substring the guidance must contain
 	}{
-		{"signature_invalid", 401, `{"reason_code":"signature_invalid","message":"x"}`, "signed bytes were rejected"},
-		{"nonce_replayed", 401, `{"reason_code":"nonce_replayed"}`, "buffered event was re-sent"},
-		{"did_agent_mismatch", 401, `{"reason_code":"did_agent_mismatch"}`, "does not match"},
-		{"verifier_not_configured", 500, `{"reason_code":"verifier_not_configured"}`, "no KMS verifier"},
-		{"timestamp_outside_window", 401, `{"reason_code":"timestamp_outside_window"}`, "±300s"},
-		{"timestamp_skew alias", 401, `{"reason_code":"timestamp_skew"}`, "±300s"},
-		{"legacy reason key", 401, `{"reason":"nonce_replayed"}`, "buffered event was re-sent"},
-		{"string code key", 401, `{"code":"did_agent_mismatch"}`, "does not match"},
-		{"unknown reason", 401, `{"reason_code":"teapot"}`, "unrecognized reason code"},
+		{"invalid_api_key", 401, `{"reason_code":"invalid_api_key"}`, "revoked or malformed"},
+		{"agent_inactive", 403, `{"reason_code":"agent_inactive"}`, "deactivated by an operator"},
+		{"workload_identity_unavailable", 409, `{"reason_code":"workload_identity_unavailable"}`, "identity-provider generation"},
+		{"verifier_unavailable", 503, `{"reason_code":"verifier_unavailable"}`, "token verifier is unavailable"},
+		{"legacy reason key", 403, `{"reason":"agent_inactive"}`, "deactivated by an operator"},
+		{"string code key", 403, `{"code":"agent_inactive"}`, "deactivated by an operator"},
+		{"unknown reason", 400, `{"reason_code":"teapot"}`, "unrecognized reason code"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,15 +37,17 @@ func TestDiagnose_ForwardCompatReasonCodes(t *testing.T) {
 			}
 		})
 	}
-	got := diagnose(401, `{"reason_code":"teapot"}`)
-	if !strings.Contains(got, "teapot") || !strings.Contains(got, "401") {
+	got := diagnose(400, `{"reason_code":"teapot"}`)
+	if !strings.Contains(got, "teapot") || !strings.Contains(got, "400") {
 		t.Errorf("unknown-reason diagnostic dropped raw code/status: %q", got)
 	}
 }
 
 // TestDiagnose_StockCoreStatusMapping covers the reality today: core emits an
-// integer `code` + a generic `message` with no machine reason code, so
-// diagnose maps on status + message.
+// integer `code` + a generic `message` with no machine reason code on a
+// runtime route (evaluate/approval/validate), so diagnose maps on status +
+// message -- and a runtime 401 is flat: the same body a rejected identity
+// and a datastore fault both produce.
 func TestDiagnose_StockCoreStatusMapping(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -55,13 +55,13 @@ func TestDiagnose_StockCoreStatusMapping(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{"401 identity", 401, `{"code":401,"message":"invalid token or agent identity"}`, "identity rejected"},
-		{"401 missing auth", 401, `{"code":401,"message":"missing authorization token"}`, "no Authorization bearer"},
+		{"401 identity", 401, `{"code":401,"message":"invalid token or agent identity"}`, "run `openbox doctor`"},
+		{"401 no message", 401, `{"code":401}`, "run `openbox doctor`"},
 		{"400 event_type", 400, `{"code":400,"message":"invalid event_type: ToolCall"}`, "accept-listed the dev event types"},
 		{"400 event_type echoes value", 400, `{"code":400,"message":"invalid event_type: ToolCall"}`, "ToolCall"},
 		{"400 handoff", 400, `{"code":400,"message":"handoff payload invalid"}`, "payload rejected"},
 		{"400 empty msg", 400, `{"code":400}`, "no message"},
-		{"500", 500, `{"code":500,"message":"internal server error"}`, "verifier/replay-cache unavailable"},
+		{"500", 500, `{"code":500,"message":"internal server error"}`, "internal server error"},
 		{"non-JSON body", 418, `boom`, "418"},
 		{"empty body", 502, ``, "502"},
 		{"other status w/ message", 429, `{"code":429,"message":"slow down"}`, "slow down"},
@@ -102,7 +102,7 @@ func TestExtractReason_IgnoresIntCode(t *testing.T) {
 	if r := extractReason([]byte(`not json`)); r != "" {
 		t.Errorf("non-JSON body must yield empty reason, got %q", r)
 	}
-	if r := extractReason([]byte(`{"reason_code":"signature_invalid","code":"other"}`)); r != "signature_invalid" {
+	if r := extractReason([]byte(`{"reason_code":"agent_inactive","code":"other"}`)); r != "agent_inactive" {
 		t.Errorf("reason_code must win over code, got %q", r)
 	}
 }
@@ -118,12 +118,12 @@ func fixedRespServer(t *testing.T, status int, body string) *memhttptest.Server 
 	return srv
 }
 
-// TestEmit_MapsRejection_FailOpenAndLogSafe drives the full client path: a 401
-// core rejection must (a) still fail-open on the verdict (VerdictUnknown,
-// which no caller reads as a block) while reporting the advisory ErrDelivery
-// so a durable caller can retry (E8-S7), (b) produce exactly one log line
-// carrying the mapped guidance + event id, and (c) never leak the obx_ key or
-// Ed25519 seed (INV-1).
+// TestEmit_MapsRejection_FailOpenAndLogSafe drives the full client path: a
+// rejection must (a) still fail-open on the verdict (VerdictUnknown, which no
+// caller reads as a block) while reporting the advisory ErrDelivery so a
+// durable caller can retry (E8-S7), (b) produce exactly one log line carrying
+// the mapped guidance + event id, and (c) never leak the obx_ key or workload
+// bearer (INV-1).
 func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -131,9 +131,9 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 		body   string
 		want   string
 	}{
-		{"stock 401 identity", 401, `{"code":401,"message":"invalid token or agent identity"}`, "identity rejected"},
+		{"stock 401, flat", 401, `{"code":401,"message":"invalid token or agent identity"}`, "run `openbox doctor`"},
 		{"400 event_type (pre-EXT-core)", 400, `{"code":400,"message":"invalid event_type: ToolCall"}`, "accept-listed the dev event types"},
-		{"forward-compat reason", 401, `{"reason_code":"verifier_not_configured"}`, "no KMS verifier"},
+		{"forward-compat bootstrap reason", 403, `{"reason_code":"verifier_unavailable"}`, "token verifier is unavailable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,7 +162,7 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 			if !strings.Contains(all, "evt-1") {
 				t.Errorf("diagnostic missing event id: %q", all)
 			}
-			if strings.Contains(all, testAPIKey) || strings.Contains(all, testPrivateKeyB64) {
+			if strings.Contains(all, testAPIKey) || strings.Contains(all, testWorkloadToken) {
 				t.Error("INV-1 violation: secret material leaked into the diagnostic")
 			}
 		})

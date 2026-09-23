@@ -16,12 +16,24 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
-const evaluatePath = "/api/v1/governance/evaluate"
+const evaluatePath = "/api/v3/governance/evaluate"
 
-// v3EvaluatePath is used instead of evaluatePath when Config.WorkloadPrivateKey
-// is set (dual-mode, phase 04 slice 4a). v1 stays byte-identical until slice
-// 4d deletes it.
-const v3EvaluatePath = "/api/v3/governance/evaluate"
+// The client must match these exactly or core rejects the request.
+const (
+	headerAuthorization = "Authorization"
+	headerSDKVersion    = "X-OpenBox-SDK-Version"
+	headerUserAgent     = "User-Agent"
+
+	// headerIdempotencyKey carries the event's idempotency key (==
+	// DevEvent.EventID == metadata.event_id) as a standard request header
+	// (INV-5).
+	headerIdempotencyKey = "Idempotency-Key"
+
+	// headerWorkloadToken carries the exchanged Keycloak bearer. The
+	// Authorization header still carries the obx_ API key
+	// (setWorkloadHeaders below), never the workload token.
+	headerWorkloadToken = "X-OpenBox-Workload-Token"
+)
 
 // Fail-open (INV-3): these bound delay, never whether Emit proceeds.
 const (
@@ -42,22 +54,17 @@ func (nopLogger) Printf(string, ...any) {}
 
 // Config configures a Client.
 type Config struct {
-	BaseURL       string // openbox-core base, e.g. https://core.openbox.ai
-	APIKey        string // obx_(live|test)_… runtime key (INV-1)
-	DID           string // did:aip:…; the developer agent's DID (INV-7); v1 only
-	PrivateKeyB64 string // base64 raw 32-byte Ed25519 seed (INV-1); v1 only
+	BaseURL string // openbox-core base, e.g. https://core.openbox.ai
+	APIKey  string // obx_(live|test)_… runtime key (INV-1)
 
-	// WorkloadPrivateKey selects v3 dual-mode when non-empty: a PEM (PKCS#8)
-	// or single-line base64 DER RSA private key, in either form
-	// workloadauth.ParsePrivateKey accepts. New parses it (and builds the
-	// Authenticator) locally, before any network call. Left empty, the Client
-	// behaves exactly as it does today: v1 AIP Ed25519 signing via DID +
-	// PrivateKeyB64, byte-identical.
+	// WorkloadPrivateKey is the workload agent's RSA private key, a PEM
+	// (PKCS#8) or single-line base64 DER, in either form
+	// workloadauth.ParsePrivateKey accepts. Required: New parses it (and
+	// builds the Authenticator) locally, before any network call.
 	WorkloadPrivateKey string
 
-	// TokenCachePath is where the v3 workload bearer token is cached on disk;
+	// TokenCachePath is where the workload bearer token is cached on disk;
 	// "" selects an in-memory cache (lane daemons, git-action, doctor).
-	// Ignored when WorkloadPrivateKey is empty.
 	TokenCachePath string
 
 	// ContentCaptureEnabled is the org's content posture; default false strips
@@ -93,13 +100,12 @@ type tokenSource interface {
 	Invalidate() error
 }
 
-// Client is the shared /evaluate transport: v1 AIP-signed, or v3
-// workload-identity-authenticated when Config.WorkloadPrivateKey is set.
+// Client is the shared /evaluate transport: authenticated on /api/v3 with a
+// workload identity bearer.
 type Client struct {
 	baseURL    string
 	apiKey     string
-	signer     *signer     // v1; nil when tokens is set
-	tokens     tokenSource // v3; nil when signer is set
+	tokens     tokenSource
 	contentOn  bool
 	http       *http.Client
 	maxRetries int
@@ -107,10 +113,6 @@ type Client struct {
 	log        Logger
 	now        func() time.Time
 }
-
-// v3 reports whether this Client authenticates on /api/v3 with a workload
-// bearer, rather than v1 AIP Ed25519 signing.
-func (c *Client) v3() bool { return c.tokens != nil }
 
 // New builds a Client.
 func New(cfg Config) (*Client, error) {
@@ -123,32 +125,26 @@ func New(cfg Config) (*Client, error) {
 	if cfg.APIKey == "" {
 		return nil, errors.New("client: APIKey (obx_ runtime key) is required")
 	}
+	if cfg.WorkloadPrivateKey == "" {
+		return nil, errors.New("client: WorkloadPrivateKey is required")
+	}
 
 	httpc := cfg.HTTP
 	if httpc == nil {
 		httpc = &http.Client{Timeout: defaultTimeout}
 	}
 
-	var sg *signer
 	var tokens tokenSource
-	if cfg.WorkloadPrivateKey != "" {
-		if cfg.tokens != nil {
-			tokens = cfg.tokens
-		} else {
-			// ParsePrivateKey runs inside NewAuthenticator, before any network
-			// call: a malformed key fails New, never a later Emit.
-			auth, aerr := workloadauth.NewAuthenticator(cfg.APIKey, cfg.WorkloadPrivateKey, cfg.TokenCachePath, cfg.BaseURL, httpc)
-			if aerr != nil {
-				return nil, aerr
-			}
-			tokens = auth
-		}
+	if cfg.tokens != nil {
+		tokens = cfg.tokens
 	} else {
-		var serr error
-		sg, serr = newSigner(cfg.DID, cfg.PrivateKeyB64)
-		if serr != nil {
-			return nil, serr
+		// ParsePrivateKey runs inside NewAuthenticator, before any network
+		// call: a malformed key fails New, never a later Emit.
+		auth, aerr := workloadauth.NewAuthenticator(cfg.APIKey, cfg.WorkloadPrivateKey, cfg.TokenCachePath, cfg.BaseURL, httpc)
+		if aerr != nil {
+			return nil, aerr
 		}
+		tokens = auth
 	}
 
 	maxRetries := defaultMaxRetries
@@ -176,7 +172,6 @@ func New(cfg Config) (*Client, error) {
 	return &Client{
 		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:     cfg.APIKey,
-		signer:     sg,
 		tokens:     tokens,
 		contentOn:  cfg.ContentCaptureEnabled,
 		http:       httpc,
@@ -235,8 +230,9 @@ func isRefusal(err error) bool {
 	}
 }
 
-// Emit builds the core payload from a normalized dev event, signs it, and
-// POSTs it to /evaluate. It is fail-open (INV-3): the Evaluation it returns on
+// Emit builds the core payload from a normalized dev event and POSTs it,
+// workload-identity-authenticated, to /evaluate. It is fail-open (INV-3): the
+// Evaluation it returns on
 // any failure is the zero value, which every caller treats as allow, so a
 // failure here can never block a tool call.
 //   - A caller precondition (empty EventID/SessionID), which is a bug to fix;
@@ -267,11 +263,7 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 		return Evaluation{}, fmt.Errorf("%w: %v", ErrUnbuildable, err)
 	}
 
-	path := evaluatePath
-	if c.v3() {
-		path = v3EvaluatePath
-	}
-	respBody, err := c.post(ctx, path, body, ev.EventID)
+	respBody, err := c.post(ctx, evaluatePath, body, ev.EventID)
 	if err != nil {
 		// Surfacing ErrDelivery lets a durable caller re-spool the event instead of
 		// losing it; callers that cannot retry ignore it (see the doc comment).
@@ -370,59 +362,18 @@ func (b *budgetedBackOff) NextBackOff() time.Duration {
 	return next
 }
 
-// attempt path is both the URL suffix and (v1) the signed canonical-string
-// PATH component, so the two can never disagree; signing one route and
-// sending to another would fail authentication in a way that reads as an
-// outage.
-func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
-	if c.v3() {
-		return c.attemptV3(ctx, path, body, idemKey)
-	}
-	return c.attemptV1(ctx, path, body, idemKey)
-}
-
-func (c *Client) attemptV1(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
-	sig, err := c.signer.sign(http.MethodPost, path, body, c.now())
-	if err != nil {
-		return nil, false, err // signing failure is not retryable
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
-	if err != nil {
-		return nil, false, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	c.setSignedHeaders(req.Header, sig)
-	if idemKey != "" {
-		req.Header.Set(headerIdempotencyKey, idemKey)
-	}
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, true, err // network/transport error; retryable
-	}
-	defer resp.Body.Close()
-	rb, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return rb, false, nil
-	}
-	retryable = resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
-	ra, _ := parseRetryAfter(resp.Header.Get("Retry-After"), c.now())
-	return nil, retryable, &httpError{path: path, status: resp.StatusCode, body: string(rb), retryAfter: ra}
-}
-
-// attemptV3 acquires a workload bearer token and POSTs the workload envelope.
-// A token-acquisition failure is returned verbatim -- NEVER wrapped in an
+// attempt acquires a workload bearer token and POSTs the workload envelope. A
+// token-acquisition failure is returned verbatim -- NEVER wrapped in an
 // *httpError -- so isRefusal can never mistake it for a proven, event-specific
 // refusal (it is not one: the control plane never saw the event). It is
 // retryable iff the *workloadauth.Error says Transient.
 //
-// D2: a v3 401 is never resent, cached token or not. A cached token's 401
+// A 401 is never resent, cached token or not. A cached token's 401
 // invalidates the cache (file and memory) so the next attempt goes cold; a
 // fresh token's 401 invalidates nothing, since there is nothing stale to
 // evict. Either way retryable is false here, which is what stops post's retry
 // loop from resending.
-func (c *Client) attemptV3(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
+func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
 	token, fromCache, terr := c.tokens.Token(ctx)
 	if terr != nil {
 		var werr *workloadauth.Error
@@ -453,11 +404,11 @@ func (c *Client) attemptV3(ctx context.Context, path string, body []byte, idemKe
 		if fromCache {
 			_ = c.tokens.Invalidate()
 		}
-		return nil, false, &httpError{path: path, status: resp.StatusCode, body: string(rb), v3: true}
+		return nil, false, &httpError{path: path, status: resp.StatusCode, body: string(rb)}
 	}
 	retryable = resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
 	ra, _ := parseRetryAfter(resp.Header.Get("Retry-After"), c.now())
-	return nil, retryable, &httpError{path: path, status: resp.StatusCode, body: string(rb), retryAfter: ra, v3: true}
+	return nil, retryable, &httpError{path: path, status: resp.StatusCode, body: string(rb), retryAfter: ra}
 }
 
 // parseRetryAfter reads both forms RFC 9110 allows: delta-seconds, and an
@@ -492,10 +443,6 @@ type httpError struct {
 	// retry budget, which is also the bound on what an impersonated control
 	// plane could make a hook wait.
 	retryAfter time.Duration
-	// v3 marks an httpError produced on a workload-identity route, so
-	// describeDrop renders the v3 guidance table instead of v1's
-	// signing-reason one for the same status/body shape.
-	v3 bool
 }
 
 func (e *httpError) Error() string {
@@ -536,34 +483,12 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// setSignedHeaders writes the envelope every signed request carries: the
-// bearer, the SDK identity, and the AIP signature quadruple. One
-// implementation, so /evaluate and /auth/validate cannot sign differently.
-func (c *Client) setSignedHeaders(h http.Header, sig signature) {
-	h.Set("Accept", "application/json")
-	h.Set(headerAuthorization, "Bearer "+c.apiKey)
-	h.Set(headerSDKVersion, sdkVersion)
-	h.Set(headerUserAgent, "OpenBox-SDK/"+sdkVersion)
-	h.Set(headerAgentDID, c.signer.did)
-	h.Set(headerAgentTS, sig.timestamp)
-	h.Set(headerAgentNonce, sig.nonce)
-	h.Set(headerAgentSig, sig.sig)
-	h.Set(headerBodySHA256, sig.bodySHA)
-}
-
-// headerWorkloadToken carries the exchanged Keycloak bearer on a v3 request.
-// The Authorization header still carries the obx_ API key (setWorkloadHeaders
-// below), never the workload token -- unlike v1, where Authorization is the
-// only credential header.
-const headerWorkloadToken = "X-OpenBox-Workload-Token"
-
-// setWorkloadHeaders writes the v3 envelope: Accept, the obx_ API key on
+// setWorkloadHeaders writes the request envelope: Accept, the obx_ API key on
 // Authorization, the exchanged workload bearer, the SDK identity, and
 // (separately, by the caller) an idempotency key when there is one. It sets
-// NO DID, signature or body-hash header -- pinned by
-// TestEmitSendsWorkloadEnvelopeOnV3, since a v3 request carries no
-// attribution coordinate at all (D1: the DID is derived in memory and never
-// sent).
+// no DID, signature or body-hash header -- pinned by
+// TestEmitSendsWorkloadEnvelopeOnV3, since a request carries no attribution
+// coordinate at all (the DID is derived in memory and never sent).
 func (c *Client) setWorkloadHeaders(h http.Header, workloadToken string) {
 	h.Set("Accept", "application/json")
 	h.Set(headerAuthorization, "Bearer "+c.apiKey)

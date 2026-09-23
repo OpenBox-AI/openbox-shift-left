@@ -9,11 +9,7 @@ import (
 	"time"
 )
 
-const approvalPath = "/api/v1/governance/approval"
-
-// v3ApprovalPath is used instead of approvalPath when Config.WorkloadPrivateKey
-// is set (dual-mode, phase 04 slice 4a).
-const v3ApprovalPath = "/api/v3/governance/approval"
+const approvalPath = "/api/v3/governance/approval"
 
 // ErrApprovalNotFound reports that core holds no governance event for this
 // key; the request was never filed, or has not landed yet.
@@ -78,11 +74,7 @@ func (c *Client) PollApproval(ctx context.Context, k ApprovalKey) (ApprovalStatu
 	if err != nil {
 		return ApprovalStatus{}, fmt.Errorf("%w: %v", ErrUnbuildable, err)
 	}
-	path := approvalPath
-	if c.v3() {
-		path = v3ApprovalPath
-	}
-	respBody, _, err := c.attempt(ctx, path, body, "")
+	respBody, _, err := c.attempt(ctx, approvalPath, body, "")
 	if err != nil {
 		var he *httpError
 		if errors.As(err, &he) && he.status == http.StatusNotFound {

@@ -158,10 +158,10 @@ func CodexSpoolDir() string { return codex.DefaultSpoolDir() }
 
 // SpoolDirFor is the spool directory the named provider's adapter writes to,
 // reusing that adapter's own DefaultSpoolDir (which honours OPENBOX_SPOOL_DIR)
-// rather than re-deriving the path here. It exists for D5 (init/adopt
-// discarding a tool's spool when a legacy identity is replaced): the caller
-// already validated the provider name via Lookup, so an unrecognized name
-// answers "" rather than an error.
+// rather than re-deriving the path here. It exists so init/adopt can discard
+// a tool's spool when a legacy identity is replaced: the caller already
+// validated the provider name via Lookup, so an unrecognized name answers ""
+// rather than an error.
 func SpoolDirFor(name string) string {
 	switch provider.Name(name) {
 	case provider.ClaudeCode:

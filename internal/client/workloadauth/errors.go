@@ -12,7 +12,8 @@ import (
 
 // Stage names which half of the workload-identity exchange an Error came
 // from, since bootstrap and the token exchange fail in different ways and a
-// caller (D2's cache-invalidate-on-401, for one) needs to tell them apart.
+// caller (the client's cache-invalidate-on-401 path, for one) needs to tell
+// them apart.
 type Stage string
 
 const (

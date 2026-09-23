@@ -47,7 +47,7 @@ func resolveProviderIdentities(warn func(format string, args ...any)) map[string
 			// Memory, not creds.TokenCachePath: a lane daemon is a single long-lived
 			// process holding this token in memory for its whole life anyway, and a
 			// disk cache shared with the hook binary would let the two race a
-			// concurrent Store/Invalidate against the same file (brainstorm Design).
+			// concurrent Store/Invalidate against the same file.
 			TokenCachePath:        "",
 			ContentCaptureEnabled: creds.ContentCaptureEnabled,
 			// Without this, client.Emit's own diagnostic lines (a delivery
