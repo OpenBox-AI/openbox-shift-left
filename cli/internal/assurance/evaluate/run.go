@@ -32,6 +32,7 @@ type runState struct {
 	process             CommandResult
 	relay               *coreRelay
 	effectRelay         *effectRelay
+	modelRelay          *modelRelay
 	registryStarted     bool
 	registryAddress     string
 	registryTag         string
@@ -189,16 +190,8 @@ func (state *runState) publishOutput(success bool, dependencies Dependencies) er
 		Effects: map[string]any{
 			"safe_sink":        map[string]any{"status": statusForReceipt(effect.MatchingReceipts), "attempts": effect.Attempts, "matching_receipts": effect.MatchingReceipts, "evaluation_id": state.prepared.evaluationID, "matched_at": effect.MatchedAt.Format(time.RFC3339Nano)},
 			"retrieval_poison": map[string]any{"status": "missing", "matching_receipts": 0},
-			// Reported as declared, not as observed. Nothing on this path
-			// receipts a model call: the retired CLI lane proved it by grepping
-			// a gateway log line, and no typed receipt has replaced that. The
-			// pack's own coverage forces this channel to `missing`, and these
-			// fields say which route was configured, not that it was used.
-			// `provider` carries the declared route. The pack forces `status` to
-			// missing regardless: nothing on this path receipts a model call, so
-			// these fields say what was CONFIGURED, not what was served.
-			"model_route": modelRouteEffect(state.prepared),
-			"core_relay":  map[string]any{"status": "observed", "matching_validations": receipt.MatchingValidations, "governance_events": receipt.GovernanceEvents},
+			"model_route":      modelRouteEffect(state.prepared, state.modelRelay),
+			"core_relay":       map[string]any{"status": "observed", "matching_validations": receipt.MatchingValidations, "governance_events": receipt.GovernanceEvents},
 		},
 		FinalizedAt: dependencies.Clock.Now(),
 	})
@@ -283,27 +276,30 @@ func (state *runState) initializeRecord(started time.Time) {
 		ungovernedCredentialLimitations(state.prepared.declared)...)
 }
 
-// modelRouteEffect describes the route this run was pointed at.
-//
-// model_digest is present only when the project declared one, and that is the
-// whole point of it being optional. A local Ollama has a real content address
-// for its weights and the preflight checks it. A hosted route — OpenAI,
-// Anthropic, Gemini, OpenRouter — has none: the model is a service-side name
-// whose weights can change behind it, so there is nothing to cite. The field
-// used to be required, which left such a project no way to run except to invent
-// a digest, and an invented content address in sealed evidence is worse than an
-// absent one.
-//
-// Absent therefore means "this route publishes no digest", which is a fact
-// about the route, and is why it is omitted rather than emitted empty.
-func modelRouteEffect(prepared *prepared) map[string]any {
+// modelRouteEffect describes the route and, when the local relay carried the
+// call, what the model chose. model_digest is present only when declared: a
+// hosted route publishes no content address, and an invented one in sealed
+// evidence is worse than an absent one.
+func modelRouteEffect(prepared *prepared, relay *modelRelay) map[string]any {
 	effect := map[string]any{
-		"status":   "missing",
-		"provider": prepared.declared.modelRoute,
-		"model":    prepared.environment["OPENAI_MODEL"],
+		"status":            "missing",
+		"matching_receipts": 0,
+		"provider":          prepared.declared.modelRoute,
+		"model":             prepared.environment["OPENAI_MODEL"],
 	}
 	if prepared.declared.modelDigest != "" {
 		effect["model_digest"] = prepared.declared.modelDigest
+	}
+	if relay == nil {
+		return effect
+	}
+	if receipt := relay.Receipt(); receipt.Requests > 0 {
+		effect["status"] = "observed"
+		effect["matching_receipts"] = 1
+		effect["model"] = receipt.Model
+		effect["tool_calls"] = append([]string{}, receipt.ToolCalls...)
+		effect["finish_reason"] = receipt.FinishReason
+		effect["observed_at"] = receipt.ObservedAt.Format(time.RFC3339Nano)
 	}
 	return effect
 }
@@ -384,6 +380,17 @@ func (state *runState) execute(ctx context.Context, dependencies Dependencies) e
 		state.prepared.environmentNames = environmentInventory(state.prepared.environment)
 		state.record.EnvironmentNames = append([]string(nil), state.prepared.environmentNames...)
 		state.phase(dependencies, "safe_effect_sink_started")
+	}
+	// Only a local-ollama route passes through this host, so only it can be
+	// receipted. The declared OPENAI_BASE_URL is replaced by the relay's.
+	if state.prepared.declared.modelRoute == ModelRouteLocalOllama {
+		modelRelay, modelErr := startModelRelay(dependencies)
+		if modelErr != nil {
+			return &classifiedError{class: "receipt_service_failure", err: errors.New("project evaluate: start model route receipt service")}
+		}
+		state.modelRelay = modelRelay
+		state.prepared.environment["OPENAI_BASE_URL"] = fmt.Sprintf("http://host.openshell.internal:%d/v1", modelRelay.Port())
+		state.phase(dependencies, "model_route_relay_started")
 	}
 	if commandErr := state.runThroughSandbox(ctx, dependencies); commandErr != nil {
 		return commandErr
@@ -571,6 +578,13 @@ func (state *runState) cleanup(dependencies Dependencies) error {
 		}
 		closeCancel()
 	}
+	if state.modelRelay != nil {
+		closeContext, closeCancel := context.WithTimeout(ctx, 5*time.Second)
+		if err := state.modelRelay.Close(closeContext); err != nil {
+			cleanupErrors = append(cleanupErrors, errors.New("model route receipt service shutdown failed"))
+		}
+		closeCancel()
+	}
 	if state.sandboxMayExist {
 		if err := state.deleteSandbox(dependencies); err != nil {
 			cleanupErrors = append(cleanupErrors, err)
@@ -687,7 +701,7 @@ func (state *runState) finishRecord() {
 func (state *runState) writeOutput() error {
 	if !state.policyWritten {
 		if len(state.policy) == 0 {
-			state.policy = buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, 0)
+			state.policy = buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, 0, 0, 0)
 		}
 		if err := state.workspace.WritePrivateFile("policy.yaml", state.policy); err != nil {
 			return err

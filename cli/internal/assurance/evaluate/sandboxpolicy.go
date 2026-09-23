@@ -13,7 +13,8 @@ import (
 //
 // Credentials are never written here. credential_binding names a provider and
 // the gateway resolves it, so the key appears in neither policy nor request.
-func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort int, effectPorts ...int) []byte {
+// A zero port omits that endpoint.
+func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort, effectPort, modelPort int) []byte {
 	var policy strings.Builder
 	policy.WriteString("version: 1\n")
 	policy.WriteString("filesystem_policy:\n")
@@ -43,10 +44,16 @@ func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort
 			},
 		}},
 	}
-	if len(effectPorts) == 1 && effectPorts[0] > 0 {
+	if effectPort > 0 {
 		endpoints["safe_effect_sink"] = []sandboxEndpoint{{
-			port:  effectPorts[0],
+			port:  effectPort,
 			rules: []sandboxRule{{method: "POST", path: "/effects/safe"}},
+		}}
+	}
+	if modelPort > 0 {
+		endpoints["model_route"] = []sandboxEndpoint{{
+			port:  modelPort,
+			rules: []sandboxRule{{method: "POST", path: "/v1/chat/completions"}},
 		}}
 	}
 	policy.WriteString("network_policies:\n")

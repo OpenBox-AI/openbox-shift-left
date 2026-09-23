@@ -24,7 +24,7 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	if dependencies.Sandbox == nil {
 		return fail("not_runnable", "project evaluate: no sandbox service is configured")
 	}
-	document := buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, state.relay.Port(), state.effectPorts()...)
+	document := buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, state.relay.Port(), state.effectPort(), state.modelPort())
 	digest := sha256.Sum256(document)
 	identity := sandboxclient.PolicyIdentity{
 		ID:      sandboxPolicyIdentity,
@@ -99,11 +99,18 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	return nil
 }
 
-func (state *runState) effectPorts() []int {
+func (state *runState) effectPort() int {
 	if state.effectRelay == nil {
-		return nil
+		return 0
 	}
-	return []int{state.effectRelay.Port()}
+	return state.effectRelay.Port()
+}
+
+func (state *runState) modelPort() int {
+	if state.modelRelay == nil {
+		return 0
+	}
+	return state.modelRelay.Port()
 }
 
 // deleteSandbox asks for deletion and then requires terminal absence: an

@@ -72,18 +72,6 @@ func Assemble(input PackInput) (*Pack, error) {
 		effects = map[string]any{}
 	}
 	effects["schema"] = EffectsSchema
-	modelEffect, _ := effects["model_route"].(map[string]any)
-	if modelEffect == nil {
-		modelEffect = map[string]any{}
-	}
-	// The model route is no longer observable. Its only evidence was a
-	// substring in the gateway's log, and the lane no longer reads that log —
-	// nor should it, since a log line is not a receipt. It stays `missing`
-	// until the model relay issues one of its own, which is honest: missing
-	// means nobody looked successfully, never that no call was made.
-	modelEffect["status"] = "missing"
-	modelEffect["matching_receipts"] = 0
-	effects["model_route"] = modelEffect
 	effectsBytes, err := artifact.CanonicalJSON(effects)
 	if err != nil {
 		return nil, err
@@ -188,6 +176,12 @@ func behaviorFromInput(input PackInput, evidenceObserved bool, effects map[strin
 		entries = append(entries, map[string]any{
 			"id": "effect:safe_sink:" + input.Window.EvaluationID, "type": "SafeEffect", "timestamp": safe["matched_at"], "authority": "independent_receipt",
 			"correlation": map[string]any{"run_id": input.Window.EvaluationID}, "source": map[string]any{"file": "effects.json", "record": "safe_sink"},
+		})
+	}
+	if model, ok := effects["model_route"].(map[string]any); ok && effectStatus(effects, "model_route") == "observed" {
+		entries = append(entries, map[string]any{
+			"id": "model_route:" + input.Window.EvaluationID, "type": "ModelInvocation", "timestamp": model["observed_at"], "authority": "model_receipt",
+			"correlation": map[string]any{"run_id": input.Window.EvaluationID}, "source": map[string]any{"file": "effects.json", "record": "model_route"},
 		})
 	}
 	// One entry, not one per log line: the sandbox reports its isolation
@@ -325,12 +319,6 @@ func Validate(pack *Pack) error {
 		(effects.Model.Status == "observed") != (effects.Model.MatchingReceipts == 1) ||
 		(effects.Core.Status == "observed") != (effects.Core.MatchingValidations > 0 && effects.Core.GovernanceEvents > 0) {
 		return errors.New("observation: contradictory effect receipts")
-	}
-	// A model-route observation would now need a receipt from the model relay.
-	// Until that exists the status is `missing`, and claiming `observed`
-	// without a citable receipt is refused rather than trusted.
-	if effects.Model.Status == "observed" {
-		return errors.New("observation: model receipt has no authority to resolve against")
 	}
 	var run struct {
 		EvaluationID string          `json:"evaluation_id"`

@@ -252,8 +252,8 @@ func TestValidateImageUsesStandardOCICommand(t *testing.T) {
 // The policy the sandbox service validates is YAML meeting its floor, not the
 // CLI path's JSON. These are the properties that decide what the image may do.
 func TestSandboxPolicyMeetsTheFloorAndBindsCredentialsByProvider(t *testing.T) {
-	first := buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153)
-	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153)) {
+	first := buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153, 0)
+	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153, 0)) {
 		t.Fatal("policy bytes changed between identical renders")
 	}
 	text := string(first)
@@ -783,7 +783,7 @@ func TestModelDigestIsOmittedWhenTheRoutePublishesNone(t *testing.T) {
 	effect := modelRouteEffect(&prepared{
 		declared:    hosted,
 		environment: map[string]string{"OPENAI_MODEL": "gpt-4o"},
-	})
+	}, nil)
 	if _, present := effect["model_digest"]; present {
 		t.Fatalf("emitted a digest for a route that publishes none: %v", effect)
 	}
@@ -800,7 +800,7 @@ func TestModelDigestIsOmittedWhenTheRoutePublishesNone(t *testing.T) {
 	effect = modelRouteEffect(&prepared{
 		declared:    local,
 		environment: map[string]string{"OPENAI_MODEL": testModel},
-	})
+	}, nil)
 	if effect["model_digest"] != testModelDigest {
 		t.Fatalf("a declared digest was dropped: %v", effect)
 	}

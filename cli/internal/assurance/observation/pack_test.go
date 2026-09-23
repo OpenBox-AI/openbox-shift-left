@@ -31,7 +31,7 @@ func TestAssembleFinalizeAndReadExactObservation(t *testing.T) {
 	pack, err := Assemble(PackInput{ExecutionJSON: execution, SandboxEvidence: []byte(`{"egress_decisions":[]}`), Snapshot: snapshot, Backend: backend, Window: Window{EvaluationID: "ev-one", StartedAt: now, Deadline: now.Add(time.Minute)}, Effects: map[string]any{
 		"safe_sink":        map[string]any{"status": "observed", "attempts": 1, "matching_receipts": 1, "evaluation_id": "ev-one", "matched_at": now.Format(time.RFC3339Nano)},
 		"retrieval_poison": map[string]any{"status": "missing", "matching_receipts": 0},
-		"model_route":      map[string]any{"provider": "openai-compatible-provider", "model": "granite4.1:3b", "model_digest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"},
+		"model_route":      map[string]any{"status": "missing", "matching_receipts": 0, "provider": "openai-compatible-provider", "model": "granite4.1:3b", "model_digest": "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"},
 		"core_relay":       map[string]any{"status": "observed", "matching_validations": 1, "governance_events": 1},
 	}, FinalizedAt: now})
 	if err != nil {
