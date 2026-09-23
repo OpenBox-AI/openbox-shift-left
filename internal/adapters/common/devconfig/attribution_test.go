@@ -1,22 +1,15 @@
 package devconfig
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
 
-// TestAttributionDIDMatchesCoreDerivation pins the namespace (VERIFIED,
-// Validation Session 1: core openbox_did.go:30, backend aip-namespace.ts) and
-// one literal agent_id -> did vector, computed once with uuid.NewSHA1 since
-// neither repo carries a literal vector today. It then asserts git-action's
-// own DIDForAgent (the only other local copy of this derivation) agrees,
-// until phase 04 deletes that copy in favour of this one.
-//
-// The cross-check runs git-action's function out of process
-// (testdata/didcheck), not via a direct import: git-action already imports
-// devconfig (advisory.go), so importing git-action back from here would be a
-// compile cycle.
+// TestAttributionDIDMatchesCoreDerivation pins the namespace (core
+// openbox_did.go, backend aip-namespace.ts) and one literal agent_id -> did
+// vector, computed once with uuid.NewSHA1 since neither repo carries a
+// literal vector. This is the only derivation in the repo, so this is the
+// only place it has to be pinned.
 func TestAttributionDIDMatchesCoreDerivation(t *testing.T) {
 	if AttributionAIPNamespace != "b6e4a1d3-7c02-4e8a-9d1f-5a3b7c2d8e0f" {
 		t.Fatalf("namespace = %q, want the VERIFIED core/backend value", AttributionAIPNamespace)
@@ -36,15 +29,6 @@ func TestAttributionDIDMatchesCoreDerivation(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "did:aip:") {
 		t.Fatalf("AttributionDIDFor(%q) = %q, missing the did:aip: prefix", agentID, got)
-	}
-
-	out, err := exec.Command("go", "run", "./testdata/didcheck", agentID).Output()
-	if err != nil {
-		t.Fatalf("running git-action's DIDForAgent out of process: %v", err)
-	}
-	if gitActionDID := strings.TrimSpace(string(out)); gitActionDID != got {
-		t.Fatalf("devconfig.AttributionDIDFor(%q) = %q, git-action's DIDForAgent = %q; the derivations have drifted",
-			agentID, got, gitActionDID)
 	}
 }
 

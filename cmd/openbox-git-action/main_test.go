@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"os"
 	"os/exec"
@@ -113,12 +114,12 @@ func TestSelectVerifier_MisconfiguredDegradesToNoop(t *testing.T) {
 	}
 }
 
+// TestSelectVerifier_FlagOnBuildsRealVerifier the witness needs a real (fake)
+// core to authenticate against: fakecore's own v3 identity is what its
+// GET /api/v3/auth/validate names, so the configured OPENBOX_AGENT_ID must be
+// fakecore's own agent id for the witness to match.
 func TestSelectVerifier_FlagOnBuildsRealVerifier(t *testing.T) {
-	const agentID = "11111111-1111-1111-1111-111111111111"
-	did, err := gitaction.DIDForAgent(agentID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fake := fakecore.New(t, fakecore.Script{})
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"data":[]}`))
@@ -127,24 +128,114 @@ func TestSelectVerifier_FlagOnBuildsRealVerifier(t *testing.T) {
 
 	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
 	t.Setenv("OPENBOX_OWNERSHIP_API_URL", srv.URL) // loopback http allowed
-	t.Setenv("OPENBOX_AGENT_ID", agentID)
-	t.Setenv("OPENBOX_DID", did)
+	t.Setenv("OPENBOX_BASE_URL", fake.URL())
+	t.Setenv("OPENBOX_API_KEY", fakecore.APIKey())
+	t.Setenv("OPENBOX_WORKLOAD_PRIVATE_KEY", fakecore.WorkloadPrivateKey())
+	t.Setenv("OPENBOX_AGENT_ID", fakecore.AgentID())
 	t.Setenv("OPENBOX_ORG_API_KEY", "obx_key_test")
 
 	v := selectVerifier(false, discardLogger())
 	if _, ok := v.(gitaction.NoopVerifier); ok {
-		t.Fatal("flag on with a usable config must build the real apiVerifier, not Noop")
+		t.Fatal("flag on with a usable config and a matching witness must build the real apiVerifier, not Noop")
+	}
+}
+
+// TestSelectVerifier_WitnessMismatchDegradesToNoop an OPENBOX_AGENT_ID that
+// names a different principal than the one the witnessed credential actually
+// authenticates as must degrade to Noop, same as any other misconfiguration
+// -- never build a verifier that would read another principal's sessions.
+func TestSelectVerifier_WitnessMismatchDegradesToNoop(t *testing.T) {
+	fake := fakecore.New(t, fakecore.Script{})
+	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "1")
+	t.Setenv("OPENBOX_OWNERSHIP_API_URL", srv.URL)
+	t.Setenv("OPENBOX_BASE_URL", fake.URL())
+	t.Setenv("OPENBOX_API_KEY", fakecore.APIKey())
+	t.Setenv("OPENBOX_WORKLOAD_PRIVATE_KEY", fakecore.WorkloadPrivateKey())
+	t.Setenv("OPENBOX_AGENT_ID", "22222222-2222-2222-2222-222222222222") // not fakecore's own agent id
+	t.Setenv("OPENBOX_ORG_API_KEY", "obx_key_test")
+
+	v := selectVerifier(false, discardLogger())
+	if _, ok := v.(gitaction.NoopVerifier); !ok {
+		t.Fatal("a witness naming a different agent than configured must degrade to NoopVerifier")
 	}
 }
 
 func TestCLI_MissingCredsIsPreconditionError(t *testing.T) {
 	dir, sha := initRepo(t)
-	for _, k := range []string{"OPENBOX_BASE_URL", "OPENBOX_API_KEY", "OPENBOX_DID", "OPENBOX_SEED"} {
+	for _, k := range []string{
+		"OPENBOX_BASE_URL", "OPENBOX_API_KEY", "OPENBOX_DID", "OPENBOX_SEED",
+		"OPENBOX_AGENT_ID", "OPENBOX_WORKLOAD_PRIVATE_KEY",
+	} {
 		t.Setenv(k, "")
 	}
 	var out, errb bytes.Buffer
 	code := run([]string{"--dir", dir, "--sha", sha}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2 (missing creds precondition)\nstderr:\n%s", code, errb.String())
+	}
+}
+
+// TestGitActionReachesV3 the end-to-end proof: a v3 identity (API key +
+// workload key) reaches fakecore's real v3 /evaluate route, carrying both
+// v3 auth headers (the obx_ API key on Authorization, and the exchanged
+// workload bearer), and no ownership verification (off by default) blocks
+// the run.
+func TestGitActionReachesV3(t *testing.T) {
+	fake := fakecore.New(t, fakecore.Script{})
+	dir, sha := initRepo(t)
+
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "")
+	t.Setenv("OPENBOX_BASE_URL", fake.URL())
+	t.Setenv("OPENBOX_API_KEY", fakecore.APIKey())
+	t.Setenv("OPENBOX_WORKLOAD_PRIVATE_KEY", fakecore.WorkloadPrivateKey())
+	t.Setenv("OPENBOX_AGENT_ID", fakecore.AgentID())
+	t.Setenv("OPENBOX_DID", fakecore.AttributionDID())
+
+	var out, errb bytes.Buffer
+	code := run([]string{"--dir", dir, "--sha", sha, "--repo", "o/r"}, &out, &errb)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, errb.String())
+	}
+
+	inbox := fake.Inbox()
+	if len(inbox) != 1 {
+		t.Fatalf("fakecore inbox = %d entries, want 1", len(inbox))
+	}
+	h := inbox[0].Headers
+	if h.Get("Authorization") == "" {
+		t.Error("missing Authorization header (the obx_ API key)")
+	}
+	if h.Get("X-Openbox-Workload-Token") == "" {
+		t.Error("missing X-Openbox-Workload-Token header (the exchanged workload bearer)")
+	}
+}
+
+// TestGitActionRefusesMismatchedExportedDID a stale OPENBOX_DID left over
+// from before a re-init (a new agent id, an old DID) must refuse to run
+// rather than silently emit under the wrong attribution label.
+func TestGitActionRefusesMismatchedExportedDID(t *testing.T) {
+	fake := fakecore.New(t, fakecore.Script{})
+	dir, sha := initRepo(t)
+
+	t.Setenv("OPENBOX_OWNERSHIP_VERIFY", "")
+	t.Setenv("OPENBOX_BASE_URL", fake.URL())
+	t.Setenv("OPENBOX_API_KEY", fakecore.APIKey())
+	t.Setenv("OPENBOX_WORKLOAD_PRIVATE_KEY", fakecore.WorkloadPrivateKey())
+	t.Setenv("OPENBOX_AGENT_ID", fakecore.AgentID())
+	t.Setenv("OPENBOX_DID", "did:aip:00000000-0000-0000-0000-000000000000") // stale/wrong
+
+	var out, errb bytes.Buffer
+	code := run([]string{"--dir", dir, "--sha", sha}, &out, &errb)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (mismatched OPENBOX_DID); stderr=%q", code, errb.String())
+	}
+	if len(fake.Inbox()) != 0 {
+		t.Fatal("a mismatched OPENBOX_DID must refuse before ever emitting")
 	}
 }

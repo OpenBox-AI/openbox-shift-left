@@ -156,6 +156,23 @@ func CodexHooksPath() string { return codex.DefaultHooksPath() }
 // doctor can report its backlog without importing the adapter.
 func CodexSpoolDir() string { return codex.DefaultSpoolDir() }
 
+// SpoolDirFor is the spool directory the named provider's adapter writes to,
+// reusing that adapter's own DefaultSpoolDir (which honours OPENBOX_SPOOL_DIR)
+// rather than re-deriving the path here. It exists for D5 (init/adopt
+// discarding a tool's spool when a legacy identity is replaced): the caller
+// already validated the provider name via Lookup, so an unrecognized name
+// answers "" rather than an error.
+func SpoolDirFor(name string) string {
+	switch provider.Name(name) {
+	case provider.ClaudeCode:
+		return claudecode.DefaultSpoolDir()
+	case provider.Codex:
+		return codex.DefaultSpoolDir()
+	default:
+		return ""
+	}
+}
+
 // OwnedSpoolDirs is every spool directory the adapters write to, de-duplicated
 // by resolved path. It exists so a purge cannot miss one: cmd/openbox already
 // hardcodes "cc-spool" three times for its own lane spools, and a fourth copy

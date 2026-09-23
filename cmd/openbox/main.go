@@ -10,6 +10,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
@@ -318,7 +319,7 @@ func (a *app) runDevInit(args []string) int {
 		return code
 	}
 
-	d := devinit.Deps{Installer: inst, Out: a.stdout, GenerateKey: a.newWorkloadKey}
+	d := devinit.Deps{Installer: inst, Out: a.stdout, GenerateKey: a.newWorkloadKey, DiscardLegacySpool: discardLegacySpool}
 	var tokenFrom string
 	if !plan.reuse {
 		// Adopt first, and before the token check: pasting an agent's own key
@@ -414,6 +415,19 @@ func (a *app) runDevInit(args []string) int {
 
 	fmt.Fprintf(a.stdout, "\nDone. `openbox doctor` explains every value above, and where it came from.\n")
 	return exitOK
+}
+
+// discardLegacySpool implements devinit.Deps.DiscardLegacySpool (D5): the
+// named provider's own spool directory, discarded under the spool lock and
+// recorded in its discard ledger. register() calls this only after a
+// successful WriteWorkloadIdentity, and only for a tool whose store was
+// legacy before that write -- never for a fresh or already-v3 store.
+func discardLegacySpool(tool string) (int, error) {
+	dir := providers.SpoolDirFor(tool)
+	if dir == "" {
+		return 0, nil
+	}
+	return hookflow.Spool{Dir: dir}.DiscardAll("queued under the previous identity")
 }
 
 func (a *app) usage() {

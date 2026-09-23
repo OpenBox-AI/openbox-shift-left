@@ -2,8 +2,10 @@ package gitaction
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"sync/atomic"
@@ -15,11 +17,17 @@ const testAgentID = "11111111-1111-1111-1111-111111111111"
 
 func testPusherDID(t *testing.T) string {
 	t.Helper()
-	did, err := DIDForAgent(testAgentID)
+	did, err := devconfig.AttributionDIDFor(testAgentID)
 	if err != nil {
-		t.Fatalf("didForAgent: %v", err)
+		t.Fatalf("AttributionDIDFor: %v", err)
 	}
 	return did
+}
+
+// witnessOK returns a Witness that reports agentID, unconditionally, as
+// though core's own /api/v3/auth/validate had just confirmed it.
+func witnessOK(agentID string) func(context.Context) (string, error) {
+	return func(context.Context) (string, error) { return agentID, nil }
 }
 
 type mockBackend struct {
@@ -53,7 +61,7 @@ func (m *mockBackend) verifier(t *testing.T, timeout time.Duration) OwnershipVer
 	v, err := NewAPIVerifier(APIVerifierConfig{
 		BaseURL:   m.srv.URL,
 		AgentID:   testAgentID,
-		PusherDID: testPusherDID(t),
+		Witness:   witnessOK(testAgentID),
 		OrgAPIKey: "obx_key_test",
 		Timeout:   timeout,
 	})
@@ -78,18 +86,6 @@ func sessionsBodyForAgent(agentID string, runIDs ...string) string {
 	}
 	b.WriteString(`]}}`)
 	return b.String()
-}
-
-func TestUUIDV5_MatchesReferenceVector(t *testing.T) {
-	const nsDNS = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-	got, err := uuidV5(nsDNS, "python.org")
-	if err != nil {
-		t.Fatal(err)
-	}
-	const want = "886313e1-3b8a-5372-9b90-0c9aee199e5d"
-	if got != want {
-		t.Fatalf("uuidV5 = %s, want %s (implementation does not match the uuid lib)", got, want)
-	}
 }
 
 func TestAPIVerifier_OwnedSessionIsOwned(t *testing.T) {
@@ -183,7 +179,7 @@ func TestAPIVerifier_DoesNotForwardKeyOnCrossHostRedirect(t *testing.T) {
 	defer redirector.Close()
 
 	v, err := NewAPIVerifier(APIVerifierConfig{
-		BaseURL: redirector.URL, AgentID: testAgentID, PusherDID: testPusherDID(t), OrgAPIKey: "obx_key_secret",
+		BaseURL: redirector.URL, AgentID: testAgentID, Witness: witnessOK(testAgentID), OrgAPIKey: "obx_key_secret",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,15 +328,15 @@ func TestAPIVerifier_CachesDefinitiveResultPerSession(t *testing.T) {
 }
 
 func TestNewAPIVerifier_RejectsBadConfig(t *testing.T) {
-	did := testPusherDID(t)
+	witness := witnessOK(testAgentID)
 	cases := map[string]APIVerifierConfig{
-		"no base url":        {AgentID: testAgentID, PusherDID: did, OrgAPIKey: "k"},
-		"plaintext non-lb":   {BaseURL: "http://backend:3000", AgentID: testAgentID, PusherDID: did, OrgAPIKey: "k"},
-		"no org key":         {BaseURL: "https://b", AgentID: testAgentID, PusherDID: did},
-		"base url with path": {BaseURL: "https://b/api", AgentID: testAgentID, PusherDID: did, OrgAPIKey: "k"},
-		"agent id not uuid":  {BaseURL: "https://b", AgentID: "not-a-uuid", PusherDID: did, OrgAPIKey: "k"},
-		"agent id path-junk": {BaseURL: "https://b", AgentID: "1111111/1111/1111/1111/111111111111", PusherDID: did, OrgAPIKey: "k"},
-		"did mismatch":       {BaseURL: "https://b", AgentID: testAgentID, PusherDID: "did:aip:00000000-0000-0000-0000-000000000000", OrgAPIKey: "k"},
+		"no base url":        {AgentID: testAgentID, Witness: witness, OrgAPIKey: "k"},
+		"plaintext non-lb":   {BaseURL: "http://backend:3000", AgentID: testAgentID, Witness: witness, OrgAPIKey: "k"},
+		"no org key":         {BaseURL: "https://b", AgentID: testAgentID, Witness: witness},
+		"base url with path": {BaseURL: "https://b/api", AgentID: testAgentID, Witness: witness, OrgAPIKey: "k"},
+		"agent id not uuid":  {BaseURL: "https://b", AgentID: "not-a-uuid", Witness: witness, OrgAPIKey: "k"},
+		"agent id path-junk": {BaseURL: "https://b", AgentID: "1111111/1111/1111/1111/111111111111", Witness: witness, OrgAPIKey: "k"},
+		"no witness":         {BaseURL: "https://b", AgentID: testAgentID, OrgAPIKey: "k"},
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -351,17 +347,64 @@ func TestNewAPIVerifier_RejectsBadConfig(t *testing.T) {
 	}
 }
 
-func TestNewAPIVerifier_BindsAgentIDToDID(t *testing.T) {
+// TestOwnershipWitnessMatchPasses an uppercase-vs-lowercase UUID rendering of
+// the same agent must still match: the compare is on parsed UUIDs, not raw
+// strings.
+func TestOwnershipWitnessMatchPasses(t *testing.T) {
 	if _, err := NewAPIVerifier(APIVerifierConfig{
-		BaseURL: "https://b", AgentID: testAgentID, PusherDID: testPusherDID(t), OrgAPIKey: "k",
+		BaseURL: "https://b", AgentID: strings.ToUpper(testAgentID), Witness: witnessOK(testAgentID), OrgAPIKey: "k",
 	}); err != nil {
-		t.Fatalf("matching pair should construct: %v", err)
+		t.Fatalf("a witness naming the same agent (different case) should construct: %v", err)
 	}
-	otherDID, _ := DIDForAgent("22222222-2222-2222-2222-222222222222")
-	if _, err := NewAPIVerifier(APIVerifierConfig{
-		BaseURL: "https://b", AgentID: testAgentID, PusherDID: otherDID, OrgAPIKey: "k",
-	}); err == nil {
-		t.Fatal("an agent id that names a different principal than the DID must be rejected")
+}
+
+// TestOwnershipWitnessMismatchRefusesAnotherPrincipal core's witness naming a
+// different agent than the one configured must refuse construction with the
+// existing "another principal's sessions" wording -- this is what replaced
+// the tautological DID bind.
+func TestOwnershipWitnessMismatchRefusesAnotherPrincipal(t *testing.T) {
+	other := "22222222-2222-2222-2222-222222222222"
+	_, err := NewAPIVerifier(APIVerifierConfig{
+		BaseURL: "https://b", AgentID: testAgentID, Witness: witnessOK(other), OrgAPIKey: "k",
+	})
+	if err == nil {
+		t.Fatal("a witness naming a different agent must be refused")
+	}
+	if !strings.Contains(err.Error(), "refusing to read another principal's sessions") {
+		t.Fatalf("error = %q, want the existing refusal wording", err)
+	}
+}
+
+// TestOwnershipWitness401Refuses any witness error, a 401 included, refuses
+// construction; the caller (selectVerifier) degrades to NoopVerifier.
+func TestOwnershipWitness401Refuses(t *testing.T) {
+	_, err := NewAPIVerifier(APIVerifierConfig{
+		BaseURL: "https://b", AgentID: testAgentID, OrgAPIKey: "k",
+		Witness: func(context.Context) (string, error) {
+			return "", errors.New("auth/validate returned HTTP 401: identity rejected")
+		},
+	})
+	if err == nil {
+		t.Fatal("a 401 from the witness must refuse construction")
+	}
+}
+
+// TestNoSessionReadBeforeWitness a witness failure must never let a session
+// read happen: construction fails before the returned verifier (there is
+// none) could ever be asked OwnsSession, so the session backend must see zero
+// requests.
+func TestNoSessionReadBeforeWitness(t *testing.T) {
+	m := newMockBackend(t, 200, sessionsBody("sess-A"))
+	_, err := NewAPIVerifier(APIVerifierConfig{
+		BaseURL: m.srv.URL, AgentID: testAgentID, OrgAPIKey: "k",
+		Witness: func(context.Context) (string, error) { return "", errors.New("witness unreachable") },
+	})
+	if err == nil {
+		t.Fatal("expected construction to fail when the witness errors")
+	}
+	if n := atomic.LoadInt32(&m.calls); n != 0 {
+		t.Fatalf("the session backend was hit %d times despite the witness failing; ownership must never be "+
+			"read before the witness succeeds", n)
 	}
 }
 

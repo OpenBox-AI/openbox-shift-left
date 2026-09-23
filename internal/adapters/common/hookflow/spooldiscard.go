@@ -2,6 +2,7 @@ package hookflow
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,6 +36,53 @@ func (s Spool) recordDiscard(basePath string, events int, reason string) {
 	}
 	defer f.Close()
 	_, _ = f.WriteString(line)
+}
+
+// DiscardAll removes every event currently waiting in this spool -- session,
+// recovery and in-flight rotated (`.flushing.`) files alike -- and records
+// the total under reason in the discard ledger. It exists for D5: when
+// `openbox init`/`adopt` writes a v3 identity over a legacy one, whatever
+// that tool had queued under the old identity can never be delivered under
+// the new one (the control plane ties every event to the credential that
+// authenticated it), so it is discarded rather than left to churn forever
+// unsent. It takes the spool lock, the same one Append/drain use, so this
+// never races a concurrent flush into double-counting or a torn read.
+//
+// Best-effort past the first file: one unremovable file must not hide the
+// rest, so every removable file is still removed and counted, and every
+// removal failure is joined into the returned error.
+func (s Spool) DiscardAll(reason string) (int, error) {
+	unlock := s.lockSpool()
+	defer unlock()
+
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("spool discard: readdir: %w", err)
+	}
+
+	total := 0
+	var errs []error
+	for _, e := range entries {
+		if e.IsDir() || !IsBacklogFile(e.Name()) {
+			continue
+		}
+		path := filepath.Join(s.Dir, e.Name())
+		n := countLines(path)
+		if rmErr := os.Remove(path); rmErr != nil {
+			if !os.IsNotExist(rmErr) {
+				errs = append(errs, fmt.Errorf("spool discard: remove %s: %w", e.Name(), rmErr))
+			}
+			continue
+		}
+		total += n
+	}
+	if total > 0 {
+		s.recordDiscard(s.Dir, total, reason)
+	}
+	return total, errors.Join(errs...)
 }
 
 func (s Spool) DiscardedCount() int {

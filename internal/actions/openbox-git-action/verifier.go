@@ -15,20 +15,19 @@ import (
 	"github.com/google/uuid"
 )
 
-//   - AgentID↔DID binding: at construction the verifier recomputes
-//     did:aip:<uuidv5(agentID, namespace)> and requires it to equal the deploy
-//     agent's DID (OPENBOX_DID).
+//   - Server witness: at construction the verifier calls Witness, which
+//     authenticates the deploy's own credential against core, and requires the
+//     agent id core names to equal the configured OPENBOX_AGENT_ID. A derived
+//     DID can no longer prove this on its own -- it is a pure function of the
+//     agent id, so it agrees with itself by construction and proves nothing
+//     about which credential is actually authenticating.
 //   - Per-row agent_id check: a row is accepted only when its agent_id equals
 //     the queried agentID, so a stray/other-agent row can never enter the
 //     owned set.
 
-// aipNamespace if the backend ever changes this derivation the bind fails →
-// the verifier degrades to Noop (fail-safe: it never over-attributes on a
-// mismatch).
-const aipNamespace = "b6e4a1d3-7c02-4e8a-9d1f-5a3b7c2d8e0f"
-
-// defaultOwnershipTimeout bounds the ownership read so a slow/absent API
-// degrades to Inferred (NFR reliability) instead of hanging the deploy.
+// defaultOwnershipTimeout bounds the ownership read, and the witness call, so
+// a slow/absent API degrades to Inferred (NFR reliability) instead of hanging
+// the deploy.
 const defaultOwnershipTimeout = 5 * time.Second
 
 type apiVerifier struct {
@@ -50,11 +49,21 @@ type APIVerifierConfig struct {
 	// https (or http on loopback for tests): the org key rides in a header
 	// (INV-1).
 	BaseURL string
-	// AgentID is the deploy agent's UUID (the /agent/<id>/sessions path key).
+	// AgentID is the deploy agent's UUID (the /agent/<id>/sessions path key),
+	// normally OPENBOX_AGENT_ID.
 	AgentID string
-	// PusherDID is the deploy agent's did:aip:<uuid> (the signing/attribution
-	// identity). AgentID must derive to exactly this DID.
-	PusherDID string
+	// Witness authenticates the deploy's own runtime credential against core
+	// and reports the agent id core itself attributes that credential to
+	// (core's GET /api/v3/auth/validate, via the runtime client's
+	// ValidateDetailed). NewAPIVerifier calls it exactly once, before any
+	// session read, bounded by Timeout (or defaultOwnershipTimeout), and
+	// requires the agent id it returns to name the same principal as AgentID.
+	//
+	// This replaces binding AgentID to a caller-supplied PusherDID: a DID is a
+	// pure function of AgentID, so it agrees with itself by construction and
+	// proves nothing about which credential is actually authenticating. The
+	// server witness is what makes the check real.
+	Witness func(ctx context.Context) (agentID string, err error)
 	// OrgAPIKey is an org X-API-Key (obx_key_…) holding read:agent_session
 	// (INV-1: never logged; sent only in the X-API-Key header).
 	OrgAPIKey string
@@ -63,7 +72,12 @@ type APIVerifierConfig struct {
 	Logger  Logger        // optional; INV-1/INV-2 ids/types/errors only
 }
 
-// NewAPIVerifier builds the real OwnershipVerifier.
+// NewAPIVerifier builds the real OwnershipVerifier. It calls cfg.Witness
+// before ever reading a session and requires the agent id it reports to name
+// the same principal as cfg.AgentID (case-insensitive UUID compare). A
+// mismatch, a witness error (a 401 included), or an unset Witness all refuse
+// construction; the caller degrades to NoopVerifier exactly as it does for
+// any other misconfiguration (fail-safe: this never over-attributes).
 func NewAPIVerifier(cfg APIVerifierConfig) (OwnershipVerifier, error) {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	if base == "" {
@@ -75,21 +89,34 @@ func NewAPIVerifier(cfg APIVerifierConfig) (OwnershipVerifier, error) {
 	if cfg.OrgAPIKey == "" {
 		return nil, errors.New("ownership verify: org API key is required (OPENBOX_ORG_API_KEY)")
 	}
-	if !isUUIDShaped(cfg.AgentID) {
+	configuredID, err := uuid.Parse(cfg.AgentID)
+	if err != nil {
 		return nil, fmt.Errorf("ownership verify: agent id must be a UUID, got %q", cfg.AgentID)
 	}
-	derived, err := DIDForAgent(cfg.AgentID)
-	if err != nil {
-		return nil, fmt.Errorf("ownership verify: %w", err)
-	}
-	if derived != cfg.PusherDID {
-		return nil, fmt.Errorf("ownership verify: agent id %q derives to %s, not the deploy DID %q "+
-			"(refusing to read another principal's sessions)", cfg.AgentID, derived, cfg.PusherDID)
+	if cfg.Witness == nil {
+		return nil, errors.New("ownership verify: a witness is required to authenticate the configured agent id")
 	}
 
 	timeout := cfg.Timeout
 	if timeout <= 0 {
 		timeout = defaultOwnershipTimeout
+	}
+
+	// Bounded, and run before any session read: an ownership check must never
+	// trust a caller-asserted identity, only one core itself just confirmed.
+	wctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	witnessed, werr := cfg.Witness(wctx)
+	if werr != nil {
+		return nil, fmt.Errorf("ownership verify: witness: %w", werr)
+	}
+	witnessedID, err := uuid.Parse(witnessed)
+	if err != nil {
+		return nil, fmt.Errorf("ownership verify: witness returned a non-UUID agent id %q: %w", witnessed, err)
+	}
+	if !strings.EqualFold(witnessedID.String(), configuredID.String()) {
+		return nil, fmt.Errorf("ownership verify: the witnessed agent %s does not match the configured agent %s "+
+			"(refusing to read another principal's sessions)", witnessed, cfg.AgentID)
 	}
 	return &apiVerifier{
 		http: &http.Client{
@@ -188,43 +215,4 @@ func checkOwnershipBaseURL(raw string) error {
 	default:
 		return fmt.Errorf("backend URL scheme must be https (or http on loopback), got %q", u.Scheme)
 	}
-}
-
-func isUUIDShaped(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, r := range s {
-		switch i {
-		case 8, 13, 18, 23:
-			if r != '-' {
-				return false
-			}
-		default:
-			isHex := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
-			if !isHex {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// DIDForAgent recomputes the agent's DID as openbox-backend does:
-// did:aip:<uuidv5(agentID, aipNamespace)> (RFC 4122 v5, SHA-1).
-func DIDForAgent(agentID string) (string, error) {
-	id, err := uuidV5(aipNamespace, agentID)
-	if err != nil {
-		return "", err
-	}
-	return "did:aip:" + id, nil
-}
-
-func uuidV5(namespace, name string) (string, error) {
-	ns, err := uuid.Parse(namespace)
-	if err != nil {
-		return "", fmt.Errorf("parse namespace UUID: %w", err)
-	}
-	// The name is hashed as its utf8 bytes (the agent id STRING).
-	return uuid.NewSHA1(ns, []byte(name)).String(), nil
 }

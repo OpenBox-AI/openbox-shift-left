@@ -10,15 +10,22 @@ import (
 // DeployMeta is the deploy-context the action stamps onto the Deploy event
 // (beyond what it resolves from git).
 type DeployMeta struct {
-	Repo         string // e.g. "openbox-ai/openbox-shift-left" (GITHUB_REPOSITORY)
-	Environment  string // e.g. "production"; "" => omitted
-	DeveloperDID string // the git-action agent's REAL did:aip:<uuid> (signing identity)
+	Repo        string // e.g. "openbox-ai/openbox-shift-left" (GITHUB_REPOSITORY)
+	Environment string // e.g. "production"; "" => omitted
+	// DeveloperDID is the git-action agent's attribution label,
+	// devconfig.AttributionDIDFor(OPENBOX_AGENT_ID) -- NOT a signing identity.
+	// A v3 workload agent authenticates with its API key and workload bearer
+	// (internal/client's Authorization/X-OpenBox-Workload-Token headers); this
+	// DID is a derived coordinate carried only as the event's workflow_id, for
+	// attribution and grouping, and is never itself proof of anything.
+	DeveloperDID string
 }
 
 // BuildDeployEvent maps a Resolution + deploy context onto the normalized
 // DevEvent the client emits (contract event_type = Deploy).
-//   - The signing identity (client.Config.DID) is the agent's real
-//     did:aip:<uuid>; core validates it.
+//   - DeveloperDID is the derived attribution label (D1), never a signing
+//     identity: core validates the request via the workload bearer, not via
+//     this value.
 //   - Deploy_did is a synthetic lineage label
 //     (`did:aip:deploy-<shortsha>-<unix>`) carried only in metadata; core has
 //     no deploy-DID primitive, so it is never sent as the signing DID.
