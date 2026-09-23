@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -17,6 +15,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"

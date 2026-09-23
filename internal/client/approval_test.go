@@ -7,9 +7,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 func approvalServer(t *testing.T, respond func() (int, string)) (*memhttptest.Server, *ApprovalKey) {

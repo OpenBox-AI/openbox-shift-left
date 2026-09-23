@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
@@ -221,7 +222,7 @@ func TestHookWithNoIdentityWarnsAndContinues(t *testing.T) {
 func TestWarnNamesLegacyStore(t *testing.T) {
 	home := isolateHomeOnly(t)
 	spool := perToolHookEnv(t)
-	if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -832,7 +833,7 @@ func TestUninstallRemovesAnIdentityDirWithNoCredentialFile(t *testing.T) {
 	// step runs and sweeps directories on its way out, which is why this case
 	// has to be the machine that has none: that is the branch the sweep sits
 	// behind.
-	if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), testDIDFor(t, "claude-code")); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), testDIDFor(t, "claude-code")); err != nil {
 		t.Fatal(err)
 	}
 

@@ -7,12 +7,13 @@ import (
 	"encoding/pem"
 	"log"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
 // TestContentCaptureConformance tool-content conformance suite; executable

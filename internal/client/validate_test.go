@@ -5,9 +5,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 // TestValidate_HappyPath_AuthenticatedGET drives the real Validate → workload

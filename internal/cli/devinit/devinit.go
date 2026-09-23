@@ -151,6 +151,13 @@ func randomSuffix() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// suffixedName appends "-<suffix>" to name, trimming name rather than the
+// suffix when the whole would exceed the backend's 255-byte limit: cutting the
+// suffix off would register the taken name again.
+func suffixedName(name, suffix string) string {
+	return truncate(name, 255-len(suffix)-1) + "-" + suffix
+}
+
 func truncate(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
@@ -203,6 +210,12 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 
 	stored, readErr := readLocalCredentials()
 	fromFile := readErr == nil && stored.apiKey != "" && stored.workloadKey != ""
+	// A store holding v3 keys beside a leftover legacy marker (a stored
+	// developer_did, or a seed) is one the resolver refuses, so reusing it would
+	// print "Reusing" over a tool whose hooks send nothing. It registers instead.
+	if ls, lerr := devconfig.LegacyStoreFor(o.Provider); lerr == nil && ls.Legacy {
+		fromFile = false
+	}
 	// The environment counts, and has to, because the caller's gate already
 	// accepted it: a machine provisioned entirely through exported variables
 	// would otherwise reach the registration branch with no registrar wired and
@@ -226,13 +239,14 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		fmt.Fprintf(d.Out, "Reusing the existing %s agent; nothing was registered.\n", o.Provider)
 		fmt.Fprintf(d.Out, "  %-12s %s\n", "agent id", agentIDOrNone(agentID))
 		// Reuse is a file test, so a key that was revoked server-side still looks
-		// like a complete store and this run never goes online to find out. That
-		// makes deleting the file the whole rotation procedure, and a reader who
-		// is not told will look for a flag that does not exist. Which tool this
+		// like a complete store and this run never goes online to find out. There
+		// is no in-place key rotation: deleting the file and re-running registers
+		// a new agent (suffixed, since this one keeps its name), and a reader who
+		// is not told will expect the old agent id to survive. Which tool this
 		// store belongs to, and which identity wins, is `openbox doctor`'s.
 		fmt.Fprintf(d.Out, "  %-12s %s\n", "credentials", where)
 		if fromFile {
-			fmt.Fprintf(d.Out, "  %-12s delete it and re-run to rotate the key, keeping this agent id\n", "")
+			fmt.Fprintf(d.Out, "  %-12s deleting it and re-running registers a new agent; this agent id is not kept\n", "")
 		}
 		return res, ref, nil
 	}
@@ -299,12 +313,8 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 			return res, ref, fmt.Errorf("an agent named %q already exists (id %s), and generating a "+
 				"replacement suffix failed: %w", name, existing.ID, serr)
 		}
-		registerName = truncate(name+"-"+suffix, 255)
+		registerName = suffixedName(name, suffix)
 		res.AgentName = registerName
-		fmt.Fprintf(d.Out, "an agent named %q (id %s) already exists in this org; registered this "+
-			"machine's %s agent as %q\n", existing.AgentName, existing.ID, o.Provider, registerName)
-		fmt.Fprintln(d.Out, "  if this machine still holds that agent's workload key, re-run and answer "+
-			"yes when it offers to adopt it instead")
 	}
 
 	genKey := d.GenerateKey
@@ -345,7 +355,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// up rather than loop.
 		suffix, serr := suffixFn()
 		if serr == nil {
-			registerName = truncate(name+"-"+suffix, 255)
+			registerName = suffixedName(name, suffix)
 			res.AgentName = registerName
 			req.AgentName = registerName
 			reg, err = d.Registrar.Create(ctx, req)
@@ -365,6 +375,15 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 	res.AgentID, res.Registered = reg.AgentID, true
 	res.AgentName = reg.AgentName
+	// Printed only once Create has succeeded, under the name that succeeded:
+	// before it, a failed create (or the duplicate-name retry) would leave
+	// stdout claiming a registration that did not happen.
+	if existing != nil {
+		fmt.Fprintf(d.Out, "an agent named %q (id %s) already exists in this org; registered this "+
+			"machine's %s agent as %q\n", existing.AgentName, existing.ID, o.Provider, registerName)
+		fmt.Fprintln(d.Out, "  if this machine still holds that agent's workload key, re-run and answer "+
+			"yes when it offers to adopt it instead")
+	}
 	res.IdentityKid = reg.Identity.Kid
 	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness
 

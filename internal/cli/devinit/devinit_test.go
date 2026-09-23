@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
@@ -288,7 +289,7 @@ func TestLegacyStoreDoesNotReuse(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.SetLegacyDID(filepath.Join(dir, "dev.json"), "did:aip:existing"); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(dir, "dev.json"), "did:aip:existing"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -959,7 +960,7 @@ func TestInitTranslatesCreateConflicts(t *testing.T) {
 // that replaces it, not folded silently into the success output.
 func TestLegacyNoticePrintsOnceBeforeRegistering(t *testing.T) {
 	dir := isolateHome(t)
-	if err := devconfig.SetLegacyDID(filepath.Join(dir, "claude-code", "dev.json"), "did:aip:existing"); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(dir, "claude-code", "dev.json"), "did:aip:existing"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -991,7 +992,7 @@ func TestInitReplacesLegacyStoreCleanly(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfgPath := filepath.Join(dir, "claude-code", "dev.json")
-	if err := devconfig.SetLegacyDID(cfgPath, "did:aip:legacy"); err != nil {
+	if err := devconfigtest.SetLegacyDID(cfgPath, "did:aip:legacy"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1049,5 +1050,85 @@ func TestRegisteredKidMustMatchSubmittedJWK(t *testing.T) {
 	}
 	if kv := readCredentialFile(t); len(kv) != 0 {
 		t.Errorf("no credentials should be written on a kid mismatch, got %v", kv)
+	}
+}
+
+// TestStoreWithV3KeysAndALegacyMarkerRegisters a store holding a complete v3
+// key pair beside a leftover developer_did is one the resolver refuses, so
+// init must re-register rather than print "Reusing" over a tool whose hooks
+// send nothing.
+func TestStoreWithV3KeysAndALegacyMarkerRegisters(t *testing.T) {
+	isolateHome(t)
+	// No config override: the marker sits in the tool's own dev.json, where an
+	// install without OPENBOX_CONFIG keeps it and every per-tool check reads.
+	t.Setenv(devconfig.EnvConfigPath, "")
+	cfgPath, err := devconfig.DevConfigPathFor("claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
+		devconfig.EnvAPIKeyDirect:       "obx_test_existing",
+		devconfig.EnvWorkloadPrivateKey: "present",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfigtest.SetLegacyDID(cfgPath, "did:aip:existing"); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &fakeRegistrar{reg: validReg()}
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Reused || reg.createCalls != 1 {
+		t.Fatalf("a store the resolver refuses was reused (res=%+v, creates=%d)", res, reg.createCalls)
+	}
+	if ls, err := devconfig.LegacyStoreFor("claude-code"); err != nil || ls.Legacy {
+		t.Fatalf("after re-registering, the store must carry no legacy marker: %+v, %v", ls, err)
+	}
+}
+
+// TestTakenNameNoticeIsNotPrintedWhenCreateFails the "registered this
+// machine's agent as X" line is a claim about a completed registration, so a
+// create that fails must not leave it on stdout.
+func TestTakenNameNoticeIsNotPrintedWhenCreateFails(t *testing.T) {
+	isolateHome(t)
+	name := defaultAgentName("claude-code")
+	reg := &fakeRegistrar{
+		reg:       validReg(),
+		byName:    map[string]*backend.AgentSummary{name: {ID: "old-9", AgentName: name}},
+		createErr: errors.New("backend unavailable"),
+	}
+	var out bytes.Buffer
+	if _, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &out,
+			Suffix: func() (string, error) { return "a1b2c3", nil }}); err == nil {
+		t.Fatal("a failed create must fail init")
+	}
+	if strings.Contains(out.String(), "registered this machine's") {
+		t.Fatalf("stdout claims a registration that failed:\n%s", out.String())
+	}
+}
+
+// TestSuffixedNameKeepsTheSuffixAtTheLengthLimit trimming a maximum-length
+// name must cut the name, never the suffix: without the suffix the request
+// would carry the taken name again.
+func TestSuffixedNameKeepsTheSuffixAtTheLengthLimit(t *testing.T) {
+	long := strings.Repeat("n", 255)
+	got := suffixedName(long, "a1b2c3")
+	if len(got) > 255 {
+		t.Fatalf("len = %d, want <= 255", len(got))
+	}
+	if !strings.HasSuffix(got, "-a1b2c3") {
+		t.Fatalf("suffix lost: %q", got[len(got)-10:])
+	}
+	if short := suffixedName("dev", "a1b2c3"); short != "dev-a1b2c3" {
+		t.Fatalf("suffixedName(dev) = %q", short)
 	}
 }

@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )

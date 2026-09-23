@@ -8,11 +8,12 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 const testAPIKey = "obx_test_" + "0123456789abcdef0123456789abcdef0123456789abcdef"

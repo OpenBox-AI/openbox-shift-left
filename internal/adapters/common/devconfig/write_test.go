@@ -93,7 +93,7 @@ func TestWriteConfig_KeepsCoordinatesItWasNotGiven(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetLegacyDID(path, "did:aip:original"); err != nil {
+	if err := setLegacyDID(path, "did:aip:original"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,7 +189,7 @@ func TestWriteConfig_FilePermissionsAreOwnerOnly(t *testing.T) {
 // setString cannot clear a field, so this needs the explicit clear.
 func TestWriteConfigClearsLegacyDIDOnWorkloadIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := SetLegacyDID(path, "did:aip:legacy"); err != nil {
+	if err := setLegacyDID(path, "did:aip:legacy"); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustLoad(t, path).DID; got != "did:aip:legacy" {
@@ -219,7 +219,7 @@ func TestWriteConfigClearsLegacyDIDOnWorkloadIdentity(t *testing.T) {
 // touch the DID, which is exactly what every existing caller does.
 func TestWriteConfigKeepsDIDWithoutIdentityMethod(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := SetLegacyDID(path, "did:aip:x"); err != nil {
+	if err := setLegacyDID(path, "did:aip:x"); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteConfig(path, Update{BaseURL: "https://core.example"}); err != nil {

@@ -453,7 +453,7 @@ func (a *app) printInventory(inv uninstallInventory) {
 			s.dir, s.backlog, s.discarded)
 	}
 	for _, p := range inv.envFiles {
-		a.row("credentials", "%s (deleted last, and its signing seed cannot be re-retrieved)", p)
+		a.row("credentials", "%s (deleted last, and its workload private key cannot be re-retrieved)", p)
 	}
 	for _, p := range inv.envResidue {
 		a.row("credentials", "%s (an interrupted write; same secrets, deleted with them)", p)

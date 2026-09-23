@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"

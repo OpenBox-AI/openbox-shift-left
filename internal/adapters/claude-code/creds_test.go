@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 )
 
 // TestLegacyStoreHookSendsNothing a stored developer_did means the store
@@ -21,7 +22,7 @@ func TestLegacyStoreHookSendsNothing(t *testing.T) {
 	spool := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	if err := devconfig.SetLegacyDID(DefaultConfigPath(), "did:aip:legacy-store"); err != nil {
+	if err := devconfigtest.SetLegacyDID(DefaultConfigPath(), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 

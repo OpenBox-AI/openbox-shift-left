@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
@@ -255,7 +256,7 @@ func TestLegacyStoreGovernsNothingAndSaysSo(t *testing.T) {
 	t.Setenv(devconfig.EnvConfigPath, "")
 
 	homeDir := filepath.Join(dir, "home")
-	if err := devconfig.SetLegacyDID(filepath.Join(homeDir, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(homeDir, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -37,7 +37,7 @@ func TestLegacyStoreDetection(t *testing.T) {
 					t.Fatal(err)
 				}
 				if tc.did != "" {
-					if err := SetLegacyDID(cfgPath, tc.did); err != nil {
+					if err := setLegacyDID(cfgPath, tc.did); err != nil {
 						t.Fatal(err)
 					}
 				} else {

@@ -24,7 +24,7 @@ func TestWriteWorkloadIdentityReplacesALegacyStore(t *testing.T) {
 	if err := WriteConfig(cfgPath, Update{BaseURL: "https://core.example"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetLegacyDID(cfgPath, "did:aip:legacy"); err != nil {
+	if err := setLegacyDID(cfgPath, "did:aip:legacy"); err != nil {
 		t.Fatal(err)
 	}
 	envPath, err := EnvFilePathFor("codex")

@@ -8,6 +8,12 @@ import (
 	"fmt"
 	"net/http"
 
+	"io"
+	"log"
+	"net"
+	"os"
+	"strings"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
@@ -19,11 +25,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
-	"io"
-	"log"
-	"net"
-	"os"
-	"strings"
 )
 
 var version = "0.1.0-dev"

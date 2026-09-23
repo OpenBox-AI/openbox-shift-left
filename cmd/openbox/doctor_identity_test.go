@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
@@ -23,7 +24,7 @@ func TestDoctorNamesLegacyStoreHooksSendNothing(t *testing.T) {
 		seed func(t *testing.T, home string)
 	}{
 		{"stored DID", func(t *testing.T, home string) {
-			if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
+			if err := devconfigtest.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -38,7 +39,7 @@ func TestDoctorNamesLegacyStoreHooksSendNothing(t *testing.T) {
 			}
 		}},
 		{"both", func(t *testing.T, home string) {
-			if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
+			if err := devconfigtest.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
 				t.Fatal(err)
 			}
 			envPath, err := devconfig.EnvFilePathFor("claude-code")

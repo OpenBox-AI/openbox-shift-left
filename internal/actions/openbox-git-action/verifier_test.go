@@ -5,12 +5,13 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 )
 
 const testAgentID = "11111111-1111-1111-1111-111111111111"

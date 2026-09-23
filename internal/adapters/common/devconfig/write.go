@@ -68,30 +68,6 @@ func WriteConfig(path string, u Update) error {
 	return nil
 }
 
-// SetLegacyDID plants a developer_did directly on the config at path,
-// bypassing Update: nothing in this codebase writes one any more (a v3
-// identity never has one, and WriteWorkloadIdentity always clears it), so
-// exercising a pre-IAMv3 store for a test needs its own seam rather than a
-// field on the write path everything else uses.
-func SetLegacyDID(path, did string) error {
-	cfg, err := Load(path)
-	if err != nil {
-		return err
-	}
-	cfg.DID = did
-	raw, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("dev config: marshal: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("dev config: create dir: %w", err)
-	}
-	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
-		return fmt.Errorf("dev config: write %s: %w", path, err)
-	}
-	return nil
-}
-
 // WouldDowngradeEnforce reports whether writing next to the config at path
 // turns enforcement off, so the caller can say so out loud rather than let a
 // posture change happen quietly. Next is the tri-state Update.Enforce: nil

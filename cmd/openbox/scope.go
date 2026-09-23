@@ -42,6 +42,12 @@ func (a *app) requireCredentials() (credentialPlan, int) {
 	if err != nil {
 		return credentialPlan{}, a.errorf("%v", err)
 	}
+	// A store carrying a legacy marker beside v3 keys is refused by the
+	// resolver and re-registered by devinit, so it must not read as reusable
+	// here either, or the register branch runs with no registrar wired.
+	if ls, lerr := devconfig.LegacyStoreFor(devconfig.BoundProvider()); lerr == nil && ls.Legacy {
+		kv = nil
+	}
 	return credentialPlan{reuse: a.credentialsPresent(kv)}, exitOK
 }
 

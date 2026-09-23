@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
@@ -30,7 +31,7 @@ func seedLegacyStore(t *testing.T, home, tool string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.SetLegacyDID(filepath.Join(home, tool, "dev.json"), "did:aip:legacy"); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(home, tool, "dev.json"), "did:aip:legacy"); err != nil {
 		t.Fatal(err)
 	}
 }

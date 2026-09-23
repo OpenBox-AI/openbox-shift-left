@@ -7,11 +7,12 @@ import (
 	"io/fs"
 	"log"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 
 	"time"
 

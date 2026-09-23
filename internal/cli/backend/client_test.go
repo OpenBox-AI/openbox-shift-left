@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"strings"
 
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
-	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/aivss"
 )

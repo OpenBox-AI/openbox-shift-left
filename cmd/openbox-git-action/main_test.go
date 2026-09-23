@@ -6,13 +6,14 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 
 	gitaction "github.com/openbox-ai/openbox-shift-left/internal/actions/openbox-git-action"
 )

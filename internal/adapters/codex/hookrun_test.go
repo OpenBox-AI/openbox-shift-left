@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"log"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
 
@@ -105,7 +107,7 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 // spool, no request.
 func TestLegacyStoreHookSendsNothing(t *testing.T) {
 	spool := setHookEnv(t)
-	if err := devconfig.SetLegacyDID(DefaultConfigPath(), "did:aip:legacy-store"); err != nil {
+	if err := devconfigtest.SetLegacyDID(DefaultConfigPath(), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 

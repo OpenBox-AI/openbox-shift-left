@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig/devconfigtest"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
@@ -525,7 +526,7 @@ func TestLegacyStorePlusTokenRegistersFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	const legacyDID = "did:aip:11111111-2222-3333-4444-555555555555"
-	if err := devconfig.SetLegacyDID(filepath.Join(home, "dev.json"), legacyDID); err != nil {
+	if err := devconfigtest.SetLegacyDID(filepath.Join(home, "dev.json"), legacyDID); err != nil {
 		t.Fatal(err)
 	}
 	orgEnvBefore, err := os.ReadFile(orgEnv)
@@ -951,7 +952,17 @@ func TestReuseGatesAgree(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy"); err != nil {
+				if err := devconfigtest.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy"); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantReuse: false,
+		},
+		{
+			name: "mixed: v3 keys beside a stored developer_did",
+			setup: func(t *testing.T, home string) {
+				seedCredentials(t, "claude-code")
+				if err := devconfigtest.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy"); err != nil {
 					t.Fatal(err)
 				}
 			},

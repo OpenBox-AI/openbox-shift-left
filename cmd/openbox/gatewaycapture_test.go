@@ -4,20 +4,22 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
-	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )

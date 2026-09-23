@@ -23,10 +23,11 @@ import (
 // also the only recovery from a taken-name registration where this machine
 // still holds the older agent's own key.
 //
-// Declining is the default. Adopting overwrites nothing -- this branch is only
-// reached when the tool has no store -- but registering a second agent for a
-// tool that already has one is the outcome nobody wants, so the question is
-// asked with "no" as the answer a stray Enter gives.
+// Declining is the default. This branch is reached when the tool has no usable
+// store: none at all, or a legacy one that adopting replaces (discarding the
+// events queued under it). Registering a second agent for a tool that already
+// has one is the outcome nobody wants, so the question is asked with "no" as
+// the answer a stray Enter gives.
 func (a *app) adoptExistingAgent(tool string) (adopted bool, code int) {
 	p, err := a.newPrompt()
 	if err != nil {
