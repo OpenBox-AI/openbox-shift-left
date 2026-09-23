@@ -3,19 +3,24 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
@@ -123,6 +128,14 @@ func (a *app) runTransport(args []string) int {
 		}),
 		// Same reason: the attribution parser lives in gatewayemit too.
 		transport.WithRequestAttribution(gatewayemit.ParseRequestAttribution),
+		// The cross-lane HALT latch: a run any lane latched halted refuses
+		// every relayed POST for that run before it reaches the provider, with
+		// no /evaluate round trip. gatedFn is deliberately every POST, not only
+		// a completion: a halted session must not keep making ANY relayed
+		// call. haltDecorator's own next stays nil for now, left ready for a
+		// real /evaluate evaluator to chain in behind it -- until then an
+		// unlatched call is allowed here exactly as it always was.
+		transport.WithGate(haltDecorator{logger: logger}, gatedFn),
 	}
 	if *verbose {
 		opts = append(opts, transport.WithVerbose(logger.Printf))
@@ -161,7 +174,9 @@ func (a *app) runTransport(args []string) int {
 		logger.Printf("openbox transport: cleared inherited proxy settings in this process (%s) so the "+
 			"relay's own upstream leg does not dial itself", strings.Join(cleared, ", "))
 	}
-	logger.Printf("openbox transport: observe-only; model calls are recorded, never refused (probe A pending)")
+	logger.Printf("openbox transport: model calls are recorded; a relayed call for a run any lane " +
+		"latched HALTed is refused locally (no /evaluate round trip); a server-side verdict does not " +
+		"yet refuse a call synchronously")
 	reportElection(logger, "transport", settingsPath, activation.LaneTransport, *elected)
 
 	if a.transportReady != nil {
@@ -204,4 +219,109 @@ func (a *app) runTransport(args []string) int {
 	statusPersister.Flush(pool.Dropped())
 	logger.Printf("openbox transport: stopped; delivery pool dropped=%d", pool.Dropped())
 	return exitOK
+}
+
+// gatedFn is the gated-class selector transport.WithGate takes: every POST,
+// the same permissive rule gatewayemit's own isModelCall uses to decide
+// "worth attributing at all" -- a halted session must not keep making ANY
+// relayed call, not only a /v1/messages completion, and the decorator's own
+// check is a local file stat, cheap enough that gating too widely costs
+// nothing the way a real /evaluate round trip would (a future gated-class
+// question for a server verdict, which trades latency differently, is
+// unrelated to this one).
+func gatedFn(r *http.Request) bool {
+	return strings.EqualFold(r.Method, http.MethodPost)
+}
+
+// haltDecorator is a latch-only Evaluator: it answers HALT from the
+// cross-lane latch without a round trip when the run a relayed call's
+// session currently belongs to is latched, and otherwise delegates to next.
+// Built here rather than in internal/transport: this is the one place
+// hookflow (the latch) and sessionkey (the per-provider carrier) are both
+// reachable at once -- that package's import guard
+// (internal/depguard/guards_test.go) excludes both.
+//
+// next is nil for now, left ready for a real /evaluate evaluator to chain in
+// behind it. A nil next allows every unlatched call exactly as this relay
+// always has -- this decorator only ever SUBTRACTS a call a real evaluator
+// would also have refused, never adds a refusal that isn't already
+// intended.
+//
+// logger receives the refusal line and any audit-write failure; nil discards.
+type haltDecorator struct {
+	next   gateway.Evaluator
+	logger *log.Logger
+}
+
+// Evaluate implements gateway.Evaluator.
+func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client.Evaluation, error) {
+	if sessionID, info, halted := h.haltedRun(c); halted {
+		// Reuse SessionHaltDecision's wording rather than inventing a second
+		// refusal vocabulary: the same text a replayed hook refusal renders.
+		dec := hookflow.SessionHaltDecision(info)
+		// The refusal is recorded here, not left to the relay's own event:
+		// when another lane is the elected producer that event is skipped, the
+		// call never reaches the provider, and no lane would otherwise know
+		// it was refused. Same audit sink a replayed hook refusal writes.
+		logger := h.logger
+		if logger == nil {
+			logger = log.New(io.Discard, "", 0)
+		}
+		logger.Printf("transport: refused a relayed call for session %s: its run is latched halted", sessionID)
+		hookflow.RecordEnforcement(logger, sessionID, "llm_completion", dec, hookflow.ApplyResult{Decision: "deny", Emitted: true})
+		return dec.Evaluation, nil
+	}
+	if h.next == nil {
+		return client.Evaluation{Verdict: client.VerdictAllow}, nil
+	}
+	return h.next.Evaluate(ctx, c)
+}
+
+// haltedRun resolves the session key for c's provider (sessionkey.Resolve,
+// per host), then the run that session CURRENTLY belongs to
+// (haltDecoratorRunID), and reports whether that run -- not the session id --
+// is latched halted. A call whose provider or session key cannot be
+// resolved is never treated as latched: the caller falls through to next
+// (or allow), exactly the skip-and-count posture every other consumer of an
+// unresolvable carrier already takes.
+func (h haltDecorator) haltedRun(c gateway.Captured) (string, hookflow.SessionHaltInfo, bool) {
+	providerName, ok := transport.ProviderForHost(hostOf(c.HTTPURL))
+	if !ok {
+		return "", hookflow.SessionHaltInfo{}, false
+	}
+	sessionID, ok := sessionkey.ResolveProxy(sessionkey.Provider(providerName), c.RequestHeaders)
+	if !ok {
+		return "", hookflow.SessionHaltInfo{}, false
+	}
+	info, halted := hookflow.SessionHalted(haltDecoratorRunID(sessionID))
+	return sessionID, info, halted
+}
+
+// haltDecoratorRunID resolves session to the run it CURRENTLY belongs to
+// (git.RunStore's own current record), so a `/clear` or `--resume` bump is
+// what gets consulted -- never a generation the session already left behind
+// (the latch bites for a continued run only when THAT run halted). A read
+// failure or generation 0 falls back to the session id itself: at generation
+// 0 the run IS the session, the same selection runIDFor makes everywhere
+// else in this repo.
+func haltDecoratorRunID(sessionID string) string {
+	rec, err := (obgit.RunStore{}).Read(sessionID)
+	if err != nil || rec.Generation == 0 {
+		return sessionID
+	}
+	return rec.RunID
+}
+
+// hostOf extracts the host component transport.ProviderForHost matches
+// against, from the full upstream URL gateway.Captured.HTTPURL carries
+// (e.g. "https://api.anthropic.com/v1/messages", never carrying the query --
+// RequestCapture.ForGate's own URL is already stripped). An unparseable URL
+// resolves to "", which matches no provider's host table, so the decorator
+// falls through rather than guessing.
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }

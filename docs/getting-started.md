@@ -376,8 +376,13 @@ where every other line still looks healthy and nothing is being recorded at all.
 
 Four things to know:
 
-- **They capture; they do not refuse.** A relayed call is always forwarded. The
-  refusal path exists and is unwired on purpose.
+- **The transport lane refuses one case; nothing else does.** A relayed call
+  is forwarded unless its session's current run was already latched HALTed by
+  some lane (hooks, telemetry, or transport itself) — that case is refused
+  locally, before the call reaches the provider, with no round trip to the
+  control plane. Every other verdict still has no in-path refusal: the
+  gateway lane forwards regardless, and the synchronous, per-call
+  server-verdict refusal path on both lanes exists and is unwired on purpose.
 - **The assurance is detection.** Unsetting the routing is enough to go around a
   lane, and nothing here stops that; what you get is a queryable hole in the
   record. See [the MDM recipe](gateway-mdm-recipe.md) if you need more.

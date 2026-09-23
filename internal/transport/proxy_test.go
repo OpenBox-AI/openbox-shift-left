@@ -350,27 +350,42 @@ func TestProductionHandlerIsTheGatewayRelay(t *testing.T) {
 	}
 }
 
-// TestTheGateIsNotWired. Refusal is dormant until probe A names a shape Claude
-// Code does not retry around; a wrong shape silently disables a capability for
-// the rest of the session.
-func TestTheGateIsNotWired(t *testing.T) {
+// TestProxyGoNeverRendersARefusalItself pins the seam boundary: proxy.go may
+// WIRE gateway.Gateway.WithGate (its own Evaluator and
+// gated predicate are cmd/openbox's to build, this package's import guard
+// excludes both hookflow and sessionkey), but it must never itself call
+// Decide, WriteRefusal or RefuseEverything -- that decision and its rendering
+// stay inside gateway.Gateway.ServeHTTP, the one place they were reviewed.
+func TestProxyGoNeverRendersARefusalItself(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "proxy.go", nil, 0)
 	if err != nil {
 		t.Fatalf("parse proxy.go: %v", err)
 	}
-	forbidden := map[string]bool{"WithGate": true, "Decide": true, "WriteRefusal": true, "RefuseEverything": true}
+	forbidden := map[string]bool{"Decide": true, "WriteRefusal": true, "WriteRefusalAs": true, "RefuseEverything": true}
 
 	ast.Inspect(f, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
 		if !ok || !forbidden[sel.Sel.Name] {
 			return true
 		}
-		t.Errorf("%s: proxy.go calls %s. Refusal is dormant until probe A (phase 13) names a shape "+
-			"Claude Code does not retry around; a wrong one silently disables a capability for the "+
-			"whole session.", fset.Position(sel.Pos()), sel.Sel.Name)
+		t.Errorf("%s: proxy.go calls %s directly. That decision and its rendering belong inside "+
+			"gateway.Gateway.ServeHTTP, reached only through WithGate.", fset.Position(sel.Pos()), sel.Sel.Name)
 		return true
 	})
+}
+
+// TestWithGateDefaultsOffSoAnUnconfiguredRelayNeverGates pins the safe
+// default: a Proxy built without WithGate never calls an evaluator and
+// forwards every call, exactly as before this option existed.
+func TestWithGateDefaultsOffSoAnUnconfiguredRelayNeverGates(t *testing.T) {
+	p, err := New(Config{}, testCA(t), &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if p.evaluator != nil || p.gated != nil {
+		t.Fatalf("a Proxy built without WithGate carries evaluator=%v gated=%t, want both nil", p.evaluator, p.gated != nil)
+	}
 }
 
 // TestGoproxysBundledCAIsNeverReferenced. OkConnect's is inert (ConnectAccept

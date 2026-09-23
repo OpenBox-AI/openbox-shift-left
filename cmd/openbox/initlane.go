@@ -7,6 +7,7 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
@@ -135,23 +136,31 @@ func (a *app) removeLane(in laneRemoval) error {
 // named — and the transport CA check then refuses a certificate that is not
 // where it looked.
 //
-// Three keys now, and only path coordinates: a unit file is world-readable,
+// Five keys now, and only path coordinates: a unit file is world-readable,
 // so the API key and the signing seed must never reach one. The first two are
 // overrides this process's own environment may or may not carry, so they are
-// copied only when set. The third, OPENBOX_SESSION_DIR, is different in kind:
-// it is RESOLVED rather than copied, because a daemon has no $HOME at all --
-// obgit.DefaultSessionDir()'s os.UserConfigDir() fallback would resolve
-// differently, or not at all, inside it (phase 08 insight 7). Without it, the
-// gateway/proxy lanes would read (or bump) a run record this process never
-// wrote and disagree with the hooks about which run a call belongs to.
+// copied only when set. The last three, OPENBOX_SESSION_DIR, OPENBOX_HALT_DIR
+// and OPENBOX_ENFORCEMENT_FILE, are different in kind: each is RESOLVED rather
+// than copied, because a daemon has no $HOME at all -- their shared
+// os.UserConfigDir() fallback (through devconfig.ConfigDir()) would resolve
+// differently, or not at all, inside it.
+// Without OPENBOX_SESSION_DIR the gateway/proxy lanes would read (or bump) a
+// run record this process never wrote and disagree with the hooks about
+// which run a call belongs to; without OPENBOX_HALT_DIR a lane daemon's own
+// HALT-latch write, and the transport lane's cross-lane read of it, would
+// each resolve a DIFFERENT, wrong directory instead of the one hooks already
+// write to; without OPENBOX_ENFORCEMENT_FILE the transport lane's record of a
+// latched refusal would land somewhere no one reads, or nowhere.
 func (a *app) laneUnitEnv() map[string]string {
-	env := make(map[string]string, 3)
+	env := make(map[string]string, 5)
 	for _, key := range []string{devconfig.EnvHome, devconfig.EnvSpoolDir} {
 		if v := a.getenv(key); v != "" {
 			env[key] = v
 		}
 	}
 	env[obgit.EnvSessionDir] = obgit.DefaultSessionDir()
+	env[devconfig.EnvHaltDir] = hookflow.DefaultHaltDir()
+	env[devconfig.EnvEnforcementFile] = hookflow.DefaultEnforcementPath()
 	return env
 }
 

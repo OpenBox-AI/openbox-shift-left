@@ -1,8 +1,12 @@
 package hookflow
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -89,5 +93,104 @@ func TestSessionHaltEmptySessionIDNeverLatches(t *testing.T) {
 	WriteSessionHalt(nopLogger(), "", client.Evaluation{Reason: "x"})
 	if _, halted := SessionHalted(""); halted {
 		t.Error("an empty session id must never read halted")
+	}
+}
+
+// TestSessionHaltWriteUsesAtomicWriteFile pins that the latch file lands
+// through atomicWriteFile (rename-into-place), not a direct os.WriteFile:
+// mode and content must come out exactly as atomicWriteFile leaves them.
+func TestSessionHaltWriteUsesAtomicWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(devconfig.EnvHaltDir, dir)
+	WriteSessionHalt(nopLogger(), "s-atomic", client.Evaluation{Reason: "kill switch", PolicyID: "p-1"})
+
+	path := haltPath("s-atomic")
+	assertMode(t, path, 0o600)
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var info SessionHaltInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		t.Fatalf("latch file did not parse: %v (raw=%q)", err, raw)
+	}
+	if info.Reason != "kill switch" || info.PolicyID != "p-1" {
+		t.Errorf("latch info = %+v, want the written reason and policy id", info)
+	}
+
+	// No temp file left behind alongside the committed one (renameio/the
+	// Windows fallback both clean up on success).
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("halt dir has %d entries, want exactly the committed latch file: %v", len(entries), entries)
+	}
+}
+
+// TestSessionHaltLatchNeverObservedPartiallyWritten pins the reason
+// WriteSessionHalt must go through an atomic (rename-into-place) writer
+// rather than os.WriteFile: with a lane daemon and a hook flusher both able
+// to latch the same run concurrently, a reader must only ever observe a
+// complete, previously-committed file or nothing at all -- never bytes from
+// a write still in flight. Each writer's payload is large enough to force
+// more than a single underlying write() so a non-atomic writer would be
+// likely to expose a torn read under contention.
+func TestSessionHaltLatchNeverObservedPartiallyWritten(t *testing.T) {
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	const sessionID = "s-concurrent"
+
+	const writers = 8
+	const writesPerWriter = 25
+	padding := strings.Repeat("x", 64*1024) // forces a multi-chunk write
+
+	stop := make(chan struct{})
+	var readerErr error
+	var readerWG sync.WaitGroup
+	readerWG.Add(1)
+	go func() {
+		defer readerWG.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			raw, err := os.ReadFile(haltPath(sessionID))
+			if err != nil {
+				continue // not written yet: acceptable, never a torn read
+			}
+			var info SessionHaltInfo
+			if err := json.Unmarshal(raw, &info); err != nil {
+				readerErr = fmt.Errorf("observed a non-JSON (partially written) latch file: %w", err)
+				return
+			}
+		}
+	}()
+
+	var writersWG sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		writersWG.Add(1)
+		go func(i int) {
+			defer writersWG.Done()
+			for j := 0; j < writesPerWriter; j++ {
+				WriteSessionHalt(nopLogger(), sessionID, client.Evaluation{
+					Reason:   fmt.Sprintf("writer-%d-write-%d-%s", i, j, padding),
+					PolicyID: "p-race",
+				})
+			}
+		}(i)
+	}
+	writersWG.Wait()
+	close(stop)
+	readerWG.Wait()
+
+	if readerErr != nil {
+		t.Fatal(readerErr)
+	}
+	if _, halted := SessionHalted(sessionID); !halted {
+		t.Fatal("session must read halted after concurrent writers finished")
 	}
 }

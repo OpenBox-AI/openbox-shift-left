@@ -58,8 +58,11 @@ live stack these lanes have never been run against.
   containment — see [Architecture](architecture.md)'s decision record. **A recorded model call now crosses that path
   byte-identically in both directions, and a recorded 60-frame SSE response
   streams through it per chunk** (phase 13); retiring phase 11's "no response
-  body has ever traversed this lane". One limit stands where it did: refusal is
-  dormant, so this lane observes and never stops a call.
+  body has ever traversed this lane". Refusal is no longer fully dormant:
+  `transport.WithGate` wires a latch-only decorator that refuses a relayed
+  call for a run some lane already latched HALTed, with no `/evaluate` round
+  trip; a synchronous per-call server verdict still has no production
+  caller — see §5's refusal-row note.
 - **`:otel:` (telemetry)**; the receiver, the mapper and `openbox telemetry` all
   exist and are wired, and a real recorded OTLP export maps end to end: 20
   records, 16 event types, of which `api_request` becomes a conformant
@@ -229,7 +232,7 @@ holding an older, constrained CA keeps working — it tunnels rather than
 intercepts any host it cannot mint for, and `openbox doctor` names those hosts
 as a "legacy constrained CA" finding until it is re-issued, which `init` does
 not yet do automatically. See [Architecture](architecture.md)'s decision
-record. The telemetry keys are `CLAUDE_CODE_*`.
+record.
 
 The `:otel:` (telemetry) lane now has a Codex arm too: `init --provider codex`
 writes an OpenBox-owned `[otel]` block into `$CODEX_HOME/config.toml`
@@ -290,7 +293,7 @@ than a softer version of the same absence:
 | Relayed call **latency** (`duration_ms`) | ✅ measured to end-of-stream | ✅ measured | ✅ from the tool's reported `duration_ms` |
 | Paired `ActivityStarted`/`ActivityCompleted` | ✅ | ✅ | ✅ |
 | Token-count probe told apart from a completion, and then dropped | ✅ classified `token_count`, never spooled | ✅ classified `token_count`, never spooled | n/a; this lane sees no probes |
-| Refuse a call on a verdict | ⚠️ written, **dormant** | ⚠️ written, **dormant** | ❌ impossible; out of path |
+| Refuse a call on a verdict | ⚠️ written, **dormant** | ✅ **latch-only** (cross-lane HALT, no `/evaluate` round trip); server-verdict refusal still **dormant** (§5) | ❌ impossible; out of path |
 | Terminal CLI | ✅ | ✅ | ✅ |
 | **Desktop app** | ❌ measured-empty 2026-08-27 | ⬜ intended, **unconfirmed**; not routed, and now **detected** as unrouted | ⬜ intended, **unconfirmed** |
 | Subscription-OAuth session | ⬜ open | ⬜ intended, **unconfirmed** | ⬜ intended, **unconfirmed** |
@@ -750,7 +753,7 @@ facts shape almost every row:
 | Relayed call latency | E1 | E1 | E1 | `internal/gateway/capture_test.go` · `TestCompleteCarriesTheMeasuredCall`; `internal/cli/telemetryemit/mapper_test.go` · `TestDurationDerivesTheTurnWindow` |
 | Paired `ActivityStarted` / `ActivityCompleted` | E2 | E2 | E1 | `internal/cli/gatewayemit/lane_test.go` · `TestLaneNamesMatchTheActivityIDNamespaces` |
 | A token-count probe is told apart and dropped | E2 | E2 | n/a | `internal/cli/gatewayemit/pathclass_test.go` · `TestAProbeIsClassifiedAndNotSpooled` |
-| Refusal is written but dormant | E0 | E1 | E0 | `internal/transport/proxy_test.go` · `TestTheGateIsNotWired` |
+| A run any lane latched HALTed is refused locally on the next relayed call, no server evaluator yet | E0 | E1 | E0 | `cmd/openbox/crosslanehalt_test.go` · `TestHaltDecoratorRefusesALatchedRun`, `TestWithGateWiredIntoTheRelayRefusesBeforeTheDial`; `internal/transport/proxy_test.go` · `TestProxyGoNeverRendersARefusalItself` |
 | The three lanes never share an `activity_id` | E2 | E2 | E2 | `internal/cli/gatewayemit/lane_test.go` · `TestTheLanesAreDisjoint` |
 | Terminal CLI / desktop / OAuth coverage | E0 | E0 | E0 | field observation, not a test. §1b's two ⬜ columns are the honest centre of that table |
 | Core accepts, stores or deduplicates any of it | E3 | E3 | E3 | needs a live stack |
@@ -772,14 +775,23 @@ because neither sets them: only the telemetry lane, which is the governed tool
 reporting its own call, carries them. That is a property of the design rather
 than a missing test, and the row says so instead of reading as an oversight.
 
-**On the dormancy row.** `TestTheGateIsNotWired` parses `proxy.go` and fails the
-build if it ever calls the gate or refusal functions. It is E1 by the ladder —
-no wire is involved — but note what it does that no tier here captures: for a
-claim that a path is *not* wired, a static check over the source is exhaustive
-where a test can only sample. It is the strongest possible evidence for that
-particular shape of claim, and it is stronger than the `:gateway:` and `:otel:`
-rows beside it, which rest on the absence of a mechanism rather than on a check
-that the absence holds.
+**On the refusal row.** The proxy lane's gate is no longer dormant:
+`transport.WithGate` (`internal/transport/proxy.go`) forwards to
+`gateway.Gateway.WithGate`, and `cmd/openbox/transport.go` wires a
+`haltDecorator` behind it that answers HALT from the cross-lane latch
+(`hookflow.SessionHalted`) with no `/evaluate` round trip. `TestHaltDecoratorRefusesALatchedRun`
+and `TestHaltDecoratorDoesNotRefuseAContinuedRunThatDidNotHalt` exercise the
+decorator's own resolution directly (a local fixture, E1); `TestWithGateWiredIntoTheRelayRefusesBeforeTheDial`
+drives a real relay end to end and asserts the refusal happens before the
+upstream dial. `TestProxyGoNeverRendersARefusalItself` (successor to the
+prior dormancy check, `TestTheGateIsNotWired`) keeps the boundary the
+rewrite left in place: `proxy.go` may wire `WithGate`, but `Decide` /
+`WriteRefusal` / `RefuseEverything` stay inside `gateway.Gateway.ServeHTTP`,
+the one place they were reviewed — a static check over the source, still E1
+by the ladder, still stronger than a sampling test for that particular shape
+of claim. What remains genuinely absent, and still owned by the `:gateway:`
+and `:otel:` E0s beside it, is a *server-verdict* refusal on this lane
+(not built) and any refusal concept at all on the receive-only OTel lane.
 
 **What none of these prove.** That the control plane accepts the wire, stores a
 row, or keeps two rows apart; that a socket binds, that TLS terminates against a

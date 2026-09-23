@@ -60,7 +60,10 @@ func haltPath(sessionID string) string {
 // above). Best-effort and off the blocking path: the halting response is
 // already on stdout when this runs, so a write fault costs only the later
 // calls' local refusal (they fall back to a fresh evaluation); logged
-// loudly, never surfaced (INV-3).
+// loudly, never surfaced (INV-3). The write goes through atomicWriteFile,
+// not os.WriteFile: lane daemons and hook flushers can latch the same run
+// concurrently, and a reader (SessionHalted) must never observe a
+// partially-written file.
 func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation) {
 	if sessionID == "" {
 		logger.Printf("session halt latch skipped: empty session id")
@@ -76,7 +79,7 @@ func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation)
 		logger.Printf("session halt latch skipped (mkdir): %v", err)
 		return
 	}
-	if err := os.WriteFile(haltPath(sessionID), line, 0o600); err != nil {
+	if err := atomicWriteFile(haltPath(sessionID), line, 0o600); err != nil {
 		logger.Printf("session halt latch skipped (write): %v", err)
 	}
 }

@@ -46,6 +46,18 @@ type Proxy struct {
 	// it directly (see cmd/openbox/transport.go).
 	attribution func(raw []byte) map[string]string
 
+	// evaluator and gated forward to gateway.Gateway.WithGate on every
+	// per-host relay newRelay builds. Both nil (the zero value) is the
+	// default: an unconfigured Proxy forwards byte-identically to before this
+	// seam existed (TestUngatedCallMakesNoRoundTripThroughTheRelay
+	// / TestUngatedCallAddsNoRoundTrip pin the same property one level down,
+	// in gateway.Gateway itself). The concrete Evaluator currently built (a
+	// latch-only decorator; a real /evaluate evaluator chains in later) lives
+	// in cmd/openbox/transport.go, the one place hookflow and sessionkey are
+	// both reachable -- this package's own import guard excludes both.
+	evaluator gateway.Evaluator
+	gated     func(*http.Request) bool
+
 	clearedEnv []string
 
 	// handlerFor production must never get a stub, so
@@ -104,6 +116,23 @@ func WithRequestAttribution(parse func(raw []byte) map[string]string) Option {
 // WithVerbose turns on per-connection commentary.
 func WithVerbose(logf func(format string, args ...any)) Option {
 	return func(p *Proxy) { p.logf = logf }
+}
+
+// WithGate turns on synchronous refusal for every per-host relay this Proxy
+// builds: an Evaluator plus the predicate deciding which calls it answers
+// for, forwarded to gateway.Gateway.WithGate. Defaulted off: a Proxy built
+// without this option never calls ev and never gates a call, so an
+// unconfigured relay's behavior is unchanged.
+func WithGate(ev gateway.Evaluator, gated func(*http.Request) bool) Option {
+	if ev != nil && gated == nil {
+		// A nil selector would silently gate nothing while the caller believes
+		// the evaluator is wired; the safe reading is every POST.
+		gated = func(r *http.Request) bool { return r.Method == http.MethodPost }
+	}
+	return func(p *Proxy) {
+		p.evaluator = ev
+		p.gated = gated
+	}
 }
 
 // Apply configures a Proxy after construction.
@@ -245,6 +274,9 @@ func (p *Proxy) newRelay(host string) (http.Handler, error) {
 	}
 	if p.attribution != nil {
 		g = g.WithRequestAttribution(p.attribution)
+	}
+	if p.evaluator != nil {
+		g = g.WithGate(p.evaluator, p.gated)
 	}
 	if p.logf != nil {
 		g = g.WithVerbose(p.logf)

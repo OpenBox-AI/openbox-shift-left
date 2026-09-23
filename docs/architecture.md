@@ -251,10 +251,12 @@ Being precise here is part of the product.
   `init` brings up the transport relay and the telemetry receiver, retiring an
   older `ANTHROPIC_BASE_URL` gateway if it finds one; where no lane is packaged,
   tool calls are governed and model calls are not, because the hooks never see a
-  model request. A lane records a model call, it does not refuse one: the
-  refusal path is written and has no production caller, pending the probe that
-  would say what shape a refusal must take. Three limits are worth stating
-  plainly rather than discovering:
+  model request. A lane records a model call; only the transport lane refuses
+  one today, and only for a run some lane already latched HALTed (a local
+  latch check, no `/evaluate` round trip) — the synchronous, per-call
+  server-verdict refusal path is still written and has no production caller,
+  pending the probe that would say what shape it must take. Three limits are
+  worth stating plainly rather than discovering:
   - **The base claim is detection, not prevention.** A developer can unset one
     environment variable. That is *visible*, and the signal that makes it visible
     had to be rebuilt: it used to be "model turns with no gateway **spans**", which
@@ -383,11 +385,17 @@ Being precise here is part of the product.
     token count doubles with no error anywhere. The election is derived from where
     the tool's settings actually route model calls and is answered per record;
     resolving it once at daemon start shipped exactly that double-count into review.
-  - **Neither in-path lane refuses a call.** Both carry a written, tested
-    refusal
-    path that nothing calls, for the same reason the gateway's is dormant: the
-    refusal shape Claude Code does not retry around is unprobed. `tools/refusal-injector/`
-    is the instrument; it needs a bind-capable host, a real install and credentials.
+  - **The transport lane now refuses a call locally; the legacy gateway lane
+    still never does.** `cmd/openbox/transport.go` wires a latch-only
+    `haltDecorator` behind `transport.WithGate`: it refuses a relayed POST
+    when the run that call's session currently belongs to was already latched
+    HALTed by some lane (`hookflow.SessionHalted`), with no `/evaluate` round
+    trip; an unlatched call is allowed exactly as before. The `gateway` lane
+    wires no gate at all. The synchronous, server-verdict refusal path both
+    lanes share (`gateway.Gateway.WithGate`, `internal/gateway/refuse.go`) is
+    still written and has no production caller: the refusal shape Claude
+    Code does not retry around is unprobed. `tools/refusal-injector/` is the
+    instrument; it needs a bind-capable host, a real install and credentials.
   - **The transport lane installs a CA on the developer's machine, and that is a
     real downgrade accepted for coverage.** It is generated once, stored beside
     the credentials under `~/.openbox/` with no more protection than they have,
@@ -585,9 +593,12 @@ was made on the smaller number.
   installed it does not proxy, intercept or allow-list the coding tool's traffic
   to its model provider; that is the provider's plane plus your network
   controls, and OpenBox records that posture as evidence. With an in-path lane it
-  carries and records the model call, but it still allow-lists nothing and still
-  refuses nothing: the refusal path is unwired. Everything else the tool talks
-  to is untouched either way.
+  carries and records the model call, and it still allow-lists nothing; the
+  transport lane also refuses a call locally when the run it belongs to was
+  already latched HALTed by some lane (no `/evaluate` round trip), but a
+  synchronous per-call server verdict is still unwired, and the legacy
+  `gateway` lane refuses nothing at all. Everything else the tool talks to is
+  untouched either way.
 - **Policy integrity is no longer a client-side claim.** There is no local
   bundle to sign, hash or verify, so the client makes no integrity claim about
   policy at all; the control plane holds the policy it applied and its own

@@ -144,6 +144,14 @@ bound): containment is the per-provider intercept allowlist
 what keeps a machine still holding an older constrained CA blind-tunnelling a
 host outside that constraint instead of failing the handshake; `openbox init`
 does not yet re-issue that legacy CA itself, only `doctor` names the finding.
+The relay's cross-lane HALT latch resolves a session off
+`sessionkey.ResolveProxy`'s carrier header (Claude Code's
+`X-Claude-Code-Session-Id`; Codex's thread id off `x-client-request-id`,
+never its `session-id` header, which is a prompt-cache key), so that header
+must stay out of `credentialHeaders`' redaction list or the latch can never
+resolve a session. The latch is keyed on the session's *current run*
+(`git.RunStore`), not the session id itself, so a `/clear` or `--resume`
+starts unlatched even though the carrier header is unchanged.
 
 **Three shapes are pinned by tests.** `message.content` is bound as
 `json.RawMessage` because it is a string on user lines and an array on assistant

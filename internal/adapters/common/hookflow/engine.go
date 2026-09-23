@@ -3,8 +3,10 @@ package hookflow
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
@@ -253,21 +255,38 @@ func (e *Engine) Retire(ctx context.Context) (int, error) {
 
 // emitFunc adapts an Emitter to a FlushFunc. It emits the event and then
 // records the returned Evaluation to the Advisory sink; record-only, never
-// blocking.
+// blocking. It is Deliver with the error kept, because the spool's drain loop
+// (unlike a lane daemon's bounded pool) needs it to decide whether a file
+// stays spooled for the next pass.
 func (e *Engine) emitFunc(em Emitter) FlushFunc {
+	logger := log.New(logfWriter{logf: e.logf}, "", 0)
 	return func(ctx context.Context, ev client.DevEvent) error {
-		_, err := Deliver(ctx, em, e.Advisory, ev, nil)
+		_, err := Deliver(ctx, em, e.Advisory, ev, logger)
 		return err
 	}
 }
 
 // Deliver is the one delivery body every path in this repo uses to get an
-// event to core and record its verdict: client.Emit, then Advisory.Record.
-// The hook flusher calls it through emitFunc above; the two in-process lane
-// daemons (telemetry.go, transport.go) call it directly from a bounded pool,
-// never the request goroutine. advisory may be nil (still delivers, records
-// nothing). logger is currently unused by this body; callers already pass
-// their own (or nil) ahead of a later caller that needs it for diagnostics.
+// event to core and record its verdict: client.Emit, then Advisory.Record,
+// then the cross-lane HALT latch. The hook flusher
+// calls it through emitFunc above; the two in-process lane daemons
+// (telemetry.go, transport.go) call it directly from a bounded pool, never
+// the request goroutine. advisory may be nil (still delivers, records
+// nothing). logger may be nil; the latch write substitutes a discard logger
+// rather than requiring every caller to build one just to satisfy
+// WriteSessionHalt's own non-nil contract.
+//
+// The latch condition is deliberately `err == nil && eval.Verdict ==
+// client.VerdictHalt`: em.Emit returns the zero Evaluation on a transport
+// fault (client.Client.Emit's own contract), so a HALT can never be a
+// misread error, and an error from core is never latched.
+//
+// This is the ONLY thing keeping a halted developer session refused on the
+// relay: core's own halted-session pre-check is gated on
+// !isDeveloperSession (../openbox-core/internal/services/
+// governance_workflow.go:370), so it never fires for the sessions this repo
+// governs. Removing this write silently un-halts every halted run on every
+// lane but the hook path's own narrow prompt-contract write (gate.go).
 func Deliver(ctx context.Context, em Emitter, advisory *Advisory, ev client.DevEvent, logger *log.Logger) (client.Evaluation, error) {
 	eval, err := em.Emit(ctx, ev)
 	// On success, a real verdict is recorded. Either way this cannot block the
@@ -275,5 +294,57 @@ func Deliver(ctx context.Context, em Emitter, advisory *Advisory, ev client.DevE
 	if advisory != nil {
 		advisory.Record(ev, eval)
 	}
+	if err == nil && eval.Verdict == client.VerdictHalt {
+		WriteSessionHalt(loggerOrDiscard(logger), runIDFor(ev), eval)
+	}
 	return eval, err
+}
+
+// discardLogger is what Deliver substitutes for a nil *log.Logger:
+// WriteSessionHalt itself requires a non-nil one, and a caller indifferent to
+// the latch's own diagnostics (a test, a pool built without one) must not
+// have to build a real one just to avoid a nil-pointer panic three calls
+// deep.
+var discardLogger = log.New(io.Discard, "", 0)
+
+func loggerOrDiscard(logger *log.Logger) *log.Logger {
+	if logger != nil {
+		return logger
+	}
+	return discardLogger
+}
+
+// runIDFor mirrors client's own unexported runIDFor selection (RunID when a
+// producer already stamped one from its own run record, else SessionID at
+// generation 0) so the latch keys on the SAME run a wire payload names.
+// It cannot call client.runIDFor directly (unexported, package client) or
+// resolve session->run itself via git.RunStore: internal/adapters/common/git
+// imports this package for AtomicWriteFile, so the reverse import would
+// cycle. This is not a gap: every producer that reaches Deliver --
+// claude-code's mapper (mapper.go:112, stamped from hookrun.go's own
+// RunStore.Read at hook time), gatewayemit's Emitter (resolveRun) and
+// telemetryemit's Mapper (turnFor) -- already resolves session->run via ITS
+// OWN RunStore.Read and stamps ev.RunID before the event ever reaches
+// Deliver, so this selection reads back a value already correctly resolved
+// upstream rather than recomputing it.
+func runIDFor(ev client.DevEvent) string {
+	if ev.RunID != "" {
+		return ev.RunID
+	}
+	return ev.SessionID
+}
+
+// logfWriter adapts a Printf-shaped logf (Engine's own e.logf, itself
+// "Nil ⇒ silent") to an io.Writer, so Deliver's latch write -- which needs a
+// *log.Logger for WriteSessionHalt -- can share Engine's own destination
+// without a second "Nil ⇒ silent" rule ever drifting from e.logf's.
+type logfWriter struct {
+	logf func(format string, args ...any)
+}
+
+func (w logfWriter) Write(p []byte) (int, error) {
+	if w.logf != nil {
+		w.logf("%s", strings.TrimRight(string(p), "\n"))
+	}
+	return len(p), nil
 }
