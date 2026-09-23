@@ -28,7 +28,7 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &gotBody)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a-1","agent_name":"dev","did":"did:aip:x","tier":"Tier 2","trust_score":0.81},"token":"obx_test_`+repeat("a", 48)+`","identity":{"did":"did:aip:x","privateKey":"c2VlZA=="}}}`)
+		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a-1","agent_name":"dev","tier":"Tier 2","trust_score":0.81},"token":"obx_test_`+repeat("a", 48)+`","identity":{"kid":"kid-x"}}}`)
 	}))
 	defer srv.Close()
 
@@ -61,7 +61,7 @@ func TestCreateParsesResponseAndSendsContract(t *testing.T) {
 	if _, ok := gotBody["aivss_config"]; !ok {
 		t.Error("aivss_config must be present")
 	}
-	if reg.APIKey == "" || reg.PrivateKey != "c2VlZA==" || reg.DID != "did:aip:x" {
+	if reg.APIKey == "" || reg.Identity.Kid != "kid-x" {
 		t.Errorf("bad registration parse: %+v", reg)
 	}
 	if reg.AgentID != "a-1" || reg.Tier != "Tier 2" {
@@ -74,7 +74,7 @@ func TestCreateBearerPathSetsClientHeader(t *testing.T) {
 	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotClient = r.Header.Get("x-openbox-client")
-		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a"},"token":"t","identity":{"did":"d","privateKey":"p"}}}`)
+		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a"},"token":"t","identity":{"kid":"k"}}}`)
 	}))
 	defer srv.Close()
 
@@ -87,21 +87,6 @@ func TestCreateBearerPathSetsClientHeader(t *testing.T) {
 	}
 	if gotClient != "my-client" {
 		t.Errorf("x-openbox-client = %q, want my-client", gotClient)
-	}
-}
-
-func TestCreateDIDFallsBackToAgentBody(t *testing.T) {
-	srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, `{"data":{"agent":{"id":"a","did":"did:aip:from-agent"},"token":"t","identity":{"privateKey":"p"}}}`)
-	}))
-	defer srv.Close()
-	c := New(srv.URL, "obx_key_x", "cli")
-	reg, err := c.Create(context.Background(), CreateAgentRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reg.DID != "did:aip:from-agent" {
-		t.Errorf("DID = %q, want fallback to agent.did", reg.DID)
 	}
 }
 
@@ -297,6 +282,55 @@ func TestClassifyCreateConflict(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ClassifyCreateConflict(tt.err); got != tt.want {
 				t.Errorf("ClassifyCreateConflict(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsDuplicateNameConflict this race carries no code and no 409: the
+// backend answers HTTP 400 for it (agent.service.ts:978-981), so it needs its
+// own classifier rather than folding into ClassifyCreateConflict.
+func TestIsDuplicateNameConflict(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "400 duplicate name, exact backend wording",
+			err:  &APIError{StatusCode: 400, Body: `{"message":"Agent with name \"dev-x-a1b2c3\" already exists in this organization"}`},
+			want: true,
+		},
+		{
+			name: "400 duplicate name, case-insensitive match",
+			err:  &APIError{StatusCode: 400, Body: `{"MESSAGE":"AGENT WITH NAME already EXISTS IN THIS ORGANIZATION"}`},
+			want: true,
+		},
+		{
+			name: "400 for an unrelated reason",
+			err:  &APIError{StatusCode: 400, Body: `{"message":"AIVSS config is required"}`},
+			want: false,
+		},
+		{
+			name: "409 conflict is not this classifier's concern",
+			err:  &APIError{StatusCode: 409, Body: `{"message":"Agent with name \"dev-x\" already exists in this organization"}`},
+			want: false,
+		},
+		{
+			name: "non-APIError",
+			err:  errors.New("boom"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsDuplicateNameConflict(tt.err); got != tt.want {
+				t.Errorf("IsDuplicateNameConflict(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}

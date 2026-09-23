@@ -18,7 +18,6 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 
 	if err := WriteConfig(path, Update{
-		DID:      "did:aip:x",
 		Enforce:  boolPtr(true),
 		Tier2:    boolPtr(true),
 		Findings: boolPtr(true),
@@ -26,7 +25,7 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 		t.Fatalf("initial write: %v", err)
 	}
 
-	if err := WriteConfig(path, Update{DID: "did:aip:x", BaseURL: "https://core.example"}); err != nil {
+	if err := WriteConfig(path, Update{BaseURL: "https://core.example"}); err != nil {
 		t.Fatalf("re-init write: %v", err)
 	}
 
@@ -50,11 +49,11 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 // actually work.
 func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := WriteConfig(path, Update{DID: "did:aip:x", Enforce: boolPtr(true)}); err != nil {
+	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
 		t.Fatal(err)
 	}
 
-	u := Update{DID: "did:aip:x", Enforce: boolPtr(false)}
+	u := Update{Enforce: boolPtr(false)}
 	if !WouldDowngradeEnforce(path, u.Enforce) {
 		t.Error("an explicit false against a prior true must be reported as a downgrade so the CLI can say so")
 	}
@@ -74,7 +73,7 @@ func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
 // every ordinary re-init would print a posture warning.
 func TestWriteConfig_SilenceIsNotADowngrade(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := WriteConfig(path, Update{DID: "did:aip:x", Enforce: boolPtr(true)}); err != nil {
+	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
 		t.Fatal(err)
 	}
 	if WouldDowngradeEnforce(path, nil) {
@@ -88,11 +87,13 @@ func TestWriteConfig_SilenceIsNotADowngrade(t *testing.T) {
 func TestWriteConfig_KeepsCoordinatesItWasNotGiven(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 	if err := WriteConfig(path, Update{
-		DID:        "did:aip:original",
 		BaseURL:    "https://core.example",
 		AgentID:    "agent-1",
 		BackendURL: "https://backend.example",
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetLegacyDID(path, "did:aip:original"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -152,11 +153,11 @@ func TestWriteConfig_OverwritesUnparseablePriorConfig(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{ this is not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(path, Update{DID: "did:aip:x", Enforce: boolPtr(true)}); err != nil {
+	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
 		t.Fatalf("write over a corrupt config: %v", err)
 	}
 	cfg := mustLoad(t, path)
-	if cfg.DID != "did:aip:x" || cfg.Enforce == nil || !*cfg.Enforce {
+	if cfg.Enforce == nil || !*cfg.Enforce {
 		t.Errorf("recovery write did not take: %+v", cfg)
 	}
 }
@@ -164,7 +165,7 @@ func TestWriteConfig_OverwritesUnparseablePriorConfig(t *testing.T) {
 func TestWriteConfig_FilePermissionsAreOwnerOnly(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested")
 	path := filepath.Join(dir, "dev.json")
-	if err := WriteConfig(path, Update{DID: "did:aip:x"}); err != nil {
+	if err := WriteConfig(path, Update{}); err != nil {
 		t.Fatal(err)
 	}
 	fi, err := os.Stat(path)
@@ -188,7 +189,7 @@ func TestWriteConfig_FilePermissionsAreOwnerOnly(t *testing.T) {
 // setString cannot clear a field, so this needs the explicit clear.
 func TestWriteConfigClearsLegacyDIDOnWorkloadIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := WriteConfig(path, Update{DID: "did:aip:legacy"}); err != nil {
+	if err := SetLegacyDID(path, "did:aip:legacy"); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustLoad(t, path).DID; got != "did:aip:legacy" {
@@ -218,7 +219,7 @@ func TestWriteConfigClearsLegacyDIDOnWorkloadIdentity(t *testing.T) {
 // touch the DID, which is exactly what every existing caller does.
 func TestWriteConfigKeepsDIDWithoutIdentityMethod(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := WriteConfig(path, Update{DID: "did:aip:x"}); err != nil {
+	if err := SetLegacyDID(path, "did:aip:x"); err != nil {
 		t.Fatal(err)
 	}
 	if err := WriteConfig(path, Update{BaseURL: "https://core.example"}); err != nil {

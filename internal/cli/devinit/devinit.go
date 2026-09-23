@@ -9,7 +9,9 @@ package devinit
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -59,16 +61,6 @@ type Options struct {
 	// decision for the mechanism).
 	Enforce  *bool
 	Findings *bool
-	// AssumeExistingStore is set by the caller when it has already written a
-	// usable store THIS run, outside the file/env shapes register's own reuse
-	// check reads -- the one case today is a successful interactive adopt
-	// (cmd/openbox/adopt.go), which still writes the pre-v3 DID+seed shape.
-	// Without this, a freshly adopted store falls through register's v3 reuse
-	// check (adopt writes no workload key) into a fresh registration with no
-	// registrar wired, discarding what the operator just pasted. Adopt's own
-	// prompts and messages are unchanged here; their v3-native redesign is a
-	// separate, later concern.
-	AssumeExistingStore bool
 }
 
 // Deps are the injected collaborators (all faked in tests).
@@ -87,14 +79,23 @@ type Deps struct {
 	// register calls it exactly the way a real implementation would, so
 	// wiring one in is a Deps assignment, not a change to this file.
 	DiscardLegacySpool func(tool string) (int, error)
+	// Suffix generates the 6-lowercase-hex-character suffix appended to a name
+	// already taken in the org (randomSuffix when nil): crypto/rand once per
+	// call, so a test can pin the sequence rather than pattern-match a random
+	// result.
+	Suffix func() (string, error)
 }
 
 // Result summarizes what happened, for the caller to render / pick an exit
 // code.
 type Result struct {
 	AgentID   string
-	DID       string // the derived attribution label, best-effort; "" if AgentID itself is not a UUID
 	AgentName string
+	// IdentityMethod is devconfig.IdentityMethodKeycloakWorkload on every
+	// successful result (reused or freshly registered): the v3 binary never
+	// resolves or registers anything else. Empty only when Run returned an
+	// error before an identity was confirmed.
+	IdentityMethod string
 	// IdentityKid is the registered keycloak_workload key's RFC 7638
 	// thumbprint, printed in place of a DID for a fresh registration.
 	IdentityKid   string
@@ -138,6 +139,16 @@ func localHostName() string {
 		return "host"
 	}
 	return h
+}
+
+// randomSuffix is Deps.Suffix's production implementation: 6 lowercase hex
+// characters from crypto/rand, appended to a name already taken in the org.
+func randomSuffix() (string, error) {
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate a name suffix: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func truncate(s string, maxBytes int) string {
@@ -202,16 +213,14 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	// check: EnvIdentityPresent and readLocalCredentials both ask the v3
 	// question, so a legacy store falls through to registration below, same as
 	// no store at all.
-	if fromFile || devconfig.EnvIdentityPresent() || o.AssumeExistingStore {
+	if fromFile || devconfig.EnvIdentityPresent() {
 		agentID := devconfig.ResolveAgentID()
 		res.Reused = true
 		res.AgentID = agentID
+		res.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
 		ref.AgentID = agentID
-		if did, err := devconfig.AttributionDIDFor(agentID); err == nil {
-			res.DID = did
-		}
 		where := credentialFileLabel()
-		if !fromFile && !o.AssumeExistingStore {
+		if !fromFile {
 			where = "the environment"
 		}
 		fmt.Fprintf(d.Out, "Reusing the existing %s agent; nothing was registered.\n", o.Provider)
@@ -239,9 +248,23 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 				"client. This is a build or wiring bug, not a configuration problem", o.Provider)
 	}
 
+	// One line, printed once, right before the run that will actually replace
+	// the store: LegacyStoreFor is file-only, so a legacy store here means
+	// this tool's identity predates v3 and hooks have been sending nothing.
+	if ls, lerr := devconfig.LegacyStoreFor(o.Provider); lerr == nil && ls.Legacy {
+		fmt.Fprintln(d.Out, "this tool holds a legacy (pre-IAMv3) identity that hooks can no longer use; "+
+			"registering a workload agent replaces it")
+	}
+
+	suffixFn := d.Suffix
+	if suffixFn == nil {
+		suffixFn = randomSuffix
+	}
+
 	// Unconditional now. The escape hatch was --force, which registered a
-	// second, differently-named agent; without it there is exactly one recovery
-	// and the message has to say what it costs rather than name a flag.
+	// second, differently-named agent; a taken name now gets a fresh suffix
+	// instead of a halt, since a lost store can no longer be repaired by
+	// pasting a DID + seed that no longer exist.
 	existing, err := d.Registrar.FindByName(ctx, name)
 	if err != nil {
 		// A rejected credential is not an outage, and saying so sends the
@@ -268,20 +291,20 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 				"re-run when the OpenBox org is reachable",
 			name, err)
 	}
+
+	registerName := name
 	if existing != nil {
-		res.AgentID, res.DID = existing.ID, existing.DID
-		return res, ref, fmt.Errorf(
-			"a developer agent named %q already exists in this org (id %s, DID %s) but %s holds "+
-				"no credentials for it on this machine.\n"+
-				"  Most likely this machine registered it before, and its store was deleted or moved; "+
-				"the other cause is a second machine reporting the same user and host name.\n"+
-				"  Its API key and signing key were shown once, at registration, and are not stored "+
-				"server-side -- so if they are lost, that agent's identity cannot be recovered at all.\n"+
-				"  If you still have them, re-run `openbox init --provider %s` and answer yes when it "+
-				"offers to adopt an existing agent; it takes the id %s, the DID, the key and the seed.\n"+
-				"  If you do not: delete %q in the dashboard and re-run. That mints a NEW DID, "+
-				"so work attributed to the old one stays attached to the old one.",
-			name, existing.ID, existing.DID, o.Provider, o.Provider, existing.ID, name)
+		suffix, serr := suffixFn()
+		if serr != nil {
+			return res, ref, fmt.Errorf("an agent named %q already exists (id %s), and generating a "+
+				"replacement suffix failed: %w", name, existing.ID, serr)
+		}
+		registerName = truncate(name+"-"+suffix, 255)
+		res.AgentName = registerName
+		fmt.Fprintf(d.Out, "an agent named %q (id %s) already exists in this org; registered this "+
+			"machine's %s agent as %q\n", existing.AgentName, existing.ID, o.Provider, registerName)
+		fmt.Fprintln(d.Out, "  if this machine still holds that agent's workload key, re-run and answer "+
+			"yes when it offers to adopt it instead")
 	}
 
 	genKey := d.GenerateKey
@@ -298,7 +321,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 
 	req := backend.CreateAgentRequest{
-		AgentName:   name,
+		AgentName:   registerName,
 		AgentType:   developerAgentType,
 		Icon:        icon,
 		Description: o.Description,
@@ -315,7 +338,23 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		},
 	}
 	reg, err := d.Registrar.Create(ctx, req)
+	if err != nil && backend.IsDuplicateNameConflict(err) {
+		// The race this covers: another process (or another `init` on another
+		// machine for the same tool+user+host) claimed registerName between
+		// FindByName and this call. One retry under a fresh suffix, then give
+		// up rather than loop.
+		suffix, serr := suffixFn()
+		if serr == nil {
+			registerName = truncate(name+"-"+suffix, 255)
+			res.AgentName = registerName
+			req.AgentName = registerName
+			reg, err = d.Registrar.Create(ctx, req)
+		}
+	}
 	if err != nil {
+		if conflict := backend.ClassifyCreateConflict(err); conflict != backend.None && conflict != backend.Other409 {
+			return res, ref, fmt.Errorf("%s (%w)", translatedConflictMessage(conflict), err)
+		}
 		var apiErr *backend.APIError
 		if errors.As(err, &apiErr) {
 			return res, ref, fmt.Errorf("HALT: agent/create rejected registration (%w). "+
@@ -325,9 +364,9 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		return res, ref, fmt.Errorf("agent/create failed: %w", err)
 	}
 	res.AgentID, res.Registered = reg.AgentID, true
+	res.AgentName = reg.AgentName
 	res.IdentityKid = reg.Identity.Kid
-	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness; ref.DID stays unset (never stored)
-	ref.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
+	ref.AgentID = reg.AgentID // persisted to dev.json for `dev sync`/staleness
 
 	if reg.Identity.Method != devconfig.IdentityMethodKeycloakWorkload || reg.APIKey == "" {
 		return res, ref, fmt.Errorf(
@@ -335,6 +374,19 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 				"cannot store runtime credentials; rotate the key or re-provision the identity",
 			reg.AgentID, devconfig.IdentityMethodKeycloakWorkload)
 	}
+	// A mismatch here means the backend persisted a different key than the one
+	// this machine just proved possession of: every hook signing with priv
+	// would fail exchange from the first call onward, silently (fail-open), so
+	// this must refuse before a single byte of it is written to disk.
+	if reg.Identity.Kid != jwk.Kid {
+		return res, ref, fmt.Errorf(
+			"agent registered (id %s) but the backend's key id %q does not match the one this machine "+
+				"submitted (%q); every hook would fail to authenticate. Refusing to store credentials; "+
+				"rotate the key and re-run `openbox init --provider %s`",
+			reg.AgentID, reg.Identity.Kid, jwk.Kid, o.Provider)
+	}
+	ref.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
+	res.IdentityMethod = devconfig.IdentityMethodKeycloakWorkload
 
 	workloadKeyB64, err := workloadauth.EncodePrivateKey(priv)
 	if err != nil {
@@ -353,7 +405,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		APIKey:        reg.APIKey,
 		PrivateKeyB64: workloadKeyB64,
 	}); err != nil {
-		return res, ref, resumeErr(reg, "write credentials to "+credentialFileLabel(), err)
+		return res, ref, resumeErr(o, reg, "write credentials to "+credentialFileLabel(), err)
 	}
 
 	if wasLegacy && d.DiscardLegacySpool != nil {
@@ -375,6 +427,24 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	}
 
 	return res, ref, nil
+}
+
+// translatedConflictMessage renders the three known create-time 409s in terms
+// a developer can act on. The aivss HALT wording never appears for these:
+// each names what an OpenBox admin (or a re-run) must do instead.
+func translatedConflictMessage(c backend.CreateConflict) string {
+	switch c {
+	case backend.IdPNotInitialized:
+		return "your org's identity provider is not initialized; ask your OpenBox admin to initialize it " +
+			"(operator: `bootstrap-legacy-did-authority --apply`), then re-run"
+	case backend.ExternalIdP:
+		return "your org issues agent identities from an external provider (Okta/Entra); shift-left " +
+			"supports only OpenBox-generated workload identities"
+	case backend.IdPChangedRetry:
+		return "the org's identity provider changed during registration; re-run"
+	default:
+		return ""
+	}
 }
 
 // applyConfig every recognized provider has a built adapter, so there is no
@@ -408,10 +478,16 @@ func tierLabel(tier, trust string) string {
 	}
 }
 
-func resumeErr(reg *backend.Registration, step string, err error) error {
-	return fmt.Errorf("agent registered (id %s, DID %s) but failed to %s: %w; "+
-		"the API key and signing key were shown only once; rotate the key and re-run, or complete the step manually",
-		reg.AgentID, reg.DID, step, err)
+// resumeErr reports a write failure after a successful Create. That agent is
+// now orphaned server-side: its API key and the signing key generated for it
+// were never written anywhere on this machine and cannot be recovered, so the
+// only remedy is a fresh registration, not a retry of this one.
+func resumeErr(o Options, reg *backend.Registration, step string, err error) error {
+	return fmt.Errorf("agent registered (id %s, name %q) but failed to %s: %w.\n"+
+		"  Re-run `openbox init --provider %s`; it registers a fresh agent (suffixed if this name "+
+		"is still taken) and tries again.\n"+
+		"  The orphaned agent %s %q holds no usable key and may be removed from the org.",
+		reg.AgentID, reg.AgentName, step, err, o.Provider, reg.AgentID, reg.AgentName)
 }
 
 // jwkAsMap projects a workloadauth.JWK onto the map[string]string shape

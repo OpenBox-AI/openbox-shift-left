@@ -30,8 +30,7 @@ func seedLegacyStore(t *testing.T, home, tool string) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(filepath.Join(home, tool, "dev.json"),
-		devconfig.Update{DID: "did:aip:legacy"}); err != nil {
+	if err := devconfig.SetLegacyDID(filepath.Join(home, tool, "dev.json"), "did:aip:legacy"); err != nil {
 		t.Fatal(err)
 	}
 }

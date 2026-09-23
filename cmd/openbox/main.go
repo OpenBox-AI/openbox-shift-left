@@ -330,12 +330,10 @@ func (a *app) runDevInit(args []string) int {
 			return code
 		}
 		if adopted {
-			// adopt just wrote this tool's store; devinit's own reuse check reads
-			// a v3 shape adopt does not write (it is still the pre-v3 DID+seed
-			// prompt, unchanged here), so without this the pasted identity would
-			// fall straight through into a fresh registration with no registrar
-			// wired.
-			o.AssumeExistingStore = true
+			// adopt just wrote this tool's own v3 store (agent id, API key,
+			// workload key), which devinit's ordinary reuse check already
+			// recognizes as complete; no separate signal is needed to skip
+			// registration.
 		} else {
 			token, tokenSource, code := a.requireControlToken()
 			if code != exitOK {

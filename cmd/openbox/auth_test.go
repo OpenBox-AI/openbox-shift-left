@@ -168,7 +168,6 @@ func TestAuthNeverTouchesPosture(t *testing.T) {
 
 	tr, fa := true, false
 	if err := devconfig.WriteConfig(devPath, devconfig.Update{
-		DID:     "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
 		Enforce: &tr, Tier2: &tr, Findings: &tr,
 		ContentCapture: &fa, InstallGitHook: &tr,
 	}); err != nil {
@@ -219,7 +218,7 @@ func TestAuthDoesNotTripTheEnforceDowngradeGuard(t *testing.T) {
 	home := isolateHome(t)
 	devPath := filepath.Join(home, "dev.json")
 	tr := true
-	if err := devconfig.WriteConfig(devPath, devconfig.Update{DID: "did:aip:x", Enforce: &tr}); err != nil {
+	if err := devconfig.WriteConfig(devPath, devconfig.Update{Enforce: &tr}); err != nil {
 		t.Fatal(err)
 	}
 	if devconfig.WouldDowngradeEnforce(devPath, nil) {
@@ -569,6 +568,13 @@ func TestAuthSuccessNamesInitAsTheNextStep(t *testing.T) {
 	// project would send them doing work that does nothing.
 	if !strings.Contains(s, "every session on this machine") {
 		t.Errorf("success output should state what the next step governs:\n%s", s)
+	}
+	// init cannot register at all until an admin has initialized the org's
+	// identity provider; the person who just ran auth is often not that admin,
+	// so the next-steps output has to name the precondition rather than let
+	// them discover it from a 409 later.
+	if !strings.Contains(s, "identity provider") || !strings.Contains(s, "admin") {
+		t.Errorf("success output should name the identity-provider precondition:\n%s", s)
 	}
 	for _, gone := range []string{"THIS DIRECTORY", "--scope", "each project"} {
 		if strings.Contains(s, gone) {

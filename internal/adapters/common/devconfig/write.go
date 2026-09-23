@@ -14,7 +14,6 @@ import (
 type Update struct {
 	// BaseURL coordinates.
 	BaseURL    string
-	DID        string
 	AgentID    string
 	BackendURL string
 	// IdentityMethod, when it equals IdentityMethodKeycloakWorkload, marks this
@@ -40,7 +39,6 @@ func WriteConfig(path string, u Update) error {
 	cfg, _ := Load(path)
 
 	setString(&cfg.BaseURL, u.BaseURL)
-	setString(&cfg.DID, u.DID)
 	setString(&cfg.AgentID, u.AgentID)
 	setString(&cfg.BackendURL, u.BackendURL)
 	setString(&cfg.IdentityMethod, u.IdentityMethod)
@@ -57,6 +55,30 @@ func WriteConfig(path string, u Update) error {
 	setBoolPtr(&cfg.Tier2, u.Tier2)
 	setBoolPtr(&cfg.Findings, u.Findings)
 
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("dev config: marshal: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("dev config: create dir: %w", err)
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("dev config: write %s: %w", path, err)
+	}
+	return nil
+}
+
+// SetLegacyDID plants a developer_did directly on the config at path,
+// bypassing Update: nothing in this codebase writes one any more (a v3
+// identity never has one, and WriteWorkloadIdentity always clears it), so
+// exercising a pre-IAMv3 store for a test needs its own seam rather than a
+// field on the write path everything else uses.
+func SetLegacyDID(path, did string) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+	cfg.DID = did
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("dev config: marshal: %w", err)

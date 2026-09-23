@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -27,11 +28,23 @@ func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Ser
 		case r.Method == http.MethodPost && r.URL.Path == "/agent/create":
 			b, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(b, createBody)
-			_, _ = io.WriteString(w, `{"data":{"agent":{"id":"srv-agent","agent_name":"dev-x","tier":"Tier 2","trust_score":0.81},`+
-				`"token":"obx_test_`+strings.Repeat("a", 48)+`",`+
+			// A real backend persists exactly the kid this machine submitted; echoed
+			// here so the guard on the client side (registered kid must match the
+			// submitted JWK) does not reject its own fixture.
+			kid := "kid-1"
+			if iv, ok := (*createBody)["identity_verification"].(map[string]any); ok {
+				if pj, ok := iv["public_jwk"].(map[string]any); ok {
+					if k, _ := pj["kid"].(string); k != "" {
+						kid = k
+					}
+				}
+			}
+			fmt.Fprintf(w, `{"data":{"agent":{"id":"srv-agent","agent_name":"dev-x","tier":"Tier 2","trust_score":0.81},`+
+				`"token":"obx_test_%s",`+
 				`"identity":{"method":"keycloak_workload","source_type":"openbox","workload_identity_id":"wi-1",`+
-				`"credential_id":"cred-1","service_account_id":"sa-1","client_id":"client-1","kid":"kid-1",`+
-				`"token_endpoint":"https://idp.example/token","audience":"aud","private_key_available_from_openbox":false}}}`)
+				`"credential_id":"cred-1","service_account_id":"sa-1","client_id":"client-1","kid":%q,`+
+				`"token_endpoint":"https://idp.example/token","audience":"aud","private_key_available_from_openbox":false}}}`,
+				strings.Repeat("a", 48), kid)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}

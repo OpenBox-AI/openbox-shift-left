@@ -17,7 +17,7 @@ func TestResolveContentCaptureForReadsEachToolsOwnFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(codexPath, Update{DID: "did:aip:codex", ContentCapture: &off}); err != nil {
+	if err := WriteConfig(codexPath, Update{ContentCapture: &off}); err != nil {
 		t.Fatal(err)
 	}
 	// claude-code gets no dev.json at all: it must default ON, not inherit
@@ -49,7 +49,7 @@ func TestResolveContentCaptureForHonoursTheOppositeDirectionToo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(ccPath, Update{DID: "did:aip:cc", ContentCapture: &off}); err != nil {
+	if err := WriteConfig(ccPath, Update{ContentCapture: &off}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -85,7 +85,7 @@ func TestResolveContentCaptureForManagedLockStillAppliesToEveryTool(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(codexPath, Update{DID: "did:aip:codex", ContentCapture: &on}); err != nil {
+	if err := WriteConfig(codexPath, Update{ContentCapture: &on}); err != nil {
 		t.Fatal(err)
 	}
 

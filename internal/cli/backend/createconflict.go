@@ -71,3 +71,17 @@ func ClassifyCreateConflict(err error) CreateConflict {
 		return Other409
 	}
 }
+
+// IsDuplicateNameConflict reports whether err is the race Create hits when two
+// registrations claim the same suffixed name at once: HTTP 400 (not 409 --
+// this one carries no code at all), body containing "already exists in this
+// organization", matched case-insensitively (backend
+// agent.service.ts:978-981 uses ILike). The caller's remedy is a fresh
+// suffix, not a translated message.
+func IsDuplicateNameConflict(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+	return strings.Contains(strings.ToLower(apiErr.Body), "already exists in this organization")
+}

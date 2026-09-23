@@ -47,9 +47,16 @@ type fakeReg struct {
 	create int
 }
 
-func (f *fakeReg) Create(context.Context, backend.CreateAgentRequest) (*backend.Registration, error) {
+func (f *fakeReg) Create(_ context.Context, req backend.CreateAgentRequest) (*backend.Registration, error) {
 	f.create++
-	return f.reg, nil
+	reg := *f.reg
+	// A real backend persists exactly the kid this machine submitted; echoing
+	// it here means a fixture's own Identity.Kid literal never has to match
+	// what workloadauth.PublicJWK derives from whichever key the case used.
+	if req.IdentityVerification != nil {
+		reg.Identity.Kid = req.IdentityVerification.PublicJWK["kid"]
+	}
+	return &reg, nil
 }
 func (f *fakeReg) FindByName(context.Context, string) (*backend.AgentSummary, error) {
 	return nil, nil

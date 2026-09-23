@@ -220,6 +220,8 @@ func (a *app) printAuthNextSteps() {
 	fmt.Fprintf(a.stdout, "  lane it supports. One run governs every session on this machine, in any\n")
 	fmt.Fprintf(a.stdout, "  directory; there is no scope to choose and nothing to repeat per project.\n")
 	fmt.Fprintf(a.stdout, "  Run it once per tool: each carries its own agent identity.\n")
+	fmt.Fprintf(a.stdout, "  Your org's identity provider must be initialized by an OpenBox admin before\n")
+	fmt.Fprintf(a.stdout, "  `init` can register; it will say so if that has not happened yet.\n")
 	// The URLs written above are the organization's, and `init` copies them into
 	// each tool's own config -- one file is loaded, never merged over another.
 	// So a re-run that corrects a URL has no runtime effect until every already

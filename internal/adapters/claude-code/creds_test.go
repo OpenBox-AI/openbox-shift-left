@@ -21,7 +21,7 @@ func TestLegacyStoreHookSendsNothing(t *testing.T) {
 	spool := t.TempDir()
 	t.Setenv("OPENBOX_SPOOL_DIR", spool)
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	if err := devconfig.WriteConfig(DefaultConfigPath(), devconfig.Update{DID: "did:aip:legacy-store"}); err != nil {
+	if err := devconfig.SetLegacyDID(DefaultConfigPath(), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 

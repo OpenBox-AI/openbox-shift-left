@@ -98,13 +98,9 @@ type IdentityVerification struct {
 
 type createResponse struct {
 	Data struct {
-		Agent    agentBody `json:"agent"`
-		Token    string    `json:"token"`
-		Identity struct {
-			DID        string `json:"did"`
-			PrivateKey string `json:"privateKey"`
-			WorkloadIdentityInfo
-		} `json:"identity"`
+		Agent    agentBody            `json:"agent"`
+		Token    string               `json:"token"`
+		Identity WorkloadIdentityInfo `json:"identity"`
 	} `json:"data"`
 }
 
@@ -129,25 +125,23 @@ type agentBody struct {
 	ID             string `json:"id"`
 	AgentName      string `json:"agent_name"`
 	AgentType      string `json:"agent_type"`
-	DID            string `json:"did"`
 	OrganizationID string `json:"organization_id"`
 	Tier           string `json:"tier"`
 	TrustScore     any    `json:"trust_score"`
 }
 
 // Registration is the credential material captured from a successful create.
-// APIKey and PrivateKey are secrets (INV-1) and must go straight to the secret
-// store; never logged, never written to a config file.
+// APIKey is a secret (INV-1) and must go straight to the secret store; never
+// logged, never written to a config file.
 type Registration struct {
 	AgentID    string
 	AgentName  string
-	DID        string
 	APIKey     string // obx_(live|test)_+48hex; shown once
-	PrivateKey string // base64 raw 32-byte Ed25519 seed; shown once
 	Tier       string
 	TrustScore string
-	// Identity is the workload identity info from a keycloak_workload create
-	// (empty on an openbox_did v1 create). Not yet read by any caller.
+	// Identity is the workload identity info from a keycloak_workload create.
+	// Its PrivateKeyAvailableFromOpenBox is always false: the private key never
+	// leaves this machine, and never left this response either.
 	Identity WorkloadIdentityInfo
 }
 
@@ -157,19 +151,13 @@ func (c *Client) Create(ctx context.Context, req CreateAgentRequest) (*Registrat
 	if err := c.do(ctx, http.MethodPost, "/agent/create", req, &out); err != nil {
 		return nil, err
 	}
-	did := out.Data.Identity.DID
-	if did == "" {
-		did = out.Data.Agent.DID // fall back to the agent body's did
-	}
 	reg := &Registration{
 		AgentID:    out.Data.Agent.ID,
 		AgentName:  out.Data.Agent.AgentName,
-		DID:        did,
 		APIKey:     out.Data.Token,
-		PrivateKey: out.Data.Identity.PrivateKey,
 		Tier:       out.Data.Agent.Tier,
 		TrustScore: fmt.Sprint(out.Data.Agent.TrustScore),
-		Identity:   out.Data.Identity.WorkloadIdentityInfo,
+		Identity:   out.Data.Identity,
 	}
 	return reg, nil
 }

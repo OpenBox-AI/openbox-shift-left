@@ -18,7 +18,7 @@ func TestSupportedIsSortedAndComplete(t *testing.T) {
 // carry a raw secret value (INV-1).
 func TestCredentialRefCarriesOnlySafeFields(t *testing.T) {
 	allowed := map[string]bool{
-		"DID": true, "BaseURL": true, "ContentCapture": true, "InstallGitHook": true,
+		"BaseURL": true, "ContentCapture": true, "InstallGitHook": true,
 		"AgentID": true, "BackendURL": true, "ProjectDir": true,
 		"Enforce": true, "Tier2": true, "Findings": true,
 		// IdentityMethod is "keycloak_workload" or "", a store-shape marker, not

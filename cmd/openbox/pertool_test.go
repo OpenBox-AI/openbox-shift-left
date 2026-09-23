@@ -220,8 +220,7 @@ func TestHookWithNoIdentityWarnsAndContinues(t *testing.T) {
 func TestWarnNamesLegacyStore(t *testing.T) {
 	home := isolateHomeOnly(t)
 	spool := perToolHookEnv(t)
-	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"),
-		devconfig.Update{DID: "did:aip:legacy-store"}); err != nil {
+	if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -824,8 +823,7 @@ func TestUninstallRemovesAnIdentityDirWithNoCredentialFile(t *testing.T) {
 	// step runs and sweeps directories on its way out, which is why this case
 	// has to be the machine that has none: that is the branch the sweep sits
 	// behind.
-	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"),
-		devconfig.Update{DID: testDIDFor(t, "claude-code")}); err != nil {
+	if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), testDIDFor(t, "claude-code")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -897,13 +895,21 @@ func TestDoctorReportsOrgToToolURLDrift(t *testing.T) {
 		BackendURL: "https://api.corrected", BaseURL: "https://core.corrected"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
-		DID: testDIDFor(t, "claude-code"), BackendURL: "https://api.stale", BaseURL: "https://core.stale"}); err != nil {
+	ccPath := filepath.Join(home, "claude-code", "dev.json")
+	if err := devconfig.WriteConfig(ccPath, devconfig.Update{
+		BackendURL: "https://api.stale", BaseURL: "https://core.stale"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.SetLegacyDID(ccPath, testDIDFor(t, "claude-code")); err != nil {
 		t.Fatal(err)
 	}
 	// codex agrees with the org, so only one row may be flagged.
-	if err := devconfig.WriteConfig(filepath.Join(home, "codex", "dev.json"), devconfig.Update{
-		DID: testDIDFor(t, "codex"), BackendURL: "https://api.corrected", BaseURL: "https://core.corrected"}); err != nil {
+	codexPath := filepath.Join(home, "codex", "dev.json")
+	if err := devconfig.WriteConfig(codexPath, devconfig.Update{
+		BackendURL: "https://api.corrected", BaseURL: "https://core.corrected"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.SetLegacyDID(codexPath, testDIDFor(t, "codex")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1066,8 +1072,11 @@ func TestDoctorDoesNotFlagDriftAnEnvVarOverrides(t *testing.T) {
 		BaseURL: "https://core.corrected"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
-		DID: testDIDFor(t, "claude-code"), BaseURL: "https://core.stale"}); err != nil {
+	ccPath := filepath.Join(home, "claude-code", "dev.json")
+	if err := devconfig.WriteConfig(ccPath, devconfig.Update{BaseURL: "https://core.stale"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.SetLegacyDID(ccPath, testDIDFor(t, "claude-code")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1209,8 +1218,8 @@ func TestDoctorDoesNotFlagDriftWhenBothResolveTheSame(t *testing.T) {
 		BaseURL: devconfig.DefaultBaseURL}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"), devconfig.Update{
-		DID: testDIDFor(t, "claude-code")}); err != nil {
+	if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"),
+		testDIDFor(t, "claude-code")); err != nil {
 		t.Fatal(err)
 	}
 

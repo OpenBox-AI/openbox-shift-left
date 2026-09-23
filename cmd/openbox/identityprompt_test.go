@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -10,55 +9,7 @@ import (
 
 // These moved here with their subjects when `auth` stopped owning agent
 // credentials. They are not `auth` tests any more; they guard the validation
-// `init`'s adopt prompt runs on four values typed in by hand.
-
-func TestPrivateKeyValidation(t *testing.T) {
-	for _, tc := range []struct {
-		name, key, wantText string
-	}{
-		{name: "valid 32-byte seed", key: testSeedB64, wantText: ""},
-		{name: "not base64", key: "!!!not base64!!!", wantText: "not valid base64"},
-		{name: "wrong length", key: base64.StdEncoding.EncodeToString([]byte("short")), wantText: "decodes to 5 bytes"},
-		{name: "empty", key: "", wantText: "no signing key"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := privateKeyProblem(tc.key)
-			if tc.wantText == "" {
-				if got != "" {
-					t.Fatalf("valid key rejected: %s", got)
-				}
-				return
-			}
-			if !strings.Contains(got, tc.wantText) {
-				t.Errorf("problem = %q, want it to contain %q", got, tc.wantText)
-			}
-			if tc.key != "" && strings.Contains(got, tc.key) {
-				t.Errorf("validation echoed the key: %s", got)
-			}
-		})
-	}
-}
-
-func TestDIDShapeValidation(t *testing.T) {
-	for _, tc := range []struct {
-		did      string
-		wantFail bool
-	}{
-		{"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", false},
-		{"did:aip:not-a-uuid", true},
-		{"did:web:example.com", true},
-		{"3f2504e0-4f89-11d3-9a0c-0305e82c3301", true},
-		{"", true},
-	} {
-		problem := validateAgentIdentity(tc.did, "obx_k", testSeedB64)
-		if tc.wantFail && problem == "" {
-			t.Errorf("DID %q should have been rejected", tc.did)
-		}
-		if !tc.wantFail && problem != "" {
-			t.Errorf("DID %q rejected: %s", tc.did, problem)
-		}
-	}
-}
+// `init`'s adopt prompt runs on a hand-typed API key.
 
 // TestOrgKeyInTheAgentKeyFieldIsRejected the org/agent key mix-up cost hours of
 // debugging once, and the split made it easier to hit rather than harder: the
@@ -66,7 +17,7 @@ func TestDIDShapeValidation(t *testing.T) {
 // commands, so pasting one into the other's field has to be rejected by name.
 func TestOrgKeyInTheAgentKeyFieldIsRejected(t *testing.T) {
 	body := strings.Repeat("f", 48)
-	problem := validateAgentIdentity("did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_key_"+body, testSeedB64)
+	problem := apiKeyProblem("obx_key_" + body)
 	if problem == "" {
 		t.Fatal("an obx_key_ org key in the agent-key field must be rejected")
 	}
@@ -77,6 +28,26 @@ func TestOrgKeyInTheAgentKeyFieldIsRejected(t *testing.T) {
 	}
 	if strings.Contains(problem, body) {
 		t.Errorf("rejection echoed the credential body:\n%s", problem)
+	}
+}
+
+// TestBlankAPIKeyIsRejected the adopt flow's confirmation is "no" by default;
+// an empty answer must still be caught rather than written as an empty
+// credential the next run reads as "configured".
+func TestBlankAPIKeyIsRejected(t *testing.T) {
+	problem := apiKeyProblem("")
+	if problem == "" {
+		t.Fatal("a blank API key should have been rejected")
+	}
+	if !strings.Contains(problem, "no API key") {
+		t.Errorf("rejection does not say what is missing: %s", problem)
+	}
+}
+
+// TestValidAPIKeyIsAccepted the ordinary obx_ runtime key shape.
+func TestValidAPIKeyIsAccepted(t *testing.T) {
+	if problem := apiKeyProblem("obx_" + strings.Repeat("a", 48)); problem != "" {
+		t.Errorf("a valid runtime key was rejected: %s", problem)
 	}
 }
 
@@ -94,26 +65,6 @@ func TestAgentKeyInTheControlTokenFieldIsRejected(t *testing.T) {
 	}
 	if strings.Contains(problem, body) {
 		t.Errorf("rejection echoed the credential body:\n%s", problem)
-	}
-}
-
-// TestFingerprintIsOfThePublicKeyNotTheSeed the fingerprint is of the derived
-// public key.
-func TestFingerprintIsOfThePublicKeyNotTheSeed(t *testing.T) {
-	fp := publicKeyFingerprint(testSeedB64)
-	if !strings.HasPrefix(fp, "SHA256:") || !strings.Contains(fp, "public key") {
-		t.Errorf("fingerprint = %q", fp)
-	}
-	if strings.Contains(fp, testSeedB64) {
-		t.Errorf("fingerprint contains the seed: %q", fp)
-	}
-	other := make([]byte, 32)
-	other[0] = 1
-	if publicKeyFingerprint(base64.StdEncoding.EncodeToString(other)) == fp {
-		t.Error("two different seeds produced the same fingerprint")
-	}
-	if got := publicKeyFingerprint(""); got != "(none)" {
-		t.Errorf("empty seed = %q, want (none)", got)
 	}
 }
 

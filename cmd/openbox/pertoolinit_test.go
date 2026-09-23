@@ -3,18 +3,55 @@ package main
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/backend"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 )
+
+// writePEMKeyFile writes a runtime-generated RSA key (never a literal) as a
+// PKCS#8 PEM file, the shape the agent's page offers to download.
+func writePEMKeyFile(t *testing.T, key *rsa.PrivateKey) string {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	path := filepath.Join(t.TempDir(), "workload-key.pem")
+	if err := os.WriteFile(path, block, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// writeDERKeyFile writes a runtime-generated RSA key as the single-line
+// base64 PKCS#8 DER document another machine's OPENBOX_WORKLOAD_PRIVATE_KEY
+// holds.
+func writeDERKeyFile(t *testing.T, key *rsa.PrivateKey) string {
+	t.Helper()
+	b64, err := workloadauth.EncodePrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "workload-key.b64")
+	if err := os.WriteFile(path, []byte(b64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 // testOrgToken and the minted key below are assembled rather than written
 // out: a credential-shaped literal in this repo is rewritten on disk by the
@@ -56,6 +93,14 @@ func (r *countingReg) Create(_ context.Context, req backend.CreateAgentRequest) 
 	r.next++
 	r.lastName = req.AgentName
 	suffix := strings.Repeat("0", 3) + string(rune('0'+r.next))
+	kid := "kid-" + suffix
+	// A real backend persists exactly the kid this machine submitted
+	// (agent-registration-identity.service.ts:429); echoing it here means a
+	// case's own assertions about "kid-<n>" still hold without also having to
+	// predict what workloadauth.PublicJWK derives from the generated key.
+	if req.IdentityVerification != nil && req.IdentityVerification.PublicJWK["kid"] != "" {
+		kid = req.IdentityVerification.PublicJWK["kid"]
+	}
 	return &backend.Registration{
 		AgentID:    "srv-agent-" + suffix,
 		AgentName:  req.AgentName,
@@ -65,7 +110,7 @@ func (r *countingReg) Create(_ context.Context, req backend.CreateAgentRequest) 
 		Identity: backend.WorkloadIdentityInfo{
 			Method:     devconfig.IdentityMethodKeycloakWorkload,
 			SourceType: "openbox",
-			Kid:        "kid-" + suffix,
+			Kid:        kid,
 		},
 	}, nil
 }
@@ -274,26 +319,31 @@ func TestInitWithNoStoreAndNoTokenRefuses(t *testing.T) {
 	}
 }
 
-// TestAdoptPromptWritesTheToolStoreAndSkipsRegistration (owner ruling O2.)
-// Shrinking `auth` removed the only interactive route to a rotated key; this
-// is where it came back, and it is also the one recovery from the
-// duplicate-name halt.
-func TestAdoptPromptWritesTheToolStoreAndSkipsRegistration(t *testing.T) {
+// TestAdoptReadsPEMFileAndNormalizes adopting is an agent id, its API key,
+// and a file path -- never a pasted key body. The PEM here is written by the
+// test from a runtime-generated key, never a literal.
+func TestAdoptReadsPEMFileAndNormalizes(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
 	t.Setenv(devconfig.EnvControlToken, testOrgToken)
 	clearAgentEnv(t)
 
-	reg := &countingReg{byName: map[string]*backend.AgentSummary{}}
-	pasted := map[string]string{
-		"id":  "adopted-agent-7",
-		"did": "did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-		"key": "obx_pasted_by_hand",
+	key, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := writePEMKeyFile(t, key)
+	wantB64, err := workloadauth.EncodePrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	a, _, errb := testApp(nil)
+	reg := &countingReg{byName: map[string]*backend.AgentSummary{}}
+	agentID := uuid.NewString()
+
+	a, out, errb := testApp(nil)
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
-	p := &prompt.Scripted{Answers: []string{"y", pasted["id"], pasted["did"], pasted["key"], testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"y", agentID, "obx_pasted_by_hand", keyPath}}
 	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
 
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
@@ -307,42 +357,126 @@ func TestAdoptPromptWritesTheToolStoreAndSkipsRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kv[devconfig.EnvAPIKeyDirect] != pasted["key"] || kv[devconfig.EnvAgentPrivateKey] != testSeedB64 {
-		t.Errorf("the pasted credentials were not stored: %v", kv)
+	if kv[devconfig.EnvAPIKeyDirect] != "obx_pasted_by_hand" || kv[devconfig.EnvWorkloadPrivateKey] != wantB64 {
+		t.Errorf("the pasted credentials were not stored normalised: %v", kv)
+	}
+	if _, ok := kv[devconfig.EnvAgentPrivateKey]; ok {
+		t.Errorf("adopt wrote a v1 seed field: %v", kv)
 	}
 	cfg, err := devconfig.Load(filepath.Join(home, "claude-code", "dev.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DID != pasted["did"] || cfg.AgentID != pasted["id"] {
-		t.Errorf("the pasted coordinates were not stored: %+v", cfg)
+	if cfg.AgentID != agentID || cfg.IdentityMethod != devconfig.IdentityMethodKeycloakWorkload {
+		t.Errorf("the adopted coordinates were not stored: %+v", cfg)
+	}
+	if cfg.DID != "" {
+		t.Errorf("adopt wrote a v1 DID: %+v", cfg)
+	}
+	// The file is read, not moved: the original still exists, untouched.
+	raw, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("the key file was moved or deleted: %v", err)
+	}
+	if len(raw) == 0 {
+		t.Error("the key file was truncated")
+	}
+	if strings.Contains(out.String(), wantB64) {
+		t.Errorf("the normalised key leaked to stdout:\n%s", out.String())
 	}
 }
 
-// TestAdoptRejectsABadSeedBeforeWritingAnything a half-populated store is
-// worse than none: the next run would read it as "already registered" and
-// install hooks against an identity that cannot sign.
-func TestAdoptRejectsABadSeedBeforeWritingAnything(t *testing.T) {
+// TestAdoptAcceptsBase64DERFile the file may instead hold another machine's
+// OPENBOX_WORKLOAD_PRIVATE_KEY value verbatim (single-line base64 PKCS#8 DER);
+// workloadauth.ParsePrivateKey accepts both shapes and this must too.
+func TestAdoptAcceptsBase64DERFile(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
 	t.Setenv(devconfig.EnvControlToken, testOrgToken)
 	clearAgentEnv(t)
 
+	key, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := writeDERKeyFile(t, key)
+	wantB64, err := workloadauth.EncodePrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &countingReg{byName: map[string]*backend.AgentSummary{}}
+	agentID := uuid.NewString()
 	a, _, errb := testApp(nil)
-	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
-	p := &prompt.Scripted{Answers: []string{"y", "adopted-agent-7",
-		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_pasted_by_hand", "not-base64!!"}}
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
+	p := &prompt.Scripted{Answers: []string{"y", agentID, "obx_pasted_by_hand", keyPath}}
 	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
 
-	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
-		t.Fatalf("exit = %d, want a refusal on an unusable seed", code)
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "base64") {
-		t.Errorf("the refusal does not say what is wrong with the seed:\n%s", errb.String())
+	kv, err := devconfig.ParseEnvFile(filepath.Join(home, "claude-code", ".env"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "claude-code", ".env")); !os.IsNotExist(err) {
-		t.Errorf("a rejected adopt wrote a credential file anyway (err=%v)", err)
+	if kv[devconfig.EnvWorkloadPrivateKey] != wantB64 {
+		t.Errorf("the DER key was not stored normalised: %v", kv)
 	}
+}
+
+// TestAdoptRefusesOrgKeyAndBadPEMBeforeWriting neither refusal may leave a
+// half-populated store the next run reads as "already registered": no file
+// is created on either.
+func TestAdoptRefusesOrgKeyAndBadPEMBeforeWriting(t *testing.T) {
+	t.Run("org key in the agent-key field", func(t *testing.T) {
+		home := isolateHomeUnbound(t)
+		requireUnbound(t)
+		t.Setenv(devconfig.EnvControlToken, testOrgToken)
+		clearAgentEnv(t)
+
+		a, _, errb := testApp(nil)
+		a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+		p := &prompt.Scripted{Answers: []string{"y", uuid.NewString(),
+			"obx_key_" + strings.Repeat("f", 48), "/dev/null"}}
+		a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+
+		if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
+			t.Fatalf("exit = %d, want a refusal on an organization key", code)
+		}
+		if !strings.Contains(errb.String(), "ORGANIZATION key") {
+			t.Errorf("the refusal does not name the mistake:\n%s", errb.String())
+		}
+		if _, err := os.Stat(filepath.Join(home, "claude-code", ".env")); !os.IsNotExist(err) {
+			t.Errorf("a rejected adopt wrote a credential file anyway (err=%v)", err)
+		}
+	})
+
+	t.Run("unreadable key shape", func(t *testing.T) {
+		home := isolateHomeUnbound(t)
+		requireUnbound(t)
+		t.Setenv(devconfig.EnvControlToken, testOrgToken)
+		clearAgentEnv(t)
+
+		badPath := filepath.Join(t.TempDir(), "not-a-key.pem")
+		if err := os.WriteFile(badPath, []byte("not a key at all"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		a, _, errb := testApp(nil)
+		a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+		p := &prompt.Scripted{Answers: []string{"y", uuid.NewString(), "obx_pasted_by_hand", badPath}}
+		a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+
+		if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
+			t.Fatalf("exit = %d, want a refusal on an unusable key", code)
+		}
+		if !strings.Contains(errb.String(), "PKCS#8") {
+			t.Errorf("the refusal does not say what is wrong with the key:\n%s", errb.String())
+		}
+		if _, err := os.Stat(filepath.Join(home, "claude-code", ".env")); !os.IsNotExist(err) {
+			t.Errorf("a rejected adopt wrote a credential file anyway (err=%v)", err)
+		}
+	})
 }
 
 // TestNonInteractiveInitSkipsAdoptAndRegisters an unattended install already
@@ -391,7 +525,7 @@ func TestLegacyStorePlusTokenRegistersFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	const legacyDID = "did:aip:11111111-2222-3333-4444-555555555555"
-	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{DID: legacyDID}); err != nil {
+	if err := devconfig.SetLegacyDID(filepath.Join(home, "dev.json"), legacyDID); err != nil {
 		t.Fatal(err)
 	}
 	orgEnvBefore, err := os.ReadFile(orgEnv)
@@ -576,21 +710,27 @@ func TestInitInstallsAgainstAnEnvironmentIdentity(t *testing.T) {
 	}
 }
 
-// TestAdoptNeedsNoOrganizationToken adopting is four values pasted by hand and
-// makes no control-plane call, so requiring fleet authority for it locked out
-// the shape this exists to serve: a developer holding their own agent's key
-// while the organization key lives with an administrator. It is also the only
-// route back from the duplicate-name halt.
+// TestAdoptNeedsNoOrganizationToken adopting is an id, a key and a file path
+// pasted by hand and makes no control-plane call, so requiring fleet
+// authority for it locked out the shape this exists to serve: a developer
+// holding their own agent's key while the organization key lives with an
+// administrator.
 func TestAdoptNeedsNoOrganizationToken(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
 	clearAgentEnv(t)
 	t.Setenv(devconfig.EnvControlToken, "")
 
+	key, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := writePEMKeyFile(t, key)
+	agentID := uuid.NewString()
+
 	a, _, errb := testApp(nil)
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
-	p := &prompt.Scripted{Answers: []string{"y", "adopted-agent-9",
-		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_pasted_by_hand", testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"y", agentID, "obx_pasted_by_hand", keyPath}}
 	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
 
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
@@ -600,13 +740,13 @@ func TestAdoptNeedsNoOrganizationToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AgentID != "adopted-agent-9" {
+	if cfg.AgentID != agentID {
 		t.Errorf("the adopted agent was not stored: %+v", cfg)
 	}
 }
 
 // TestAdoptRefusesABlankAgentID the id identifies the agent this store belongs
-// to, and a store carrying a DID with no id is one doctor cannot attribute.
+// to; nothing is written without one.
 func TestAdoptRefusesABlankAgentID(t *testing.T) {
 	home := isolateHomeUnbound(t)
 	requireUnbound(t)
@@ -615,8 +755,7 @@ func TestAdoptRefusesABlankAgentID(t *testing.T) {
 
 	a, _, errb := testApp(nil)
 	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
-	p := &prompt.Scripted{Answers: []string{"y", "",
-		"did:aip:3f2504e0-4f89-11d3-9a0c-0305e82c3301", "obx_pasted_by_hand", testSeedB64}}
+	p := &prompt.Scripted{Answers: []string{"y", ""}}
 	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
 
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
@@ -627,6 +766,116 @@ func TestAdoptRefusesABlankAgentID(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "claude-code", "dev.json")); !os.IsNotExist(err) {
 		t.Errorf("a rejected adopt wrote a config anyway (err=%v)", err)
+	}
+}
+
+// TestAdoptRefusesANonUUIDAgentID the agent id shown on the dashboard is a
+// UUID; anything else is almost certainly the wrong field pasted in.
+func TestAdoptRefusesANonUUIDAgentID(t *testing.T) {
+	isolateHomeUnbound(t)
+	requireUnbound(t)
+	clearAgentEnv(t)
+	t.Setenv(devconfig.EnvControlToken, "")
+
+	a, _, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+	p := &prompt.Scripted{Answers: []string{"y", "not-a-uuid"}}
+	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitError {
+		t.Fatalf("exit = %d, want a refusal on a non-UUID agent id", code)
+	}
+	if !strings.Contains(errb.String(), "UUID") {
+		t.Errorf("the refusal does not say what is wrong:\n%s", errb.String())
+	}
+}
+
+// TestAdoptThenInitReuses the second invocation: once adopt has written a v3
+// store, ResolveCredentialsFor succeeds for it and a plain `init` afterward
+// reuses it offline, the same as a freshly registered store.
+func TestAdoptThenInitReuses(t *testing.T) {
+	home := isolateHomeUnbound(t)
+	requireUnbound(t)
+	t.Setenv(devconfig.EnvControlToken, testOrgToken)
+	clearAgentEnv(t)
+
+	key, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := writePEMKeyFile(t, key)
+	agentID := uuid.NewString()
+
+	reg := &countingReg{byName: map[string]*backend.AgentSummary{}}
+	a, _, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
+	p := &prompt.Scripted{Answers: []string{"y", agentID, "obx_pasted_by_hand", keyPath}}
+	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("adopt exit = %d; stderr=%q", code, errb.String())
+	}
+
+	release, err := devconfig.BindProvider("claude-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := devconfig.ResolveCredentialsFor("claude-code"); err != nil {
+		release()
+		t.Fatalf("ResolveCredentialsFor after adopt: %v", err)
+	}
+	release()
+
+	b, _, errb2 := testApp(nil)
+	b.newRegistrar = func(_, _, _ string) devinit.Registrar { return reg }
+	b.newPrompt = declineAdopt(t)
+	if code := b.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("second init exit = %d; stderr=%q", code, errb2.String())
+	}
+	if reg.creates != 0 {
+		t.Errorf("the second init registered instead of reusing: %d creates", reg.creates)
+	}
+	got := agentIDFromStore(t, home, "claude-code")
+	if got != agentID {
+		t.Errorf("agent id = %q, want the adopted %q", got, agentID)
+	}
+}
+
+// TestAdoptReplacingLegacyDiscardsItsSpool adopting over a legacy store runs
+// the same spool discard init does: the legacy identity's spooled events are
+// gone, counted, and announced, once WriteWorkloadIdentity's write succeeds.
+func TestAdoptReplacingLegacyDiscardsItsSpool(t *testing.T) {
+	home := isolateHomeOnly(t)
+	clearAgentEnv(t)
+	seedLegacyStore(t, home, "claude-code")
+
+	spoolDir := providers.SpoolDirFor("claude-code")
+	sp := hookflow.Spool{Dir: spoolDir}
+	for i, id := range []string{"e1", "e2"} {
+		if err := sp.Append(legacySpoolEvent("sess", id)); err != nil {
+			t.Fatalf("seed spool event %d: %v", i, err)
+		}
+	}
+
+	key, err := workloadauth.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := writePEMKeyFile(t, key)
+	agentID := uuid.NewString()
+
+	t.Setenv(devconfig.EnvControlToken, "")
+	a, out, errb := testApp(nil)
+	a.newRegistrar = func(_, _, _ string) devinit.Registrar { return panicReg{} }
+	p := &prompt.Scripted{Answers: []string{"y", agentID, "obx_pasted_by_hand", keyPath}}
+	a.newPrompt = func() (prompt.Prompter, error) { return p, nil }
+	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
+		t.Fatalf("adopt exit = %d; stderr=%q", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "discarded 2 events queued under the previous identity") {
+		t.Errorf("stdout missing the discard line:\n%s", out.String())
+	}
+	if got := sp.BacklogCount(); got != 0 {
+		t.Errorf("backlog after adopt = %d, want 0", got)
 	}
 }
 
@@ -702,8 +951,7 @@ func TestReuseGatesAgree(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				if err := devconfig.WriteConfig(filepath.Join(home, "claude-code", "dev.json"),
-					devconfig.Update{DID: "did:aip:legacy"}); err != nil {
+				if err := devconfig.SetLegacyDID(filepath.Join(home, "claude-code", "dev.json"), "did:aip:legacy"); err != nil {
 					t.Fatal(err)
 				}
 			},

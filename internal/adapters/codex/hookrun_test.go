@@ -105,7 +105,7 @@ func TestRunHook_MisuseIsSafe(t *testing.T) {
 // spool, no request.
 func TestLegacyStoreHookSendsNothing(t *testing.T) {
 	spool := setHookEnv(t)
-	if err := devconfig.WriteConfig(DefaultConfigPath(), devconfig.Update{DID: "did:aip:legacy-store"}); err != nil {
+	if err := devconfig.SetLegacyDID(DefaultConfigPath(), "did:aip:legacy-store"); err != nil {
 		t.Fatal(err)
 	}
 

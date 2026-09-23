@@ -36,6 +36,10 @@ type fakeRegistrar struct {
 	findErr                error
 	byName                 map[string]*backend.AgentSummary
 	lastReq                backend.CreateAgentRequest
+	// kidMismatch forces the returned Identity.Kid to stay whatever f.reg
+	// already set, instead of echoing the submitted JWK's own kid -- the one
+	// case that must NOT match, so the guard has something to catch.
+	kidMismatch bool
 }
 
 func (f *fakeRegistrar) Create(_ context.Context, req backend.CreateAgentRequest) (*backend.Registration, error) {
@@ -44,7 +48,15 @@ func (f *fakeRegistrar) Create(_ context.Context, req backend.CreateAgentRequest
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
-	return f.reg, nil
+	reg := *f.reg
+	// A real backend persists exactly the kid this machine submitted
+	// (agent-registration-identity.service.ts:429); echoing it here means a
+	// fixture's own Identity.Kid literal never has to match what
+	// workloadauth.PublicJWK derives from whichever key the case generated.
+	if !f.kidMismatch && req.IdentityVerification != nil {
+		reg.Identity.Kid = req.IdentityVerification.PublicJWK["kid"]
+	}
+	return &reg, nil
 }
 
 func (f *fakeRegistrar) FindByName(_ context.Context, name string) (*backend.AgentSummary, error) {
@@ -53,6 +65,39 @@ func (f *fakeRegistrar) FindByName(_ context.Context, name string) (*backend.Age
 		return nil, f.findErr
 	}
 	return f.byName[name], nil
+}
+
+// raceRegistrar simulates Create's own duplicate-name race: FindByName sees
+// nothing (or whatever byName says), but Create itself answers HTTP 400
+// "already exists in this organization" for a specific name (duplicateFor) or
+// for every call (alwaysDuplicate), the shape backend.IsDuplicateNameConflict
+// classifies.
+type raceRegistrar struct {
+	createCalls int
+	reg         *backend.Registration
+	byName      map[string]*backend.AgentSummary
+	lastReq     backend.CreateAgentRequest
+
+	duplicateFor    string
+	alwaysDuplicate bool
+}
+
+func (r *raceRegistrar) FindByName(_ context.Context, name string) (*backend.AgentSummary, error) {
+	return r.byName[name], nil
+}
+
+func (r *raceRegistrar) Create(_ context.Context, req backend.CreateAgentRequest) (*backend.Registration, error) {
+	r.createCalls++
+	r.lastReq = req
+	if r.alwaysDuplicate || req.AgentName == r.duplicateFor {
+		return nil, &backend.APIError{StatusCode: 400,
+			Body: `{"message":"Agent with name \"` + req.AgentName + `\" already exists in this organization"}`}
+	}
+	reg := *r.reg
+	if req.IdentityVerification != nil {
+		reg.Identity.Kid = req.IdentityVerification.PublicJWK["kid"]
+	}
+	return &reg, nil
 }
 
 type fakeInstaller struct {
@@ -180,8 +225,8 @@ func TestConfigAppliedWhenInstallerAvailable(t *testing.T) {
 	if inst.gotRef.AgentID != "agent-1" {
 		t.Errorf("installer got bad ref: %+v", inst.gotRef)
 	}
-	if inst.gotRef.DID != "" {
-		t.Errorf("installer ref carries a DID (%q); a v3 registration never persists one", inst.gotRef.DID)
+	if inst.gotRef.IdentityMethod != devconfig.IdentityMethodKeycloakWorkload {
+		t.Errorf("installer ref identity method = %q, want %q", inst.gotRef.IdentityMethod, devconfig.IdentityMethodKeycloakWorkload)
 	}
 }
 
@@ -222,12 +267,8 @@ func TestIdempotentReuseSkipsRegistration(t *testing.T) {
 	if reg.createCalls != 0 || reg.findCalls != 0 {
 		t.Errorf("reuse should not hit the network: create=%d find=%d", reg.createCalls, reg.findCalls)
 	}
-	wantDID, err := devconfig.AttributionDIDFor(existingAgentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Reused || res.AgentID != existingAgentID || res.DID != wantDID {
-		t.Errorf("res = %+v, want AgentID %q DID %q", res, existingAgentID, wantDID)
+	if !res.Reused || res.AgentID != existingAgentID || res.IdentityMethod != devconfig.IdentityMethodKeycloakWorkload {
+		t.Errorf("res = %+v, want AgentID %q identity method %q", res, existingAgentID, devconfig.IdentityMethodKeycloakWorkload)
 	}
 }
 
@@ -247,7 +288,7 @@ func TestLegacyStoreDoesNotReuse(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := devconfig.WriteConfig(filepath.Join(dir, "dev.json"), devconfig.Update{DID: "did:aip:existing"}); err != nil {
+	if err := devconfig.SetLegacyDID(filepath.Join(dir, "dev.json"), "did:aip:existing"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -266,22 +307,33 @@ func TestLegacyStoreDoesNotReuse(t *testing.T) {
 	}
 }
 
-func TestRemoteDuplicateBlocksWithoutForce(t *testing.T) {
+// TestExplicitNameTakenAlsoRegistersSuffixed the taken-name branch is
+// unconditional: an operator-chosen --name that collides gets the same
+// suffixed registration a default name does, rather than a halt.
+func TestExplicitNameTakenAlsoRegistersSuffixed(t *testing.T) {
 	isolateHome(t)
 	reg := &fakeRegistrar{
 		reg:    validReg(),
-		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9", DID: "did:aip:old"}},
+		byName: map[string]*backend.AgentSummary{"dev-x": {ID: "old-9", AgentName: "dev-x"}},
 	}
+	var out bytes.Buffer
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
-		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("expected duplicate error, got %v", err)
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &out,
+			Suffix: func() (string, error) { return "a1b2c3", nil }})
+	if err != nil {
+		t.Fatalf("a taken explicit name must register suffixed, not fail: %v", err)
 	}
-	if reg.createCalls != 0 {
-		t.Errorf("must not create over an existing agent: create=%d", reg.createCalls)
+	if reg.createCalls != 1 {
+		t.Errorf("want exactly one Create, got %d", reg.createCalls)
 	}
-	if res.AgentID != "old-9" {
-		t.Errorf("res.AgentID = %q, want old-9", res.AgentID)
+	if reg.lastReq.AgentName != "dev-x-a1b2c3" {
+		t.Errorf("Create got name %q, want the suffixed name", reg.lastReq.AgentName)
+	}
+	if !res.Registered {
+		t.Error("res.Registered should be true")
+	}
+	if s := out.String(); !strings.Contains(s, "old-9") || !strings.Contains(s, "dev-x-a1b2c3") {
+		t.Errorf("output does not name both the old agent and the new name:\n%s", s)
 	}
 }
 
@@ -315,11 +367,12 @@ func TestAPIErrorHalts(t *testing.T) {
 	}
 }
 
-// TestPartialFailureReportsAgentAndResume a credential write that fails after
-// the agent exists must name the registered agent and how to resume: its API
-// key and signing key were shown exactly once and are now unreachable, so a
-// bare I/O error would strand the user.
-func TestPartialFailureReportsAgentAndResume(t *testing.T) {
+// TestWriteFailureAfterCreateNamesTheOrphan a credential write that fails
+// after the agent already exists server-side must name that agent (id and
+// name) and say what to do next: re-run init, because its API key and signing
+// key were shown exactly once and are now unreachable, and the agent left
+// behind holds no usable key.
+func TestWriteFailureAfterCreateNamesTheOrphan(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("mode bits do not deny writes on Windows")
 	}
@@ -338,13 +391,19 @@ func TestPartialFailureReportsAgentAndResume(t *testing.T) {
 	reg := &fakeRegistrar{reg: validReg()}
 	res, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
 		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
-	if err == nil || !strings.Contains(err.Error(), "agent-1") || !strings.Contains(err.Error(), "rotate") {
-		t.Fatalf("expected resume guidance naming agent-1, got %v", err)
+	if err == nil {
+		t.Fatal("expected an error naming the orphaned agent")
+	}
+	msg := err.Error()
+	for _, want := range []string{"agent-1", "dev-x", "Re-run", "openbox init --provider claude-code", "orphaned"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the failure does not name %q:\n%s", want, msg)
+		}
 	}
 	if !res.Registered {
 		t.Error("agent was registered; res.Registered should be true")
 	}
-	if strings.Contains(err.Error(), "obx_test_SECRETKEYVALUE") || strings.Contains(err.Error(), "PRIVATESEEDVALUE") {
+	if strings.Contains(msg, "obx_test_SECRETKEYVALUE") || strings.Contains(msg, "PRIVATESEEDVALUE") {
 		t.Errorf("error leaked a credential value: %v", err)
 	}
 }
@@ -502,34 +561,130 @@ func TestReuseNeverFiresFromTheOrgStore(t *testing.T) {
 	}
 }
 
-// TestTheDuplicateNameHaltNamesTheCauseAndTheRemedy (owner ruling V4.) This
-// halt is what an upgraded machine hits when its old agent still exists in the
-// org under a name this install would reuse, and the remedy it used to give --
-// re-run `auth` and paste the agent id -- is a route that no longer exists.
-// A halt that names a dead route is worse than one that names none.
-func TestTheDuplicateNameHaltNamesTheCauseAndTheRemedy(t *testing.T) {
+// TestDefaultNameTakenRegistersSuffixed this is what an upgraded machine hits
+// when its old agent still exists in the org under the name this install
+// would otherwise reuse, or any lost-store re-init: rather than halt, it
+// registers under a suffixed name and prints both the old agent (id and name)
+// and the new one, so nothing about the recovery route depends on `auth`
+// pasting an agent id that this binary no longer has a prompt for.
+func TestDefaultNameTakenRegistersSuffixed(t *testing.T) {
 	isolateHome(t)
 	name := defaultAgentName("claude-code")
 	reg := &fakeRegistrar{
 		reg:    validReg(),
-		byName: map[string]*backend.AgentSummary{name: {ID: "old-9", DID: "did:aip:old"}},
+		byName: map[string]*backend.AgentSummary{name: {ID: "old-9", AgentName: name}},
 	}
-	_, err := Run(context.Background(), Options{Provider: "claude-code"},
-		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
-	if err == nil {
-		t.Fatal("a name already taken in the org must halt, not mint a second agent")
+	var out bytes.Buffer
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &out,
+			Suffix: func() (string, error) { return "a1b2c3", nil }})
+	if err != nil {
+		t.Fatalf("a taken default name must register suffixed, not halt: %v", err)
 	}
-	msg := err.Error()
-	for _, want := range []string{name, "old-9", "did:aip:old", "openbox init --provider claude-code", "adopt"} {
+	wantName := name + "-a1b2c3"
+	if reg.lastReq.AgentName != wantName {
+		t.Errorf("Create got name %q, want %q", reg.lastReq.AgentName, wantName)
+	}
+	if reg.createCalls != 1 {
+		t.Errorf("Create called %d times, want 1", reg.createCalls)
+	}
+	if !res.Registered {
+		t.Error("res.Registered should be true")
+	}
+	msg := out.String()
+	for _, want := range []string{name, "old-9", wantName} {
 		if !strings.Contains(msg, want) {
-			t.Errorf("the halt does not name %q:\n%s", want, msg)
+			t.Errorf("stdout does not name %q:\n%s", want, msg)
 		}
 	}
-	if strings.Contains(msg, "openbox auth") {
-		t.Errorf("the halt still offers `openbox auth`, which no longer registers anything:\n%s", msg)
+}
+
+// TestSuffixedInitReusesOnSecondRun a suffixed registration is written to this
+// machine's own store like any other; the second `init` for the same tool
+// reuses it offline and never re-suffixes, because it never reaches
+// FindByName at all.
+func TestSuffixedInitReusesOnSecondRun(t *testing.T) {
+	isolateHome(t)
+	name := defaultAgentName("claude-code")
+	reg := &fakeRegistrar{
+		reg:    validReg(),
+		byName: map[string]*backend.AgentSummary{name: {ID: "old-9", AgentName: name}},
 	}
-	if reg.createCalls != 0 {
-		t.Errorf("Create was called %d times after the halt", reg.createCalls)
+	deps := Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{},
+		Suffix: func() (string, error) { return "a1b2c3", nil }}
+
+	if _, err := Run(context.Background(), Options{Provider: "claude-code"}, deps); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if reg.createCalls != 1 || reg.findCalls != 1 {
+		t.Fatalf("first run: creates=%d finds=%d, want 1 and 1", reg.createCalls, reg.findCalls)
+	}
+
+	res, err := Run(context.Background(), Options{Provider: "claude-code"}, deps)
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if !res.Reused || res.Registered {
+		t.Errorf("second run: res = %+v, want Reused and not Registered", res)
+	}
+	if reg.createCalls != 1 || reg.findCalls != 1 {
+		t.Errorf("second run: creates=%d finds=%d, want unchanged at 1 and 1 (no re-suffixing)", reg.createCalls, reg.findCalls)
+	}
+}
+
+// TestCreateDuplicateRetriesOnceWithFreshSuffix the race Create itself can hit
+// (another process claims the same suffixed name first) is HTTP 400 with
+// "already exists in this organization", not a 409; one retry under a fresh
+// suffix, then give up.
+func TestCreateDuplicateRetriesOnceWithFreshSuffix(t *testing.T) {
+	isolateHome(t)
+	name := defaultAgentName("claude-code")
+	suffixes := []string{"a1b2c3", "d4e5f6"}
+	suffixCalls := 0
+	reg := &raceRegistrar{
+		reg:          validReg(),
+		byName:       map[string]*backend.AgentSummary{name: {ID: "old-9", AgentName: name}},
+		duplicateFor: name + "-a1b2c3",
+	}
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{},
+			Suffix: func() (string, error) {
+				s := suffixes[suffixCalls]
+				suffixCalls++
+				return s, nil
+			}})
+	if err != nil {
+		t.Fatalf("a duplicate-name race must retry once and succeed, got: %v", err)
+	}
+	if reg.createCalls != 2 {
+		t.Errorf("Create called %d times, want 2 (one race, one retry)", reg.createCalls)
+	}
+	wantName := name + "-d4e5f6"
+	if reg.lastReq.AgentName != wantName {
+		t.Errorf("the retry used name %q, want %q", reg.lastReq.AgentName, wantName)
+	}
+	if !res.Registered {
+		t.Error("res.Registered should be true after the retry succeeds")
+	}
+}
+
+// TestCreateDuplicateFailsAfterOneRetry a persistent race (or a name someone
+// else is actively claiming) must fail with the backend's own body rather
+// than loop.
+func TestCreateDuplicateFailsAfterOneRetry(t *testing.T) {
+	isolateHome(t)
+	reg := &raceRegistrar{reg: validReg(), alwaysDuplicate: true}
+	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{},
+			Suffix: func() (string, error) { return "a1b2c3", nil }})
+	if err == nil {
+		t.Fatal("a persistent duplicate-name race must fail, not loop or succeed")
+	}
+	if reg.createCalls != 2 {
+		t.Errorf("Create called %d times, want exactly 2 (one retry, then give up)", reg.createCalls)
+	}
+	if !strings.Contains(err.Error(), "already exists in this organization") {
+		t.Errorf("failure does not carry the backend's own body:\n%v", err)
 	}
 }
 
@@ -738,5 +893,161 @@ func TestSecondInitReusesWithoutRegistering(t *testing.T) {
 	if envBefore[devconfig.EnvAPIKeyDirect] != envAfter[devconfig.EnvAPIKeyDirect] ||
 		envBefore[devconfig.EnvWorkloadPrivateKey] != envAfter[devconfig.EnvWorkloadPrivateKey] {
 		t.Errorf("credential file changed across the reuse run: before=%v after=%v", envBefore, envAfter)
+	}
+}
+
+// TestInitTranslatesCreateConflicts the three known create-time 409 classes
+// each get a message a developer can act on; the generic aivss HALT wording
+// never appears for them. An unrecognized 409 still falls to that generic
+// text.
+func TestInitTranslatesCreateConflicts(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantSubstr string
+		wantHalt   bool
+	}{
+		{
+			name:       "idp not initialized",
+			body:       `{"message":"The organization identity provider must be initialized before creating a workload-authenticated agent"}`,
+			wantSubstr: "ask your OpenBox admin",
+		},
+		{
+			name:       "external idp",
+			body:       `{"message":"The selected identity does not belong to the active identity provider"}`,
+			wantSubstr: "external provider (Okta/Entra)",
+		},
+		{
+			name:       "idp changed",
+			body:       `{"message":"The active identity provider changed during agent registration"}`,
+			wantSubstr: "changed during registration",
+		},
+		{
+			name:     "unknown 409 falls to the generic HALT",
+			body:     `{"message":"The selected workload identity is not active, verified, and eligible"}`,
+			wantHalt: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateHome(t)
+			reg := &fakeRegistrar{createErr: &backend.APIError{StatusCode: 409, Body: tt.body}}
+			_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
+				Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			msg := err.Error()
+			if tt.wantHalt {
+				if !strings.Contains(msg, "HALT: agent/create") {
+					t.Errorf("unknown 409 lost the generic HALT text: %s", msg)
+				}
+				return
+			}
+			if strings.Contains(msg, "HALT: agent/create") {
+				t.Errorf("a known 409 class still shows the generic HALT: %s", msg)
+			}
+			if !strings.Contains(msg, tt.wantSubstr) {
+				t.Errorf("message = %q, want it to contain %q", msg, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+// TestLegacyNoticePrintsOnceBeforeRegistering a legacy store means hooks have
+// been sending nothing; that has to be said once, before the registration
+// that replaces it, not folded silently into the success output.
+func TestLegacyNoticePrintsOnceBeforeRegistering(t *testing.T) {
+	dir := isolateHome(t)
+	if err := devconfig.SetLegacyDID(filepath.Join(dir, "claude-code", "dev.json"), "did:aip:existing"); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &fakeRegistrar{reg: validReg()}
+	var out bytes.Buffer
+	if _, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &out}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	s := out.String()
+	if n := strings.Count(s, "legacy (pre-IAMv3) identity"); n != 1 {
+		t.Errorf("legacy notice printed %d times, want exactly 1:\n%s", n, s)
+	}
+}
+
+// TestInitReplacesLegacyStoreCleanly the end state of registering over a
+// legacy store has no DID, no seed, and a v3 identity_method; the second init
+// afterward reuses it silently (no re-registration, no repeated notice).
+func TestInitReplacesLegacyStoreCleanly(t *testing.T) {
+	dir := isolateHome(t)
+	envPath, err := devconfig.EnvFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := devconfig.WriteEnvFile(envPath, map[string]string{
+		devconfig.EnvAPIKeyDirect:    "obx_legacy",
+		devconfig.EnvAgentPrivateKey: "legacyseed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(dir, "claude-code", "dev.json")
+	if err := devconfig.SetLegacyDID(cfgPath, "did:aip:legacy"); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := &fakeRegistrar{reg: validReg()}
+	res, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !res.Registered {
+		t.Fatal("expected a fresh registration over the legacy store")
+	}
+
+	kv := readCredentialFile(t)
+	if _, ok := kv[devconfig.EnvAgentPrivateKey]; ok {
+		t.Errorf("legacy seed survived the write: %v", kv)
+	}
+	cfg, err := devconfig.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DID != "" {
+		t.Errorf("DID survived the write: %q", cfg.DID)
+	}
+	if cfg.IdentityMethod != devconfig.IdentityMethodKeycloakWorkload {
+		t.Errorf("identity_method = %q, want %q", cfg.IdentityMethod, devconfig.IdentityMethodKeycloakWorkload)
+	}
+
+	res2, err := Run(context.Background(), Options{Provider: "claude-code"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if !res2.Reused || res2.Registered {
+		t.Errorf("second run: res = %+v, want Reused and not Registered", res2)
+	}
+	if reg.createCalls != 1 {
+		t.Errorf("Create called %d times across both runs, want 1", reg.createCalls)
+	}
+}
+
+// TestRegisteredKidMustMatchSubmittedJWK a backend that persisted a different
+// key than the one this machine proved possession of would fail exchange on
+// every hook call, silently (fail-open); the mismatch must be caught before
+// any credential is written, not discovered later at exchange.
+func TestRegisteredKidMustMatchSubmittedJWK(t *testing.T) {
+	isolateHome(t)
+	r := validReg()
+	r.Identity.Kid = "kid-from-a-different-key"
+	reg := &fakeRegistrar{reg: r, kidMismatch: true}
+	_, err := Run(context.Background(), Options{Provider: "claude-code", AgentName: "dev-x"},
+		Deps{GenerateKey: fixedGenerateKey, Registrar: reg, Installer: &fakeInstaller{}, Out: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("expected a kid-mismatch refusal, got %v", err)
+	}
+	if kv := readCredentialFile(t); len(kv) != 0 {
+		t.Errorf("no credentials should be written on a kid mismatch, got %v", kv)
 	}
 }

@@ -32,19 +32,20 @@ func TestLegacyStoreDetection(t *testing.T) {
 			t.Setenv(EnvConfigPath, "")
 
 			if tc.did != "" || tc.name == "clean v3 store" {
-				u := Update{}
-				if tc.did != "" {
-					u.DID = tc.did
-				} else {
-					u.AgentID = "agent-1"
-					u.IdentityMethod = IdentityMethodKeycloakWorkload
-				}
 				cfgPath, err := DevConfigWritePathFor("codex")
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := WriteConfig(cfgPath, u); err != nil {
-					t.Fatal(err)
+				if tc.did != "" {
+					if err := SetLegacyDID(cfgPath, tc.did); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					if err := WriteConfig(cfgPath, Update{
+						AgentID: "agent-1", IdentityMethod: IdentityMethodKeycloakWorkload,
+					}); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 
