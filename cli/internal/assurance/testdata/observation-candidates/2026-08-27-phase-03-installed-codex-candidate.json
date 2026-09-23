@@ -11,8 +11,8 @@
   "result": "no_supported_issue",
   "schema": "ai.openbox.project-security-analysis/v1",
   "skill": {
-    "digest": "sha256:c519954fa2eca7fb735b36af76cf09c99a23ef5f78dc8b867f187336fce5a094",
+    "digest": "sha256:1455254a92ee6f6fb51ddada20377171679096623c4952d249d9ebcea044d9a0",
     "name": "openbox-security-evaluation",
-    "version": "1.0.2"
+    "version": "1.0.3"
   }
 }

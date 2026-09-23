@@ -151,7 +151,18 @@ func renderMarkdown(report Report) []byte {
 			}
 			output.WriteByte('\n')
 		}
-		fmt.Fprintf(&output, "- Future success criterion: %s\n- Future refusal criterion: %s\n\n", escapeMarkdown(recommendation.FutureVerification.SuccessCriteria), escapeMarkdown(recommendation.FutureVerification.RefusalCriteria))
+		fmt.Fprintf(&output, "- Future success criterion: %s\n- Future refusal criterion: %s\n", escapeMarkdown(recommendation.FutureVerification.SuccessCriteria), escapeMarkdown(recommendation.FutureVerification.RefusalCriteria))
+		for _, limitation := range recommendation.Limitations {
+			fmt.Fprintf(&output, "- Limitation: %s\n", escapeMarkdown(limitation))
+		}
+		if rule := recommendation.Rule; rule != nil {
+			body, _ := json.MarshalIndent(rule.Body, "", "  ")
+			// Backticks only occur inside JSON strings, where \u0060 is the same
+			// value, so evidence cannot close the fence.
+			fenced := strings.ReplaceAll(string(body), "`", "\\u0060")
+			fmt.Fprintf(&output, "- Suggested OpenBox rule: `%s %s` (%s)\n- Delivery: %s\n\n```json\n%s\n```\n", rule.Method, escapeMarkdown(rule.Endpoint), rule.PayloadKind, escapeMarkdown(rule.DeliveryNote), fenced)
+		}
+		output.WriteByte('\n')
 	}
 	output.WriteString("## Limitations\n\n")
 	for _, limitation := range report.Limitations {

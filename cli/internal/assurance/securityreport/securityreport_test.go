@@ -658,3 +658,55 @@ func makePackRemovable(t *testing.T, root string) {
 		_ = os.Chmod(root, 0o700)
 	})
 }
+
+// A suggested rule is filled from the evidence, in the exact policy_builder v2
+// shape, and routed to the only delivery that does not silently deactivate the
+// agent's policy: PUT-merge into the active one, POST only when there is none.
+func TestExcessiveAgencySuggestsAnApprovalPolicyRule(t *testing.T) {
+	issue := Issue{
+		IssueID:   "issue:2222222222222222222222222222222222222222222222222222222222222222",
+		Action:    &Action{Class: "tool_activity", Name: "sendSupportReport", SourceEvidenceID: "backend-1"},
+		Standards: []StandardReference{{Catalog: "OWASP_LLM", Version: "2025", ID: "LLM06"}},
+	}
+	ruleFor := func(posture *targetposture.Posture) *SuggestedRule {
+		t.Helper()
+		_, recommendations, err := mapRecommendations([]Issue{issue}, posture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var rules []*SuggestedRule
+		for _, recommendation := range recommendations {
+			if recommendation.Rule != nil {
+				if recommendation.CatalogEntryID != "human-authorization" {
+					t.Fatalf("rule on %s", recommendation.CatalogEntryID)
+				}
+				rules = append(rules, recommendation.Rule)
+			}
+		}
+		if len(rules) != 1 {
+			t.Fatalf("want exactly one suggested rule, got %d", len(rules))
+		}
+		return rules[0]
+	}
+
+	empty := validPosture("sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	rule := ruleFor(empty)
+	if rule.Method != "POST" || rule.Endpoint != "/agent/"+empty.Agent.ID+"/policies" || rule.PayloadKind != "policy_builder_v2_rule" {
+		t.Fatalf("no-policy delivery = %s %s %s", rule.Method, rule.Endpoint, rule.PayloadKind)
+	}
+	if rule.Body["decision"] != "REQUIRE_APPROVAL" || rule.Body["matchMode"] != "any" {
+		t.Fatalf("body = %#v", rule.Body)
+	}
+	condition := rule.Body["conditions"].([]any)[0].(map[string]any)
+	if condition["operator"] != "equals" ||
+		condition["left"].(map[string]any)["field"] != "activity_type" ||
+		condition["right"].(map[string]any)["value"] != "sendSupportReport" {
+		t.Fatalf("condition = %#v", condition)
+	}
+
+	withPolicy := validPosture("sha256:1111111111111111111111111111111111111111111111111111111111111111")
+	withPolicy.Policies = []targetposture.Policy{{ID: "policy-1", VersionHash: "v1", Active: true, Current: true, Opaque: true}}
+	if rule := ruleFor(withPolicy); rule.Method != "PUT" || rule.Endpoint != "/agent/"+withPolicy.Agent.ID+"/policies/policy-1" {
+		t.Fatalf("active-policy delivery = %s %s", rule.Method, rule.Endpoint)
+	}
+}

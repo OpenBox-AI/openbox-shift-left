@@ -17,7 +17,7 @@ const (
 	ReportSchema                = "ai.openbox.project-security-report.report/v1"
 	RecommendationSchema        = "ai.openbox.project-recommendation-catalog/v1"
 	RecommendationVersion       = "2026-08-27-mvp1"
-	RecommendationDigest        = "sha256:88ffde4e3af016c07fd2d619d514e86c74e7b048c10ca65c843c3e672df55612"
+	RecommendationDigest        = "sha256:72535bda25d9ecfd5cc5fe7178216528e80ae38b0615ab87ec4e9bed5632cba2"
 	MaxCandidateBytes     int64 = 4 << 20
 )
 
@@ -140,6 +140,19 @@ type Recommendation struct {
 	ExpectedProtectedBehavior string               `json:"expected_protected_behavior"`
 	FutureVerification        FutureVerification   `json:"future_verification"`
 	Limitations               []string             `json:"limitations"`
+	// Rule is an applicable OpenBox control, present only where one can
+	// actually enforce the constraint. It is filled here from the evidence,
+	// never taken from the analyst, and the lane never applies it.
+	Rule *SuggestedRule `json:"rule,omitempty"`
+}
+
+// SuggestedRule is a control body in the exact shape its endpoint accepts.
+type SuggestedRule struct {
+	Method       string         `json:"method"`
+	Endpoint     string         `json:"endpoint"`
+	PayloadKind  string         `json:"payload_kind"`
+	Body         map[string]any `json:"body"`
+	DeliveryNote string         `json:"delivery_note"`
 }
 
 type Report struct {

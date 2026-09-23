@@ -17,13 +17,13 @@ import (
 
 const (
 	Name               = "openbox-security-evaluation"
-	Version            = "1.0.2"
+	Version            = "1.0.3"
 	BundleSchema       = "ai.openbox.security-skill-bundle/v1"
 	CandidateSchema    = "ai.openbox.project-security-analysis/v1"
 	CatalogSchema      = "ai.openbox.security-standards-catalog/v1"
 	CatalogVersion     = "2026-09-22-full"
-	RepositoryPath     = "cli/internal/securityskill/bundles/openbox-security-evaluation/1.0.2"
-	bundleRoot         = "bundles/openbox-security-evaluation/1.0.2"
+	RepositoryPath     = "cli/internal/securityskill/bundles/openbox-security-evaluation/1.0.3"
+	bundleRoot         = "bundles/openbox-security-evaluation/1.0.3"
 	BundleManifestName = "bundle.json"
 	MaxCandidateBytes  = 4 << 20
 )
@@ -39,7 +39,7 @@ var payloadPaths = [...]string{
 	"scripts/publish-candidate.sh",
 }
 
-//go:embed bundles/openbox-security-evaluation/1.0.2
+//go:embed bundles/openbox-security-evaluation/1.0.3
 var bundleFiles embed.FS
 
 type Descriptor struct {

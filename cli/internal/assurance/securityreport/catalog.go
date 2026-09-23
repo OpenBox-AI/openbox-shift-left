@@ -165,7 +165,46 @@ func recommendationFor(entry catalogEntry, issue Issue, posture *targetposture.P
 	default:
 		recommendation.Status = "new_gap"
 	}
+	if entry.ID == "human-authorization" && issue.Action != nil && recommendation.Status != "unavailable" {
+		recommendation.Rule = approvalPolicyRule(issue.Action.Name, posture)
+	}
 	return recommendation
+}
+
+// approvalPolicyRule gates the cited action behind human approval with a
+// policy rule — the one control OpenBox enforces on a single tool call. It is
+// ActivityStarted that carries activity_type, so the rule fires before the
+// tool runs, not after.
+func approvalPolicyRule(action string, posture *targetposture.Posture) *SuggestedRule {
+	rule := map[string]any{
+		"id":        "suggested-require-approval",
+		"name":      "Require approval: " + action,
+		"decision":  "REQUIRE_APPROVAL",
+		"reason":    action + " sends data out of the agent and must be approved by a person",
+		"matchMode": "any",
+		"conditions": []any{map[string]any{
+			"id":       "c1",
+			"left":     map[string]any{"kind": "field", "field": "activity_type", "transform": "value", "valueType": "string"},
+			"operator": "equals",
+			"right":    map[string]any{"kind": "literal", "value": action, "valueType": "string"},
+		}},
+	}
+	// An agent has one active policy, and POST deactivates it. So the rule is
+	// merged into the active policy when there is one.
+	for _, policy := range posture.Policies {
+		if policy.Active && policy.Current {
+			return &SuggestedRule{
+				Method: "PUT", Endpoint: "/agent/" + posture.Agent.ID + "/policies/" + policy.ID,
+				PayloadKind: "policy_builder_v2_rule", Body: rule,
+				DeliveryNote: "Append to config.policy_builder.rules of active policy " + policy.ID + " and PUT it; a POST would deactivate that policy. Or fix it in the project: set requireApproval on the " + action + " tool.",
+			}
+		}
+	}
+	return &SuggestedRule{
+		Method: "POST", Endpoint: "/agent/" + posture.Agent.ID + "/policies",
+		PayloadKind: "policy_builder_v2_rule", Body: rule,
+		DeliveryNote: "The agent has no active policy: POST {\"name\":\"Security baseline\",\"config\":{\"policy_builder\":{\"version\":2,\"rules\":[<rule>]}}}. Or fix it in the project: set requireApproval on the " + action + " tool.",
+	}
 }
 
 func seamFor(kind string, posture *targetposture.Posture) targetposture.Seam {

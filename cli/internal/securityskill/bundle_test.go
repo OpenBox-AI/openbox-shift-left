@@ -16,7 +16,7 @@ func TestBundleIdentityAndPublicReferenceParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Name != Name || manifest.Version != Version || manifest.Digest != "sha256:c519954fa2eca7fb735b36af76cf09c99a23ef5f78dc8b867f187336fce5a094" {
+	if manifest.Name != Name || manifest.Version != Version || manifest.Digest != "sha256:1455254a92ee6f6fb51ddada20377171679096623c4952d249d9ebcea044d9a0" {
 		t.Fatalf("manifest identity = %#v", manifest)
 	}
 	if lines := bytes.Count(files["SKILL.md"], []byte("\n")); lines >= 500 {
