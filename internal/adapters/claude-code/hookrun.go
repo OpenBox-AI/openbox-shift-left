@@ -197,11 +197,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		(hook == HookConfigChange && ev.Source != policySettingsSource)
 
 	if gated {
-		if info, halted := hookflow.SessionHalted(runID); halted {
-			if _, err := ad.Observe(hook, ev); err != nil {
-				logger.Printf("spool %s event: %v", hook, err)
-			}
-			nudgeFlush()
+		// haltReplayTriple picks the contract and the labels a halted session
+		// replays with, per hook: the same choice the gate's own escalation
+		// switch below makes.
+		haltReplayTriple := func() (hookflow.OutputContract, string, string) {
 			var c hookflow.OutputContract = promptContract
 			toolName, toolKind := promptToolKind, promptToolKind
 			switch hook {
@@ -211,7 +210,30 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			case HookConfigChange:
 				c, toolName, toolKind = configContract, configToolKind, configToolKind
 			}
-			hookflow.ReplaySessionHalt(logger, stdout, info, ev.SessionID, toolName, toolKind, c)
+			return c, toolName, toolKind
+		}
+		// onHalted renders a halted run's answer to this gated call: the same
+		// steps hookflow.ReplaySessionHalt takes (no server round-trip; the
+		// latch is the decided state), reimplemented here only because that
+		// helper does not report back the ApplyResult the gate's own
+		// post-drain latch re-read needs to return. Used both for the
+		// PRE-gate check right below (a run already halted before this call
+		// even started) and wired onto the gate itself (EnforceGate.OnHalted)
+		// for a halt this call's OWN drain step discovers -- one
+		// implementation of "how a halted run answers," not two.
+		onHalted := func(info hookflow.SessionHaltInfo) hookflow.ApplyResult {
+			if _, err := ad.Observe(hook, ev); err != nil {
+				logger.Printf("spool %s event: %v", hook, err)
+			}
+			nudgeFlush()
+			c, toolName, toolKind := haltReplayTriple()
+			dec, res := hookflow.SessionHaltReplay(logger, stdout, info, false, nil, toolName, c)
+			hookflow.RecordEnforcement(logger, ev.SessionID, toolKind, dec, res)
+			return res
+		}
+
+		if info, halted := hookflow.SessionHalted(runID); halted {
+			onHalted(info)
 			return
 		}
 
@@ -254,6 +276,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			SpoolObserve:     spoolObserve,
 			SpoolObserveHead: spoolObserveHead,
 			RunID:            runID,
+			Queue:            ad.Engine,
+			OnHalted:         onHalted,
+			ForceFlush:       func() { forceFlusher(logger, ev.SessionID) },
 		}
 		res := g.Run(context.Background(), logger, stdout, target)
 		if hook == HookUserPromptSubmit && !res.Emitted && ResolveFindings() {

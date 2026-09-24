@@ -128,7 +128,16 @@ func TestEnforcementConformance(t *testing.T) {
 		evalCreds(t, url)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
-		benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+		// A session id of its own, not "s": C2-C4 above ran their own gate
+		// against an unreachable control plane, and each left its own
+		// escalation's own observe copy queued (unanswered, never a failure)
+		// in "s"'s own head file. The gate now drains its own session's
+		// queue before it escalates (this phase's own change), so reusing
+		// "s" here would have this call's own drain deliver that backlog
+		// against the reachable server this subtest sets up, inflating the
+		// hit count this assertion checks for a reason unrelated to what it
+		// tests.
+		benign := `{"hook_event_name":"PreToolUse","session_id":"s5","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 		if out := run(t, benign); strings.TrimSpace(out) != "" {
 			t.Errorf("fail-closed must NOT block a real allow; got %q", out)
 		}

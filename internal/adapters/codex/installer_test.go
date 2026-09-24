@@ -70,7 +70,11 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 		switch ev {
 		case "SessionEnd":
 			wantTimeout = float64(sessionEndHookTimeoutSec)
-		case "PreToolUse":
+		case "PreToolUse", "UserPromptSubmit":
+			// UserPromptSubmit is gated and its own gate budgets its
+			// evaluation off the same shared Ceiling as PreToolUse; the
+			// install must give it the same raised bound or Codex kills the
+			// hook while the gate still believes it has more time left.
 			wantTimeout = float64(preToolUseHookTimeoutSec)
 		}
 		if h["timeout"] != wantTimeout {
@@ -368,5 +372,33 @@ func TestInstaller_ReInitKeepsPosture(t *testing.T) {
 	}
 	if cfg.AgentID != "agent-1" || cfg.BackendURL != "https://backend.example" {
 		t.Errorf("re-init dropped the sync coordinates: %+v", cfg)
+	}
+}
+
+// TestGatedHooks_DriveBothTheGateAndTheInstalledTimeout is the one source of
+// truth this adapter uses twice: RunHook's own gate check (hookrun.go) and
+// the installer's own raised-ceiling install (timeoutFor) must never define
+// the gated set independently, or the two can drift -- an install still
+// reflecting an old set would kill a gated hook while the gate itself still
+// believes it has the raised ceiling's worth of time.
+func TestGatedHooks_DriveBothTheGateAndTheInstalledTimeout(t *testing.T) {
+	for _, h := range []HookName{HookPreToolUse, HookUserPromptSubmit, HookPermissionRequest} {
+		if !h.Gated() {
+			t.Errorf("%s must be gated", h)
+		}
+		if got := timeoutFor(h); got != preToolUseHookTimeoutSec {
+			t.Errorf("%s installed timeout = %d, want the gated ceiling %d", h, got, preToolUseHookTimeoutSec)
+		}
+	}
+	for _, h := range []HookName{
+		HookSessionStart, HookPostToolUse, HookStop, HookSubagentStart,
+		HookSubagentStop, HookPreCompact, HookPostCompact,
+	} {
+		if h.Gated() {
+			t.Errorf("%s must not be gated", h)
+		}
+	}
+	if got := timeoutFor(HookSessionEnd); got != sessionEndHookTimeoutSec {
+		t.Errorf("SessionEnd timeout = %d, want %d (never the gated ceiling, even though it is not in the never-gated list above)", got, sessionEndHookTimeoutSec)
 	}
 }

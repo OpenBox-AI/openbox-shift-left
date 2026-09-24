@@ -31,15 +31,16 @@ const SourceApprovalUndecided = "approval:undecided"
 
 // AwaitApproval holds the tool call while a filed approval is decided, and
 // reports the answer. Ok is false when the hold ended with the request still
-// undecided; the caller turns that into a deny (see ApprovalUndecided).
-func (t Evaluator) AwaitApproval(ctx context.Context, logger *log.Logger, key client.ApprovalKey, enforceStart time.Time) (decision.Decision, bool) {
+// undecided; the caller turns that into a deny (see ApprovalUndecided). cl is
+// a client the caller already built and shares across its own drain,
+// escalation and approval hold -- a nil cl reports undecided at once, the
+// same as an exhausted budget.
+func (t Evaluator) AwaitApproval(ctx context.Context, logger *log.Logger, cl Governor, key client.ApprovalKey, enforceStart time.Time) (decision.Decision, bool) {
 	budget := t.HoldBudget(enforceStart, resolveApprovalHold())
 	if budget <= 0 {
 		return decision.Decision{}, false
 	}
-	cl, err := t.NewClient(logger)
-	if err != nil {
-		logger.Printf("approval hold skipped (client init): %v", err)
+	if cl == nil {
 		return decision.Decision{}, false
 	}
 

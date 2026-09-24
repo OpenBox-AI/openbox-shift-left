@@ -2,6 +2,7 @@ package hookflow
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync/atomic"
 	"time"
@@ -137,7 +138,41 @@ func (t Evaluator) remaining(enforceStart time.Time) time.Duration {
 	return EnforceBudget(t.Ceiling) - time.Since(enforceStart)
 }
 
-// Escalate runs one bounded evaluation for an already-mapped event.
+// errNoTransport is Evaluator.buildClient's own "nothing configured" case:
+// no Evaluator.NewClient function was ever set, as opposed to one that was
+// set and failed. logTransportFailure tells the two apart in what it logs;
+// every caller of buildClient treats them identically otherwise (an
+// unattempted escalation, a skipped drain, an approval hold that reports
+// undecided at once).
+var errNoTransport = errors.New("no control-plane transport configured")
+
+// buildClient is the one "get a client, or the reason there isn't one" step
+// every entry point into an evaluation shares: Escalate and run (each still
+// building their own, single-step client) and a gate run's own ONE shared
+// client (EnforceGate's Run, built once for its drain, escalation and
+// approval-hold steps together).
+func (t Evaluator) buildClient(logger *log.Logger) (Governor, error) {
+	if t.NewClient == nil {
+		return nil, errNoTransport
+	}
+	return t.NewClient(logger)
+}
+
+// logTransportFailure logs why a client for this evaluation is not
+// available, in the exact wording Escalate/run have always used: the
+// "nothing configured" case that never even tried to dial, and a caller
+// that reached the control plane's own transport constructor and got an
+// error back from it.
+func logTransportFailure(logger *log.Logger, err error) {
+	if errors.Is(err, errNoTransport) {
+		logger.Print("evaluation degrading: no control-plane transport configured")
+		return
+	}
+	logger.Printf("inline evaluation degrading (client init): %v", err)
+}
+
+// Escalate runs one bounded evaluation for an already-mapped event, building
+// its own client via t.NewClient.
 //
 // budget<=0 never even builds a client: this call's own escalation was
 // unattempted from the start, the same as a NewClient failure, so it reports
@@ -145,6 +180,25 @@ func (t Evaluator) remaining(enforceStart time.Time) time.Duration {
 // would immediately see its own ctx already expired and misreport
 // EscalationUnanswered.
 func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.DevEvent, budget time.Duration) decision.Decision {
+	if budget <= 0 {
+		logger.Print("inline evaluation degrading: no evaluation budget remaining")
+		t.reportOutcome(EscalationNotAttempted)
+		return EvaluationFailOpen("no evaluation budget remaining")
+	}
+	cl, err := t.buildClient(logger)
+	if err != nil {
+		logTransportFailure(logger, err)
+		t.reportOutcome(EscalationNotAttempted)
+		return EvaluationFailOpen("control plane unreachable")
+	}
+	return t.EscalateWith(ctx, logger, cl, ev, budget)
+}
+
+// EscalateWith is Escalate with a client the caller already built and shares
+// across its own drain, escalation and approval hold: the identical
+// bounded, single-attempt evaluation and outcome reporting, minus the
+// client build Escalate does on its own behalf.
+func (t Evaluator) EscalateWith(ctx context.Context, logger *log.Logger, cl Governor, ev client.DevEvent, budget time.Duration) decision.Decision {
 	if budget <= 0 {
 		logger.Print("inline evaluation degrading: no evaluation budget remaining")
 		t.reportOutcome(EscalationNotAttempted)
@@ -167,7 +221,7 @@ func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.D
 	defer cancel()
 
 	resultCh := make(chan decision.Decision, 1)
-	go func() { resultCh <- runner.run(cctx, logger, ev) }()
+	go func() { resultCh <- runner.runWith(cctx, logger, ev, cl) }()
 
 	select {
 	case dec := <-resultCh:
@@ -186,14 +240,21 @@ func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.D
 }
 
 func (t Evaluator) run(cctx context.Context, logger *log.Logger, ev client.DevEvent) decision.Decision {
-	if t.NewClient == nil {
-		logger.Print("evaluation degrading: no control-plane transport configured")
+	cl, err := t.buildClient(logger)
+	if err != nil {
+		logTransportFailure(logger, err)
 		t.reportOutcome(EscalationNotAttempted)
 		return EvaluationFailOpen("control plane unreachable")
 	}
-	cl, err := t.NewClient(logger)
-	if err != nil {
-		logger.Printf("inline evaluation degrading (client init): %v", err)
+	return t.runWith(cctx, logger, ev, cl)
+}
+
+// runWith is run's own emit-and-classify step, factored out so EscalateWith
+// (a caller that already built its own client) can reuse the exact same
+// unanswered-vs-explicit-failure discriminator without building a second
+// client for the same escalation.
+func (t Evaluator) runWith(cctx context.Context, logger *log.Logger, ev client.DevEvent, cl Governor) decision.Decision {
+	if cl == nil {
 		t.reportOutcome(EscalationNotAttempted)
 		return EvaluationFailOpen("control plane unreachable")
 	}

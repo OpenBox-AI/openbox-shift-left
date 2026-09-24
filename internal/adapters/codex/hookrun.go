@@ -149,8 +149,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// Enforcement is always on now (ResolveEnforce always reports true): every
 	// gated hook always runs the gate below and reads the latch. There is no
 	// longer an observe-only branch for these three hook classes.
-	gated := hook == HookPreToolUse || hook == HookUserPromptSubmit ||
-		hook == HookPermissionRequest
+	//
+	// hook.Gated() (installer.go) is the one source of truth for this set,
+	// shared with the installer's own raised-ceiling install: an independent
+	// boolean expression here could drift from what got installed.
+	gated := hook.Gated()
 
 	if gated {
 		// The latch is keyed by session id because the gate below sets no RunID,
@@ -158,14 +161,29 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// must move together: adding a RunID to the gate literal without changing
 		// this call would write the latch under one key and read it under another,
 		// silently un-halting a terminated session.
-		if info, halted := hookflow.SessionHalted(ev.SessionID); halted {
+		//
+		// onHalted renders a halted run's answer to this gated call: the same
+		// steps hookflow.ReplaySessionHalt takes (no server round-trip; the
+		// latch is the decided state), reimplemented here only because that
+		// helper does not report back the ApplyResult the gate's own
+		// post-drain latch re-read needs to return. Used both for the
+		// PRE-gate check right below (a run already halted before this call
+		// even started) and wired onto the gate itself (EnforceGate.OnHalted)
+		// for a halt this call's OWN drain step discovers -- one
+		// implementation of "how a halted run answers," not two.
+		onHalted := func(info hookflow.SessionHaltInfo) hookflow.ApplyResult {
 			if _, err := ad.Observe(hook, ev); err != nil {
 				logger.Printf("spool %s event: %v", hook, err)
 			}
 			nudgeFlush()
 			c, toolName, toolKind := haltReplayTriple(hook, ev)
-			// The latch IS the decided state: no /evaluate round trip.
-			hookflow.ReplaySessionHalt(logger, stdout, info, ev.SessionID, toolName, toolKind, c)
+			dec, res := hookflow.SessionHaltReplay(logger, stdout, info, false, nil, toolName, c)
+			hookflow.RecordEnforcement(logger, ev.SessionID, toolKind, dec, res)
+			return res
+		}
+
+		if info, halted := hookflow.SessionHalted(ev.SessionID); halted {
+			onHalted(info)
 			return
 		}
 
@@ -208,6 +226,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			SpoolObserve:     spoolObserve,
 			SpoolObserveHead: spoolObserveHead,
 			// RunID deliberately unset: see the latch-key note above.
+			Queue:      ad.Engine,
+			OnHalted:   onHalted,
+			ForceFlush: func() { forceFlusher(logger, ev.SessionID) },
 		}
 		res := g.Run(context.Background(), logger, stdout, target)
 		// A gate that already wrote owns stdout; appending findings after it

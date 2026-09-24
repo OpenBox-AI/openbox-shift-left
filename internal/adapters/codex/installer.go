@@ -265,15 +265,31 @@ func (i Installer) hookCommand(event string) string {
 	return `"` + engine + `" hook codex ` + event
 }
 
+// gatedHooks is the one source of truth for which Codex hook classes run the
+// enforcement gate (RunHook's own `gated` check, hookrun.go) and therefore
+// need the raised ceiling at install time (timeoutFor, below): PreToolUse
+// and PermissionRequest can each hold for a real approval decision (a
+// tighter bound would time out mid-decision and fail the call open, which
+// is the one outcome this surface must never produce), and UserPromptSubmit
+// budgets its own evaluation off this SAME ceiling (evaluator.Ceiling,
+// shared across every gated class) -- an install still at the old 5s bound
+// would kill the hook mid-evaluation (or mid gate-drain) while the
+// evaluator itself still believes it has up to 30s. Defining the gated set
+// independently in two places let them drift; this is read by both.
+var gatedHooks = map[HookName]bool{
+	HookPreToolUse:        true,
+	HookPermissionRequest: true,
+	HookUserPromptSubmit:  true,
+}
+
+// Gated reports whether hook runs the enforcement gate.
+func (h HookName) Gated() bool { return gatedHooks[h] }
+
 func timeoutFor(ev HookName) int {
-	switch ev {
-	case HookSessionEnd:
+	switch {
+	case ev == HookSessionEnd:
 		return sessionEndHookTimeoutSec
-	// Both gating hooks can hold for a real approval decision, so both carry the
-	// raised ceiling. PermissionRequest is the escalation itself: a tighter bound
-	// here would time out mid-decision and fail the call open, which is the one
-	// outcome this surface must never produce.
-	case HookPreToolUse, HookPermissionRequest:
+	case ev.Gated():
 		return preToolUseHookTimeoutSec
 	}
 	return hotHookTimeoutSec

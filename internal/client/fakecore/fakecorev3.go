@@ -35,6 +35,11 @@ import (
 // requires, restated from workloadauth's own copy for the reason given above.
 const v3ClientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
 
+// headerIdempotencyKey restates client.headerIdempotencyKey (unexported in
+// that package, and this file already keeps its own copy of every wire
+// constant it grades rather than importing the client under test).
+const headerIdempotencyKey = "Idempotency-Key"
+
 // v3AttributionAIPNamespace restates devconfig.AttributionAIPNamespace
 // (verified against core openbox_did.go:30 and backend aip-namespace.ts).
 // TestFakecoreAttributionDIDMatchesTheVerifiedVector pins the same vector
@@ -147,6 +152,43 @@ func (f *Server) V3EvaluateAttempts() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.v3EvaluateAttempts
+}
+
+// AttemptsByKey counts every v3 evaluate request, accepted or not, grouped
+// by its own Idempotency-Key header -- the same key a re-sent attempt for
+// the SAME event carries again. fakecore never dedupes (this package's own
+// doc comment), so "core kept one copy" is never a fact this fake can prove;
+// what a caller CAN prove is that two requests for the same event carried
+// equal keys, which is what a legitimate re-send (an attempt still
+// unanswered when a gate's own drain step had to stop waiting) looks like on
+// the wire, and a raw Hits/V3EvaluateAttempts count cannot distinguish that
+// from two different events.
+func (f *Server) AttemptsByKey() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]int, len(f.v3EvaluateKeys))
+	for _, k := range f.v3EvaluateKeys {
+		out[k]++
+	}
+	return out
+}
+
+// HeldByKey narrows AttemptsByKey to the attempts this Script's own Delay/
+// DelayFor actually held (a positive delay was applied) rather than
+// answered immediately, refused outright, or never reached far enough to
+// know its own event_type at all (an outage, an auth failure, or a
+// rejected body never holds anything). A grader can subtract this from
+// AttemptsByKey to tell "resent because THIS attempt's own answer was held
+// past the caller's own budget" apart from any other reason an event might
+// be resent.
+func (f *Server) HeldByKey() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]int, len(f.v3EvaluateHeldKeys))
+	for _, k := range f.v3EvaluateHeldKeys {
+		out[k]++
+	}
+	return out
 }
 
 // TokenEndpointDown makes the next bootstrap document's token_endpoint point
@@ -344,8 +386,16 @@ func (f *Server) writeV3Unauthorized(w http.ResponseWriter) {
 }
 
 func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []byte) {
+	// Recorded here, unconditionally, alongside the attempt counter itself:
+	// every branch below (auth, a malformed body, wire-shape, an outage) can
+	// still return early, and AttemptsByKey's whole point is to prove a
+	// caller sent a SPECIFIC event twice regardless of how far either
+	// attempt got -- undercounting an early-refused attempt would hide
+	// exactly the double-send it exists to catch.
+	idemKey := r.Header.Get(headerIdempotencyKey)
 	f.mu.Lock()
 	f.v3EvaluateAttempts++
+	f.v3EvaluateKeys = append(f.v3EvaluateKeys, idemKey)
 	f.mu.Unlock()
 
 	if !f.v3AuthOK(r) {
@@ -376,7 +426,10 @@ func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []b
 	} else {
 		f.scripted++
 	}
-	delay := f.script.Delay
+	delay := f.script.delayFor(rec.EventType())
+	if delay > 0 {
+		f.v3EvaluateHeldKeys = append(f.v3EvaluateHeldKeys, idemKey)
+	}
 	f.mu.Unlock()
 
 	// Same knob as the v1 route (fakecore.go's serveEvaluate): a scenario

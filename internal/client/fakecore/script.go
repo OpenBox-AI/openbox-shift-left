@@ -18,6 +18,26 @@ type Script struct {
 	AlwaysStatus int
 	// Delay holds each response, for the timeout paths.
 	Delay time.Duration
+	// DelayFor holds the response for one specific wire event_type (e.g.
+	// "SessionStarted", "ToolCall") instead of every request, keyed by the
+	// same string Received.EventType() reads back. A scenario proving "core
+	// durably accepted this event but was slow to answer" (a caller's own
+	// attempt gives up on the response, not on whether the event stuck)
+	// wants this rather than Delay: the v3 evaluate route already appends an
+	// accepted request to the inbox BEFORE holding the response either way,
+	// so DelayFor changes nothing about acceptance, only which class of
+	// event the hold applies to. Absent for a given event_type falls back to
+	// Delay.
+	DelayFor map[string]time.Duration
+}
+
+// delayFor picks this event's own hold: DelayFor[eventType] when present,
+// else the blanket Delay.
+func (s Script) delayFor(eventType string) time.Duration {
+	if d, ok := s.DelayFor[eventType]; ok {
+		return d
+	}
+	return s.Delay
 }
 
 const allowVerdict = `{"governance_event_id":"ge","verdict":"allow","risk_score":0.1,"action":"continue","fallback_used":false}`

@@ -128,6 +128,14 @@ type Server struct {
 	v3BootstrapFailReason string
 	v3ExchangeFailStatus  int
 	v3ExchangeFailError   string
+	// v3EvaluateKeys is every v3 evaluate request's own Idempotency-Key
+	// header, in arrival order, over EVERY request (accepted or not, an
+	// outage included) -- AttemptsByKey's own backing store.
+	v3EvaluateKeys []string
+	// v3EvaluateHeldKeys is the Idempotency-Key header of every v3 evaluate
+	// request this Script's own Delay/DelayFor actually held (delay > 0) --
+	// HeldByKey's own backing store, a subset of v3EvaluateKeys.
+	v3EvaluateHeldKeys []string
 }
 
 // New starts a fake core. The workload identity a client under test

@@ -150,6 +150,99 @@ func TestGate_ObserveCopyQueuedToHeadWhenEscalationOutlivesItsBudget(t *testing.
 	}
 }
 
+// TestGate_UnansweredEscalationGoesToHeadWhenTheDrainLeftNothingBehind is the
+// same budget-exceeded escalation as above, but with a queue wired and
+// nothing in it: the drain (or the lack of anything to drain) already
+// leaves nothing behind, so the head is exactly where the tail is, and the
+// unanswered outcome still goes there.
+func TestGate_UnansweredEscalationGoesToHeadWhenTheDrainLeftNothingBehind(t *testing.T) {
+	isolateConfig(t)
+	isolateMarkers(t)
+	t.Setenv(devconfig.EnvTier2, "1")
+	t.Setenv(devconfig.EnvApprovalHold, "50")
+	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	defer devconfig.Pin()()
+
+	engine := NewEngine(t.TempDir())
+
+	gov := slowGovernor{fakeGovernor: &fakeGovernor{}, emitted: make(chan struct{})}
+	var spooledTail, spooledHead bool
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 20 * time.Millisecond,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record:           func(decision.Decision, ApplyResult) {},
+		SpoolObserve:     func() { spooledTail = true },
+		SpoolObserveHead: func() { spooledHead = true },
+		Queue:            engine,
+	}
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+
+	<-gov.emitted
+
+	if !spooledHead {
+		t.Error("an empty queue leaves nothing behind; the unanswered outcome must still go to the head")
+	}
+	if spooledTail {
+		t.Error("an empty queue must not route an unanswered outcome to the tail")
+	}
+}
+
+// TestGate_UnansweredEscalationGoesToTailWhenTheDrainLeftSomethingBehind an
+// undrained predecessor of the SAME session is still queued behind this
+// call's own drain step (its own attempt never got an answer either, so it
+// was correctly requeued rather than scored a failure): this call's own
+// unanswered escalation must NOT be queued to the head, which would let it
+// overtake that predecessor. It goes to the tail instead, same as an
+// ordinary first attempt.
+func TestGate_UnansweredEscalationGoesToTailWhenTheDrainLeftSomethingBehind(t *testing.T) {
+	isolateConfig(t)
+	isolateMarkers(t)
+	t.Setenv(devconfig.EnvTier2, "1")
+	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	defer devconfig.Pin()()
+
+	engine := NewEngine(t.TempDir())
+	seedQueued(t, engine, "sess-1", "seed-1", client.EventToolCall)
+
+	// Both the queued predecessor and this call's own escalation event never
+	// hear back within their own attempt window.
+	gov := &orderedGovernor{fakeGovernor: &fakeGovernor{}, sleepUntilDone: map[string]bool{
+		"seed-1": true, "evt-1": true,
+	}}
+	var spooledTail, spooledHead bool
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 20 * time.Millisecond,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record:           func(decision.Decision, ApplyResult) {},
+		SpoolObserve:     func() { spooledTail = true },
+		SpoolObserveHead: func() { spooledHead = true },
+		Queue:            engine,
+	}
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+
+	if !spooledTail {
+		t.Error("an undrained predecessor must route this call's own unanswered event to the tail, not the head")
+	}
+	if spooledHead {
+		t.Error("routing to the head here would let this call's own event overtake its undrained predecessor")
+	}
+	if n := engine.Spool.PendingCount("sess-1"); n == 0 {
+		t.Error("the predecessor must still be queued (requeued, not delivered) for this to be a meaningful test")
+	}
+}
+
 // TestGate_ObserveCopySpooledOnStaleGateEarlyReturn is deleted with the stale
 // gate : there is no local bundle to be stale, so no early return before the
 // evaluation.
@@ -218,4 +311,72 @@ func spooledLines(t *testing.T, e *Engine, sessionID string) int {
 		t.Fatalf("read spool: %v", err)
 	}
 	return len(NonEmptyLines(data))
+}
+
+// TestGate_UnansweredEscalationGoesToTailWhenASameSessionAppendLandsDuringEscalation
+// a lane daemon shares this session's own spool and can append a new event
+// for it WHILE this call's own escalation is still in flight: the routing
+// decision (tail vs. head) must be re-read at the time the outcome is
+// actually dispatched, not decided from a snapshot taken before the
+// escalation ran, or a same-session append landing mid-escalation would be
+// silently overtaken by this call's own event going to the head.
+func TestGate_UnansweredEscalationGoesToTailWhenASameSessionAppendLandsDuringEscalation(t *testing.T) {
+	isolateConfig(t)
+	isolateMarkers(t)
+	t.Setenv(devconfig.EnvTier2, "1")
+	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	defer devconfig.Pin()()
+
+	engine := NewEngine(t.TempDir())
+	// The queue starts EMPTY: a snapshot taken before the escalation runs
+	// would read "nothing to overtake" and stay that way for the rest of
+	// the call.
+
+	gov := &appendingGovernor{fakeGovernor: &fakeGovernor{}, engine: engine, sessionID: "sess-1", eventID: "landed-mid-escalation"}
+	var spooledTail, spooledHead bool
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 20 * time.Millisecond,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record:           func(decision.Decision, ApplyResult) {},
+		SpoolObserve:     func() { spooledTail = true },
+		SpoolObserveHead: func() { spooledHead = true },
+		Queue:            engine,
+	}
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+
+	if !spooledTail {
+		t.Error("a same-session append that landed during the escalation must route this call's own unanswered event to the tail")
+	}
+	if spooledHead {
+		t.Error("routing to the head here would let this call's own event overtake the append that landed during the escalation")
+	}
+}
+
+// appendingGovernor's Emit appends a fresh event to the given session's
+// spool (simulating a lane daemon sharing it) and then blocks until its own
+// ctx is done, so the caller's escalation always ends up EscalationUnanswered.
+type appendingGovernor struct {
+	*fakeGovernor
+	engine    *Engine
+	sessionID string
+	eventID   string
+}
+
+func (g *appendingGovernor) Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error) {
+	_ = g.engine.Spool.Append(client.DevEvent{
+		SchemaVersion: client.SchemaVersion,
+		EventID:       g.eventID,
+		EventType:     client.EventToolCall,
+		SessionID:     g.sessionID,
+		DeveloperDID:  "did:aip:dev",
+		Timestamp:     "2026-08-01T12:00:00Z",
+	})
+	<-ctx.Done()
+	return client.Evaluation{}, ctx.Err()
 }
