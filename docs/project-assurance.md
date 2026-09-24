@@ -209,9 +209,10 @@ the lane never applies one — applying is a separate, human decision.
 - **Excessive agency (LLM06)** yields a policy rule: `REQUIRE_APPROVAL` when
   `activity_type` equals the cited action, in the policy_builder v2 shape the
   dashboard's policy editor uses. It fires on `ActivityStarted`, before the
-  tool runs. An agent has one active policy and `POST` deactivates it, so the
-  rule is PUT-merged into the active policy when there is one
-  (`securityreport/catalog.go`, `approvalPolicyRule`).
+  tool runs. Every policy change is a new version and `POST` makes it the only
+  active one, so delivery is always a `POST` carrying the current rules plus
+  this one (`securityreport/catalog.go`, `approvalPolicyRule`). The dashboard's
+  Accept does exactly that (ADR-0022).
 - **Prompt injection** yields no rule, and the report says why: OpenBox has no
   semantic prompt-injection guardrail — the regex guardrail is an
   allow-pattern, and the goal-alignment judge never changes a verdict.

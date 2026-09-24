@@ -189,21 +189,20 @@ func approvalPolicyRule(action string, posture *targetposture.Posture) *Suggeste
 			"right":    map[string]any{"kind": "literal", "value": action, "valueType": "string"},
 		}},
 	}
-	// An agent has one active policy, and POST deactivates it. So the rule is
-	// merged into the active policy when there is one.
+	// Every policy change is a new version, and POST makes it the agent's only
+	// active policy. So the rule is delivered as a new version that carries
+	// the current rules too; the dashboard's Accept builds exactly that.
+	current := "a new policy with this rule as its only rule"
 	for _, policy := range posture.Policies {
 		if policy.Active && policy.Current {
-			return &SuggestedRule{
-				Method: "PUT", Endpoint: "/agent/" + posture.Agent.ID + "/policies/" + policy.ID,
-				PayloadKind: "policy_builder_v2_rule", Body: rule,
-				DeliveryNote: "Append to config.policy_builder.rules of active policy " + policy.ID + " and PUT it; a POST would deactivate that policy. Or fix it in the project: set requireApproval on the " + action + " tool.",
-			}
+			current = "the config of current policy " + policy.ID + " with this rule appended to config.policy_builder.rules"
+			break
 		}
 	}
 	return &SuggestedRule{
 		Method: "POST", Endpoint: "/agent/" + posture.Agent.ID + "/policies",
 		PayloadKind: "policy_builder_v2_rule", Body: rule,
-		DeliveryNote: "The agent has no active policy: POST a new policy whose config.policy_builder is version 2 with this rule as its only rule. Or fix it in the project: set requireApproval on the " + action + " tool.",
+		DeliveryNote: "Deploy a new policy version: POST " + current + " (policy_builder version 2). Accept in the dashboard's Evaluation tab does this. Or fix it in the project: set requireApproval on the " + action + " tool.",
 	}
 }
 

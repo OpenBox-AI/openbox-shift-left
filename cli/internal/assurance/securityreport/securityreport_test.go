@@ -706,7 +706,9 @@ func TestExcessiveAgencySuggestsAnApprovalPolicyRule(t *testing.T) {
 
 	withPolicy := validPosture("sha256:1111111111111111111111111111111111111111111111111111111111111111")
 	withPolicy.Policies = []targetposture.Policy{{ID: "policy-1", VersionHash: "v1", Active: true, Current: true, Opaque: true}}
-	if rule := ruleFor(withPolicy); rule.Method != "PUT" || rule.Endpoint != "/agent/"+withPolicy.Agent.ID+"/policies/policy-1" {
-		t.Fatalf("active-policy delivery = %s %s", rule.Method, rule.Endpoint)
+	// A new version replaces the active one, so it must carry the current rules.
+	if rule := ruleFor(withPolicy); rule.Method != "POST" || rule.Endpoint != "/agent/"+withPolicy.Agent.ID+"/policies" ||
+		!strings.Contains(rule.DeliveryNote, "current policy policy-1 with this rule appended") {
+		t.Fatalf("active-policy delivery = %s %s: %s", rule.Method, rule.Endpoint, rule.DeliveryNote)
 	}
 }
