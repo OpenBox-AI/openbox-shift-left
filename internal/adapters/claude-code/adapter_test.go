@@ -93,9 +93,13 @@ func TestFlushIsObserveOnly(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("undelivered event counted as delivered: n=%d, want 0", n)
 	}
-	recs, _ := filepath.Glob(filepath.Join(dir, "*.rec*.jsonl"))
-	if len(recs) != 1 {
-		t.Fatalf("undelivered event should be carried over to one recovery file, got %v", recs)
+	// Single-attempt delivery has no carry-over: the one attempt this event
+	// gets was spent (and failed), so it is ledgered and gone, not re-queued.
+	if got := ad.Spool.DiscardedCount(); got != 1 {
+		t.Fatalf("DiscardedCount = %d, want 1", got)
+	}
+	if got := ad.Spool.PendingCount("s1"); got != 0 {
+		t.Fatalf("PendingCount = %d, want 0 (nothing left queued after its one attempt)", got)
 	}
 }
 

@@ -119,26 +119,20 @@ func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 	}
 }
 
-// Flush drains the given session's spooled events through the Emitter, then
-// sweeps carry-over (recovery) files left undelivered by earlier flushes. It
-// is bounded by ctx (the caller caps session-end flush so teardown is never
-// delayed unduly).
+// Flush drains the given session's own spooled events -- its head file, then
+// its tail -- one attempt per event (Spool.DrainSession), until empty or ctx
+// runs out. It is bounded by ctx (the caller caps session-end flush so
+// teardown is never delayed unduly).
 //
 // It owns the session's debounce lock, moved here from the two adapter callers
-// because nothing could hold the choreography while it was duplicated: drainFile
+// because nothing could hold the choreography while it was duplicated: a drain
 // renames the file aside BEFORE delivering and Maybe returns silently on a fresh
 // lock, so an append during a drain is invisible to both. 81 events sat that way.
+// The session's own stripe lock (DrainSession, Block mode) is what now actually
+// serializes concurrent drainers; the debounce lock's job is narrower -- keeping
+// RealtimeTrigger from spawning a REDUNDANT flusher mid-drain.
 func (e *Engine) Flush(ctx context.Context, sessionID string, em Emitter) (int, error) {
-	fn := e.emitFunc(em)
-	carried := e.Spool.recoveryFiles()
-
-	total, err := e.drainUntilEmpty(ctx, sessionID, fn)
-
-	swept, sweepErr := e.speaking().sweepRecovery(ctx, carried, sessionID, fn)
-	if err == nil {
-		err = sweepErr
-	}
-	return total + swept, err
+	return e.drainUntilEmpty(ctx, sessionID, e.emitFunc(em))
 }
 
 func (e *Engine) drainUntilEmpty(ctx context.Context, sessionID string, fn FlushFunc) (int, error) {
@@ -148,13 +142,13 @@ func (e *Engine) drainUntilEmpty(ctx context.Context, sessionID string, fn Flush
 	// Its own scope so the release is DEFERRED: a panic would strand the lock.
 	func() {
 		defer e.Spool.ReleaseFlushLock(sessionID)
-		for pass := 1; ; pass++ {
+		for pass := 1; pass <= MaxDrainPasses; pass++ {
 			// Per pass, not once: a drain outliving the debounce window would otherwise
 			// let Maybe's stale-lock takeover spawn a competing flusher mid-drain.
 			e.Spool.TouchFlushLock(sessionID)
 
 			var n int
-			n, err = spool.FlushSession(ctx, sessionID, fn)
+			n, err = spool.DrainSession(ctx, sessionID, fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 			total += n
 			if err != nil {
 				return
@@ -163,26 +157,34 @@ func (e *Engine) drainUntilEmpty(ctx context.Context, sessionID string, fn Flush
 			if remaining == 0 {
 				return
 			}
-			if pass >= MaxDrainPasses {
+			if pass == MaxDrainPasses {
 				e.logf("spool: %s: %d event(s) remain after %d drain passes; they stay spooled for the sweep",
 					sessionID, remaining, MaxDrainPasses)
-				return
 			}
 		}
 	}()
 
 	// One pass AFTER the release closes the sliver; a double drain is harmless.
 	if err == nil && e.Spool.PendingCount(sessionID) > 0 {
-		n, lateErr := spool.FlushSession(ctx, sessionID, fn)
+		n, lateErr := spool.DrainSession(ctx, sessionID, fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 		total += n
 		err = lateErr
 	}
 	return total, err
 }
 
-// FlushAll drains every spooled session, each until empty as Flush does.
+// FlushAll drains every spooled session, each in Try mode (FlushAll owns none
+// of them, unlike Flush's own session).
 func (e *Engine) FlushAll(ctx context.Context, em Emitter) (int, error) {
 	return e.speaking().FlushAll(ctx, e.emitFunc(em))
+}
+
+// DrainSession is the exported single-session drain every later caller
+// builds on (a gate's own escalation, a lane daemon's queue): sessionID's
+// events through em, one attempt each, per opts. See Spool.DrainSession for
+// the full contract.
+func (e *Engine) DrainSession(ctx context.Context, sessionID string, em Emitter, opts DrainOptions) (int, error) {
+	return e.speaking().DrainSession(ctx, sessionID, e.emitFunc(em), opts)
 }
 
 // speaking attaches the engine's voice to a COPY of its spool: two flushes can
@@ -201,12 +203,15 @@ func (e *Engine) FlushOrSweep(ctx context.Context, sessionID string, em Emitter)
 		return e.Flush(ctx, sessionID, em)
 	}
 	n, err := e.FlushAll(ctx, em)
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || errors.Is(err, errPassCutShort) {
 		// The walk stopped partway, so files behind it were never opened -- and a
 		// stale mtime on one of those means nobody TRIED for the retention age, not
 		// that the age was spent failing to deliver. A flusher that was simply down
 		// for a month leaves exactly that, and its first pass back would delete
-		// still-deliverable evidence without ever attempting it.
+		// still-deliverable evidence without ever attempting it. errPassCutShort is
+		// the same story one layer down: DrainSession refused to even rotate a stem
+		// once its remaining budget could not cover one attempt, so that stem (and
+		// everything walked after it) is exactly as untried as one ctx never reached.
 		e.logf("spool: the sweep ended early (%v); skipping retirement, because a file "+
 			"this pass never reached must not be deleted for being old", err)
 		return n, err

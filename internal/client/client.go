@@ -268,12 +268,17 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 		// Surfacing ErrDelivery lets a durable caller re-spool the event instead of
 		// losing it; callers that cannot retry ignore it (see the doc comment).
 		c.log.Printf("openbox: delivery failed for event %s (%s): %s", ev.EventID, ev.EventType, describeDrop(err))
+		// err itself rides along wrapped (not just its describeDrop text), so
+		// FailureClass can recover the *httpError/context deadline a single-attempt
+		// caller (the hook spool) needs to pick a discard-ledger/halt-latch reason;
+		// safe by the same INV-1 guarantee describeDrop relies on: neither
+		// *httpError nor *workloadauth.Error ever carries a secret.
 		if isRefusal(err) {
 			// Both sentinels: ErrDelivery for every caller that re-spools, ErrRefused
 			// for the one that also decides whether this cost an attempt.
-			return Evaluation{}, fmt.Errorf("%w: %w: %s", ErrDelivery, ErrRefused, describeDrop(err))
+			return Evaluation{}, fmt.Errorf("%w: %w: %w", ErrDelivery, ErrRefused, err)
 		}
-		return Evaluation{}, fmt.Errorf("%w: %s", ErrDelivery, describeDrop(err))
+		return Evaluation{}, fmt.Errorf("%w: %w", ErrDelivery, err)
 	}
 	return parseEvaluation(respBody), nil
 }
@@ -432,6 +437,44 @@ func parseRetryAfter(h string, now time.Time) (time.Duration, bool) {
 		return 0, false
 	}
 	return 0, false
+}
+
+// FailureClass classifies why Emit's error means core did not accept an
+// event, coarse enough for a discard-ledger line or a halt-latch reason
+// without ever naming request/response content (INV-2): "unbuildable" (never
+// sent at all), "401", "429", "5xx", "4xx" (a proven refusal that is none of
+// the above), "timeout" (the attempt's own deadline, not the caller's), or
+// "network" (anything else: DNS, dial, TLS, a token acquisition fault). "" for
+// a nil err, which every caller treats as no failure.
+//
+// Order matters: ErrUnbuildable is checked before *httpError because a build
+// failure never reaches the wire at all, and context.DeadlineExceeded is
+// checked before the network fallback because a *url.Error wrapping it is
+// still "no status code", the same shape a dial failure has.
+func FailureClass(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, ErrUnbuildable):
+		return "unbuildable"
+	}
+	var he *httpError
+	if errors.As(err, &he) {
+		switch {
+		case he.status == http.StatusUnauthorized:
+			return "401"
+		case he.status == http.StatusTooManyRequests:
+			return "429"
+		case he.status >= 500:
+			return "5xx"
+		default:
+			return "4xx"
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "network"
 }
 
 type httpError struct {

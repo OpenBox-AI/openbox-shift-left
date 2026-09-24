@@ -11,58 +11,18 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// TestAReclaimedOrphanStopsLookingLikeAnOrphan is the double-delivery race.
-//
-// The claim on an orphan is exclusive only while its MTIME says a drain is
-// holding it. Rename preserves the mtime and the claimed name still contains
-// ".flushing.", so an unstamped reclaim stayed as old as it was: the next
-// concurrent FlushAll -- routine, with all three lane daemons sweeping one
-// directory -- renamed it again and drained the same lines in parallel. Nothing
-// downstream dedupes (see the Spool doc comment), so every event landed twice
-// and the two-rows-per-activity_id invariant broke.
-func TestAReclaimedOrphanStopsLookingLikeAnOrphan(t *testing.T) {
-	dir := t.TempDir()
-	orphan := filepath.Join(dir, "sess.jsonl.flushing.OLD")
-	if err := os.WriteFile(orphan, []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-72 * time.Hour)
-	if err := os.Chtimes(orphan, old, old); err != nil {
-		t.Fatal(err)
-	}
+// TestARotatedFileIsStampedBeforeTheLockDrops: the double-delivery race this
+// guarded against used to be closed by a claim-then-stamp rename on a stray
+// `.flushing.` file (see git history); DrainSession's own per-session stripe
+// lock now makes a concurrent reclaim of the SAME stem structurally
+// impossible instead (only one drainer can be inside reclaimStemOrphans for a
+// given stem at a time), so that race no longer needs its own regression test
+// here -- sessionorder_test.go's -race, 200-iteration drain covers the general
+// property. What still needs pinning one layer up: collectSession stamps a
+// live drain's OWN rotated file under the spool lock, so a concurrent FlushAll
+// walk can never read it as old enough to be an orphan while delivery is still
+// in flight.
 
-	// What FlushAll's reclaim branch does, in the order it does it.
-	claimed := orphan + ".reclaim.TEST"
-	if err := os.Rename(orphan, claimed); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if err := os.Chtimes(claimed, now, now); err != nil {
-		t.Fatal(err)
-	}
-
-	info, err := os.Stat(claimed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The name still matches, deliberately: that is what keeps the file counted as
-	// backlog. The mtime is the only thing standing between it and a second drain.
-	if !strings.Contains(filepath.Base(claimed), ".flushing.") {
-		t.Fatal("precondition: the claimed name no longer matches the orphan predicate")
-	}
-	if age := time.Since(info.ModTime()); age >= ReclaimOrphanAfter {
-		t.Errorf("a just-claimed file reads as %v old, past the %v orphan threshold, so a "+
-			"concurrent sweep would reclaim it mid-drain and deliver every line twice",
-			age.Round(time.Second), ReclaimOrphanAfter)
-	}
-}
-
-// TestARotatedFileIsStampedBeforeTheLockDrops the same window one layer up.
-//
-// drainFile stamps under the spool lock now. Between an unlock and a later stamp
-// the rotated file carries the SOURCE's mtime -- and writeRecovery deliberately
-// stamps a carry-over back to the age of the data in it -- so a rotation of one
-// was already past the orphan threshold at the instant it was published.
 func TestARotatedFileIsStampedBeforeTheLockDrops(t *testing.T) {
 	e := testEngine(t)
 	spoolEvent(t, e, "aged", "aged-1")
@@ -92,8 +52,8 @@ func TestARotatedFileIsStampedBeforeTheLockDrops(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := e.Spool.FlushSession(context.Background(), "aged", fn); err != nil {
-		t.Fatalf("FlushSession: %v", err)
+	if _, err := e.Spool.DrainSession(context.Background(), "aged", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}); err != nil {
+		t.Fatalf("DrainSession: %v", err)
 	}
 	if !seen {
 		t.Skip("the rotated file was not observable from the delivery callback")
@@ -120,8 +80,8 @@ func TestACorruptSpooledLineIsRecordedAsLost(t *testing.T) {
 
 	delivered := 0
 	fn := func(_ context.Context, _ client.DevEvent) error { delivered++; return nil }
-	if _, err := e.Spool.FlushSession(context.Background(), "torn", fn); err != nil {
-		t.Fatalf("FlushSession: %v", err)
+	if _, err := e.Spool.DrainSession(context.Background(), "torn", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}); err != nil {
+		t.Fatalf("DrainSession: %v", err)
 	}
 	if delivered != 0 {
 		t.Fatalf("precondition: a torn line was delivered %d time(s)", delivered)

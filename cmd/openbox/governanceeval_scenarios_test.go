@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
@@ -317,9 +318,11 @@ func TestGovernanceEvalSpoolSeesToolEvents(t *testing.T) {
 }
 
 // TestGovernanceEvalRejectsAWrongKey: a body signed with a key core does not
-// know is refused, and the event stays in the spool. A 401 must never spend a
-// delivery attempt -- core answers 401 both for a bad key and for a fault of
-// its own, so treating it as terminal would discard evidence over an outage.
+// know is refused. Single-attempt delivery has no carry-over any more: a
+// 401 -- which core answers both for a bad key and for a fault of its own --
+// still spends the event's one attempt like every other class, so it is
+// ledgered and gone, never left sitting in the spool for a retry that no
+// longer exists.
 func TestGovernanceEvalRejectsAWrongKey(t *testing.T) {
 	sc := ranFineSession()
 	fake := fakecore.New(t, sc.Script())
@@ -357,8 +360,11 @@ func TestGovernanceEvalRejectsAWrongKey(t *testing.T) {
 	if fake.V3EvaluateAttempts() != 0 {
 		t.Errorf("a failed token exchange must never reach /evaluate at all; got %d attempts", fake.V3EvaluateAttempts())
 	}
-	if !spoolStillHolds(t, spool) {
-		t.Error("the spool was drained despite a rejected assertion; a token-acquisition failure must not spend a delivery attempt, because core answers a bad key with the same shape as an outage of its own")
+	if spoolStillHolds(t, spool) {
+		t.Error("single-attempt delivery has no carry-over: every rejected event should be ledgered and gone, not left sitting in the spool")
+	}
+	if got := (hookflow.Spool{Dir: spool}).DiscardedCount(); got == 0 {
+		t.Error("a token-acquisition failure still spends the event's one attempt and must be recorded in the discard ledger")
 	}
 }
 

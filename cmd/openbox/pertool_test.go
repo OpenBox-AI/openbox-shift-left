@@ -35,6 +35,16 @@ func perToolHookEnv(t *testing.T) string {
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
 	t.Setenv(devconfig.EnvContentCapture, "0")
+	// SessionStart now drains its own WorkflowStarted event inline, so a
+	// SessionStart hook fired without this would otherwise try a real
+	// client.New/network round trip against devconfig.DefaultBaseURL (a live
+	// SaaS host). This deliberately exercises inlineAttempt's client-init-
+	// failed branch instead: an invalid scheme fails client.New's own
+	// validation before any dial (forceFlusher no-ops here too, since a
+	// `.test` binary refuses to spawn), so these per-tool tests stay
+	// network-free the way they always have -- a caller wanting to exercise
+	// real delivery overrides this after calling perToolHookEnv.
+	t.Setenv(devconfig.EnvBaseURL, "not-a-url")
 	return spool
 }
 

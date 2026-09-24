@@ -46,8 +46,18 @@ func (c Credentials) NewClient(logger client.Logger) (*client.Client, error) {
 		TokenCachePath:        c.TokenCachePath,
 		ContentCaptureEnabled: c.ContentCaptureEnabled,
 		Logger:                logger,
+		// Every hook client -- the flusher's, the gate's own escalation --
+		// gets exactly one attempt at the wire too: a retry here would race
+		// DrainSession's own single-attempt accounting. The git action's
+		// client is unrelated and keeps the library default.
+		MaxRetries: &zeroRetries,
 	})
 }
+
+// zeroRetries makes MaxRetries: 0 addressable; client.Config.MaxRetries is a
+// *int precisely so an explicit zero is expressible (unset is the library
+// default, defaultMaxRetries).
+var zeroRetries = 0
 
 // ResolveIdentity resolves only the developer DID (env, then config file); no
 // secret-store access (INV-1: zero secret I/O on the hot path).

@@ -5,11 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
-// rawLine is a spool line without the trailing newline drainRotated's
-// NonEmptyLines would strip, matching what writeRecovery expects.
+// rawLine is a spool line without the trailing newline NonEmptyLines would
+// strip; the caller re-appends '\n' when it needs a file on disk.
 func rawLine(t *testing.T, session, id string) []byte {
 	t.Helper()
 	line, err := jsonLine(ev(session, id))
@@ -34,7 +33,10 @@ func TestSpoolDiscardAllRemovesEverySpooledFile(t *testing.T) {
 	if err := sp.Append(ev("sessA", "a2")); err != nil {
 		t.Fatalf("append a2: %v", err)
 	}
-	sp.writeRecovery(sp.SessionPath("sessB"), [][]byte{rawLine(t, "sessB", "b1")}, 1, time.Now())
+	if err := os.WriteFile(filepath.Join(dir, "sessB.rec1-test.jsonl"),
+		append(rawLine(t, "sessB", "b1"), '\n'), 0o600); err != nil {
+		t.Fatalf("seed legacy carry-over file: %v", err)
+	}
 	rotated := sp.SessionPath("sessC") + ".flushing.reclaim123"
 	if err := os.WriteFile(rotated, rawLine(t, "sessC", "c1"), 0o600); err != nil {
 		t.Fatalf("seed rotated file: %v", err)

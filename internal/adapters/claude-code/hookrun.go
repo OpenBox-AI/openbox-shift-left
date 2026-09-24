@@ -15,13 +15,41 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-const flushBudget = 12 * time.Second
+// flushBudget bounds the detached `flush` subcommand: the realtime trigger's
+// spawned child, the periodic sweeper, and `openbox uninstall`'s own flush
+// all inherit it. 60s so a pass can start DeliveryAttemptTimeout-bounded
+// (30s) attempts with slack.
+const flushBudget = 60 * time.Second
+
+// sessionStartInlineWindow bounds SessionStart's own inline delivery attempt:
+// the CC SessionStart hook is otherHookTimeoutSec (5s); this leaves 1s of
+// slack for the rest of the hook and process teardown, and is comfortably
+// under the window so more than one queued line can still be attempted if a
+// backlog is waiting.
+const sessionStartInlineWindow = time.Duration(otherHookTimeoutSec-1) * time.Second
+
+// sessionStartAttemptTimeout bounds each individual attempt inside
+// sessionStartInlineWindow, strictly less than it: DrainSession never starts
+// an attempt it cannot finish, so an attemptTimeout equal to the whole window
+// would let even a fast attempt's few milliseconds of real elapsed time push
+// the NEXT line's remaining budget below the bound and defer it needlessly.
+const sessionStartAttemptTimeout = sessionStartInlineWindow - time.Second
+
+// sessionEndInlineWindow bounds SessionEnd's own inline delivery attempt: the
+// CC SessionEnd hook is 15s; this leaves 3s for the git-registry cleanup and
+// finops rollup already done earlier in this hook, plus process teardown.
+const sessionEndInlineWindow = 12 * time.Second
+
+// sessionEndAttemptTimeout is sessionEndInlineWindow's per-attempt bound, for
+// the same reason sessionStartAttemptTimeout is not equal to its window.
+const sessionEndAttemptTimeout = 10 * time.Second
 
 // RunHook executes the observe-only path for one Claude Code hook invocation.
 // It is the single engine behind `openbox hook claude-code <event>`, which is
 // the only way in: the standalone alias binary it once also served was never
 // released and is gone.
 func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
+	hookStart := time.Now()
 	defer devconfig.Pin()()
 	defer func() {
 		if r := recover(); r != nil {
@@ -224,7 +252,16 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	if _, err := ad.Observe(hook, ev); err != nil {
 		logger.Printf("spool %s event: %v", hook, err)
 	}
-	if hook != HookSessionEnd {
+	switch hook {
+	case HookSessionStart:
+		// The session's own WorkflowStarted event is drained inline, under
+		// this session's own stripe, right after the append above -- so no
+		// detached flusher's debounce window can let anything else of this
+		// run overtake it.
+		inlineAttempt(ad, logger, ev.SessionID, hookStart, sessionStartInlineWindow, sessionStartAttemptTimeout)
+	case HookSessionEnd:
+		// Handled after the finops/git-registry work below, not nudged here.
+	default:
 		nudgeFlush()
 	}
 
@@ -239,8 +276,65 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	if hook == HookSessionEnd {
-		runFlush(logger, ev.SessionID)
+		// The same inline attempt, within SessionEnd's own (smaller) budget,
+		// falling back to the detached flusher when the window runs out.
+		inlineAttempt(ad, logger, ev.SessionID, hookStart, sessionEndInlineWindow, sessionEndAttemptTimeout)
 	}
+}
+
+// inlineAttempt drives one single-attempt, own-session drain within window
+// (measured from hookStart -- the hook's own process start, not from here --
+// so credential resolution and everything RunHook already did are counted
+// against the SAME budget the hook's own vendor timeout is), so a
+// SessionStart or SessionEnd hook's own newest event does not wait on the
+// detached flusher's debounce window to reach core. It reuses the caller's
+// own Adapter (its spool, its advisory sink) rather than building a second
+// one, and owns the stripe lock for its own session (hookflow.Block): the
+// append this hook just made is drained under the SAME lock, so nothing can
+// overtake it. An attempt whose own ctx expires before core answers is
+// requeued, never scored as a failure (RequeueUnanswered): the short inline
+// window proves nothing about whether core would have accepted the event.
+// Whatever the window could not even start, or could not get an answer for,
+// falls back to the detached flusher -- not a failure, and a re-send is
+// deduped by core's idempotency key.
+func inlineAttempt(ad *Adapter, logger *log.Logger, sessionID string, hookStart time.Time, window, attemptTimeout time.Duration) {
+	creds, err := ResolveCredentials()
+	if err != nil {
+		logger.Printf("flush skipped (events remain spooled): %v", err)
+		forceFlusher(logger, sessionID)
+		return
+	}
+	cl, err := creds.NewClient(logger)
+	if err != nil {
+		logger.Printf("flush skipped (client init): %v", err)
+		forceFlusher(logger, sessionID)
+		return
+	}
+
+	ad.Log = logger.Printf
+	ad.Advisory.Log = logger
+
+	ctx, cancel := context.WithDeadline(context.Background(), hookStart.Add(window))
+	defer cancel()
+	opts := hookflow.DrainOptions{Mode: hookflow.Block, AttemptTimeout: attemptTimeout, RequeueUnanswered: true}
+	if _, err := ad.DrainSession(ctx, sessionID, cl, opts); err != nil {
+		logger.Printf("inline delivery ended early: %v", err)
+	}
+	if ad.Spool.PendingCount(sessionID) > 0 {
+		forceFlusher(logger, sessionID)
+	}
+}
+
+// forceFlusher spawns the detached flusher regardless of the realtime_flush
+// toggle: once an inline attempt could not finish, waiting out the ordinary
+// debounce toggle is not the fallback's job. Reuses RealtimeTrigger.Maybe's
+// own spawn/debounce plumbing rather than a second copy of it.
+func forceFlusher(logger *log.Logger, sessionID string) {
+	hookflow.RealtimeTrigger{
+		Spool:    hookflow.Spool{Dir: DefaultSpoolDir()},
+		Provider: provider,
+		Enabled:  func() bool { return true },
+	}.Maybe(logger, sessionID)
 }
 
 // isBumpSource reports whether SessionStart's source enum opens a new run

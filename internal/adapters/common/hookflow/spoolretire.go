@@ -16,8 +16,18 @@ const RetireSpoolAfter = 30 * 24 * time.Hour
 
 const MaxDrainPasses = 8
 
+// MaxRecoveryAttempts is retained only so doctor's existing (pre-phase-2)
+// wording still compiles and reads sensibly until that phase revises it: this
+// release has no carry-over/retry concept, so no code path here counts
+// against it any more.
+const MaxRecoveryAttempts = 5
+
+// PendingCount reports how many events are currently queued for a session --
+// its tail plus its head file combined -- the two places DrainSession still
+// has left to deliver from. A single-attempt failure is not counted here: it
+// was attempted and is gone (ledgered), not pending.
 func (s Spool) PendingCount(sessionID string) int {
-	return countLines(s.SessionPath(sessionID))
+	return countLines(s.SessionPath(sessionID)) + countLines(s.headPath(sessionID))
 }
 
 func countLines(path string) int {

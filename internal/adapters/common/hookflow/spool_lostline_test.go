@@ -44,7 +44,7 @@ func TestSpoolNeverLosesALineToAConcurrentDrain(t *testing.T) {
 				return
 			default:
 			}
-			_, _ = s.FlushSession(context.Background(), "sess-1", count)
+			_, _ = s.DrainSession(context.Background(), "sess-1", count, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 		}
 	}()
 
@@ -67,7 +67,7 @@ func TestSpoolNeverLosesALineToAConcurrentDrain(t *testing.T) {
 
 	// Whatever the racing drainer left behind, plus any recovery files.
 	for {
-		n, err := s.FlushSession(context.Background(), "sess-1", count)
+		n, err := s.DrainSession(context.Background(), "sess-1", count, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 		if err != nil {
 			t.Fatalf("final drain: %v", err)
 		}

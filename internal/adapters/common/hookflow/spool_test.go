@@ -46,9 +46,9 @@ func TestSpoolRoundTrip(t *testing.T) {
 		}
 	}
 	fn, got := drainCollect()
-	n, err := sp.FlushSession(context.Background(), "sess", fn)
+	n, err := sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 	if err != nil {
-		t.Fatalf("flush: %v", err)
+		t.Fatalf("drain: %v", err)
 	}
 	if n != 3 || len(*got) != 3 {
 		t.Fatalf("drained %d events (n=%d), want 3", len(*got), n)
@@ -57,11 +57,11 @@ func TestSpoolRoundTrip(t *testing.T) {
 		t.Errorf("order not preserved: %v", *got)
 	}
 	if _, err := os.Stat(sp.SessionPath("sess")); !os.IsNotExist(err) {
-		t.Errorf("spool file should be gone after flush, stat err=%v", err)
+		t.Errorf("spool file should be gone after drain, stat err=%v", err)
 	}
-	n2, _ := sp.FlushSession(context.Background(), "sess", fn)
+	n2, _ := sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 	if n2 != 0 {
-		t.Errorf("re-flush should drain 0, got %d", n2)
+		t.Errorf("re-drain should deliver 0, got %d", n2)
 	}
 }
 
@@ -75,12 +75,15 @@ func TestSpoolCorruptLineSkipped(t *testing.T) {
 	_ = sp.Append(ev("sess", "good2"))
 
 	fn, got := drainCollect()
-	n, err := sp.FlushSession(context.Background(), "sess", fn)
+	n, err := sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 	if err != nil {
-		t.Fatalf("flush: %v", err)
+		t.Fatalf("drain: %v", err)
 	}
 	if n != 2 || len(*got) != 2 {
 		t.Fatalf("expected 2 good events past the corrupt line, got n=%d len=%d", n, len(*got))
+	}
+	if got := sp.DiscardedCount(); got != 1 {
+		t.Errorf("DiscardedCount = %d, want 1 (the corrupt line)", got)
 	}
 }
 
@@ -108,50 +111,74 @@ func TestFlushAllEmptyDir(t *testing.T) {
 	}
 }
 
-// TestSpoolCtxCancelPersistsRemainder is the F1 regression guard: a drain cut
-// short by ctx must NOT drop the undelivered tail; it persists to a recovery
-// file that a later FlushAll completes, with NO re-delivery of what was sent.
-func TestSpoolCtxCancelPersistsRemainder(t *testing.T) {
+// TestACutPassQueuesTheRemainderInAHeadFile is a regression guard: a
+// drain whose remaining budget drops below attemptTimeout before it can start
+// another delivery must NOT drop the undelivered tail, and must NOT attempt
+// it either (a cut is not a failure). It persists to <stem>.head.jsonl, which
+// the next pass drains first, ahead of anything newly appended to the tail.
+func TestACutPassQueuesTheRemainderInAHeadFile(t *testing.T) {
 	sp := Spool{Dir: t.TempDir()}
 	for _, id := range []string{"e1", "e2", "e3", "e4"} {
 		_ = sp.Append(ev("sess", id))
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
 	var delivered []string
+	var failed int
+	sp.OnFailure = func(client.DevEvent, error) { failed++ }
 	fn := func(_ context.Context, e client.DevEvent) error {
 		delivered = append(delivered, e.EventID)
 		if len(delivered) == 2 {
-			cancel()
+			time.Sleep(500 * time.Millisecond) // burns the rest of ctx's budget
 		}
 		return nil
 	}
-	n, err := sp.FlushSession(ctx, "sess", fn)
+	n, err := sp.DrainSession(ctx, "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: 150 * time.Millisecond})
 	if err == nil {
-		t.Error("expected ctx error on the cut-short drain")
+		t.Error("expected a cutoff error on the budget-limited drain")
 	}
 	if n != 2 || len(delivered) != 2 {
-		t.Fatalf("delivered %d before cancel, want 2", len(delivered))
+		t.Fatalf("delivered %d before the cutoff, want 2", len(delivered))
+	}
+	if failed != 0 {
+		t.Errorf("a cutoff must never be scored as a delivery failure, got %d", failed)
+	}
+
+	if _, err := os.Stat(filepath.Join(sp.Dir, "sess"+HeadSuffix)); err != nil {
+		t.Fatalf("head file not written: %v", err)
 	}
 	fn2, got := drainCollect()
-	n2, err := sp.FlushAll(context.Background(), fn2)
+	n2, err := sp.DrainSession(context.Background(), "sess", fn2, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
 	if err != nil {
-		t.Fatalf("recovery flush: %v", err)
+		t.Fatalf("recovery drain: %v", err)
 	}
 	if n2 != 2 || len(*got) != 2 {
-		t.Fatalf("recovered %d events, want 2 (the undelivered tail)", n2)
+		t.Fatalf("recovered %d events, want 2 (the queued tail)", n2)
 	}
 	if (*got)[0].EventID != "e3" || (*got)[1].EventID != "e4" {
-		t.Errorf("recovered wrong events (re-delivery?): %v", *got)
+		t.Errorf("recovered wrong events (re-delivery of e1/e2?): %v", *got)
 	}
 }
 
-// TestSpoolAdoptsOrphan is the F2 guard: a `.flushing.<id>` file orphaned by a
-// killed drain is re-drained by FlushAll, not stranded forever. Aged past
-// ReclaimOrphanAfter, because that is now what makes it an orphan rather than
-// somebody's live drain; the sibling below holds the other half.
-func TestSpoolAdoptsOrphan(t *testing.T) {
+// TestAnAgedOrphanIsDiscardedNotRedelivered: a `.flushing.` rotation nobody
+// claimed is a drainer that died mid-pass, and its lines' outcome cannot be
+// proven -- so, unlike the pre-single-attempt release, it is never
+// re-drained. It is discarded, and OnFailure still runs per parseable line so
+// a later caller's own latch can halt the run it belonged to.
+func TestAnAgedOrphanIsDiscardedNotRedelivered(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
+	var failed []string
+	var failErrs []error
+	sp.OnFailure = func(ev client.DevEvent, err error) {
+		failed = append(failed, ev.EventID)
+		failErrs = append(failErrs, err)
+		// Still writes the ledger line a real OnFailure (the default, or a
+		// later, latch-writing one) would: this override exists only to
+		// observe the per-line call, never to silently replace it.
+		sp.defaultOnFailure(ev, err)
+	}
 	orphan := filepath.Join(dir, "sess.jsonl.flushing.cc-deadbeef")
 	line, _ := jsonLine(ev("sess", "orphan1"))
 	if err := os.WriteFile(orphan, line, 0o600); err != nil {
@@ -166,23 +193,31 @@ func TestSpoolAdoptsOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("flushall: %v", err)
 	}
-	if n != 1 || len(*got) != 1 || (*got)[0].EventID != "orphan1" {
-		t.Fatalf("orphan not adopted: n=%d got=%v", n, *got)
+	if n != 0 || len(*got) != 0 {
+		t.Fatalf("an orphan must never be redelivered, got n=%d got=%v", n, *got)
+	}
+	if len(failed) != 1 || failed[0] != "orphan1" {
+		t.Fatalf("OnFailure not invoked for the orphan's own line, got %v", failed)
+	}
+	if len(failErrs) != 1 || failErrs[0] == nil {
+		t.Fatalf("OnFailure err must not be nil for an orphaned line, got %v", failErrs)
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Errorf("orphan should be consumed, stat err=%v", err)
 	}
+	if got := sp.DiscardedCount(); got != 1 {
+		t.Errorf("DiscardedCount = %d, want 1", got)
+	}
 }
 
-// TestASweepDoesNotReclaimALiveDrainsFile is the other half of the orphan rule,
-// and it is a duplicate-delivery guard rather than a tidiness one. drainFile
-// holds its rotated file for the whole delivery loop; a sweep that renames it
-// away re-delivers every line, and the control plane does not dedupe on event
-// id, so those are duplicate governance rows and an activity_id with four.
+// TestASweepDoesNotReclaimALiveDrainsFile is the other half of the orphan
+// rule: collectSession holds its rotated file for the whole delivery loop, and
+// a sweep that treats it as an aged orphan mid-drain would redeliver every
+// line for real (nothing downstream dedupes on event_id).
 func TestASweepDoesNotReclaimALiveDrainsFile(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
-	// Exactly what drainFile leaves behind mid-delivery: freshly stamped.
+	// Exactly what collectSession leaves behind mid-delivery: freshly stamped.
 	live := filepath.Join(dir, "sess.jsonl.flushing.cc-inflight")
 	line, _ := jsonLine(ev("sess", "inflight1"))
 	if err := os.WriteFile(live, line, 0o600); err != nil {
@@ -202,34 +237,31 @@ func TestASweepDoesNotReclaimALiveDrainsFile(t *testing.T) {
 	}
 }
 
-// TestADeadlineDoesNotBurnADeliveryAttempt: the bound exists for events the
-// server will never accept. A budget expiry refused nothing, so counting it
-// turns a retry cap into a timer that deletes any backlog too big for one
-// budget -- which is every backlog the sweep exists to rescue.
-func TestADeadlineDoesNotBurnADeliveryAttempt(t *testing.T) {
+// TestALegacyCarryOverFileIsDiscardedOnSight guards the OTHER half of "no
+// carry-over": a `<session>.recN-*.jsonl` an old binary left
+// behind is recognized (IsRecoveryFile) and discarded the first time this
+// release's code sees it, never drained through fn.
+func TestALegacyCarryOverFileIsDiscardedOnSight(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
-	for _, id := range []string{"a", "b", "c"} {
-		if err := sp.Append(ev("sess", id)); err != nil {
-			t.Fatal(err)
-		}
+	line, _ := jsonLine(ev("sess", "legacy1"))
+	legacy := filepath.Join(dir, "sess.rec3-oldbinary.jsonl")
+	if err := os.WriteFile(legacy, line, 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	// Far more passes than MaxRecoveryAttempts, every one of them timing out with
-	// nothing refused.
-	for pass := range MaxRecoveryAttempts * 3 {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel() // expired before the first line, as a spent budget is
-		if _, err := sp.FlushAll(ctx, func(context.Context, client.DevEvent) error { return nil }); err == nil {
-			t.Fatalf("pass %d: expected the deadline error", pass)
-		}
+	n, err := sp.FlushAll(context.Background(), func(context.Context, client.DevEvent) error {
+		t.Error("a legacy carry-over file must never reach the emitter")
+		return nil
+	})
+	if err != nil || n != 0 {
+		t.Fatalf("flushall = (%d, %v), want (0, nil)", n, err)
 	}
-
-	if got := sp.DiscardedCount(); got != 0 {
-		t.Errorf("%d event(s) discarded by deadlines alone; nothing ever refused them", got)
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy carry-over should be gone, stat err=%v", err)
 	}
-	if got := sp.BacklogCount(); got != 3 {
-		t.Errorf("backlog = %d, want the 3 events still waiting", got)
+	if got := sp.DiscardedCount(); got != 1 {
+		t.Errorf("DiscardedCount = %d, want 1", got)
 	}
 }
 
@@ -246,90 +278,32 @@ func TestSanitizeSessionID(t *testing.T) {
 	}
 }
 
-// writeRecoveryFile writes a carry-over file directly under name, one line per
-// id, bypassing the production writer so the test controls the exact
-// filename -- including shapes the writer itself never produces.
-func writeRecoveryFile(t *testing.T, dir, name string, ids ...string) {
-	t.Helper()
-	var buf []byte
-	for _, id := range ids {
-		line, err := jsonLine(ev("irrelevant", id))
-		if err != nil {
-			t.Fatalf("jsonLine: %v", err)
-		}
-		buf = append(buf, line...)
-	}
-	if err := os.WriteFile(filepath.Join(dir, name), buf, 0o600); err != nil {
-		t.Fatalf("write %s: %v", name, err)
-	}
-}
-
-// TestUndeliveredCountForIsolatesBySession is the fix itself: another
-// session's carry-over sitting in the same directory must never inflate this
-// session's count, which is what a directory-wide sum did.
-func TestUndeliveredCountForIsolatesBySession(t *testing.T) {
+// TestUndeliveredCountForIsHeadPlusTail is the new contract (SessionEnd's
+// EvidenceState.Undelivered): it counts what is still QUEUED for a session --
+// its head file plus its tail -- never what already failed and was ledgered
+// (that is gone, not pending), and never another session's backlog sitting in
+// the same directory.
+func TestUndeliveredCountForIsHeadPlusTail(t *testing.T) {
 	dir := t.TempDir()
 	sp := Spool{Dir: dir}
-	writeRecoveryFile(t, dir, "sessA.rec1-aaa.jsonl", "a1", "a2")
-	writeRecoveryFile(t, dir, "sessB.rec1-bbb.jsonl", "b1", "b2", "b3")
+	_ = sp.Append(ev("sessA", "a1"))
+	_ = sp.Append(ev("sessA", "a2"))
+	sp.writeHead("sessB", [][]byte{[]byte(`{"event_id":"b1"}`)})
 
 	if got := sp.UndeliveredCountFor("sessA"); got != 2 {
-		t.Errorf("sessA count = %d, want 2 (its own file only)", got)
+		t.Errorf("sessA count = %d, want 2 (its own tail)", got)
 	}
-	if got := sp.UndeliveredCountFor("sessB"); got != 3 {
-		t.Errorf("sessB count = %d, want 3 (its own file only)", got)
+	if got := sp.UndeliveredCountFor("sessB"); got != 1 {
+		t.Errorf("sessB count = %d, want 1 (its own head file)", got)
 	}
 	if got := sp.UndeliveredCountFor("sessC"); got != 0 {
-		t.Errorf("a session with no carry-over of its own must report 0, got %d", got)
+		t.Errorf("a session with nothing queued must report 0, got %d", got)
+	}
+	if got := sp.UndeliveredCount(); got != 1 {
+		t.Errorf("directory-wide UndeliveredCount = %d, want 1 (head files only)", got)
 	}
 }
 
-// TestUndeliveredCountForCountsLegacyName the pre-attempt-counter carry-over
-// name (`<session>.rec-<id>.jsonl`, written before the counter existed) must
-// count exactly like a `.rec<N>` one.
-func TestUndeliveredCountForCountsLegacyName(t *testing.T) {
-	dir := t.TempDir()
-	sp := Spool{Dir: dir}
-	writeRecoveryFile(t, dir, "sess.rec-legacy.jsonl", "l1")
-
-	if got := sp.UndeliveredCountFor("sess"); got != 1 {
-		t.Errorf("legacy carry-over not counted: got %d, want 1", got)
-	}
-}
-
-// TestUndeliveredCountForIgnoresNonRecoveryFileWithMatchingPrefix a filename
-// sharing the session's prefix is not enough on its own; it must also satisfy
-// IsRecoveryFile, or any plain file that happens to start with
-// "<session>.rec" would inflate the count.
-func TestUndeliveredCountForIgnoresNonRecoveryFileWithMatchingPrefix(t *testing.T) {
-	dir := t.TempDir()
-	sp := Spool{Dir: dir}
-	// Shares the "sess.rec" prefix, but the run before '-' is not all digits
-	// (an unparsable attempt), so IsRecoveryFile rejects it.
-	writeRecoveryFile(t, dir, "sess.recX-abc.jsonl", "n1", "n2")
-
-	if got := sp.UndeliveredCountFor("sess"); got != 0 {
-		t.Errorf("a non-recovery file with a matching prefix was counted: got %d, want 0", got)
-	}
-}
-
-// TestUndeliveredCountForSanitizesSessionID both the writer's stem and the
-// query prefix run the raw session id through sanitizeSessionID, so a raw id
-// containing a character it rewrites must still match its own carry-over.
-func TestUndeliveredCountForSanitizesSessionID(t *testing.T) {
-	dir := t.TempDir()
-	sp := Spool{Dir: dir}
-	rawID := "team/alpha" // sanitizeSessionID rewrites '/' to '_'
-	writeRecoveryFile(t, dir, sanitizeSessionID(rawID)+".rec1-ccc.jsonl", "c1", "c2", "c3", "c4")
-
-	if got := sp.UndeliveredCountFor(rawID); got != 4 {
-		t.Errorf("sanitized-id count = %d, want 4", got)
-	}
-}
-
-// TestUndeliveredCountForMissingDirectoryReportsZero this feeds a telemetry
-// field and must never fail a session, even when the spool directory itself
-// does not exist.
 func TestUndeliveredCountForMissingDirectoryReportsZero(t *testing.T) {
 	sp := Spool{Dir: filepath.Join(t.TempDir(), "does-not-exist")}
 	if got := sp.UndeliveredCountFor("sess"); got != 0 {

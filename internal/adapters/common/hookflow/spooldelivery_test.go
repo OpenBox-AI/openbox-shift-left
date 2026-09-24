@@ -417,40 +417,13 @@ func TestASweepThatEndedEarlyDoesNotRetireWhatItNeverReached(t *testing.T) {
 	}
 }
 
-// TestAChurningCarryOverAgesOutAndIsRetired is what carry-over mtime inheritance
-// buys. Once a transport fault stops spending attempts, nothing else bounds it:
-// writeRecovery mints a new file every pass, so without inheriting the data's own
-// age the 30-day gate could never come due and the retry would be unbounded.
-func TestAChurningCarryOverAgesOutAndIsRetired(t *testing.T) {
-	e := testEngine(t)
-	var logged strings.Builder
-	e.Log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
-
-	spoolEvent(t, e, "stale", "stale-1")
-	path := e.Spool.SessionPath("stale")
-	old := time.Now().Add(-RetireSpoolAfter - time.Hour)
-	if err := os.Chtimes(path, old, old); err != nil {
-		t.Fatal(err)
-	}
-
-	// A transport fault: held, never a refusal, so it spends no attempt.
-	held := func(context.Context, client.DevEvent) (client.Evaluation, error) {
-		return client.Evaluation{}, fmt.Errorf("%w: dial tcp: connection refused", client.ErrDelivery)
-	}
-	if _, err := e.FlushOrSweep(context.Background(), "", emitFunc(held)); err != nil {
-		t.Fatalf("FlushOrSweep: %v", err)
-	}
-
-	if got := e.Spool.BacklogCount(); got != 0 {
-		t.Errorf("backlog = %d; a carry-over as old as the retention age must be retired", got)
-	}
-	if got := e.Spool.DiscardedCount(); got != 1 {
-		t.Errorf("DiscardedCount = %d, want 1", got)
-	}
-	if got := logged.String(); !strings.Contains(got, "RETIRED") {
-		t.Errorf("the retirement was not reported: %q", got)
-	}
-}
+// TestAChurningCarryOverAgesOutAndIsRetired is deleted (not adapted): its
+// premise was a transport fault being HELD (never delivered, re-queued
+// forever) until it aged into retirement. Single-attempt delivery has no
+// such state any more -- a transport fault now spends the event's one
+// attempt immediately (Spool.OnFailure, a ledger line), so there is
+// nothing left in the tail to age. Retirement of a plain, never-attempted
+// file stays covered by the tests above and below.
 
 // emitFunc adapts a plain function to Emitter, so a test can pick its own
 // failure class without declaring a sink type per class.

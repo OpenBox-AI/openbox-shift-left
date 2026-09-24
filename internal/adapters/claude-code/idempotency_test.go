@@ -137,8 +137,8 @@ func TestEventID_StableAcrossSpoolLifecycle(t *testing.T) {
 	}
 
 	fn, got := drainCollect()
-	if _, err := sp.FlushSession(context.Background(), "sess", fn); err != nil {
-		t.Fatalf("flush: %v", err)
+	if _, err := sp.DrainSession(context.Background(), "sess", fn, hookflow.DrainOptions{Mode: hookflow.Block, AttemptTimeout: hookflow.DeliveryAttemptTimeout}); err != nil {
+		t.Fatalf("drain: %v", err)
 	}
 	if len(*got) != 3 {
 		t.Fatalf("drained %d, want 3", len(*got))
@@ -175,7 +175,7 @@ func TestEventID_RecoveryNeverReSendsAcked(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := sp.FlushSession(ctx, "sess", fn); err == nil {
+	if _, err := sp.DrainSession(ctx, "sess", fn, hookflow.DrainOptions{Mode: hookflow.Block, AttemptTimeout: hookflow.DeliveryAttemptTimeout}); err == nil {
 		t.Error("expected ctx error on the cut-short drain")
 	}
 	if len(acked) != 1 || acked[0] != ids[0] {

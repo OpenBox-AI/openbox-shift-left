@@ -561,10 +561,14 @@ func onlySpoolFile(t *testing.T, dir string) string {
 // TestHookEndToEndSmoke drives all five hooks through the unified subcommand
 // and asserts the whole observe→deliver path on the unified binary (in-
 // process):
-//   - The HOT-PATH hooks (SessionStart..PostToolUse) never block on the
-//     network; they spool locally and cause zero egress; delivery happens only
-//     at SessionEnd (AC4 latency budget: the async/no-network-on-hot-path
+//   - The HOT-PATH hooks (UserPromptSubmit, PreToolUse..PostToolUse) never
+//     block on the network except where gating or an inline single-attempt
+//     delivery says otherwise; delivery of everything else happens only at
+//     SessionEnd (AC4 latency budget: the async/no-network-on-hot-path
 //     guarantee);
+//   - SessionStart is the one exception among the non-gating hooks: it drains
+//     its own WorkflowStarted event inline, under its own session's stripe,
+//     before returning, so it egresses exactly once by design;
 //   - Each hot-path hook returns well within a coarse wall-clock budget;
 //   - SessionEnd flushes the spooled session to /evaluate and drains the
 //     spool;
@@ -606,7 +610,10 @@ func TestHookEndToEndSmoke(t *testing.T) {
 		hotPath       bool // must be fast
 		gating        bool // egresses synchronously by design
 	}{
-		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true, false},
+		// gating=true here does not mean access control; it means "egresses
+		// synchronously by design" (this table's own field doc), and
+		// SessionStart's inline WorkflowStarted attempt now qualifies.
+		{"SessionStart", `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r","source":"startup"}`, true, true},
 		{"UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"s1","cwd":"/r","prompt":"hi"}`, true, true},
 		{"PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_input":{"command":"` + contentCanary + `"}}`, true, true},
 		{"PostToolUse", `{"hook_event_name":"PostToolUse","session_id":"s1","cwd":"/r","tool_name":"Bash","tool_response":{"ok":true}}`, true, false},

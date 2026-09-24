@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,17 +21,51 @@ import (
 // The control plane does not dedupe developer events on their id, so anything
 // that reaches it outside this spool has to avoid duplicating itself on its own.
 // That is the rule the double-store bug broke.
+//
+// Every event gets exactly ONE delivery attempt, in append order: no
+// carry-over, no retry, no re-spool. An attempted, unaccepted event goes to
+// OnFailure and is gone; only what a pass could not even START (its budget ran
+// out first) stays queued, in a head file ahead of the tail.
 type Spool struct {
 	Dir string
 	// Log reports a loss the spool cannot avoid. Nil ⇒ silent. Reported here rather
 	// than diffed by a caller: the discard log is size-capped and RESTARTS.
 	Log func(format string, args ...any)
+	// OnFailure is invoked once for every event a drain ATTEMPTED and did not
+	// get an accepted verdict for -- any error at all (transport, timeout, a
+	// judged refusal, everything). Nil ⇒ defaultOnFailure, a ledger line
+	// naming client.FailureClass(err); a later caller additionally writes the
+	// run-keyed halt latch here.
+	OnFailure func(ev client.DevEvent, err error)
 }
 
 func (s Spool) logf(format string, args ...any) {
 	if s.Log != nil {
 		s.Log(format, args...)
 	}
+}
+
+// onFailure runs s.OnFailure, or the default ledger line when unset.
+func (s Spool) onFailure(ev client.DevEvent, err error) {
+	if s.OnFailure != nil {
+		s.OnFailure(ev, err)
+		return
+	}
+	s.defaultOnFailure(ev, err)
+}
+
+// errOrphanedDrain is the cause OnFailure sees for a line reclaimed from a
+// drainer that died mid-pass: its outcome cannot be proven, so it is
+// treated as a failure like any other, with its own wording rather than a
+// network/timeout class that would misdescribe why nothing arrived.
+var errOrphanedDrain = errors.New("hookflow: a drainer died mid-delivery; the outcome of this event cannot be proven")
+
+func (s Spool) defaultOnFailure(ev client.DevEvent, err error) {
+	reason := "a drainer died mid-delivery; the outcome of this event cannot be proven"
+	if !errors.Is(err, errOrphanedDrain) {
+		reason = "not accepted by core: " + client.FailureClass(err)
+	}
+	s.recordDiscard(s.SessionPath(ev.SessionID), 1, reason)
 }
 
 // Append writes one event as a single JSON line to the session's spool file.
@@ -43,8 +76,8 @@ func (s Spool) logf(format string, args ...any) {
 // reads it and removes it, so a write landing between the read and the remove
 // goes into a file nothing reads again -- a tool call with no evidence.
 //
-// The lock is a sidecar, never the JSONL file: drainFile and the recovery sweep
-// open that path too, and locking it would deadlock against them.
+// The lock is a sidecar, never the JSONL file: a drain opens that path too,
+// and locking it would deadlock against it.
 func (s Spool) Append(ev client.DevEvent) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("spool mkdir: %w", err)
@@ -91,63 +124,384 @@ func (s Spool) lockSpool() func() {
 // FlushFunc delivers one spooled event.
 type FlushFunc func(context.Context, client.DevEvent) error
 
-// FlushSession drains one session's spool through fn and returns the number of
-// events delivered.
-func (s Spool) FlushSession(ctx context.Context, sessionID string, fn FlushFunc) (int, error) {
-	return s.drainFile(ctx, s.SessionPath(sessionID), fn)
+// DeliveryAttemptTimeout bounds ONE delivery attempt: 30s, core's own
+// workflow cap. It is the attemptTimeout every non-inline drainer (the
+// detached flusher, the sweeper, uninstall's flush) passes to DrainSession;
+// a gate escalation and an inline SessionStart/SessionEnd attempt pass their
+// own, smaller budget instead.
+const DeliveryAttemptTimeout = 30 * time.Second
+
+// HeadSuffix names the file a cut pass writes its unattempted remainder to,
+// always ahead of the tail: at most one per stem.
+const HeadSuffix = ".head.jsonl"
+
+func (s Spool) headPath(sessionID string) string {
+	return filepath.Join(s.Dir, sanitizeSessionID(sessionID)+HeadSuffix)
 }
 
-// recoveryFiles an unreadable directory yields none: a sweep is best-effort
-// catch-up (observe, INV-3), never a reason to fail a caller.
-func (s Spool) recoveryFiles() []string {
+// ReclaimOrphanAfter bounds "no drain could still hold this"; drains take
+// seconds, so a `.flushing.` rotation older than this proves its drainer died
+// mid-pass rather than merely being slow.
+const ReclaimOrphanAfter = 5 * time.Minute
+
+// DrainSession drains one session's queue -- its head file, then its tail --
+// through fn, giving every line exactly ONE delivery attempt in order. Held
+// across the whole call is sessionID's stripe lock (mode selects Block/Try;
+// see DrainMode), so two drainers never deliver the same session
+// concurrently and delivery order always equals append order.
+//
+// Before draining, any aged orphan (a prior drainer that died mid-pass, or a
+// legacy pre-single-attempt carry-over file) belonging to this session is
+// reclaimed and discarded -- never redelivered.
+//
+// attemptTimeout bounds each individual delivery; a pass never starts an
+// attempt it cannot finish: once ctx's remaining budget drops below
+// attemptTimeout, everything left is written to the session's head file
+// instead of being attempted (not a failure). The returned error, when
+// non-nil, reports that cutoff (or ctx's own error); it never means an event
+// was lost.
+func (s Spool) DrainSession(ctx context.Context, sessionID string, fn FlushFunc, opts DrainOptions) (int, error) {
+	release, lockErr := s.lockSession(ctx, sessionID, opts.Mode)
+	defer release()
+	if lockErr != nil {
+		return 0, lockErr
+	}
+
+	// A pass that cannot even cover one attempt must not touch anything: past
+	// this point the pass rotates the tail (and any head file) aside, which
+	// resets their mtime to "now" whether or not anything in them was
+	// attempted. A caller (FlushAll, the periodic sweep) walking a directory
+	// under a shrinking ctx would otherwise churn every stem's mtime every
+	// pass without ever attempting most of them, which makes retirement
+	// think every file just got its shot and a genuinely starving one never
+	// comes due.
+	if remaining, ok := ctxRemaining(ctx); ok && remaining < opts.AttemptTimeout {
+		return 0, errPassCutShort
+	}
+
+	stem := sanitizeSessionID(sessionID)
+	s.reclaimStemLegacy(stem)
+	// Reclaimed, not delivered: never added to the count this returns (see
+	// below).
+	s.reclaimStemOrphans(stem, s.onFailure)
+
+	lines, rotated, err := s.collectSession(sessionID)
+	removeRotated := func() {
+		// Only after the remainder (if any) is durably queued in the head
+		// file: a process killed between collectSession and here (Codex
+		// SIGKILLs a SessionEnd hook at 3s) leaves these rotated files on
+		// disk exactly as any other `.flushing.` rotation, so the next
+		// drainer's reclaimStemOrphans finds and discards them past
+		// ReclaimOrphanAfter instead of the lines vanishing with no ledger
+		// line and nothing for a halt to hang off of.
+		for _, p := range rotated {
+			_ = os.Remove(p)
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(lines) == 0 {
+		removeRotated()
+		return 0, nil
+	}
+
+	delivered, corrupt, remainder, cutoff := s.attemptLines(ctx, lines, fn, opts)
+	if corrupt > 0 {
+		// Its own reason, so an investigation goes to the writer rather than to the
+		// wire: a line that will not parse was damaged on disk, not refused.
+		s.recordDiscard(s.SessionPath(sessionID), corrupt, "the spooled line was not valid JSON and could not be read back")
+	}
+	s.writeHead(sessionID, remainder)
+	removeRotated()
+
+	// orphaned lines were reclaimed and discarded, never delivered, so they
+	// are never added to the returned count: every caller (the drain-until-
+	// empty loop, a flush's own "how many did I send" log line) reads this as
+	// "accepted by core", not "lines this pass touched".
+	if !cutoff {
+		return delivered, nil
+	}
+	if ctx.Err() != nil {
+		return delivered, ctx.Err()
+	}
+	return delivered, errPassCutShort
+}
+
+// ctxRemaining reports how long ctx has left, and whether it even has a
+// deadline: a context with none (context.Background(), or one only ever
+// cancelled explicitly) never counts as short on time.
+func ctxRemaining(ctx context.Context) (time.Duration, bool) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0, false
+	}
+	return time.Until(deadline), true
+}
+
+// DrainOptions configures one DrainSession call.
+type DrainOptions struct {
+	// Mode selects Block or Try (sessionlock.go) for this call's own
+	// session stripe.
+	Mode DrainMode
+	// AttemptTimeout bounds each individual delivery attempt this call
+	// makes; a pass never starts one it cannot finish (see DrainSession).
+	AttemptTimeout time.Duration
+	// RequeueUnanswered changes what an attempt that both errored AND never
+	// heard back within its own attemptTimeout window means: normally (the
+	// detached flusher, the sweep, uninstall's flush, all with a generous
+	// 30s attemptTimeout) that is treated as any other failure -- an
+	// explicit answer just never arrived, and 30s is long enough that
+	// silence itself is meaningful. An inline SessionStart/SessionEnd
+	// attempt uses a much smaller window purely to avoid holding up the
+	// hook, so silence there proves nothing about whether core would have
+	// accepted the event; with this set, such a line (and everything after
+	// it, to keep order intact) is left queued for the detached flusher's
+	// own, unbounded try instead of being scored as a failure.
+	RequeueUnanswered bool
+}
+
+// errPassCutShort reports that a pass's own budget ran out before another
+// attempt could safely start: the remainder is queued in the head file,
+// not lost, and this is never treated as an event failure.
+var errPassCutShort = errors.New("hookflow: the pass's budget ran out before another attempt could safely start")
+
+// collectSession rotates the session's head file (if any) and tail aside
+// under the directory lock -- the same one Append takes -- so a concurrent
+// Append lands in a fresh, empty tail and never interleaves with what this
+// pass is about to read. It returns their lines combined, head before tail,
+// because the head is always the earlier, previously-unattempted remainder,
+// plus the rotated paths themselves -- which the caller must NOT remove
+// until whatever it decides to do with the lines (deliver them, queue a
+// remainder) is durable. Removing them here, before that, is exactly the
+// crash window that used to lose lines with no ledger entry and no orphan
+// left for reclaimStemOrphans to find: a process killed between this read
+// and the caller's own cleanup would otherwise take the only copy of
+// whatever it had not yet attempted down with it. Both rotated copies are
+// rotated together so a crash before either is removed leaves two ordinary
+// `.flushing.` orphans, reclaimed (never redelivered) the same way as any
+// other -- never a stale, silently-stale head file.
+func (s Spool) collectSession(sessionID string) (lines [][]byte, rotatedPaths []string, err error) {
+	head := s.headPath(sessionID)
+	tail := s.SessionPath(sessionID)
+	rotatedHead := head + ".flushing." + rand.Text()
+	rotatedTail := tail + ".flushing." + rand.Text()
+
+	rotateErr := func() error {
+		unlock := s.lockSpool()
+		defer unlock()
+
+		now := time.Now()
+		if renameErr := os.Rename(head, rotatedHead); renameErr != nil {
+			if !os.IsNotExist(renameErr) {
+				return fmt.Errorf("spool rotate head: %w", renameErr)
+			}
+			rotatedHead = ""
+		} else {
+			_ = os.Chtimes(rotatedHead, now, now)
+		}
+		if renameErr := os.Rename(tail, rotatedTail); renameErr != nil {
+			if !os.IsNotExist(renameErr) {
+				return fmt.Errorf("spool rotate tail: %w", renameErr)
+			}
+			rotatedTail = ""
+		} else {
+			_ = os.Chtimes(rotatedTail, now, now)
+		}
+		return nil
+	}()
+	if rotateErr != nil {
+		return nil, nil, rotateErr
+	}
+
+	var errs []error
+	for _, path := range []string{rotatedHead, rotatedTail} {
+		if path == "" {
+			continue
+		}
+		data, rerr := os.ReadFile(path)
+		switch {
+		case rerr == nil:
+			lines = append(lines, NonEmptyLines(data)...)
+			// Read successfully, so the caller may remove it once it is done
+			// with the lines. A read failure leaves the path OUT of this
+			// slice on purpose: the caller must never delete a file it could
+			// not actually read.
+			rotatedPaths = append(rotatedPaths, path)
+		case !os.IsNotExist(rerr):
+			errs = append(errs, fmt.Errorf("spool read: %w", rerr))
+		}
+	}
+	return lines, rotatedPaths, errors.Join(errs...)
+}
+
+// writeHead atomically replaces the session's head file with remainder, or
+// removes it when remainder is empty: at most one head file per stem, always
+// the sole record of what a pass could not even start.
+func (s Spool) writeHead(sessionID string, remainder [][]byte) {
+	path := s.headPath(sessionID)
+	if len(remainder) == 0 {
+		_ = os.Remove(path)
+		return
+	}
+	var buf bytes.Buffer
+	for _, l := range remainder {
+		buf.Write(l)
+		buf.WriteByte('\n')
+	}
+	tmp := path + ".tmp." + rand.Text()
+	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
+		_ = os.Remove(tmp)
+		s.logf("spool: %s: the unattempted remainder could not be written to its head file: %v", filepath.Base(path), err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		s.logf("spool: %s: the unattempted remainder could not be renamed into its head file: %v", filepath.Base(path), err)
+	}
+}
+
+// attemptLines gives each line exactly one delivery attempt, in order:
+// accepted or not, it advances to the next line via onFailure. Two things
+// stop the loop early, both reported back as a cutoff rather than a failure
+// of any line left in remainder: ctx running out (its own error, or its
+// remaining budget dropping below attemptTimeout before another attempt
+// could safely start), and -- only when opts.RequeueUnanswered is set -- an
+// attempt whose own per-line ctx expired before fn returned an error. That
+// second case is silence, not an answer: core may have accepted or refused
+// the event and the process never found out, so the line (and everything
+// after it, so a later line can never overtake an earlier one whose outcome
+// is unknown) is left for a drainer with a real, unbounded attempt to try
+// instead of being scored as a failure.
+func (s Spool) attemptLines(ctx context.Context, lines [][]byte, fn FlushFunc, opts DrainOptions) (delivered, corrupt int, remainder [][]byte, cutoff bool) {
+	for i, line := range lines {
+		if ctx.Err() != nil {
+			return delivered, corrupt, lines[i:], true
+		}
+		if remaining, ok := ctxRemaining(ctx); ok && remaining < opts.AttemptTimeout {
+			return delivered, corrupt, lines[i:], true
+		}
+
+		var ev client.DevEvent
+		if json.Unmarshal(line, &ev) != nil {
+			corrupt++
+			continue
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, opts.AttemptTimeout)
+		derr := fn(attemptCtx, ev)
+		unanswered := attemptCtx.Err() != nil // read BEFORE cancel changes it
+		cancel()
+		if derr != nil {
+			if opts.RequeueUnanswered && unanswered {
+				return delivered, corrupt, lines[i:], true
+			}
+			s.onFailure(ev, derr)
+			continue
+		}
+		delivered++
+	}
+	return delivered, corrupt, nil, false
+}
+
+// reclaimStemLegacy discards every legacy (pre-single-attempt) carry-over
+// file belonging to stem on sight: this release has no carry-over concept, so
+// a `<stem>.recN-*.jsonl` left by an old binary is never drained, only
+// counted and removed.
+func (s Spool) reclaimStemLegacy(stem string) {
+	prefix := stem + ".rec"
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
-		return nil
+		return
 	}
-	var out []string
 	for _, e := range entries {
-		if !e.IsDir() && IsRecoveryFile(e.Name()) {
-			out = append(out, e.Name())
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		base := name
+		if i := strings.Index(base, ".flushing."); i >= 0 {
+			base = base[:i]
+		}
+		if !IsRecoveryFile(base) {
+			continue
+		}
+		path := filepath.Join(s.Dir, name)
+		n := countLines(path)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			continue
+		}
+		if n > 0 {
+			s.recordDiscard(path, n, "a carry-over file from a prior release; single-attempt "+
+				"delivery has no carry-over, so it is discarded rather than drained")
 		}
 	}
-	return out
 }
 
-// sweepRecovery drains the named carry-over files, those belonging to
-// ownSession (if any) first so the ending session's own telemetry gets the
-// budget before other sessions' backlog does.
-func (s Spool) sweepRecovery(ctx context.Context, names []string, ownSession string, fn FlushFunc) (int, error) {
-	if ownSession != "" {
-		own := sanitizeSessionID(ownSession) + ".rec"
-		mine, theirs := make([]string, 0, len(names)), make([]string, 0, len(names))
-		for _, n := range names {
-			if strings.HasPrefix(n, own) {
-				mine = append(mine, n)
-			} else {
-				theirs = append(theirs, n)
-			}
-		}
-		names = append(mine, theirs...)
+// reclaimStemOrphans discards every `.flushing.` rotation belonging to stem
+// that is old enough to prove its drainer died mid-pass (ReclaimOrphanAfter):
+// the outcome of its lines cannot be known, so they are never redelivered,
+// only counted and, through onFailure, individually failed so a later phase's
+// latch can halt the run they belonged to. Returns how many parseable
+// lines it reclaimed.
+func (s Spool) reclaimStemOrphans(stem string, onFailure func(client.DevEvent, error)) int {
+	prefixes := [2]string{stem + ".jsonl.flushing.", stem + HeadSuffix + ".flushing."}
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return 0
 	}
 	total := 0
-	var errs []error
-	for _, name := range names {
-		if ctx.Err() != nil {
-			return total, ctx.Err()
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
 		}
-		n, err := s.drainFile(ctx, filepath.Join(s.Dir, name), fn)
-		total += n
-		errs = append(errs, err)
+		name := e.Name()
+		matched := false
+		for _, p := range prefixes {
+			if strings.HasPrefix(name, p) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		info, statErr := e.Info()
+		if statErr != nil || time.Since(info.ModTime()) < ReclaimOrphanAfter {
+			continue
+		}
+		path := filepath.Join(s.Dir, name)
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		lines := NonEmptyLines(data)
+		corrupt := 0
+		for _, line := range lines {
+			var ev client.DevEvent
+			if json.Unmarshal(line, &ev) != nil {
+				corrupt++
+				continue
+			}
+			if onFailure != nil {
+				onFailure(ev, errOrphanedDrain)
+			}
+		}
+		_ = os.Remove(path)
+		if corrupt > 0 {
+			s.recordDiscard(path, corrupt, "the spooled line was not valid JSON and could not be read back")
+		}
+		total += len(lines) - corrupt
 	}
-	// Every file's failure, not the first: a sweep that hit one unreadable
-	// carry-over and then three more reported one, and the caller had no way to
-	// see the rest. errors.Join drops the nils.
-	return total, errors.Join(errs...)
+	return total
 }
 
-// IsRecoveryFile reports whether name is a carry-over file;
-// `<session>.rec<N>-<id>.jsonl`, or the legacy `<session>.rec-<id>.jsonl`
-// written before the attempt counter existed.
+// IsRecoveryFile reports whether name is a LEGACY (pre-single-attempt)
+// carry-over file this release never writes again: `<session>.rec<N>-<id>.jsonl`,
+// or the pre-attempt-counter `<session>.rec-<id>.jsonl`. Kept only so a file an
+// old binary left behind is recognized and discarded, never drained.
 func IsRecoveryFile(name string) bool {
 	if !strings.HasSuffix(name, ".jsonl") || strings.Contains(name, ".flushing.") {
 		return false
@@ -169,10 +523,51 @@ func IsRecoveryFile(name string) bool {
 	return true
 }
 
-// FlushAll drains every session spool in the directory; the `flush` subcommand
-// / CLI-driven catch-up path; including recovery files (`*.rec-*.jsonl`) left
-// by a budget-bounded flush and orphaned `*.flushing.*` files left by a drain
-// whose process was killed mid-flight.
+// recoveryStem returns the canonical `<dir>/<session>` stem for a legacy
+// recovery filename, dropping its `.rec<N>-<id>` segment.
+func recoveryStem(basePath string) string {
+	dir, name := filepath.Split(basePath)
+	name = strings.TrimSuffix(name, ".jsonl")
+	if i := strings.Index(name, ".rec"); i >= 0 {
+		name = name[:i]
+	}
+	return filepath.Join(dir, name)
+}
+
+// sessionStemFromName recovers a stem from any file this package writes for a
+// session -- tail, head, an in-flight rotation of either, or a legacy
+// pre-single-attempt carry-over -- so FlushAll can group every variant under
+// the one stem DrainSession expects. false for a directory-level file (the
+// spool lock, the discard log, a session's flush-debounce lock, a session
+// stripe lock) nothing owns a session.
+func sessionStemFromName(name string) (string, bool) {
+	switch name {
+	case SpoolLockName, DiscardLogName:
+		return "", false
+	}
+	if strings.HasSuffix(name, ".flushlock") || strings.HasPrefix(name, ".session.lock.") {
+		return "", false
+	}
+	if i := strings.Index(name, ".flushing."); i >= 0 {
+		name = name[:i]
+	}
+	if IsRecoveryFile(name) {
+		return recoveryStem(name), true
+	}
+	if strings.HasSuffix(name, HeadSuffix) {
+		return strings.TrimSuffix(name, HeadSuffix), true
+	}
+	if strings.HasSuffix(name, ".jsonl") {
+		return strings.TrimSuffix(name, ".jsonl"), true
+	}
+	return "", false
+}
+
+// FlushAll drains every session spool in the directory -- the `flush`
+// subcommand's no-session sweep, and the periodic Sweeper's catch-up -- each
+// through DrainSession in Try mode: FlushAll does not own any of these
+// sessions, so a stripe another drainer already holds is skipped this pass,
+// not waited on.
 func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
@@ -181,263 +576,67 @@ func (s Spool) FlushAll(ctx context.Context, fn FlushFunc) (int, error) {
 		}
 		return 0, fmt.Errorf("spool readdir: %w", err)
 	}
-	total := 0
-	var errs []error
+	// entries is already alphabetical (os.ReadDir sorts), and callers rely on
+	// that: a pass cut short by ctx must reach an earlier name before a later
+	// one, so retirement can tell "never reached" apart from "reached and
+	// still live". seen dedupes without reordering -- one stem can surface
+	// from several names (its tail, its head file, an in-flight rotation).
+	stems := make([]string, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		if ctx.Err() != nil {
-			return total, ctx.Err()
-		}
-		name := e.Name()
-		var n int
-		switch {
-		case strings.Contains(name, ".flushing."):
-			// A live drain holds its rotated file all through delivery, and nothing dedupes.
-			info, statErr := e.Info()
-			if statErr != nil || time.Since(info.ModTime()) < ReclaimOrphanAfter {
-				continue
-			}
-			claimed := filepath.Join(s.Dir, name) + ".reclaim." + rand.Text()
-			if os.Rename(filepath.Join(s.Dir, name), claimed) != nil {
-				continue // lost the race to another drain, or already gone
-			}
-			// Stamp it, as drainFile stamps its own rotation: the claim is exclusive
-			// only while the MTIME says a drain holds the file. Rename preserves the
-			// mtime and the claimed name still contains ".flushing.", so without
-			// this the next concurrent walk -- routine, with three lane daemons on
-			// one directory -- reclaims it mid-drain and delivers every line twice.
-			// Nothing downstream dedupes; see this file's header. `born` was read
-			// before the rename, so retirement's clock is untouched.
-			reclaimedAt := time.Now()
-			_ = os.Chtimes(claimed, reclaimedAt, reclaimedAt)
-			// An orphan's own mtime IS its age; it is what qualified it above.
-			n, err = s.drainRotated(ctx, orphanBasePath(s.Dir, name), claimed, fn, info.ModTime())
-		case strings.HasSuffix(name, ".jsonl"):
-			// Until empty: a sweep is a drain, and the window does not care who opened it.
-			n, err = s.drainFileUntilEmpty(ctx, filepath.Join(s.Dir, name), fn)
-		default:
+		stem, ok := sessionStemFromName(e.Name())
+		if !ok || seen[stem] {
 			continue
 		}
+		seen[stem] = true
+		stems = append(stems, stem)
+	}
+
+	total := 0
+	var errs []error
+	for _, stem := range stems {
+		if ctx.Err() != nil {
+			errs = append(errs, ctx.Err())
+			break
+		}
+		n, derr := s.DrainSession(ctx, stem, fn, DrainOptions{Mode: Try, AttemptTimeout: DeliveryAttemptTimeout})
 		total += n
-		errs = append(errs, err)
+		switch {
+		case derr == nil, errors.Is(derr, ErrSessionBusy):
+		case errors.Is(derr, errPassCutShort):
+			// Every stem still to walk shares this same ctx and would see
+			// the identical (or smaller) remaining budget, so stop here
+			// rather than touch, and instantly reject, each one in turn.
+			errs = append(errs, derr)
+			return total, errors.Join(errs...)
+		default:
+			errs = append(errs, derr)
+		}
 	}
 	// One session's spool failing must not hide the next one's; errors.Join
 	// drops the nils, so a clean pass still returns nil.
 	return total, errors.Join(errs...)
 }
 
-// drainFile rotates the session's spool aside and drains the rotated copy.
-//
-// The lock covers the rename and nothing else. Holding it across delivery would
-// put a network round trip between a hook and its own Append, which is exactly
-// what INV-3 forbids; and it is not needed, because once the file is renamed no
-// later Append can reach it.
-func (s Spool) drainFile(ctx context.Context, path string, fn FlushFunc) (int, error) {
-	rotated := path + ".flushing." + rand.Text()
-	// born is how long this data has already waited, which the rotate is about to
-	// erase: the Chtimes below must stamp the rotated file `now` so a concurrent
-	// sweep cannot reclaim a live drain as an orphan, and a carry-over is a
-	// brand-new file. Unless it is carried forward, a churning lineage is reborn
-	// every pass and the retention age never comes due.
-	var born time.Time
-	err := func() error {
-		unlock := s.lockSpool()
-		defer unlock()
-		if fi, statErr := os.Stat(path); statErr == nil {
-			born = fi.ModTime()
-		}
-		if renameErr := os.Rename(path, rotated); renameErr != nil {
-			return renameErr
-		}
-		// Inside the lock, not after it. Between an unlock and a later stamp the
-		// rotated file still carries the SOURCE's mtime -- and a carry-over file's
-		// is deliberately stamped back to `born` -- so a concurrent walk landing in
-		// that window sees a brand-new rotation as an orphan older than
-		// ReclaimOrphanAfter and drains it in parallel with the drain that made it.
-		rotatedAt := time.Now()
-		_ = os.Chtimes(rotated, rotatedAt, rotatedAt)
-		return nil
-	}()
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil // already drained / nothing spooled
-		}
-		return 0, fmt.Errorf("spool rotate: %w", err)
-	}
-	return s.drainRotated(ctx, path, rotated, fn, born)
-}
-
-func (s Spool) drainFileUntilEmpty(ctx context.Context, path string, fn FlushFunc) (int, error) {
-	total := 0
-	for pass := 1; pass <= MaxDrainPasses; pass++ {
-		n, err := s.drainFile(ctx, path, fn)
-		total += n
-		if err != nil {
-			return total, err
-		}
-		remaining := countLines(path)
-		if remaining == 0 {
-			return total, nil
-		}
-		if pass == MaxDrainPasses {
-			s.logf("spool: %s: %d event(s) remain after %d drain passes; they stay spooled for the next sweep",
-				filepath.Base(path), remaining, MaxDrainPasses)
-		}
-	}
-	return total, nil
-}
-
-func (s Spool) drainRotated(ctx context.Context, basePath, file string, fn FlushFunc, born time.Time) (int, error) {
-	data, err := os.ReadFile(file)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("spool read: %w", err)
-	}
-	defer os.Remove(file) // best-effort; undelivered lines were re-spooled above
-
-	attempt := RecoveryAttempt(filepath.Base(file))
-	lines := NonEmptyLines(data)
-	n := 0
-	// refused spent an attempt; held did not. Keeping them apart is the fix: one
-	// file carries one attempt number in its name, so two meanings need two files.
-	var refused, held [][]byte
-	// Counted rather than recorded line by line, for the same reason refused and
-	// held are: one drain pass leaves one account of what it lost.
-	unbuildable := 0
-	// corrupt gets its OWN count for the same reason unbuildable does. It was the
-	// one loss here that left no trace: not delivered, not carried, not counted,
-	// and the source unlinked by the defer above -- so every counter read zero and
-	// the session still said evidence_state "complete". A torn tail from a crash
-	// mid-Append is exactly that shape.
-	corrupt := 0
-	var stopped error
-	for i, line := range lines {
-		if ctx.Err() != nil {
-			if i == 0 {
-				// Nothing on this file was even attempted, so nothing about it can
-				// advance. Said out loud, because a file that is always starved this
-				// way is indistinguishable from one that is refused every pass.
-				s.logf("spool: %s: the budget was spent before a single delivery was attempted; "+
-					"%d event(s) carried over unchanged at attempt %d",
-					filepath.Base(basePath), len(lines), attempt)
-			}
-			held = append(held, lines[i:]...)
-			stopped = ctx.Err()
-			break
-		}
-		var ev client.DevEvent
-		if json.Unmarshal(line, &ev) != nil {
-			corrupt++ // skip a corrupt line; never fail the whole drain -- but say so
-			continue
-		}
-		switch err := fn(ctx, ev); {
-		case err == nil:
-			n++
-		case errors.Is(err, client.ErrUnbuildable):
-			// Never sent, and re-sending it verbatim cannot help, so it is dropped
-			// here rather than carried -- but counted, and recorded after the loop
-			// under its OWN reason: this is a defect on the client side, and filing
-			// it as "past N delivery attempts" would read as server pressure and
-			// send an investigation to the wrong side of the wire. Loss is
-			// acceptable; loss no record survives is what this file exists to stop.
-			unbuildable++
-		case errors.Is(err, client.ErrRefused):
-			// The server judged THIS event and said no: the only thing that may
-			// spend one of its attempts.
-			refused = append(refused, line)
-		default:
-			// A transport fault, an exhausted 5xx, a 401 (which core also answers
-			// for a datastore failure) or a budget that expired inside the POST --
-			// Emit flattens that last cause to text, so errors.Is can never see it.
-			// None of these judged the event, so none may cost it an attempt.
-			held = append(held, line)
-		}
-	}
-	// A budget that dies inside the LAST delivery leaves by the door, not the
-	// break, and the caller still has to hear the pass was cut short.
-	if stopped == nil {
-		stopped = ctx.Err()
-	}
-	if unbuildable > 0 {
-		s.recordDiscard(basePath, unbuildable, "the client could not build the event for delivery")
-	}
-	if corrupt > 0 {
-		// Its own reason, so an investigation goes to the writer rather than to the
-		// wire: a line that will not parse was damaged on disk, not refused.
-		s.recordDiscard(basePath, corrupt, "the spooled line was not valid JSON and could not be read back")
-	}
-	s.carryOver(basePath, refused, held, attempt, born)
-	return n, stopped
-}
-
-// carryOver splits what a drain leaves behind by whether a delivery attempt was
-// actually spent on it. A refused line advances: without that, a file bigger
-// than one budget never finishes its loop, the count never advances, and a
-// permanently-rejected backlog churns forever at one attempt, a whole budget per
-// pass. A line the budget never reached keeps its number: advancing it turns the
-// retry cap into a timer that deletes any backlog too big for one budget.
-//
-// Two files, not one, because the number lives in the filename. held is written
-// FIRST, so a second write that fails costs the half already tried rather than
-// the half that never was. Both inherit born: a lineage that keeps being
-// rewritten would otherwise be young forever and never come due for retirement.
-func (s Spool) carryOver(basePath string, refused, held [][]byte, attempt int, born time.Time) {
-	s.writeRecovery(basePath, held, attempt, born)
-	s.writeRecovery(basePath, refused, attempt+1, born)
-}
-
-// MaxRecoveryAttempts bounds how many drains a line may survive undelivered.
-// Without a cap, an event the server will never accept; malformed in a way the
-// client cannot see, or referencing a deleted agent; would be retried on every
-// flush forever, and each retry costs a request on a developer's machine.
-const MaxRecoveryAttempts = 5
-
-// ReclaimOrphanAfter bounds "no drain could still hold this"; drains take seconds.
-const ReclaimOrphanAfter = 5 * time.Minute
-
-// RecoveryAttempt reads the attempt count encoded in a recovery filename
-// (`<session>.rec<N>-<id>.jsonl`). A spool or orphan file that has never been
-// carried over yields 0.
-func RecoveryAttempt(name string) int {
-	i := strings.Index(name, ".rec")
-	if i < 0 {
-		return 0
-	}
-	rest := name[i+len(".rec"):]
-	j := strings.Index(rest, "-")
-	if j <= 0 {
-		return 0
-	}
-	attempt, err := strconv.Atoi(rest[:j])
-	if err != nil || attempt < 0 {
-		return 0
-	}
-	return attempt
-}
-
-// UndeliveredCount reports how many spooled events are currently waiting in
-// carry-over (recovery) files; evidence an earlier flush failed to deliver.
-// Best-effort; an unreadable directory reports 0, because this feeds a
-// telemetry field and must never fail a session.
+// UndeliveredCount reports how many events are currently queued in a head
+// file -- attempted-too-late-to-start, waiting for the next pass -- across
+// every session in the directory. Best-effort; an unreadable directory
+// reports 0, because this feeds a telemetry field and must never fail a
+// session.
 func (s Spool) UndeliveredCount() int {
-	return s.sumLines(IsRecoveryFile)
+	return s.sumLines(func(n string) bool { return strings.HasSuffix(n, HeadSuffix) })
 }
 
-// UndeliveredCountFor is UndeliveredCount narrowed to one session: it counts
-// only carry-over files whose name starts with that session's sanitized
-// prefix, so another session's backlog sitting in the same directory never
-// inflates this one's count. Best-effort; an unreadable directory reports 0,
-// for the same reason UndeliveredCount does: this feeds a telemetry field and
-// must never fail a session.
+// UndeliveredCountFor narrows UndeliveredCount to one session's own pending
+// head-plus-tail count (SessionEnd's EvidenceState.Undelivered): its queue,
+// not another session's backlog sitting in the same directory, and not a
+// count of what already failed and was ledgered -- a single-attempt failure
+// is gone, not pending.
 func (s Spool) UndeliveredCountFor(sessionID string) int {
-	prefix := sanitizeSessionID(sessionID) + ".rec"
-	return s.sumLines(func(n string) bool {
-		return strings.HasPrefix(n, prefix) && IsRecoveryFile(n)
-	})
+	return s.PendingCount(sessionID)
 }
 
 func (s Spool) sumLines(match func(name string) bool) int {
@@ -459,66 +658,8 @@ func (s Spool) sumLines(match func(name string) bool) int {
 	return total
 }
 
-// recoveryStem returns the canonical `<dir>/<session>` stem for a recovery
-// filename, dropping any `.rec<N>-<id>` segment the input already carries.
-func recoveryStem(basePath string) string {
-	dir, name := filepath.Split(basePath)
-	name = strings.TrimSuffix(name, ".jsonl")
-	if i := strings.Index(name, ".rec"); i >= 0 {
-		name = name[:i]
-	}
-	return filepath.Join(dir, name)
-}
-
-// writeRecovery best-effort (observe): a write failure only loses telemetry,
-// never blocks anything.
-func (s Spool) writeRecovery(basePath string, lines [][]byte, next int, born time.Time) {
-	if len(lines) == 0 {
-		return
-	}
-	if next < 1 {
-		next = 1
-	}
-	if next > MaxRecoveryAttempts {
-		// The bound is right; discarding in silence was not.
-		s.recordDiscard(basePath, len(lines),
-			fmt.Sprintf("past %d delivery attempts", MaxRecoveryAttempts))
-		return
-	}
-	stem := recoveryStem(basePath) + ".rec" + strconv.Itoa(next) + "-" + rand.Text()
-	var buf bytes.Buffer
-	for _, l := range lines {
-		buf.Write(l)
-		buf.WriteByte('\n')
-	}
-	// Written under a name no sweep matches, then renamed in. Writing straight to
-	// the `.jsonl` name publishes it to FlushAll as soon as the entry appears, so
-	// a sweep could read a prefix, skip the torn tail as corrupt, remove the
-	// file, and the rest would follow into the removed inode.
-	tmp := stem + ".partial"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o600); err != nil {
-		_ = os.Remove(tmp)
-		s.recordDiscard(basePath, len(lines),
-			fmt.Sprintf("the carry-over file could not be written: %v", err))
-		return
-	}
-	published := stem + ".jsonl"
-	if err := os.Rename(tmp, published); err != nil {
-		_ = os.Remove(tmp)
-		s.recordDiscard(basePath, len(lines),
-			fmt.Sprintf("the carry-over file could not be renamed in: %v", err))
-		return
-	}
-	// The data is as old as it ever was; only the file is new. Retirement reads
-	// this, and nothing else does -- the orphan-reclaim clock lives on
-	// `.flushing.` names, which this never touches.
-	if !born.IsZero() {
-		_ = os.Chtimes(published, born, born)
-	}
-}
-
-// NonEmptyLines the returned slice is the caller's to index -- drainRotated
-// carries `lines[i:]` into a recovery file on cancellation -- so the signature
+// NonEmptyLines the returned slice is the caller's to index -- attemptLines
+// carries `lines[i:]` into the head file on cancellation -- so the signature
 // stays. SplitSeq only removes the intermediate index of every line including
 // the empty ones, which on a spool of small lines is most of the allocation.
 func NonEmptyLines(data []byte) [][]byte {
@@ -529,13 +670,6 @@ func NonEmptyLines(data []byte) [][]byte {
 		}
 	}
 	return out
-}
-
-func orphanBasePath(dir, name string) string {
-	if i := strings.Index(name, ".flushing."); i >= 0 {
-		name = name[:i]
-	}
-	return filepath.Join(dir, name)
 }
 
 // SessionPath is the spool file for a session id, sanitized for the
