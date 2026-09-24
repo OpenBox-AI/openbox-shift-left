@@ -13,7 +13,7 @@ backend="${OPENBOX_BACKEND_URL:-http://127.0.0.1:3000}"
 token="${OPENBOX_CONTROL_TOKEN:-$(cat "${repo_root:h}/local-stack/.state/control-token")}"
 
 "$cli" project verify "$pack"
-agent_id="$(jq -er '.agent.id' "$pack/target-posture.json")"
+agent_id="$(jq -er '.agent_id' "$pack/observation/run.json")"
 
 api() {
   curl --fail-with-body --silent --show-error \
@@ -23,8 +23,8 @@ api() {
 
 jq -n --slurpfile report "$pack/report.json" \
       --slurpfile manifest "$pack/manifest.json" \
-      --slurpfile posture "$pack/target-posture.json" \
-      '{report: $report[0], manifest: $manifest[0], target_posture: $posture[0]}' |
+      --slurpfile run "$pack/observation/run.json" \
+      '{report: $report[0], manifest: $manifest[0], run: $run[0]}' |
   api -X POST "$backend/agent/$agent_id/security-reports" --data @- |
   jq -r '"published: \(.data.digest) (\(.data.result))"'
 

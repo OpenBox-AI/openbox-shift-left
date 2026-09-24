@@ -19,6 +19,10 @@ conversation; OpenBox already stores a richer, attested record of every session
    - `evaluation_criteria`: per-agent deterministic checks, each with a type,
      params and an optional standard tag;
    - `security_reports`: sealed report packs, one row per (agent, pack digest).
+     `evaluation_id` (added by `1782100000000-link-security-reports-to-runs.ts`)
+     is the sandboxed run the pack observed. Core records that same id as the
+     session's `run_id`, so a session's evaluation returns `report_id`, and the
+     Results table and the Verify card link to the report.
 2. **Results are computed on read and never stored.** Four check types read
    only what already exists: `governance_events` verdicts, `decided_at` and
    `metadata.openbox_assurance.input_trust`; `session_attestations`; and
@@ -34,8 +38,9 @@ conversation; OpenBox already stores a richer, attested record of every session
    - `/agent/:agentId/security-reports`.
 4. **The backend does not verify seals.** A report is published only by
    `publish-report.zsh`, after `openbox project verify` passes. The backend
-   checks only the report schema, the digest shape, and that the pack's target
-   posture names this agent.
+   checks only the report schema, the digest shape, and the pack's own
+   `observation/run.json`: it must name this agent, and its evaluation id is
+   the run link.
 5. **Accept uses the existing versioned-policy flow.** A policy change is a new
    version, and POST makes it the agent's only active policy. So the dashboard's
    Accept builds the new version from the current policy's rules plus the
