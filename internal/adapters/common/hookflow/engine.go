@@ -46,13 +46,29 @@ func (e *Engine) logf(format string, args ...any) {
 
 // NewEngine builds an Engine spooling under dir and writing Advisory records
 // to the default developer-scoped sink.
+//
+// Its Spool.OnFailure is wired here, once, to the delivery-failure halt: the
+// ledger line every drainer already wrote (defaultOnFailure, unchanged),
+// plus HaltOnDeliveryFailure's write-if-absent run latch. Every drainer built
+// on this Engine (the hook flusher, the periodic sweep, a lane daemon's own
+// queue, a gate's own future drain) inherits it from this one place; nothing
+// downstream sets Spool.OnFailure again.
 func NewEngine(spoolDir string) *Engine {
-	return &Engine{
+	e := &Engine{
 		Spool:     Spool{Dir: spoolDir},
 		Advisory:  &Advisory{Path: DefaultAdvisoryPath()},
 		Durations: DurationStash{Dir: filepath.Join(spoolDir, "durations")},
 		Turns:     TurnCursor{Dir: filepath.Join(spoolDir, "turns")},
 	}
+	e.Spool.OnFailure = func(ev client.DevEvent, err error) {
+		// e.speaking(), not e.Spool directly: it is the copy whose Log is
+		// wired from e.Log AT CALL TIME (e.Log may be assigned after
+		// NewEngine returns), the same copy every drain path already logs
+		// through.
+		e.speaking().defaultOnFailure(ev, err)
+		HaltOnDeliveryFailure(log.New(logfWriter{logf: e.logf}, "", 0), ev, err)
+	}
+	return e
 }
 
 // Record is the hot path: thread the tool call's duration and append the event

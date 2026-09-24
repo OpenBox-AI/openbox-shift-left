@@ -75,11 +75,12 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	}
 }
 
-// TestInstaller_PersistsEnforcePosture proves that decision onboarding change:
-// the enforce posture chosen at `init` time (ref.Enforce/Tier2/Findings, set
-// by the resolved posture) is written to dev.json, so the runtime hook reads it with NO
-// env var.
-func TestInstaller_PersistsEnforcePosture(t *testing.T) {
+// TestInstaller_PersistsPosture proves that decision onboarding change: the
+// posture chosen at `init` time (ref.Tier2/Findings, set by the resolved
+// posture) is written to dev.json, so the runtime hook reads it with NO env
+// var. Enforce is no longer part of this: it has no CLI/install-time knob at
+// all now (ResolveEnforce always reports true).
+func TestInstaller_PersistsPosture(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
 	inst := Installer{
@@ -94,7 +95,6 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	tru := true
 	ref := CredentialRef{
 		AgentID:  testAgentID,
-		Enforce:  &tru,
 		Tier2:    &tru,
 		Findings: &tru,
 	}
@@ -110,9 +110,6 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	if cfg.Enforce == nil || !*cfg.Enforce {
-		t.Error("enforce not persisted to dev.json")
-	}
 	if cfg.Tier2 == nil || !*cfg.Tier2 {
 		t.Errorf("tier2 not persisted: %+v", cfg.Tier2)
 	}
@@ -123,15 +120,12 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	// Point the config loader at the file just written and ensure the env
 	// overrides are truly absent (LookupEnv must report !ok, so config wins).
 	t.Setenv(envConfigPath, cfgPath)
-	for _, k := range []string{envEnforce, envTier2, envFindings} {
+	for _, k := range []string{envTier2, envFindings} {
 		if _, ok := os.LookupEnv(k); ok {
 			orig := os.Getenv(k)
 			os.Unsetenv(k)
 			t.Cleanup(func() { os.Setenv(k, orig) })
 		}
-	}
-	if !ResolveEnforce() {
-		t.Error("ResolveEnforce() = false; expected the persisted enforce posture to win with no env override")
 	}
 	if !ResolveTier2() {
 		t.Error("ResolveTier2() = false; expected persisted tier2")
@@ -289,9 +283,10 @@ func TestInstallRequiresAgentID(t *testing.T) {
 	}
 }
 
-// TestInstaller_ReInitKeepsEnforcePosture a re-init that says nothing about
-// posture must leave it alone.
-func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
+// TestInstaller_ReInitKeepsPosture a re-init that says nothing about posture
+// must leave it alone. Enforce has no Update/CredentialRef field any more (no
+// install-time knob left at all, since ResolveEnforce always reports true).
+func TestInstaller_ReInitKeepsPosture(t *testing.T) {
 	pluginDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "openbox", "dev.json")
 	inst := Installer{
@@ -306,7 +301,7 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 
 	if err := inst.Install(CredentialRef{
 		AgentID: "agent-1", BackendURL: "https://backend.example",
-		Enforce: &tru, Tier2: &tru, Findings: &tru,
+		Tier2: &tru, Findings: &tru,
 	}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -321,8 +316,8 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Enforce == nil || !*cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
-		t.Errorf("re-init downgraded the enforce posture: %+v", cfg)
+	if cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
+		t.Errorf("re-init downgraded posture: %+v", cfg)
 	}
 	if cfg.AgentID != "agent-1" || cfg.BackendURL != "https://backend.example" {
 		t.Errorf("re-init dropped the sync coordinates: %+v", cfg)

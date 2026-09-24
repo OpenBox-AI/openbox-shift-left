@@ -130,14 +130,20 @@ func TestWarmHookMakesOneEvaluateAndNoAuthCalls(t *testing.T) {
 	}
 }
 
-// TestKeycloakDownToolProceedsAndEventSpools: with Keycloak's token endpoint
-// unreachable, the tool call still proceeds (fail open, never deny for an
-// auth-plane fault) and the event is held in the spool rather than lost --
-// and, because the failure is caught before any bearer exists, the binary
-// must never fall back to an unauthenticated or legacy request: zero
-// evaluate attempts, and nothing beyond the bootstrap route ever reaches the
-// fake at all (so no /api/v1 path could have been hit either).
-func TestKeycloakDownToolProceedsAndEventSpools(t *testing.T) {
+// TestKeycloakDownDeniesAndHaltsTheRun: with Keycloak's token endpoint
+// unreachable, a token-acquisition failure is an explicit, proven
+// non-acceptance like any other now (plan round 3: "a brief network drop...
+// halts the developer's active session"; client.Emit never reaches
+// /evaluate on it, so it is never mistaken for a judged refusal, but it
+// still counts as "core did not accept this event"). The call denies, the
+// run halts (HaltOnDeliveryFailure), and the event is ledgered and gone --
+// single-attempt delivery has no carry-over, so it is NOT held in the spool
+// for a later drain, superseding the old fail-open pin. Because the failure
+// is caught before any bearer exists, the binary must never fall back to an
+// unauthenticated or legacy request: zero evaluate attempts, and nothing
+// beyond the bootstrap route ever reaches the fake at all (so no /api/v1
+// path could have been hit either).
+func TestKeycloakDownDeniesAndHaltsTheRun(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{})
 	fake.TokenEndpointDown()
 
@@ -146,8 +152,8 @@ func TestKeycloakDownToolProceedsAndEventSpools(t *testing.T) {
 	evalEnv(t, fake, dir, spool, fakecore.Posture{})
 
 	stdout, _ := driveHookOK(t, preBash("toolu_kcdown", "ls -la"))
-	if v := permissionVerb(t, stdout); v != "" && v != "allow" {
-		t.Errorf("Keycloak being unreachable must fail OPEN, got permissionDecision=%q", v)
+	if v := permissionVerb(t, stdout); v != "deny" {
+		t.Errorf("Keycloak being unreachable must deny now (delivery is always fail-closed), got permissionDecision=%q", v)
 	}
 
 	if got := fake.BootstrapHits(); got == 0 {
@@ -162,17 +168,24 @@ func TestKeycloakDownToolProceedsAndEventSpools(t *testing.T) {
 	if n := len(fake.Rejections()); n != 0 {
 		t.Errorf("the fake refused %d request(s) (want 0, including zero \"v1 route\" rejections): %v", n, fake.Rejections())
 	}
-	if !spoolStillHolds(t, spool) {
-		t.Error("the tool call did not spool while Keycloak was unreachable; an auth-plane outage must not be treated as a delivered event")
+	if spoolStillHolds(t, spool) {
+		t.Error("single-attempt delivery has no carry-over: the tool call's one attempt failed, so it must be ledgered and gone, not held in the spool")
+	}
+	if n := countFiles(t, filepath.Join(dir, "halts")); n != 1 {
+		t.Errorf("%d session halt latch(es), want exactly 1: an auth-plane failure halts the run", n)
 	}
 }
 
 // TestCached401InvalidatesThenNextHookGoesCold: core answers a flat 401 for a
 // cached-but-rejected token (an agent revoked after a token was issued),
 // that 401 is never resent, and the cache file is deleted so the NEXT hook
-// goes cold rather than replaying the same dead bearer forever. The event
-// the 401'd hook could not deliver is held in the spool, and the next
-// SessionEnd flush -- once the identity is good again -- drains it.
+// goes cold rather than replaying the same dead bearer forever. Delivery is
+// always fail-closed now (plan round 3): the 401'd call denies and the run
+// halts (HaltOnDeliveryFailure); single-attempt delivery has no carry-over,
+// so the event is ledgered and gone, never held in the spool for a later
+// drain -- superseding the old fail-open pin. SessionEnd is not a gated
+// hook, so it is unaffected by the latch and still delivers its own
+// (unrelated) queued event once the identity is good again, cold.
 func TestCached401InvalidatesThenNextHookGoesCold(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{})
 	dir := t.TempDir()
@@ -194,8 +207,8 @@ func TestCached401InvalidatesThenNextHookGoesCold(t *testing.T) {
 
 	fake.Revoke()
 	stdout, _ := driveHookOK(t, preBash("toolu_revoked", "git status"))
-	if v := permissionVerb(t, stdout); v != "" && v != "allow" {
-		t.Errorf("a token-rejection 401 must fail OPEN, got permissionDecision=%q", v)
+	if v := permissionVerb(t, stdout); v != "deny" {
+		t.Errorf("a token-rejection 401 must deny now (delivery is always fail-closed), got permissionDecision=%q", v)
 	}
 	if got := fake.BootstrapHits() - bootstrapAfterWarm; got != 0 {
 		t.Errorf("the 401'd hook re-bootstrapped (delta=%d); it should have used the warm cache and only discovered the rejection at /evaluate", got)
@@ -206,35 +219,35 @@ func TestCached401InvalidatesThenNextHookGoesCold(t *testing.T) {
 	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
 		t.Fatalf("the token cache file still exists after a 401 on a cached token; the next hook will replay the same dead bearer (stat err=%v)", err)
 	}
-	if !spoolStillHolds(t, spool) {
-		t.Error("the 401'd call was not held in the spool")
+	if spoolStillHolds(t, spool) {
+		t.Error("single-attempt delivery has no carry-over: the 401'd call's one attempt failed, so it must be ledgered and gone, not held in the spool")
+	}
+	if n := countFiles(t, filepath.Join(dir, "halts")); n != 1 {
+		t.Errorf("%d session halt latch(es), want exactly 1: a token-rejection 401 halts the run", n)
 	}
 
-	// The identity is good again. The next flush (SessionEnd) must go cold
-	// -- bootstrap, exchange and evaluate exactly once each -- and drain the
-	// backlog the 401 left behind.
+	// The identity is good again. SessionEnd is not gated, so it never reads
+	// the latch above: its own flush still goes cold -- bootstrap, exchange
+	// and evaluate exactly once each -- to deliver its own queued lifecycle
+	// event (the 401'd tool call left nothing behind to drain any more).
 	fake.Unrevoke()
-	bootstrapBeforeDrain := fake.BootstrapHits()
-	exchangeBeforeDrain := fake.ExchangeHits()
-	evaluateBeforeDrain := fake.V3EvaluateAttempts()
+	bootstrapBeforeEnd := fake.BootstrapHits()
+	exchangeBeforeEnd := fake.ExchangeHits()
+	evaluateBeforeEnd := fake.V3EvaluateAttempts()
 
 	driveHookOK(t, sessionEnd())
 
-	if got := fake.BootstrapHits() - bootstrapBeforeDrain; got != 1 {
-		t.Errorf("the draining flush made %d bootstrap call(s), want exactly 1 (cold, cache was deleted)", got)
+	if got := fake.BootstrapHits() - bootstrapBeforeEnd; got != 1 {
+		t.Errorf("SessionEnd's flush made %d bootstrap call(s), want exactly 1 (cold, cache was deleted)", got)
 	}
-	if got := fake.ExchangeHits() - exchangeBeforeDrain; got != 1 {
-		t.Errorf("the draining flush made %d token-exchange call(s), want exactly 1", got)
+	if got := fake.ExchangeHits() - exchangeBeforeEnd; got != 1 {
+		t.Errorf("SessionEnd's flush made %d token-exchange call(s), want exactly 1", got)
 	}
-	// >= 1, not == 1: the flush also delivers SessionEnd's own queued
-	// lifecycle event alongside the 401'd tool call, all under the one cold
-	// acquisition above -- the property under test is one bootstrap/exchange
-	// for however many queued events drain, not a fixed event count.
-	if got := fake.V3EvaluateAttempts() - evaluateBeforeDrain; got < 1 {
-		t.Errorf("the draining flush made %d evaluate call(s), want at least 1", got)
+	if got := fake.V3EvaluateAttempts() - evaluateBeforeEnd; got < 1 {
+		t.Errorf("SessionEnd's flush made %d evaluate call(s), want at least 1", got)
 	}
 	if spoolStillHolds(t, spool) {
-		t.Error("the backlog did not drain once the identity was good again")
+		t.Error("SessionEnd's own queued event did not drain once the identity was good again")
 	}
 }
 

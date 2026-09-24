@@ -24,6 +24,7 @@ func deliveringGate(t *testing.T, gov Governor, tier2Enabled string) (spooled bo
 	t.Setenv(devconfig.EnvTier2, tier2Enabled)
 	t.Setenv(devconfig.EnvApprovalHold, "50")
 	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	isolateMarkers(t)
 	defer devconfig.Pin()()
 
@@ -52,14 +53,22 @@ func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	}
 }
 
-// TestGate_ObserveCopySpooledWhenEscalationUndelivered the fail-open safety
-// net, and the reason suppression must key on the transport rather than on
-// "did we try": nothing reached core, so the spool copy is the only remaining
-// path for this telemetry and must survive.
-func TestGate_ObserveCopySpooledWhenEscalationUndelivered(t *testing.T) {
+// TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy an explicit,
+// proven non-acceptance (core answered, or the transport refused before this
+// call's own budget ran out) is this event's one delivery attempt, like any
+// other: it halts the run (HaltOnDeliveryFailure) rather than being retried
+// through a second, local copy -- re-spooling it would spend a second
+// attempt on the very event whose first attempt just failed. Supersedes the
+// old fail-open expectation ("nothing reached core, so the spool copy must
+// survive"): delivery is now always fail-closed, and an unaccepted event
+// halts the run instead of being silently re-tried.
+func TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy(t *testing.T) {
 	gov := degradedGovernor{fakeGovernor: &fakeGovernor{}}
-	if !deliveringGate(t, gov, "1") {
-		t.Error("escalation never delivered; dropping the observe copy loses the event entirely")
+	if deliveringGate(t, gov, "1") {
+		t.Error("an explicit delivery failure must not re-spool the observe copy; it is already latched and the event already had its one attempt")
+	}
+	if _, halted := SessionHalted("sess-1"); !halted {
+		t.Error("an explicit, proven non-acceptance must halt the run")
 	}
 }
 
@@ -99,10 +108,14 @@ func (s slowGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation,
 	return client.Evaluation{Verdict: client.VerdictAllow}, nil
 }
 
-// TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget the budget-
+// TestGate_ObserveCopyQueuedToHeadWhenEscalationOutlivesItsBudget the budget-
 // exceeded escalation: Escalate gives up on the transport and returns through
-// its timeout branch, abandoning the goroutine that is still running.
-func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
+// its timeout branch, abandoning the goroutine that is still running. Its
+// outcome is unknown (not a proven failure), so it must be requeued ahead of
+// the tail for a drainer with a real attempt (SpoolObserveHead) rather than
+// spooled as an ordinary tail append (which the plain SpoolObserve callback
+// must NOT receive here) or dropped.
+func TestGate_ObserveCopyQueuedToHeadWhenEscalationOutlivesItsBudget(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
 	t.Setenv(devconfig.EnvTier2, "1")
@@ -111,7 +124,7 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 	defer devconfig.Pin()()
 
 	gov := slowGovernor{fakeGovernor: &fakeGovernor{}, emitted: make(chan struct{})}
-	spooled := false
+	var spooledTail, spooledHead bool
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
@@ -120,16 +133,20 @@ func TestGate_ObserveCopySpooledWhenEscalationOutlivesItsBudget(t *testing.T) {
 			MaxTimeout: 20 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
 		},
-		Record:       func(decision.Decision, ApplyResult) {},
-		SpoolObserve: func() { spooled = true },
+		Record:           func(decision.Decision, ApplyResult) {},
+		SpoolObserve:     func() { spooledTail = true },
+		SpoolObserveHead: func() { spooledHead = true },
 	}
 	gate.Run(context.Background(), discard(), &out, shellTarget{})
 
 	<-gov.emitted
 
-	if !spooled {
+	if !spooledHead {
 		t.Error("the escalation was abandoned at its budget, so delivery is unknown; " +
 			"dropping the observe copy risks losing the event entirely")
+	}
+	if spooledTail {
+		t.Error("an unanswered escalation must be queued to the head, not appended to the ordinary tail")
 	}
 }
 

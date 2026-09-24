@@ -212,11 +212,14 @@ func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
 	if !st.Present || !st.Readable {
 		t.Fatalf("shipped managed template must load, got %+v", st)
 	}
-	t.Setenv(EnvEnforce, "0")
-	got, src := resolveBoolWithSource("enforce",
-		func(c DevConfig) *bool { return c.Enforce }, false, EnvEnforce)
+	// enforce is deliberately absent from the shipped template now (every
+	// gated tool call is evaluated unconditionally; the key selects nothing),
+	// so secret_detection is the locked field the template still proves.
+	t.Setenv(EnvSecretDetection, "0")
+	got, src := resolveBoolWithSource("secret_detection",
+		func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection)
 	if !got || src != SourceManaged {
-		t.Errorf("template enforce = (%v, %q), want (true, managed)", got, src)
+		t.Errorf("template secret_detection = (%v, %q), want (true, managed)", got, src)
 	}
 	t.Setenv(EnvContentCapture, "1")
 	got, src = resolveBoolWithSource("content_capture",

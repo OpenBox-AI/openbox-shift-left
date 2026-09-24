@@ -11,49 +11,43 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// rewakePayload mirrors a real Claude Code payload, tool_use_id included.
-func rewakePayload(tool string) string {
-	return rewakePayloadWithUse(tool, "toolu_01AAAAAAAAAAAAAAAAAAAAAA")
-}
-
 func rewakePayloadWithUse(tool, toolUseID string) string {
 	return `{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"` + tool +
 		`","tool_use_id":"` + toolUseID + `","tool_input":{"command":"ls"}}`
 }
 
-func runRewake(t *testing.T, tool string) (int, string, time.Duration) {
-	t.Helper()
-	var wake bytes.Buffer
-	start := time.Now()
-	code := RunRewake(strings.NewReader(rewakePayload(tool)), &wake, log.New(&bytes.Buffer{}, "", 0))
-	return code, wake.String(), time.Since(start)
-}
-
 // TestRunRewake_InertWhenNothingCanFileAnApproval the watcher runs alongside
-// the gate on every tool call, so the cases where it has nothing to do must
-// cost nothing. It must also never wake a session on its own account: exit 0
-// with no output is the silent path.
+// the gate on every tool call, so the cases where the payload cannot even be
+// mapped must cost nothing. It must also never wake a session on its own
+// account: exit 0 with no output is the silent path.
+//
+// There is no "enforce off" case left: rewake is unconditional now
+// (ResolveEnforce always reports true), so this covers the one fast-return
+// path that remains before AwaitRewake's own marker-grace wait -- a payload
+// Mapper.Map refuses outright (no session id).
 func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		env  map[string]string
-		tool string
+		name    string
+		payload string
 	}{
-		{"enforce off; no gate, so no approval", map[string]string{devconfig.EnvEnforce: "0"}, "Bash"},
+		{"unmappable payload; no session id, so Map refuses before any wait",
+			`{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_use_id":"toolu_01AAAAAAAAAAAAAAAAAAAAAA","tool_input":{"command":"ls"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfig(t)
 			t.Setenv(devconfig.EnvPendingApprovalDir, t.TempDir())
 			t.Setenv(envAgentID, testAgentID)
-			for k, v := range tc.env {
-				t.Setenv(k, v)
-			}
-			code, wake, elapsed := runRewake(t, tc.tool)
+
+			var wake bytes.Buffer
+			start := time.Now()
+			code := RunRewake(strings.NewReader(tc.payload), &wake, log.New(&bytes.Buffer{}, "", 0))
+			elapsed := time.Since(start)
+
 			if code != 0 {
 				t.Errorf("exit = %d, want 0 (a non-zero exit interrupts the session)", code)
 			}
-			if wake != "" {
-				t.Errorf("wrote %q; the silent path must say nothing", wake)
+			if wake.Len() != 0 {
+				t.Errorf("wrote %q; the silent path must say nothing", wake.String())
 			}
 			if elapsed > time.Second {
 				t.Errorf("took %v; the no-op path must not wait", elapsed)

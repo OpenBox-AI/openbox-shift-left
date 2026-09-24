@@ -23,6 +23,12 @@ func isolateConfig(t *testing.T) {
 	t.Helper()
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
 	t.Setenv(devconfig.EnvHome, t.TempDir())
+	// DefaultHaltDir falls back to the REAL OS $HOME (os.UserConfigDir), not
+	// devconfig.EnvHome above: without this, a test that hits a real explicit
+	// delivery failure (HaltOnDeliveryFailure) latches into the process-wide
+	// sentinel HOME (testmain_test.go) and a LATER test reusing the same
+	// session/run id reads back an unrelated latch from an earlier test.
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	bindForTest(t, "codex")
 }
 
@@ -81,6 +87,10 @@ func serveVerdict(t *testing.T, verdictJSON string) {
 	}
 }
 
+// TestResolveEnforce_Codex inverts the old config/env precedence test:
+// enforce is deprecated and inert now, so no combination of config field or
+// env override can change ResolveEnforce's answer. The key still parses (no
+// error on any of these files), it just selects nothing.
 func TestResolveEnforce_Codex(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	write := func(j string) { _ = os.WriteFile(cfgPath, []byte(j), 0o600) }
@@ -89,19 +99,19 @@ func TestResolveEnforce_Codex(t *testing.T) {
 
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
-		t.Error("an absent enforce field must resolve to ON ")
+		t.Error("an absent enforce field must resolve to ON")
 	}
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
-	if ResolveEnforce() {
-		t.Error("enforce:false in config must opt out")
+	if !ResolveEnforce() {
+		t.Error("enforce:false in config must be ignored")
 	}
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
 	if !ResolveEnforce() {
-		t.Error("enforce:true in config should enable enforce mode")
+		t.Error("enforce:true in config should still resolve ON")
 	}
 	t.Setenv(devconfig.EnvEnforce, "false")
-	if ResolveEnforce() {
-		t.Error("env false must override config true")
+	if !ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=false must be ignored")
 	}
 }
 

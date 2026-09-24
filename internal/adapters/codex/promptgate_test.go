@@ -176,19 +176,6 @@ func TestPromptGate_CorruptLatchStillHalts(t *testing.T) {
 	}
 }
 
-// (f) With enforce off the new class is inert: stdout stays empty, exactly as
-// the observe-only path has always behaved.
-func TestPromptGate_EnforceOffWritesNothing(t *testing.T) {
-	gateEnv(t)
-	t.Setenv(devconfig.EnvEnforce, "0")
-	serveVerdictServer(t, `{"verdict":"block","reason":"would have blocked","policy_id":"p1"}`)
-
-	stdout, _ := runHook(t, "UserPromptSubmit", promptEvent("th-off"))
-	if stdout != "" {
-		t.Errorf("enforce off must write nothing to stdout; got %q", stdout)
-	}
-}
-
 // TestOutputContracts_NeverRenderARejectedShape is the fail-open guard, asserted
 // on the exact marshalled bytes for every verdict against both contracts.
 //

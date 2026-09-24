@@ -72,16 +72,24 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		}
 	})
 
-	t.Run("CDX-C2 fail-open + outage proceeds within bound (OD9)", func(t *testing.T) {
+	// CDX-C2 pinned "fail_closed=0 => outage proceeds" (OD9). Delivery is now
+	// always fail-closed (HaltOnDeliveryFailure, plan round 3): the
+	// `fail_closed` key is deprecated, parsed only so it can warn, and no
+	// longer selects a policy, so this now asserts the same outage-denies
+	// behaviour CDX-C4 pins, kept separate for its timing bound.
+	t.Run("CDX-C2 an outage denies even with fail_closed=0 (delivery is always fail-closed)", func(t *testing.T) {
 		t.Setenv(devconfig.EnvEnforce, "1")
 		t.Setenv(devconfig.EnvFailClosed, "0")
 		start := time.Now()
-		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
-			t.Errorf("fail-open outage must proceed (empty stdout); got %q", out)
+		out := run(t, dangerPayload)
+		d, _, _ := parsePreToolUse(t, []byte(out))
+		if d != codexDecisionDeny {
+			t.Fatalf("decision = %q, want deny; delivery is always fail-closed regardless of fail_closed=0 (stdout=%q)", d, out)
 		}
 		if elapsed := time.Since(start); elapsed > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
 			t.Errorf("enforce wait %v exceeds the derived whole-hook budget %v (probe P1: Codex fails open past it)", elapsed, hookflow.EnforceBudget((Engine{}).HookCeilings()))
 		}
+		assertNoLeak(t, out)
 	})
 
 	t.Run("CDX-C3 fail-open + unbundled/no-match proceeds", func(t *testing.T) {
@@ -131,14 +139,10 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		assertNoLeak(t, out)
 	})
 
-	t.Run("CDX-C7 observe mode never blocks (INV-3 byte-parity)", func(t *testing.T) {
-		serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
-		t.Setenv(devconfig.EnvEnforce, "0")
-		t.Setenv(devconfig.EnvFailClosed, "1") // even fail_closed=1 must not matter with enforce off
-		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
-			t.Errorf("observe mode must write nothing even for a BLOCK-worthy tool; got %q", out)
-		}
-	})
+	// CDX-C7 "observe mode never blocks" is gone: enforcement is unconditional
+	// now (ResolveEnforce always reports true), so there is no observe mode
+	// left for a PreToolUse/UserPromptSubmit/PermissionRequest call. Nothing
+	// replaces it; the condition cannot arise.
 
 	t.Run("CDX-C8 hook-timeout fail-open bound (probe P1, degraded-state)", func(t *testing.T) {
 		if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
@@ -240,29 +244,30 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	})
 }
 
-// TestObserveByteParity_EnforceOff pins the whole-product default: with
-// enforce OFF, the SL7-A observe path is byte-identical; Decide is never
-// reached and stdout is empty for every wired hook, even a BLOCK-worthy
-// PreToolUse.
-func TestObserveByteParity_EnforceOff(t *testing.T) {
+// TestObserveByteParity_NeverGatedHooks pins the whole-product default for
+// every hook enforcement never reaches: stdout is empty for each, byte-
+// identical to observe, even against a BLOCK-worthy verdict from a real core.
+// Enforcement is unconditional now (ResolveEnforce always reports true), so
+// UserPromptSubmit/PreToolUse/PermissionRequest are excluded here -- they are
+// ALWAYS gated and their own conformance (deny under a real BLOCK verdict) is
+// pinned by the C-series cases above, not by this byte-parity set.
+func TestObserveByteParity_NeverGatedHooks(t *testing.T) {
 	isolateEnforce(t)
 	serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
-	t.Setenv(devconfig.EnvEnforce, "0")
 	payloads := map[string]string{
-		"SessionStart":      `{"hook_event_name":"SessionStart","session_id":"s","cwd":"/tmp","source":"startup"}`,
-		"UserPromptSubmit":  `{"hook_event_name":"UserPromptSubmit","session_id":"s","cwd":"/tmp","prompt":"hi"}`,
-		"PreToolUse":        `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`,
-		"PostToolUse":       `{"hook_event_name":"PostToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_use_id":"c1"}`,
-		"PermissionRequest": `{"hook_event_name":"PermissionRequest","session_id":"s","cwd":"/tmp","tool_name":"apply_patch","tool_input":{"command":"*** Begin Patch"}}`,
-		"Stop":              `{"hook_event_name":"Stop","session_id":"s","cwd":"/tmp","last_assistant_message":"done","stop_hook_active":false,"turn_id":"t1","transcript_path":null}`,
-		"SubagentStart":     `{"hook_event_name":"SubagentStart","session_id":"s","cwd":"/tmp","agent_id":"a1","agent_type":"general"}`,
-		"SubagentStop":      `{"hook_event_name":"SubagentStop","session_id":"s","cwd":"/tmp","agent_id":"a1","agent_type":"general","last_assistant_message":"done","transcript_path":null}`,
-		"PreCompact":        `{"hook_event_name":"PreCompact","session_id":"s","cwd":"/tmp","trigger":"manual","turn_id":"t1","transcript_path":null}`,
-		"PostCompact":       `{"hook_event_name":"PostCompact","session_id":"s","cwd":"/tmp","trigger":"manual","turn_id":"t1","transcript_path":null}`,
+		"SessionStart":  `{"hook_event_name":"SessionStart","session_id":"s","cwd":"/tmp","source":"startup"}`,
+		"PostToolUse":   `{"hook_event_name":"PostToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_use_id":"c1"}`,
+		"Stop":          `{"hook_event_name":"Stop","session_id":"s","cwd":"/tmp","last_assistant_message":"done","stop_hook_active":false,"turn_id":"t1","transcript_path":null}`,
+		"SubagentStart": `{"hook_event_name":"SubagentStart","session_id":"s","cwd":"/tmp","agent_id":"a1","agent_type":"general"}`,
+		"SubagentStop":  `{"hook_event_name":"SubagentStop","session_id":"s","cwd":"/tmp","agent_id":"a1","agent_type":"general","last_assistant_message":"done","transcript_path":null}`,
+		"PreCompact":    `{"hook_event_name":"PreCompact","session_id":"s","cwd":"/tmp","trigger":"manual","turn_id":"t1","transcript_path":null}`,
+		"PostCompact":   `{"hook_event_name":"PostCompact","session_id":"s","cwd":"/tmp","trigger":"manual","turn_id":"t1","transcript_path":null}`,
 	}
 	// An event missing from this map ships unasserted, so the count is pinned to
-	// the installer's own list: a newly registered event must appear here too.
-	if len(payloads) != len(hookedEvents)-1 { // SessionEnd flushes; covered separately
+	// the installer's own list: a newly registered event must appear here too,
+	// less SessionEnd (flushes; covered separately) and the 3 always-gated hooks.
+	const gatedCount = 3 // UserPromptSubmit, PreToolUse, PermissionRequest
+	if len(payloads) != len(hookedEvents)-1-gatedCount {
 		t.Fatalf("byte-parity map covers %d events but the installer registers %d; a wired event is unasserted",
 			len(payloads), len(hookedEvents))
 	}

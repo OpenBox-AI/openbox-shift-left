@@ -9,11 +9,17 @@ import (
 
 // TestFixtures_AllFiveEventsObserveOnly drives every testdata fixture (the
 // v0.145.0-shaped payloads the story's manual validation pipes into the real
-// binary) through the engine and asserts the observe contract for each: no
-// stdout, and the tool/prompt fixtures spool without leaking their payload
-// content.
+// binary) through the engine and asserts the observe contract for each:
+// SessionStart/PostToolUse/SessionEnd write nothing, and every fixture spools
+// without leaking its payload content. UserPromptSubmit/PreToolUse are gated
+// unconditionally now (ResolveEnforce always reports true); with no reachable
+// control plane they deny (delivery is always fail-closed), but the
+// escalation was never attempted (no client configured), so the gate's own
+// SpoolObserve still appends each one's observe copy to the local spool as
+// its first delivery attempt, same as before.
 func TestFixtures_AllFiveEventsObserveOnly(t *testing.T) {
 	spool := setHookEnv(t)
+	gated := map[string]bool{"UserPromptSubmit": true, "PreToolUse": true}
 	fixtures := []struct{ sub, file string }{
 		{"SessionStart", "sessionstart.json"},
 		{"UserPromptSubmit", "userpromptsubmit.json"},
@@ -27,7 +33,12 @@ func TestFixtures_AllFiveEventsObserveOnly(t *testing.T) {
 			t.Fatalf("fixture %s: %v", f.file, err)
 		}
 		stdout, stderr := runHook(t, f.sub, string(raw))
-		if stdout != "" {
+		switch {
+		case gated[f.sub]:
+			if !strings.Contains(stdout, `"permissionDecision":"deny"`) && !strings.Contains(stdout, `"decision":"block"`) {
+				t.Fatalf("%s: gated with no reachable control plane must deny, got %q", f.sub, stdout)
+			}
+		case stdout != "":
 			t.Fatalf("%s: stdout must be empty, got %q", f.sub, stdout)
 		}
 		if strings.Contains(stderr, "dropping") {

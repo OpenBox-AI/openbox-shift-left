@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,21 +12,27 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
 
-// TestEnforceOptOutRoundTrips tHE round-trip. The opt-out was silently un-
-// appliable.
-func TestEnforceEnvOverride(t *testing.T) {
+// TestEnforceEnvOverrideIsIgnored inverts the old round-trip test: neither a
+// persisted config value nor OPENBOX_ENFORCE selects anything any more, since
+// every gated tool call is evaluated unconditionally (ResolveEnforce always
+// reports true).
+func TestEnforceEnvOverrideIsIgnored(t *testing.T) {
 	home := isolateHome(t)
 	f := false
-	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{Enforce: &f}); err != nil {
+	seed, err := json.Marshal(devconfig.DevConfig{Enforce: &f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "dev.json"), seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv(devconfig.EnvEnforce, "1")
 	if !devconfig.ResolveEnforce() {
-		t.Error("OPENBOX_ENFORCE=1 must override a config false")
+		t.Error("ResolveEnforce() must always report true")
 	}
 	t.Setenv(devconfig.EnvEnforce, "0")
-	if devconfig.ResolveEnforce() {
-		t.Error("OPENBOX_ENFORCE=0 must override the default on")
+	if !devconfig.ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=0 must be ignored; ResolveEnforce() must still report true")
 	}
 }
 
@@ -59,7 +67,7 @@ func TestAFlagThatMovedOrWasRemovedIsRefused(t *testing.T) {
 	// commands that took this work over actually live.
 	a, _, errb := testApp(nil)
 	a.run([]string{"init", "--provider", "claude-code", "--org", "x"})
-	for _, want := range []string{"openbox auth", "openbox uninstall", "OPENBOX_ENFORCE=false"} {
+	for _, want := range []string{"openbox auth", "openbox uninstall", "OPENBOX_INSTALL_GIT_HOOK=false"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Errorf("the usage shown on refusal does not mention %q:\n%s", want, errb.String())
 		}

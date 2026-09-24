@@ -15,11 +15,16 @@ const (
 )
 
 // ResolveFailurePolicy reads the org's configured failure policy.
+//
+// Always FailClosed: delivery is always fail-closed now (every unaccepted
+// event halts the run, HaltOnDeliveryFailure), so there is no longer a
+// choice to read here. devconfig.ResolveFailClosed is still called so the
+// deprecated `fail_closed`/OPENBOX_FAIL_CLOSED key is still PARSED (and can
+// still warn through the deprecated-key path), even though its value no
+// longer changes what this returns.
 func ResolveFailurePolicy() FailurePolicy {
-	if devconfig.ResolveFailClosed() {
-		return FailClosed
-	}
-	return FailOpen
+	_ = devconfig.ResolveFailClosed()
+	return FailClosed
 }
 
 // String renders the policy for the enforce diagnostic line, so a fail-closed

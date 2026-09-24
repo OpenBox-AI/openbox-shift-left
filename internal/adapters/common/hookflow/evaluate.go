@@ -3,6 +3,7 @@ package hookflow
 import (
 	"context"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
@@ -41,10 +42,70 @@ type Evaluator struct {
 	// approval hold that can follow it.
 	NewClient func(*log.Logger) (Governor, error)
 
-	// OnDelivered, when set, is called once the escalation's POST has returned
-	// without a transport error; the point at which core has stored this event.
-	// It is keyed on transport success, deliberately, NOT on the verdict.
-	OnDelivered func()
+	// OnOutcome, when set, is called at most once per Escalate call with what
+	// happened to the escalation POST (EscalationOutcome), so a caller
+	// holding a local copy of the same event (the gate's own observe copy)
+	// knows what, if anything, to do with it.
+	OnOutcome func(EscalationOutcome)
+}
+
+// EscalationOutcome classifies what one Escalate call did with its own
+// escalation POST. It never distinguishes "delivered" from "explicitly
+// refused and latched": both mean the caller's own local copy of the event
+// needs nothing further, since either core has it or HaltOnDeliveryFailure
+// already recorded that it does not.
+type EscalationOutcome int32
+
+const (
+	// EscalationSettled: core answered, or an explicit non-acceptance was
+	// already latched by HaltOnDeliveryFailure. Nothing further to spool.
+	EscalationSettled EscalationOutcome = iota
+	// EscalationNotAttempted: no POST was ever sent (no client configured, a
+	// client failed to build, or no budget was left to even try). The
+	// caller's own local copy is this event's first delivery attempt.
+	EscalationNotAttempted
+	// EscalationUnanswered: sent, but this call's own budget ran out before
+	// an answer arrived. Never a failure, never latched: the caller's own
+	// local copy is queued ahead of the tail for a drainer with a real,
+	// unbounded attempt (SpoolObserveHead); core dedupes the eventual
+	// re-send on the idempotency key.
+	EscalationUnanswered
+)
+
+func (t Evaluator) reportOutcome(o EscalationOutcome) {
+	if t.OnOutcome != nil {
+		t.OnOutcome(o)
+	}
+}
+
+// escalationReport is a first-wins guard around one Escalate call's outcome:
+// run's own goroutine (an explicit failure, already latched by
+// HaltOnDeliveryFailure) and Escalate's own cctx.Done() branch can each try
+// to report, and run's own report can reach here strictly before its result
+// ever reaches the channel Escalate selects on -- a scheduling delay between
+// "run finished and reported" and "the send Escalate is waiting on actually
+// happens" is enough, with no coincidence required. Whichever call lands
+// first is the one the caller (the gate's own re-spool dispatch) ever sees;
+// a later call is silently dropped rather than allowed to overwrite it,
+// which would otherwise let a stale Unanswered re-queue an event whose one
+// attempt already failed and latched (a second attempt, in spirit, at the
+// caller's own local copy of it).
+type escalationReport struct {
+	done atomic.Bool
+	fn   func(EscalationOutcome)
+}
+
+func newEscalationReport(fn func(EscalationOutcome)) *escalationReport {
+	return &escalationReport{fn: fn}
+}
+
+func (r *escalationReport) report(o EscalationOutcome) {
+	if r.fn == nil {
+		return
+	}
+	if r.done.CompareAndSwap(false, true) {
+		r.fn(o)
+	}
 }
 
 // Governor is the control-plane transport the enforce path needs: escalate an
@@ -77,18 +138,49 @@ func (t Evaluator) remaining(enforceStart time.Time) time.Duration {
 }
 
 // Escalate runs one bounded evaluation for an already-mapped event.
+//
+// budget<=0 never even builds a client: this call's own escalation was
+// unattempted from the start, the same as a NewClient failure, so it reports
+// EscalationNotAttempted synchronously rather than racing a goroutine that
+// would immediately see its own ctx already expired and misreport
+// EscalationUnanswered.
 func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.DevEvent, budget time.Duration) decision.Decision {
+	if budget <= 0 {
+		logger.Print("inline evaluation degrading: no evaluation budget remaining")
+		t.reportOutcome(EscalationNotAttempted)
+		return EvaluationFailOpen("no evaluation budget remaining")
+	}
+
+	// Guarded so run's own goroutine and the cctx.Done() branch below can
+	// never both land: run's own report can reach the guard strictly before
+	// its result value ever reaches resultCh (a plain scheduling delay
+	// between "run finished and reported" and "the send below actually
+	// runs" is enough), and without this, a stale Unanswered report reaching
+	// the guard after an explicit failure already reported Settled -- and
+	// already latched the run via HaltOnDeliveryFailure -- would wrongly
+	// requeue an event whose one attempt already failed.
+	rep := newEscalationReport(t.OnOutcome)
+	runner := t
+	runner.OnOutcome = rep.report
+
 	cctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
 	resultCh := make(chan decision.Decision, 1)
-	go func() { resultCh <- t.run(cctx, logger, ev) }()
+	go func() { resultCh <- runner.run(cctx, logger, ev) }()
 
 	select {
 	case dec := <-resultCh:
 		return dec
 	case <-cctx.Done():
 		logger.Printf("inline evaluation degrading (budget %v exceeded)", budget)
+		// Reported here, synchronously, rather than left for run's own
+		// goroutine to get to on its own: that goroutine may not finish
+		// before the caller (a gate hook) returns and the process exits,
+		// and the requeue this outcome triggers (SpoolObserveHead) must not
+		// depend on it doing so. The guard above is what keeps this from
+		// ever overwriting a report run already made.
+		rep.report(EscalationUnanswered)
 		return EvaluationFailOpen("evaluation budget exceeded")
 	}
 }
@@ -96,21 +188,33 @@ func (t Evaluator) Escalate(ctx context.Context, logger *log.Logger, ev client.D
 func (t Evaluator) run(cctx context.Context, logger *log.Logger, ev client.DevEvent) decision.Decision {
 	if t.NewClient == nil {
 		logger.Print("evaluation degrading: no control-plane transport configured")
+		t.reportOutcome(EscalationNotAttempted)
 		return EvaluationFailOpen("control plane unreachable")
 	}
 	cl, err := t.NewClient(logger)
 	if err != nil {
 		logger.Printf("inline evaluation degrading (client init): %v", err)
+		t.reportOutcome(EscalationNotAttempted)
 		return EvaluationFailOpen("control plane unreachable")
 	}
 	eval, err := cl.Emit(cctx, ev)
 	if err != nil {
+		// Read before anything else can change cctx's own error: the same
+		// rule DrainOptions.RequeueUnanswered uses (attemptLines) to tell an
+		// unanswered attempt from a proven one.
+		unanswered := cctx.Err() != nil
 		logger.Printf("inline evaluation degrading (emit): %v", err)
+		if unanswered {
+			t.reportOutcome(EscalationUnanswered)
+			return EvaluationFailOpen("evaluation undelivered")
+		}
+		// An explicit, proven non-acceptance: latch the run so nothing later
+		// in it goes unrecorded either; never resent (single attempt).
+		HaltOnDeliveryFailure(logger, ev, err)
+		t.reportOutcome(EscalationSettled)
 		return EvaluationFailOpen("evaluation undelivered")
 	}
-	if t.OnDelivered != nil {
-		t.OnDelivered()
-	}
+	t.reportOutcome(EscalationSettled)
 	return EvaluationDecision(eval)
 }
 

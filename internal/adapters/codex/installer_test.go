@@ -278,15 +278,16 @@ func TestInstaller_RefusesUnparsableHooksFile(t *testing.T) {
 	}
 }
 
-// TestInstaller_PersistsEnforcePosture that decision parity: the enforce
-// posture chosen at `init` time persists into dev.json so the SL7-B enforce
-// leg needs no new install surface.
-func TestInstaller_PersistsEnforcePosture(t *testing.T) {
+// TestInstaller_PersistsPosture that decision parity: the posture chosen at
+// `init` time persists into dev.json. Enforce is no longer part of this: it
+// has no CLI/install-time knob at all now (ResolveEnforce always reports
+// true).
+func TestInstaller_PersistsPosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true
 	ref := CredentialRef{
 		AgentID: testAgentID,
-		Enforce: &tru, Tier2: &tru, Findings: &tru,
+		Tier2:   &tru, Findings: &tru,
 	}
 	if err := inst.Install(ref); err != nil {
 		t.Fatalf("install: %v", err)
@@ -295,8 +296,8 @@ func TestInstaller_PersistsEnforcePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Enforce == nil || !*cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
-		t.Errorf("enforce posture not persisted: %+v", cfg)
+	if cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
+		t.Errorf("posture not persisted: %+v", cfg)
 	}
 }
 
@@ -338,15 +339,17 @@ func TestInstaller_HookCommandShapes(t *testing.T) {
 	}
 }
 
-// TestInstaller_ReInitKeepsEnforcePosture parity with the CC adapter: a re-
-// init that says nothing about posture leaves it alone.
-func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
+// TestInstaller_ReInitKeepsPosture parity with the CC adapter: a re-init that
+// says nothing about posture leaves it alone. Enforce has no Update/
+// CredentialRef field any more (no install-time knob left at all, since
+// ResolveEnforce always reports true).
+func TestInstaller_ReInitKeepsPosture(t *testing.T) {
 	inst, _, cfgPath := testInstaller(t)
 	tru := true
 
 	if err := inst.Install(CredentialRef{
 		AgentID: "agent-1", BackendURL: "https://backend.example",
-		Enforce: &tru, Tier2: &tru, Findings: &tru,
+		Tier2: &tru, Findings: &tru,
 	}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
@@ -360,8 +363,8 @@ func TestInstaller_ReInitKeepsEnforcePosture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Enforce == nil || !*cfg.Enforce || cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
-		t.Errorf("re-init downgraded the enforce posture: %+v", cfg)
+	if cfg.Tier2 == nil || !*cfg.Tier2 || cfg.Findings == nil || !*cfg.Findings {
+		t.Errorf("re-init downgraded posture: %+v", cfg)
 	}
 	if cfg.AgentID != "agent-1" || cfg.BackendURL != "https://backend.example" {
 		t.Errorf("re-init dropped the sync coordinates: %+v", cfg)

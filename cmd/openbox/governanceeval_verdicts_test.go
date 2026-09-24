@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
@@ -213,6 +214,17 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 		}
 	})
 
+	// sc.AlwaysStatus applies to EVERY /evaluate POST, including SessionStart's
+	// own inline WorkflowStarted delivery -- which now runs, and fails,
+	// BEFORE the gated call ever escalates (phase 1: SessionStart delivers
+	// inline; plan round 3: "a failed WorkflowStarted halts the run like any
+	// other failure"). So the run is already latched by the time the gated
+	// call's own gate runs, and it denies via the latch replay without
+	// asking /evaluate again -- not via its own failed escalation. This
+	// supersedes the old ordering pin (the gated call's OWN escalation
+	// failing, evidenced by source=evaluate:fail-open and hits>=1): the
+	// FIRST failure a run hits, whichever event it belongs to, is now what
+	// halts it.
 	t.Run("fail-closed-plus-an-outage-denies", func(t *testing.T) {
 		sc := oneCallSession("fail-closed-outage", allowVerdict, true)
 		sc.Posture.FailClosed = "1"
@@ -220,19 +232,13 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 		run := runScenario(t, sc)
 
 		d := requireVerb(t, run, "deny")
-		// Not an exact count: coupling the assertion to the retry schedule
-		// would make a change to the backoff read as a governance regression.
 		if run.Fake.Hits() < 1 {
-			t.Error("the gate denied without ever reaching /evaluate; the failure policy ran before the evaluation instead of after it")
+			t.Error("nothing ever reached /evaluate at all")
 		}
-		// Stronger than counting requests. This source is written only by the
-		// fail-open path, which exists only after an escalation was attempted
-		// and failed -- so it pins the ORDER, not merely that a round trip
-		// happened. Had the policy run first it would have recorded the local
-		// decider's source instead and never asked.
 		rec := requireLedgerRow(t, run)
-		if src, _ := rec["source"].(string); src != "evaluate:fail-open" {
-			t.Errorf("the ledger records source %q, want evaluate:fail-open; the denial did not come from a failed evaluation, which means the failure policy was applied before the evaluation rather than after it", src)
+		if src, _ := rec["source"].(string); src != hookflow.SourceSessionHalt {
+			t.Errorf("the ledger records source %q, want %q; SessionStart's own inline delivery failure "+
+				"should have latched the run before the gated call ever escalated", src, hookflow.SourceSessionHalt)
 		}
 		if d.Reason == "" {
 			t.Error("a fail-closed deny gave the coding agent no reason at all")
@@ -242,8 +248,11 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 				t.Errorf("the fail-closed reason quoted the tool content (%q); it must be content-free: %q", leak, d.Reason)
 			}
 		}
-		// An outage is not a kill switch.
-		requireNoHaltLatch(t, run)
+		// An outage now IS a run-halting condition (plan round 3), the
+		// opposite of the old "an outage is not a kill switch" pin.
+		if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
+			t.Errorf("%d session halt latch(es) were written, want exactly 1", n)
+		}
 	})
 }
 
@@ -334,19 +343,24 @@ func containsFold(haystack, needle string) bool {
 		stringsContainsFold(haystack, needle)
 }
 
-// TestGovernanceEvalGateOutageReportsTheCallOnce covers the election between
-// the gate's synchronous delivery and the spooled observe copy.
+// TestGovernanceEvalGateOutageReportsTheCallOnce pinned the election between
+// the gate's synchronous delivery and the spooled observe copy: the gate used
+// to spool an observe copy whenever the synchronous delivery did not happen,
+// so a scoped outage was still expected to report the call exactly once
+// (either half electing, never both, never neither).
 //
-// The gate spools the observe copy only when the synchronous delivery did not
-// happen. Both electing, or neither, is the defect: the control plane does not
-// dedupe developer events on their id, so a second copy is a second row on the
-// developer's timeline, and no copy is a governed call with no evidence.
-//
-// This is also why the fake must never collapse repeats. A fake that deduped
-// on Idempotency-Key would answer "one row" whichever way the election went,
-// and this test would pass while proving nothing.
+// Delivery is always fail-closed now (HaltOnDeliveryFailure, plan round 3):
+// an explicit non-acceptance -- this scoped outage answers 503 immediately,
+// well within the gate's own budget -- denies the call, halts the run, and is
+// NEVER resent; there is no more observe-copy fallback for it to elect
+// through. The call now reaches core zero times, not one, and stays that way
+// (single-attempt delivery has no carry-over). PairingGrader is not run here:
+// its "declaredDenied" contract still expects exactly one ActivityStarted row
+// for a blocked call (true for a real BLOCK/HALT verdict, which IS recorded
+// before it renders); a call whose own escalation was never accepted at all
+// is a different shape that grader does not yet model.
 func TestGovernanceEvalGateOutageReportsTheCallOnce(t *testing.T) {
-	sc := oneCallSession("a-gate-outage-still-reports-the-call-exactly-once", allowVerdict, false)
+	sc := oneCallSession("a-gate-outage-halts-the-run", allowVerdict, true)
 	// Down while the tool call is gated, back up by the time the session ends.
 	sc.OutageDuring = func(_ int, event string) bool { return event == "PreToolUse" }
 	run := runScenario(t, sc)
@@ -354,13 +368,17 @@ func TestGovernanceEvalGateOutageReportsTheCallOnce(t *testing.T) {
 	if run.Fake.ScriptedFailures() == 0 {
 		t.Fatal("the outage never happened, so the election was never forced")
 	}
-	// Fail-open: the gate could not ask, so the call proceeds.
-	requireVerb(t, run, "")
-
-	if n := countStartedFor(run, noToolUseID); n != 1 {
-		t.Errorf("the call reached the wire %d times, want exactly 1: both the gate and the observe copy elected, or neither did", n)
+	d := requireVerb(t, run, "deny")
+	if d.Reason == "" {
+		t.Error("a fail-closed deny gave the coding agent no reason at all")
 	}
-	grade(t, fakecore.PairingGrader(), sc, run.Run)
+
+	if n := countStartedFor(run, noToolUseID); n != 0 {
+		t.Errorf("the call reached the wire %d times, want 0; an explicit delivery failure is never resent (single-attempt delivery)", n)
+	}
+	if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
+		t.Errorf("%d session halt latch(es) were written, want exactly 1: an explicit delivery failure halts the run", n)
+	}
 }
 
 // TestGovernanceEvalHaltLatchesTheRestOfTheRun is the behavioural half of the

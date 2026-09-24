@@ -227,6 +227,12 @@ var deprecatedFields = map[string]bool{
 	"tier2":                   true,
 	"tier2_timeout_ms":        true,
 	"require_verified_bundle": true,
+	// fail_closed: delivery is always fail-closed now, so a lock on this key
+	// mandates nothing an org's session would not already get.
+	"fail_closed": true,
+	// enforce: every gated tool call is evaluated unconditionally now, so a
+	// lock on this key mandates nothing an org's session would not already get.
+	"enforce": true,
 }
 
 func unknownLocked(locked []string) []string {

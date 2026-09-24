@@ -16,6 +16,7 @@ import (
 
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
@@ -71,25 +72,40 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	t.Run("C2 fail-open + outage proceeds within bound (OD9)", func(t *testing.T) {
+	// C2/C3 pinned "fail_closed=0 => outage proceeds" (OD9). Delivery is now
+	// always fail-closed (HaltOnDeliveryFailure, plan round 3): the
+	// `fail_closed` key is deprecated, parsed only so it can warn, and no
+	// longer selects a policy. Both now assert the SAME outage-denies
+	// behaviour C4 pins, kept separate because they exercise a different
+	// knob value (fail_closed=0) and a timing bound neither premise touches.
+	t.Run("C2 an outage denies even with fail_closed=0 (delivery is always fail-closed)", func(t *testing.T) {
+		haltDir := t.TempDir()
+		t.Setenv(devconfig.EnvHaltDir, haltDir)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		start := time.Now()
 		out := run(t, dangerPayload)
-		if strings.TrimSpace(out) != "" {
-			t.Errorf("fail-open outage must proceed (empty stdout); got %q", out)
+		d, _ := parsePermissionDecision(t, []byte(out))
+		if d != ccDecisionDeny {
+			t.Fatalf("permissionDecision = %q, want deny; delivery is always fail-closed regardless of fail_closed=0 (stdout=%q)", d, out)
 		}
 		if elapsed := time.Since(start); elapsed > 3*time.Second {
 			t.Errorf("enforce wait %v exceeds the INV-3b bound (CC kills the hook at 5s)", elapsed)
 		}
+		assertNoLeak(t, out)
 	})
 
-	t.Run("C3 fail-open + unbundled proceeds (fix leaves default unchanged)", func(t *testing.T) {
+	t.Run("C3 an outage denies with fail_closed=0 (the deprecated key changes nothing)", func(t *testing.T) {
+		haltDir := t.TempDir()
+		t.Setenv(devconfig.EnvHaltDir, haltDir)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
-		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
-			t.Errorf("fail-open + unbundled must proceed (byte-identical to pre-fix); got %q", out)
+		out := run(t, dangerPayload)
+		d, _ := parsePermissionDecision(t, []byte(out))
+		if d != ccDecisionDeny {
+			t.Fatalf("permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}
+		assertNoLeak(t, out)
 	})
 
 	t.Run("C4 fail-closed + outage denies", func(t *testing.T) {
@@ -135,16 +151,10 @@ func TestEnforcementConformance(t *testing.T) {
 		assertNoLeak(t, out)
 	})
 
-	t.Run("C7 observe mode never blocks (INV-3 verbatim)", func(t *testing.T) {
-		serveVerdict(t, `{"verdict":"block","reason":"destructive recursive delete","policy_id":"conf-policy"}`)
-		t.Setenv(envEnforce, "0")
-		t.Setenv(envFailClosed, "1") // even fail_closed=1 must not matter with enforce off
-		if out := run(t, dangerPayload); strings.TrimSpace(out) != "" {
-			t.Errorf("observe mode must write nothing to stdout even for a BLOCK-worthy tool; got %q", out)
-		}
-	})
-
-	// Nothing replaces it; the condition cannot arise.
+	// C7 "observe mode never blocks" is gone: enforcement is unconditional now
+	// (ResolveEnforce always reports true), so there is no observe mode left
+	// for a PreToolUse/UserPromptSubmit/gated-ConfigChange call. Nothing
+	// replaces it; the condition cannot arise.
 
 	// The secret string must never survive on stdout / in any egress or audit
 	// sink; the placeholder must appear.
@@ -300,7 +310,7 @@ func TestEnforcementConformance(t *testing.T) {
 		t.Helper()
 		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envRealtime, "0")
-		t.Setenv(envEnforce, "0") // observe path; no gate, no deferred spool
+		// PostToolUse is never gated, enforcement setting notwithstanding.
 		var out bytes.Buffer
 		RunHook(hook, strings.NewReader(payload), &out, log.New(&bytes.Buffer{}, "", 0))
 		RunHook("SessionEnd", strings.NewReader(

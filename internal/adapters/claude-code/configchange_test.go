@@ -298,21 +298,6 @@ func TestRunHook_ConfigChange_RawCompare_UnknownSourceStillGates(t *testing.T) {
 	}
 }
 
-// TestRunHook_ConfigChange_EnforceOff: with enforce off, ConfigChange is byte-
-// identical to any other observe-only hook.
-func TestRunHook_ConfigChange_EnforceOff(t *testing.T) {
-	setupConfigChangeEnv(t)
-	t.Setenv(envEnforce, "0")
-
-	out, errOut := runConfigHook(t, configPayload("cc-5", "user_settings", "/x/settings.json"))
-	if strings.TrimSpace(out) != "" {
-		t.Errorf("enforce off must write nothing to stdout; got %q", out)
-	}
-	if strings.Contains(errOut, "enforce decision:") {
-		t.Errorf("enforce off must never invoke the gate; stderr=%q", errOut)
-	}
-}
-
 // TestTouchesSessionRegistry_RestrictedToEleven pins insight 8: the registry
 // touch (session -> cwd, for the git trailer) fires only for the 11 hooks
 // that already perform it; none of the 21 new hooks (including ConfigChange
@@ -363,18 +348,23 @@ func TestRunHook_ConfigChange_RegistryNotTouched(t *testing.T) {
 // TestSurfaceFindings_UnreachableForConfigChange is the RunHook-level trace
 // for insight 7: SurfaceFindings is guarded at hookrun.go by hook equality
 // checks that ConfigChange (and every other new hook) can never satisfy.
+//
+// ConfigChange's own source is pinned to policy_settings, which is the one
+// ConfigChange source that is never gated at all (raw compare, not through
+// enumOr) -- so it, like the other three hooks below, takes the observe path
+// unconditionally and this proves SurfaceFindings is unreachable there, not
+// merely that the (now-always-on) gate happened to deny first.
 func TestSurfaceFindings_UnreachableForConfigChange(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	isolateConfig(t)
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envEnforce, "0") // observe-only path; findings guard is what's under test
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true})
 
 	for _, hook := range []string{"ConfigChange", "MessageDisplay", "Setup", "CwdChanged"} {
 		var out bytes.Buffer
-		payload := `{"hook_event_name":"` + hook + `","session_id":"s","cwd":"/tmp","source":"user_settings"}`
+		payload := `{"hook_event_name":"` + hook + `","session_id":"s","cwd":"/tmp","source":"policy_settings"}`
 		RunHook(hook, strings.NewReader(payload), &out, nopLogger())
 		if strings.Contains(out.String(), "OpenBox governance") {
 			t.Errorf("%s must never surface findings, got %q", hook, out.String())

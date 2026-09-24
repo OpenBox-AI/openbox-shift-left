@@ -218,6 +218,59 @@ func TestHaltDecoratorRefusesALatchedRun(t *testing.T) {
 	}
 }
 
+// TestHaltDecoratorRefusesARunLatchedByADeliveryFailure is R6: a run latched
+// by an unaccepted event (HaltOnDeliveryFailure, not a HALT verdict) refuses
+// the run's NEXT relayed call exactly like a verdict-originated latch does --
+// the relay's own read side (haltDecorator) does not distinguish the two
+// origins -- while an unrelated, unlatched run is untouched.
+func TestHaltDecoratorRefusesARunLatchedByADeliveryFailure(t *testing.T) {
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "enforcements.jsonl"))
+	t.Setenv(obgit.EnvSessionDir, t.TempDir())
+	const latchedSession = "sess-delivery-halt-1"
+	const unlatchedSession = "sess-delivery-halt-unrelated"
+
+	latchedCall := gateway.Captured{
+		HTTPURL:        "https://api.anthropic.com/v1/messages",
+		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": latchedSession},
+	}
+	unlatchedCall := gateway.Captured{
+		HTTPURL:        "https://api.anthropic.com/v1/messages",
+		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": unlatchedSession},
+	}
+
+	if eval, err := (haltDecorator{}).Evaluate(context.Background(), latchedCall); err != nil || eval.Verdict != client.VerdictAllow {
+		t.Fatalf("Evaluate (unlatched): verdict=%q err=%v, want ALLOW", eval.Verdict, err)
+	}
+
+	// Stand in for a hook drainer or a lane daemon's own OnFailure, the same
+	// writer every one of them shares (hookflow.NewEngine wires it as the
+	// default Spool.OnFailure): core did not accept this event, so the run
+	// halts.
+	hookflow.HaltOnDeliveryFailure(discardMainLogger(), client.DevEvent{
+		EventID: "e1", EventType: client.EventToolCall, SessionID: latchedSession,
+	}, client.ErrDelivery)
+
+	eval, err := (haltDecorator{}).Evaluate(context.Background(), latchedCall)
+	if err != nil {
+		t.Fatalf("Evaluate (latched): %v", err)
+	}
+	if eval.Verdict != client.VerdictHalt {
+		t.Fatalf("latched session resolved verdict %q, want HALT", eval.Verdict)
+	}
+	if !strings.Contains(eval.Reason, "ToolCall") {
+		t.Errorf("resolved reason %q does not name the event the latch preserved", eval.Reason)
+	}
+
+	eval, err = (haltDecorator{}).Evaluate(context.Background(), unlatchedCall)
+	if err != nil {
+		t.Fatalf("Evaluate (unrelated session): %v", err)
+	}
+	if eval.Verdict != client.VerdictAllow {
+		t.Fatalf("an unrelated, unlatched session resolved verdict %q, want ALLOW", eval.Verdict)
+	}
+}
+
 // TestHaltDecoratorDoesNotRefuseAContinuedRunThatDidNotHalt pins the
 // correction the brief itself got wrong once: the run a session CURRENTLY
 // belongs to is what gets consulted, never the session id or an ancestor

@@ -33,9 +33,6 @@ func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
 		}
 	}()
 
-	if !ResolveEnforce() {
-		return 0
-	}
 	id, err := ResolveIdentity()
 	if err != nil {
 		return 0

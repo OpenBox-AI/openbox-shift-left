@@ -145,8 +145,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	// The two must agree: deciding to defer the observe copy here and then not
 	// running the gate would drop the event.
-	gated := ResolveEnforce() && (hook == HookPreToolUse || hook == HookUserPromptSubmit ||
-		hook == HookPermissionRequest)
+	//
+	// Enforcement is always on now (ResolveEnforce always reports true): every
+	// gated hook always runs the gate below and reads the latch. There is no
+	// longer an observe-only branch for these three hook classes.
+	gated := hook == HookPreToolUse || hook == HookUserPromptSubmit ||
+		hook == HookPermissionRequest
 
 	if gated {
 		// The latch is keyed by session id because the gate below sets no RunID,
@@ -165,12 +169,22 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			return
 		}
 
-		var spoolObserve func()
+		var spoolObserve, spoolObserveHead func()
 		if devEv, ok := ad.Mapper.Map(hook, ev); ok {
-			appendObserve := ad.RecordDeferred(devEv)
+			// Threaded once here (not through RecordDeferred): whichever of
+			// the two closures the gate actually invokes needs the SAME
+			// already-threaded event, and threading it twice would double-
+			// put its duration-pairing entry.
+			ad.ThreadDuration(&devEv)
 			spoolObserve = func() {
-				if err := appendObserve(); err != nil {
+				if err := ad.Spool.Append(devEv); err != nil {
 					logger.Printf("spool %s event: %v", hook, err)
+				}
+				nudgeFlush()
+			}
+			spoolObserveHead = func() {
+				if err := ad.Spool.SpoolObserveHead(devEv); err != nil {
+					logger.Printf("spool %s event to the session head: %v", hook, err)
 				}
 				nudgeFlush()
 			}
@@ -188,10 +202,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			c, target, record = permissionContract, permissionTarget{id: id, mapper: ad.Mapper, ev: ev}, recordPermissionEnforcement
 		}
 		g := hookflow.EnforceGate{
-			Contract:     c,
-			Evaluator:    evaluator,
-			Record:       func(dec decision.Decision, res hookflow.ApplyResult) { record(logger, ev, dec, res) },
-			SpoolObserve: spoolObserve,
+			Contract:         c,
+			Evaluator:        evaluator,
+			Record:           func(dec decision.Decision, res hookflow.ApplyResult) { record(logger, ev, dec, res) },
+			SpoolObserve:     spoolObserve,
+			SpoolObserveHead: spoolObserveHead,
 			// RunID deliberately unset: see the latch-key note above.
 		}
 		res := g.Run(context.Background(), logger, stdout, target)
@@ -203,8 +218,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		return
 	}
 
-	// Default off: with enforce off the decider is never invoked and the gate is
-	// inert, so the observe path stays byte-identical to observe-only.
+	// Every hook class that reaches here is never gated (Stop/SubagentStop
+	// already returned above, and PreToolUse/UserPromptSubmit/PermissionRequest
+	// always take the branch above): this is the observe-only path,
+	// byte-identical to today regardless of enforcement.
 	if _, err := ad.Observe(hook, ev); err != nil {
 		logger.Printf("spool %s event: %v", hook, err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,11 +13,11 @@ import (
 // TestInitWritesNoEnforceKeyEverAgain is what makes dropping --enforce safe
 // rather than a behaviour change.
 //
-// A flag that defaults to true cannot express "said nothing". With no CLI
-// writer, o.Enforce stays nil, Update.Enforce stays nil, setBoolPtr no-ops, the
-// key is never written, and ResolveEnforce reads its default of true. Writing
-// the key instead would look identical on a fresh machine and differ on every
-// machine that had ever opted out.
+// There is no CredentialRef/Update field for enforce at all any more (no
+// install-time knob left, since ResolveEnforce always reports true), so
+// nothing `init` does can ever write the key. Writing it would look
+// identical on a fresh machine and differ on every machine that had a
+// leftover opt-out sitting on disk.
 //
 // The SECOND invocation is asserted explicitly. CLAUDE.md records fifteen green
 // tests that missed exactly this class of read/write defect because each ran
@@ -40,11 +41,10 @@ func TestInitWritesNoEnforceKeyEverAgain(t *testing.T) {
 			t.Fatalf("%s run: read %s: %v", run, devPath, err)
 		}
 		if strings.Contains(string(raw), `"enforce"`) {
-			t.Errorf("%s run wrote an enforce key, so a later opt-out cannot be told from silence:\n%s",
-				run, raw)
+			t.Errorf("%s run wrote an enforce key:\n%s", run, raw)
 		}
 		if !devconfig.ResolveEnforce() {
-			t.Errorf("%s run: ResolveEnforce() = false with no key present; the default must be ON", run)
+			t.Errorf("%s run: ResolveEnforce() = false; it must always report true now", run)
 		}
 		// The one posture field init does write unconditionally, which is why the
 		// env override is its only opt-out.
@@ -57,10 +57,12 @@ func TestInitWritesNoEnforceKeyEverAgain(t *testing.T) {
 	}
 }
 
-// TestTheEnvOverrideIsTheOnlyEnforceOptOut. The flag is gone, so the escape
-// hatch has to be the env var — and it must work without writing the key,
-// because a written key would outlive the variable.
-func TestTheEnvOverrideIsTheOnlyEnforceOptOut(t *testing.T) {
+// TestTheEnvOverrideNoLongerOptsOutOfEnforce inverts the old opt-out
+// contract: OPENBOX_ENFORCE=false is a deprecated, ignored key now (every
+// gated tool call is evaluated unconditionally), so it must not turn
+// enforcement off, and it must not be persisted into dev.json either -- the
+// key is parsed only so it can warn.
+func TestTheEnvOverrideNoLongerOptsOutOfEnforce(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)
 	t.Setenv(devconfig.EnvEnforce, "false")
@@ -69,8 +71,8 @@ func TestTheEnvOverrideIsTheOnlyEnforceOptOut(t *testing.T) {
 	if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
 		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
 	}
-	if devconfig.ResolveEnforce() {
-		t.Error("OPENBOX_ENFORCE=false did not turn enforcement off")
+	if !devconfig.ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=false must be ignored; enforcement is always on now")
 	}
 	devPath, err := devconfig.DevConfigWritePath()
 	if err != nil {
@@ -81,7 +83,7 @@ func TestTheEnvOverrideIsTheOnlyEnforceOptOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), `"enforce"`) {
-		t.Errorf("the env override was persisted into the config, so it would outlive the variable:\n%s", raw)
+		t.Errorf("the ignored env override was persisted into the config:\n%s", raw)
 	}
 }
 
@@ -152,21 +154,34 @@ func TestCodexInstallsTelemetryButNeverTransport(t *testing.T) {
 	}
 }
 
-// TestAPersistedEnforceOptOutSurvivesAReInstall is the half that a
-// fresh-machine test cannot see. The defect CLAUDE.md records was not a missing
-// key -- it was a re-run silently putting `true` back over a deliberate opt-out,
-// which looks identical on a machine that never opted out.
-func TestAPersistedEnforceOptOutSurvivesAReInstall(t *testing.T) {
+// TestAPersistedEnforceOptOutIsIgnoredAcrossReInstall inverts the old
+// survives-a-reinstall contract: a leftover `"enforce": false` from before
+// this change is a dead, ignored key now, not an opt-out. It stays on disk
+// (a plain re-init never touches a field it was not given), but it must not
+// turn enforcement off, on the first install or any later one.
+func TestAPersistedEnforceOptOutIsIgnoredAcrossReInstall(t *testing.T) {
 	home := isolateHome(t)
-	seedCredentials(t)
 
-	// Somebody opted out, deliberately, before this install ran.
+	// A leftover opt-out from before enforcement was made unconditional, or a
+	// hand-edited file -- either way, a dev.json nobody generates any more but
+	// that still has to parse and be ignored. Written raw, and BEFORE
+	// seeding credentials: Update has no Enforce field left to seed it
+	// through WriteConfig, and seedCredentials' own WriteConfig call merges
+	// over whatever is already on disk rather than replacing it, so writing
+	// this first is what lets the seeded agent id and this leftover key
+	// coexist.
+	devPath := filepath.Join(home, "dev.json")
 	off := false
-	if err := devconfig.WriteConfig(filepath.Join(home, "dev.json"), devconfig.Update{Enforce: &off}); err != nil {
+	seed, err := json.Marshal(devconfig.DevConfig{Enforce: &off})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if devconfig.ResolveEnforce() {
-		t.Fatal("the fixture did not take; nothing below would mean anything")
+	if err := os.WriteFile(devPath, seed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedCredentials(t)
+	if !devconfig.ResolveEnforce() {
+		t.Fatal("a persisted enforce:false must be ignored; ResolveEnforce must still report true")
 	}
 
 	for _, run := range []string{"first", "second"} {
@@ -174,12 +189,8 @@ func TestAPersistedEnforceOptOutSurvivesAReInstall(t *testing.T) {
 		if code := a.run([]string{"init", "--provider", "claude-code"}); code != exitOK {
 			t.Fatalf("%s init exit = %d; stderr=%q", run, code, errb.String())
 		}
-		if devconfig.ResolveEnforce() {
-			t.Fatalf("the %s install reverted a deliberate enforce opt-out", run)
-		}
-		cfg := readDevJSON(t, home)
-		if cfg.Enforce == nil || *cfg.Enforce {
-			t.Fatalf("the %s install rewrote the persisted opt-out: %+v", run, cfg.Enforce)
+		if !devconfig.ResolveEnforce() {
+			t.Fatalf("the %s install let a dead enforce:false opt out of enforcement", run)
 		}
 	}
 }

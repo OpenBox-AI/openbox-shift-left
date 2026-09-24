@@ -117,10 +117,10 @@ func (a *app) runDoctor(args []string) int {
 
 	a.row("decided by", "%s", orUnset(p.DecisionAuthority))
 	a.row("if offline", "%s", orUnset(p.FailurePolicy))
-	if p.FailurePolicy == devconfig.FailurePolicyFailOpen {
-		a.row("", "gated calls PROCEED when it cannot be reached; fail_closed denies")
-	}
+	a.row("", "gated calls are DENIED and the run halts when OpenBox cannot record an event")
 	a.row("last verdict", "%s", lastDecisionSummary())
+
+	a.reportHaltedRuns()
 
 	denials, denialsUnreadable := recentConfigDenials(5)
 	switch {
@@ -804,6 +804,79 @@ func (l laneCheck) healthy(undecidable bool) bool {
 		l.routed && l.inPath && l.listening
 }
 
+// maxHaltedRunsShown bounds the halted-runs list: a latch has no expiry and
+// no remove path except `openbox uninstall` (sessionhalt.go: "presence is
+// the decided state", by design), so a long-lived machine can accumulate far
+// more than fits a terminal. The total count is always exact; only the
+// per-run list is capped, to the most recent.
+const maxHaltedRunsShown = 10
+
+// reportHaltedRuns lists currently-latched runs: presence is the decided
+// state (sessionhalt.go), so this is a plain directory listing, never a live
+// check. It shows the true total count and, for up to the maxHaltedRunsShown
+// most recent, the preserved cause -- the delivery failure class, or
+// "verdict" for a live HALT -- and the event type it could not record, never
+// the reason text a policy or the event carries, keeping this row inside
+// INV-2's content-free boundary. A latch never expires on its own: it says
+// so, so an operator does not read a long-unlatched-looking list as "these
+// cleared themselves" -- only a new session (a fresh run id) is ever
+// unhalted, and only `openbox uninstall` removes the latches themselves.
+func (a *app) reportHaltedRuns() {
+	dir := hookflow.DefaultHaltDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return // no halt dir yet: nothing has ever latched
+	}
+
+	type latch struct{ cause, eventType, ts string }
+	var latches []latch
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		raw, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
+		if rerr != nil {
+			continue
+		}
+		var info hookflow.SessionHaltInfo
+		if len(raw) == 0 || json.Unmarshal(raw, &info) != nil {
+			// A latch that will not parse (or was caught mid-write: the
+			// create-then-write window WriteSessionHaltIfAbsent leaves,
+			// sessionhalt.go) still halts its run (presence is the decided
+			// state); doctor still counts it, just with nothing further to
+			// show, and sorts last (no ts to sort by).
+			latches = append(latches, latch{cause: "(unreadable)"})
+			continue
+		}
+		cause := info.Cause
+		if cause == "" {
+			cause = "verdict"
+		}
+		latches = append(latches, latch{cause: cause, eventType: info.EventType, ts: info.TS})
+	}
+	if len(latches) == 0 {
+		return
+	}
+
+	// Most recent first; an empty ts (unreadable/mid-write) sorts last.
+	sort.Slice(latches, func(i, j int) bool { return latches[i].ts > latches[j].ts })
+	fmt.Fprintf(a.stdout, "\nHalted runs (presence is the decided state; latches never expire on their own -- "+
+		"only a new session starts unhalted; `openbox uninstall` removes them)\n")
+	a.row("latched", "%d run(s) total", len(latches))
+	shown := latches
+	if len(shown) > maxHaltedRunsShown {
+		shown = shown[:maxHaltedRunsShown]
+		a.row("", "showing the %d most recent", maxHaltedRunsShown)
+	}
+	for _, l := range shown {
+		if l.eventType != "" {
+			a.row("", "%s (%s) at %s", l.cause, l.eventType, l.ts)
+		} else {
+			a.row("", "%s at %s", l.cause, l.ts)
+		}
+	}
+}
+
 // reportSpool is where the machine-wide backlog is actionable, which
 // `evidence_undelivered` is not: it counts carry-over files only.
 func (a *app) reportSpool() {
@@ -824,10 +897,11 @@ func (a *app) reportSpool() {
 
 	discarded := spool.DiscardedCount()
 	if discarded > 0 {
-		a.row("DISCARDED", "at least %d event(s) were given up on and are GONE: past %d delivery", discarded, hookflow.MaxRecoveryAttempts)
-		a.row("", "attempts, or past the %d-day retention age. This is real loss of", int(hookflow.RetireSpoolAfter.Hours()/24))
-		a.row("", "governance evidence, recorded in %s. \"At least\" because", spool.DiscardPath())
-		a.row("", "that record is size-capped and restarts, so it is a floor.")
+		a.row("DISCARDED", "at least %d event(s) were given up on and are GONE: core did not", discarded)
+		a.row("", "accept their one delivery attempt, or they passed the %d-day retention", int(hookflow.RetireSpoolAfter.Hours()/24))
+		a.row("", "age unattempted. This is real loss of governance evidence, recorded in")
+		a.row("", "%s. \"At least\" because that record is size-capped and restarts,", spool.DiscardPath())
+		a.row("", "so it is a floor.")
 	}
 	if backlog > 0 || discarded > 0 {
 		fmt.Fprintf(a.stdout, "  flusher log  %s\n", spool.FlusherLogPath())
@@ -870,8 +944,9 @@ func (a *app) reportCodexSpool(ccDir string) {
 		a.row("", "A lane daemon sweeps every %s; `openbox hook %s flush` does it now.", hookflow.DefaultSweepInterval, provider.Codex)
 	}
 	if discarded > 0 {
-		a.row("", "DISCARDED at least %d event(s): past %d delivery attempts, or past the %d-day", discarded, hookflow.MaxRecoveryAttempts, int(hookflow.RetireSpoolAfter.Hours()/24))
-		a.row("", "retention age. Recorded in %s.", codexSpool.DiscardPath())
+		a.row("", "DISCARDED at least %d event(s): core did not accept their one delivery", discarded)
+		a.row("", "attempt, or they passed the %d-day retention age unattempted. Recorded in %s.",
+			int(hookflow.RetireSpoolAfter.Hours()/24), codexSpool.DiscardPath())
 	}
 	fmt.Fprintf(a.stdout, "  flusher log  %s\n", codexSpool.FlusherLogPath())
 }

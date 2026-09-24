@@ -338,14 +338,27 @@ func (s Spool) collectSession(sessionID string) (lines [][]byte, rotatedPaths []
 // writeHead atomically replaces the session's head file with remainder, or
 // removes it when remainder is empty: at most one head file per stem, always
 // the sole record of what a pass could not even start.
+//
+// It takes the directory lock and MERGES rather than blindly overwrites:
+// collectSession rotated the previous head file (if any) away before this
+// pass began, so a fresh write straight to headPath in the meantime -- a
+// gate's own escalation requeuing an unanswered attempt, SpoolObserveHead --
+// is strictly NEWER than remainder (drawn from what was rotated away at the
+// START of this pass) and must survive AFTER it, never silently replaced.
 func (s Spool) writeHead(sessionID string, remainder [][]byte) {
 	path := s.headPath(sessionID)
-	if len(remainder) == 0 {
+
+	unlock := s.lockSpool()
+	defer unlock()
+
+	existing, _ := os.ReadFile(path)
+	lines := append(append([][]byte{}, remainder...), NonEmptyLines(existing)...)
+	if len(lines) == 0 {
 		_ = os.Remove(path)
 		return
 	}
 	var buf bytes.Buffer
-	for _, l := range remainder {
+	for _, l := range lines {
 		buf.Write(l)
 		buf.WriteByte('\n')
 	}
@@ -359,6 +372,42 @@ func (s Spool) writeHead(sessionID string, remainder [][]byte) {
 		_ = os.Remove(tmp)
 		s.logf("spool: %s: the unattempted remainder could not be renamed into its head file: %v", filepath.Base(path), err)
 	}
+}
+
+// SpoolObserveHead appends ev's observe copy directly to the session's head
+// file, ahead of its tail: for a gate escalation whose own budget ran out
+// before core answered (the same unanswered-vs-failed discriminator
+// DrainOptions.RequeueUnanswered uses), the outcome is unknown, so it is
+// requeued for a drainer with a real, unbounded attempt rather than scored as
+// a failure -- never latched, never counted as a second attempt against this
+// event (core dedupes the eventual re-send on the idempotency key).
+//
+// Shares Append's own directory lock, so it is race-safe against a
+// concurrent rotate (collectSession) and a concurrent writeHead's own merge:
+// whichever holds the lock first completes atomically before the other
+// proceeds.
+func (s Spool) SpoolObserveHead(ev client.DevEvent) error {
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return fmt.Errorf("spool mkdir: %w", err)
+	}
+	line, err := json.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("spool marshal: %w", err)
+	}
+	line = append(line, '\n')
+
+	unlock := s.lockSpool()
+	defer unlock()
+
+	f, err := os.OpenFile(s.headPath(ev.SessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return fmt.Errorf("spool open head: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(line); err != nil {
+		return fmt.Errorf("spool write head: %w", err)
+	}
+	return nil
 }
 
 // attemptLines gives each line exactly one delivery attempt, in order:
@@ -475,6 +524,18 @@ func (s Spool) reclaimStemOrphans(stem string, onFailure func(client.DevEvent, e
 		path := filepath.Join(s.Dir, name)
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue // already gone: nothing to reclaim
+			}
+			// Unreadable for a reason that will not resolve itself
+			// (permissions, a damaged directory entry): its lines are
+			// neither delivered nor decodable, so no event and no run is
+			// known to fail (never OnFailure, never a latch) -- but
+			// silently skipping it, forever, on every future pass is its
+			// own loss. Ledgered once, by file, then removed so the next
+			// pass never sees it again.
+			s.recordDiscard(path, 1, fmt.Sprintf("an orphaned spool file could not be read back and is discarded: %v", readErr))
+			_ = os.Remove(path)
 			continue
 		}
 		lines := NonEmptyLines(data)

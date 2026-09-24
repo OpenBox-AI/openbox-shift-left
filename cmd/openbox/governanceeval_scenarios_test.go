@@ -288,31 +288,58 @@ func requireHealthyRun(t *testing.T, run evalRun) {
 }
 
 // TestGovernanceEvalSpoolSeesToolEvents: the DevEvent validator must actually
-// reach tool events. Under enforce it cannot -- a gated PreToolUse egresses at
-// the gate and its observe copy is discarded -- so this pins the unenforced
-// scenario as the one that covers them. Without it AC2 would be half vacuous
-// for the two most important types and nothing would say so.
+// reach tool events. Enforcement is unconditional now (ResolveEnforce always
+// reports true), so there is no "unenforced" scenario left to run these
+// through the plain observe path; a genuinely ALLOWed gated call still never
+// spools its own ToolCall/PromptSubmitted locally (the gate's escalation
+// settles it, so SpoolObserve never fires -- see the second half below). The
+// one place that DOES still queue the gated call's own DevEvent locally is
+// when the escalation itself was never attempted at all (no client
+// configured): EscalationNotAttempted falls back to SpoolObserve, same as
+// the pre-enforcement observe path always did. That is what this drives
+// directly, bypassing runScenario's own evalEnv (which always wires working
+// credentials): an agent id (so the mapper's DID prefix check passes and the
+// call is mappable) but no API key / workload key at all (so the client
+// never builds and the escalation is never attempted).
 func TestGovernanceEvalSpoolSeesToolEvents(t *testing.T) {
-	trimmed := func(sc fakecore.Scenario) fakecore.Scenario {
-		sc.Payloads = sc.Payloads[:len(sc.Payloads)-1] // stop before the flush drains it
-		return sc
-	}
+	spool := isolateHomeOnly(t)
+	spool = filepath.Join(spool, "spool")
+	t.Setenv(devconfig.EnvSpoolDir, spool)
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	t.Setenv(devconfig.EnvAgentID, fakecore.AgentID())
+	// Deliberately absent: no OPENBOX_API_KEY / OPENBOX_WORKLOAD_PRIVATE_KEY,
+	// so ResolveCredentials fails, the evaluator's client never builds, and
+	// every gated call's escalation reports EscalationNotAttempted.
 
-	observed := fakecore.SpooledEventTypes(runScenario(t, trimmed(observedSession())).Spool)
-	for _, want := range []string{"ToolCall", "ToolResult", "PromptSubmitted"} {
-		if observed[want] == 0 {
-			t.Errorf("no %s reached the spool with the gate off, so ValidateDevEvent never saw one; spooled: %v", want, observed)
+	for _, p := range []fakecore.HookPayload{sessionStart(), userPrompt("list the files"), preBash(okToolUseID, "ls -la"), postBash(okToolUseID, "ls -la")} {
+		a, _, errb := testApp(nil)
+		a.stdin = strings.NewReader(p.JSON)
+		a.run([]string{"hook", "claude-code", p.Event})
+		if panicked(errb.String()) {
+			t.Fatalf("%s panicked: %s", p.Event, errb.String())
 		}
 	}
 
-	// And the enforced session cannot stand in for it: a gated call egresses
-	// at the gate and its observe copy is discarded. If this ever starts
-	// spooling them the unenforced scenario is redundant and should go --
-	// but until then, dropping it would quietly un-cover two types.
-	enforced := fakecore.SpooledEventTypes(runScenario(t, trimmed(ranFineSession())).Spool)
+	observed := fakecore.SpooledEventTypes(spool)
+	for _, want := range []string{"ToolCall", "ToolResult", "PromptSubmitted"} {
+		if observed[want] == 0 {
+			t.Errorf("no %s reached the spool with no reachable control plane, so ValidateDevEvent never saw one; spooled: %v", want, observed)
+		}
+	}
+	validateSpool(t, spool, true)
+
+	// And a genuinely gated + ALLOWed session cannot stand in for it: the
+	// gate's own escalation settles the call, so its observe copy is
+	// discarded. If this ever starts spooling them the scenario above is
+	// redundant and should go -- but until then, dropping it would quietly
+	// un-cover two types.
+	trimmed := ranFineSession()
+	trimmed.Payloads = trimmed.Payloads[:len(trimmed.Payloads)-1] // stop before the flush drains it
+	enforced := fakecore.SpooledEventTypes(runScenario(t, trimmed).Spool)
 	for _, gated := range []string{"ToolCall", "PromptSubmitted"} {
 		if enforced[gated] != 0 {
-			t.Errorf("an enforced session spooled %s; the unenforced scenario is no longer the only thing covering it: %v", gated, enforced)
+			t.Errorf("an ALLOWed gated session spooled %s; the no-client scenario is no longer the only thing covering it: %v", gated, enforced)
 		}
 	}
 }

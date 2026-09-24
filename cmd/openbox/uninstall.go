@@ -493,7 +493,7 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 		// Announced before it runs: an in-process call has no session id, so the
 		// engine sweeps every session and then retires, and the two budgets are
 		// granted separately.
-		fmt.Fprintf(a.stdout, "\nflushing the %s spool (up to ~17s: 12s flush, then a separate 5s retire)…\n", name)
+		fmt.Fprintf(a.stdout, "\nflushing the %s spool (up to ~65s: 60s flush, then a separate 5s retire)…\n", name)
 		engine.RunHook("flush", strings.NewReader(""), io.Discard, log.New(a.stderr, "openbox uninstall: ", 0))
 	}
 	remaining := 0

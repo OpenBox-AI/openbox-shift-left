@@ -181,6 +181,7 @@ func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 	isolateConfig(t)
 	isolateMarkers(t)
 	t.Setenv(devconfig.EnvEnforcementFile, t.TempDir()+"/enforcements.jsonl")
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	defer devconfig.Pin()()
 
 	var emits int32

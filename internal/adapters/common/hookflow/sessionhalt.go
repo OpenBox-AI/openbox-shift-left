@@ -28,6 +28,15 @@ type SessionHaltInfo struct {
 	Reason   string `json:"reason,omitempty"`
 	PolicyID string `json:"policy_id,omitempty"`
 	TS       string `json:"ts"`
+	// Cause names the delivery failure class (client.FailureClass, or
+	// "orphaned" for a drainer that died mid-delivery) when this latch's
+	// origin was an unaccepted event rather than a HALT verdict; empty for a
+	// verdict-originated latch. Additive: an old reader ignores it.
+	Cause string `json:"cause,omitempty"`
+	// EventType names the event OpenBox could not record, when this latch's
+	// origin was a delivery failure; empty for a verdict-originated latch.
+	// Additive: an old reader ignores it.
+	EventType string `json:"event_type,omitempty"`
 }
 
 // DefaultHaltDir is where session-halt latches live: the env override, else a
@@ -65,23 +74,80 @@ func haltPath(sessionID string) string {
 // concurrently, and a reader (SessionHalted) must never observe a
 // partially-written file.
 func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation) {
-	if sessionID == "" {
-		logger.Printf("session halt latch skipped: empty session id")
+	info := SessionHaltInfo{Reason: e.Reason, PolicyID: e.PolicyID, TS: time.Now().UTC().Format(time.RFC3339Nano)}
+	path, line, ok := prepareLatchWrite(logger, sessionID, info)
+	if !ok {
 		return
 	}
-	info := SessionHaltInfo{Reason: e.Reason, PolicyID: e.PolicyID, TS: time.Now().UTC().Format(time.RFC3339Nano)}
+	if err := atomicWriteFile(path, line, 0o600); err != nil {
+		logger.Printf("session halt latch skipped (write): %v", err)
+	}
+}
+
+// WriteSessionHaltIfAbsent latches a run as halted, but ONLY when it is not
+// already latched: an existing latch -- whichever cause reached it first, a
+// live HALT verdict (WriteSessionHalt) or an earlier delivery failure -- is
+// left exactly as it is. A run's first cause is the one every later call
+// sees, never replaced by a second, unrelated one.
+//
+// O_CREATE|O_EXCL makes "is it latched, then write" one atomic filesystem
+// step, closing the race two drainers (or a drainer and a gate escalation)
+// hitting the same run's very first failure concurrently would otherwise
+// have: each observing no latch, then both writing. Deliberately not
+// atomicWriteFile (rename-into-place): that mechanism always replaces
+// whatever is at the destination, which is the one thing this function must
+// never do.
+//
+// This create-then-write is NOT the same guarantee WriteSessionHalt's doc
+// comment describes: between the O_CREATE|O_EXCL and the Write call below, a
+// concurrent reader can observe a present but EMPTY (0-byte) file. "Never
+// observed partially written" is WriteSessionHalt's own property (rename-
+// into-place), not this function's. This is accepted, not a bug: presence is
+// still the decided state (SessionHalted's own contract), an empty file
+// fails json.Unmarshal exactly like a corrupt one, and every reader already
+// treats that the same way -- SessionHalted still reports halted=true (with
+// a zero-value SessionHaltInfo), SessionHaltDecision still renders a
+// generic, non-empty reason, and doctor still counts and shows it as
+// "(unreadable)" rather than a blank line or a crash.
+//
+// Best-effort and off the blocking path, same as WriteSessionHalt: a write
+// fault here costs only a later call's local refusal (INV-3).
+func WriteSessionHaltIfAbsent(logger *log.Logger, sessionID string, info SessionHaltInfo) {
+	path, line, ok := prepareLatchWrite(logger, sessionID, info)
+	if !ok {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if !os.IsExist(err) {
+			logger.Printf("session halt latch skipped (write): %v", err)
+		}
+		return // already latched, by this cause or an earlier one: first wins
+	}
+	defer f.Close()
+	if _, err := f.Write(line); err != nil {
+		logger.Printf("session halt latch skipped (write): %v", err)
+	}
+}
+
+// prepareLatchWrite is the marshal-and-mkdir prelude WriteSessionHalt and
+// WriteSessionHaltIfAbsent share; only the final write step (rename-into-
+// place vs. O_CREATE|O_EXCL) differs between them, and stays with each.
+func prepareLatchWrite(logger *log.Logger, sessionID string, info SessionHaltInfo) (path string, line []byte, ok bool) {
+	if sessionID == "" {
+		logger.Printf("session halt latch skipped: empty session id")
+		return "", nil, false
+	}
 	line, err := json.Marshal(info)
 	if err != nil {
 		logger.Printf("session halt latch skipped (marshal): %v", err)
-		return
+		return "", nil, false
 	}
 	if err := os.MkdirAll(DefaultHaltDir(), 0o700); err != nil {
 		logger.Printf("session halt latch skipped (mkdir): %v", err)
-		return
+		return "", nil, false
 	}
-	if err := atomicWriteFile(haltPath(sessionID), line, 0o600); err != nil {
-		logger.Printf("session halt latch skipped (write): %v", err)
-	}
+	return haltPath(sessionID), line, true
 }
 
 // SessionHalted reports whether a run is latched halted (see the
@@ -123,7 +189,14 @@ func ReplaySessionHalt(logger *log.Logger, stdout io.Writer, info SessionHaltInf
 func SessionHaltDecision(info SessionHaltInfo) decision.Decision {
 	reason := info.Reason
 	if reason == "" {
-		reason = "session halted by a governance HALT verdict; start a new session"
+		// Generic and origin-agnostic on purpose: an empty Reason reaches
+		// here for BOTH a latch this process cannot parse (corrupt, or
+		// caught mid-write in WriteSessionHaltIfAbsent's own create-then-
+		// write window -- see its doc comment) and, in principle, any future
+		// writer that latched without one; the origin (a HALT verdict, or an
+		// unaccepted event) cannot be recovered here either way, and must
+		// never be guessed at.
+		reason = "session halted; the run cannot continue. Start a new session to continue."
 	}
 	return decision.Decision{
 		Evaluation:  client.Evaluation{Verdict: client.VerdictHalt, Reason: reason, PolicyID: info.PolicyID},

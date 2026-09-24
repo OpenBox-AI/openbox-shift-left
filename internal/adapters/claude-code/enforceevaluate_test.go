@@ -484,43 +484,64 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 		}
 	})
 
-	t.Run("C15 T2 outage: fail-open proceeds / fail-closed denies within bound", func(t *testing.T) {
+	// C15 pinned "fail-open proceeds / fail-closed denies" (two outcomes from
+	// the SAME outage, gated on the fail_closed value). Delivery is now
+	// always fail-closed (HaltOnDeliveryFailure): every outage denies, one
+	// escalation attempt, and the run it belongs to is latched -- so a
+	// SECOND call for that same session denies via the replay, spending no
+	// further /evaluate attempt. The deprecated fail_closed key sets nothing
+	// either way.
+	t.Run("C15 a T2 outage halts the run; its next call is denied by the latch, not a new attempt", func(t *testing.T) {
 		allowT1(t)
-		url, _ := serveEvaluate(t, `boom`, 500, 0) // exhausts retries → Emit fails open
+		url, hits := serveEvaluate(t, `boom`, 500, 0)
 		evalCreds(t, url)
 		t.Setenv(envTier2, "1")
+		t.Setenv(envFailClosed, "0") // deprecated: parsed, ignored; delivery is always fail-closed
 
-		t.Setenv(envFailClosed, "0")
-		if out := run(dangerBash); strings.TrimSpace(out) != "" {
-			t.Errorf("T2 outage under fail-open must proceed; got %q", out)
-		}
-
-		t.Setenv(envFailClosed, "1")
 		start := time.Now()
 		out := run(dangerBash)
 		elapsed := time.Since(start)
-		d, reason := parsePermissionDecision(t, []byte(out))
+		d, _ := parsePermissionDecision(t, []byte(out))
 		if d != ccDecisionDeny {
-			t.Fatalf("T2 outage under fail-closed must deny; got %q (stdout=%q)", d, out)
+			t.Fatalf("a T2 outage must deny (delivery is always fail-closed); got %q (stdout=%q)", d, out)
 		}
-		if !strings.Contains(reason, "fail-closed") {
-			t.Errorf("reason = %q, want the content-free fail-closed reason", reason)
-		}
+		// This call's own reason is the generic fail-closed-outage wording
+		// (ApplyFailurePolicy); the delivery-failure class only shows up on a
+		// LATER call replaying the latch this one just wrote -- see reason2
+		// below.
 		if elapsed > 4500*time.Millisecond {
-			t.Errorf("fail-closed deny took %v; must land before CC's 5s hook timeout", elapsed)
+			t.Errorf("the deny took %v; must land before CC's 5s hook timeout", elapsed)
 		}
 		if strings.Contains(out, "rm -rf") {
 			t.Errorf("stdout leaked the command (INV-2): %q", out)
 		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1 (single delivery attempt)", hits.V3EvaluateAttempts())
+		}
+
+		out2 := run(dangerBash)
+		d2, reason2 := parsePermissionDecision(t, []byte(out2))
+		if d2 != ccDecisionDeny {
+			t.Fatalf("the latched run's next call must also deny; got %q", d2)
+		}
+		if !strings.Contains(reason2, "halted") {
+			t.Errorf("reason = %q, want the session-halt replay wording", reason2)
+		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("a latched run must not spend a second /evaluate attempt; hits=%d", hits.V3EvaluateAttempts())
+		}
 	})
 
+	// A fresh session id: C15 above deliberately latches session "s"'s run,
+	// which every earlier subtest here shares, so this one needs its own
+	// unlatched run to test the opt-out in isolation.
 	t.Run("C16 the deprecated tier2=0 opt-out no longer disables evaluation", func(t *testing.T) {
 		allowT1(t)
 		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"still governed"}`, 200, 0)
 		evalCreds(t, url)
 		t.Setenv(envTier2, "0") // deprecated: parsed, ignored
 		t.Setenv(envFailClosed, "0")
-		out := run(dangerBash)
+		out := run(`{"hook_event_name":"PreToolUse","session_id":"s-c16","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`)
 		if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
 			t.Fatalf("tier2=0 must not suppress the verdict; permissionDecision = %q, want deny (stdout=%q)", d, out)
 		}

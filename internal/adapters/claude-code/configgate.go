@@ -57,7 +57,7 @@ func (t configSubject) DecisionRequest(bool) decision.DecisionRequest {
 
 // DevEvent maps the change for the inline evaluation through the same Mapper
 // (and pinned clock) the observe copy uses, so the two derive one event_id and
-// the gate's OnDelivered dedupe holds.
+// the gate's own EscalationOutcome tracking holds.
 func (t configSubject) DevEvent(*client.Content) (client.DevEvent, bool) {
 	return t.mapper.Map(HookConfigChange, t.ev)
 }

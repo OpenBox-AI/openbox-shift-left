@@ -167,10 +167,20 @@ func TestAuthNeverTouchesPosture(t *testing.T) {
 	devPath := filepath.Join(home, "dev.json")
 
 	tr, fa := true, false
-	if err := devconfig.WriteConfig(devPath, devconfig.Update{
+	// Enforce has no Update field any more (no install-time knob left at all),
+	// so this seeds it directly the way an old dev.json still on disk would
+	// carry one: raw, not through WriteConfig.
+	seed, err := json.Marshal(devconfig.DevConfig{
 		Enforce: &tr, Tier2: &tr, Findings: &tr,
-		ContentCapture: &fa, InstallGitHook: &tr,
-	}); err != nil {
+		ContentCapture: &fa, InstallGitHook: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(devPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devPath, seed, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(devPath)
@@ -208,21 +218,6 @@ func TestAuthNeverTouchesPosture(t *testing.T) {
 	// tool's agent, and the org config is shared by all of them.
 	if cfg.AgentID != "" {
 		t.Errorf("auth wrote an agent id (%q) into the org config", cfg.AgentID)
-	}
-}
-
-// TestAuthDoesNotTripTheEnforceDowngradeGuard wouldDowngradeEnforce must not
-// fire for an auth run: auth never proposes an enforce change, so there is no
-// posture change to announce.
-func TestAuthDoesNotTripTheEnforceDowngradeGuard(t *testing.T) {
-	home := isolateHome(t)
-	devPath := filepath.Join(home, "dev.json")
-	tr := true
-	if err := devconfig.WriteConfig(devPath, devconfig.Update{Enforce: &tr}); err != nil {
-		t.Fatal(err)
-	}
-	if devconfig.WouldDowngradeEnforce(devPath, nil) {
-		t.Error("a nil Enforce must never register as a downgrade")
 	}
 }
 

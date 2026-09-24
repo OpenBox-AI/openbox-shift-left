@@ -99,12 +99,16 @@ type DevConfig struct {
 	// InstallGitHook enables ambient install of the prepare-commit-msg hook on
 	// SessionStart.
 	InstallGitHook bool `json:"install_git_hook,omitempty"`
-	// Enforce flips the developer runtime from observe/advisory to enforce. It is
-	// a *bool, and that is load-bearing rather than stylistic.
+	// Enforce is deprecated and inert: every gated tool call is evaluated by
+	// OpenBox unconditionally now (ResolveEnforce always reports true). Parsed
+	// so an existing dev.json does not become an error, and so an explicit
+	// value can still be named in the deprecated-key warning.
 	Enforce *bool `json:"enforce,omitempty"`
-	// FailClosed selects the enforce failure policy. Default false = fail-open:
-	// an OpenBox outage never blocks a developer.
-	FailClosed bool `json:"fail_closed,omitempty"`
+	// FailClosed is deprecated and inert: delivery is always fail-closed now
+	// (HaltOnDeliveryFailure). A *bool, not a plain bool, so an explicit
+	// `"fail_closed": false` in a file is distinguishable from the key being
+	// absent altogether -- the same reason Tier2 is a *bool.
+	FailClosed *bool `json:"fail_closed,omitempty"`
 	// EnforceTimeoutMS is inert under the in-process decider; retained for back-
 	// compat parsing.
 	EnforceTimeoutMS int `json:"enforce_timeout_ms,omitempty"`
@@ -397,16 +401,20 @@ func sanitizeProvider(p string) string {
 	return b.String()
 }
 
-// ResolveEnforce reports whether the developer runtime is in enforce mode:
-// config field first, then the env override.
+// ResolveEnforce always reports true: every gated tool call is evaluated by
+// OpenBox unconditionally now, so there is no longer a mode to select. The
+// `enforce` key (dev.json, managed) and OPENBOX_ENFORCE still parse -- so the
+// key stays readable and deadKeysPresent can still warn on it -- but neither
+// selects anything here any more.
 func ResolveEnforce() bool {
-	return resolveBool("enforce", func(c DevConfig) *bool { return c.Enforce }, true, EnvEnforce)
+	return true
 }
 
-// ResolveFailClosed reports the enforce failure policy. Default false = fail-
-// open; an org never becomes fail-closed by accident.
+// ResolveFailClosed reports the enforce failure policy. Deprecated and inert:
+// delivery is always fail-closed now (HaltOnDeliveryFailure); the key still
+// parses so it can warn.
 func ResolveFailClosed() bool {
-	return resolveBool("fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed)
+	return resolveBool("fail_closed", func(c DevConfig) *bool { return c.FailClosed }, false, EnvFailClosed)
 }
 
 var deprecationOnce sync.Once
@@ -418,8 +426,10 @@ func warnDeprecatedKeys() {
 	}
 	deprecationOnce.Do(func() {
 		fmt.Fprintf(os.Stderr, "openbox: %s set but ignored; every gated tool call is "+
-			"evaluated by OpenBox, so there are no tiers to switch between and no "+
-			"local bundle to verify. Remove from dev.json / the environment to silence this.\n",
+			"evaluated by OpenBox and every event it cannot record halts the run, so "+
+			"there are no tiers to switch between, no local bundle to verify, and no "+
+			"failure policy left to choose. Remove from dev.json / the environment to "+
+			"silence this.\n",
 			strings.Join(dead, ", "))
 	})
 }
@@ -453,6 +463,12 @@ func deadKeysPresent() []string {
 	}
 	if _, env := os.LookupEnv(EnvRequireVerified); env || set(func(c DevConfig) bool { return c.RequireVerifiedBundle != nil }) {
 		dead = append(dead, "`require_verified_bundle`")
+	}
+	if _, env := os.LookupEnv(EnvFailClosed); env || set(func(c DevConfig) bool { return c.FailClosed != nil }) {
+		dead = append(dead, "`fail_closed`")
+	}
+	if _, env := os.LookupEnv(EnvEnforce); env || set(func(c DevConfig) bool { return c.Enforce != nil }) {
+		dead = append(dead, "`enforce`")
 	}
 	return dead
 }

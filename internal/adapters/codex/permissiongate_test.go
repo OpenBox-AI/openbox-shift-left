@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
@@ -119,19 +118,6 @@ func TestPermissionGate_AllowVerdictWritesNothing(t *testing.T) {
 	stdout, _ := runHook(t, "PermissionRequest", permissionEvent("th-perm-allow"))
 	if strings.TrimSpace(stdout) != "" {
 		t.Errorf("an allow verdict must write nothing, so the human is still asked; got %q", stdout)
-	}
-}
-
-// TestPermissionGate_EnforceOffWritesNothing keeps observe byte-parity for the
-// new class.
-func TestPermissionGate_EnforceOffWritesNothing(t *testing.T) {
-	gateEnv(t)
-	t.Setenv(devconfig.EnvEnforce, "0")
-	serveVerdictServer(t, `{"verdict":"block","reason":"would have denied","policy_id":"p9"}`)
-
-	stdout, _ := runHook(t, "PermissionRequest", permissionEvent("th-perm-off"))
-	if stdout != "" {
-		t.Errorf("enforce off must write nothing to stdout; got %q", stdout)
 	}
 }
 

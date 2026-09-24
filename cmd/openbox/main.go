@@ -290,11 +290,8 @@ func (a *app) runDevInit(args []string) int {
 	// and the write is what makes that env var the whole story rather than one
 	// of two places to look.
 	o.InstallGitHook = true
-	// o.Enforce is left nil, deliberately and permanently. A bool that defaults
-	// to true cannot express "said nothing", so assigning it here would write an
-	// enforce key indistinguishable from a machine that had explicitly opted in
-	// -- and would silently revert anybody who had opted out. Nil resolves to
-	// true through ResolveEnforce; OPENBOX_ENFORCE is the escape hatch.
+	// Enforcement is always on now (ResolveEnforce), so `init` has no enforce
+	// flag or field left to set at all.
 	// ProjectDir stays empty: the install is user-wide and the adapter sweeps
 	// the working directory itself.
 

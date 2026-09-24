@@ -62,8 +62,14 @@ func TestRunHook_PromptIsRedactedBeforeItIsSpooled(t *testing.T) {
 	os.Unsetenv(devconfig.EnvSecretDetection) // default ON
 
 	secret := awsSecretFixture()
-	if stdout, _ := runHook(t, "UserPromptSubmit", promptPayload("th-redact", secret)); stdout != "" {
-		t.Fatalf("observe mode must write nothing to stdout, got %q", stdout)
+	// UserPromptSubmit is gated unconditionally now (ResolveEnforce always
+	// reports true); with no reachable control plane it denies (delivery is
+	// always fail-closed), but the escalation was never attempted (no client
+	// configured), so the gate's own SpoolObserve still appends this call's
+	// observe copy to the local spool -- what this test actually exercises.
+	stdout, _ := runHook(t, "UserPromptSubmit", promptPayload("th-redact", secret))
+	if !strings.Contains(stdout, `"decision":"block"`) {
+		t.Fatalf("no reachable control plane must deny (delivery is always fail-closed), got %q", stdout)
 	}
 
 	body := spooledBody(t, spool)

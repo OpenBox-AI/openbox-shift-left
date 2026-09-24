@@ -59,6 +59,36 @@ func TestSessionHaltCorruptLatchStillHalts(t *testing.T) {
 	}
 }
 
+// TestSessionHaltEmptyLatchStillHaltsWithAGenericReason: WriteSessionHaltIfAbsent's
+// create-then-write (O_CREATE|O_EXCL, then a separate Write) leaves a brief
+// window where a concurrent reader can observe a present but EMPTY (0-byte)
+// file -- unlike WriteSessionHalt's own rename-into-place, which a reader
+// never observes mid-write. Presence must still halt, and the replayed
+// reason must still be generic and non-empty, exactly as for a corrupt
+// latch: an operator (or the next gated call) must never see a blank reason.
+func TestSessionHaltEmptyLatchStillHaltsWithAGenericReason(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(devconfig.EnvHaltDir, dir)
+
+	f, err := os.OpenFile(haltPath("s-empty-window"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close() // deliberately never written to: the exact window under test
+
+	info, halted := SessionHalted("s-empty-window")
+	if !halted {
+		t.Fatal("a present-but-empty latch must still halt (presence is the decided state)")
+	}
+	dec := SessionHaltDecision(info)
+	if dec.Evaluation.Verdict != client.VerdictHalt || !dec.SessionHalt || dec.Source != SourceSessionHalt {
+		t.Errorf("replayed decision = %+v, want a session-halting HALT sourced %q", dec, SourceSessionHalt)
+	}
+	if dec.Evaluation.Reason == "" {
+		t.Error("an empty latch must replay with the generic reason, not a blank one")
+	}
+}
+
 // TestSessionHaltNoCollisionAcrossSanitizedIDs two session ids that sanitize
 // to the same filename component must not share a latch; a collision would
 // halt an innocent session.

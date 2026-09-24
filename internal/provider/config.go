@@ -13,7 +13,6 @@ func ConfigUpdate(ref CredentialRef) devconfig.Update {
 		BackendURL:     ref.BackendURL, // control-plane base for the policy read
 		ContentCapture: ref.ContentCapture,
 		InstallGitHook: &installGitHook,
-		Enforce:        ref.Enforce,
 		Tier2:          ref.Tier2,
 		Findings:       ref.Findings,
 	}

@@ -20,6 +20,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
+// TestResolveEnforce inverts the old config/env precedence test: enforce is
+// deprecated and inert now, so no combination of config field or env
+// override can change ResolveEnforce's answer. The key still parses (no
+// error on any of these files), it just selects nothing.
 func TestResolveEnforce(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }
@@ -28,26 +32,26 @@ func TestResolveEnforce(t *testing.T) {
 
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
-		t.Error("an absent enforce field must resolve to ON ")
+		t.Error("an absent enforce field must resolve to ON")
 	}
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
-	if ResolveEnforce() {
-		t.Error("enforce:false in config must opt out")
+	if !ResolveEnforce() {
+		t.Error("enforce:false in config must be ignored")
 	}
 
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
 	if !ResolveEnforce() {
-		t.Error("enforce:true in config should enable enforce mode")
+		t.Error("enforce:true in config should still resolve ON")
 	}
 
 	t.Setenv(envEnforce, "false")
-	if ResolveEnforce() {
-		t.Error("env false must override config true")
+	if !ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=false must be ignored")
 	}
 	write(`{"developer_did":"` + testDID + `"}`)
 	t.Setenv(envEnforce, "1")
 	if !ResolveEnforce() {
-		t.Error("env 1 must override config absent/false")
+		t.Error("OPENBOX_ENFORCE=1 must still resolve ON")
 	}
 }
 
@@ -177,55 +181,51 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 	}
 }
 
-// The surviving local step decides nothing and cannot block, so the fail-open
-// property holds by construction; the block property moved to the server and
-// is asserted end to end by C1 and C12 against a real /evaluate.
-
+// The surviving local step decides nothing and cannot block; the block
+// property moved to the server and is asserted end to end by C1 and C12
+// against a real /evaluate. Delivery is always fail-closed now
+// (HaltOnDeliveryFailure): a gated call with no reachable control plane
+// denies rather than silently proceeding. Enforcement itself is unconditional
+// now too (ResolveEnforce always reports true), so there is no "enforce off"
+// case left to prove takes a different path -- PreToolUse always runs the
+// gate.
 func TestRunHook_EnforceGate(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	payload := `{"hook_event_name":"PreToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 
-	run := func() string {
-		var stderr, stdout bytes.Buffer
-		logger := log.New(&stderr, "", 0)
-		RunHook("PreToolUse", strings.NewReader(payload), &stdout, logger)
-		if stdout.Len() != 0 {
-			t.Errorf("fail-open/allow decision must not write to stdout; stdout=%q", stdout.String())
-		}
-		return stderr.String()
-	}
+	var stderrBuf, stdoutBuf bytes.Buffer
+	logger := log.New(&stderrBuf, "", 0)
+	RunHook("PreToolUse", strings.NewReader(payload), &stdoutBuf, logger)
+	out, errOut := stdoutBuf.String(), stderrBuf.String()
 
-	t.Setenv(envEnforce, "0")
-	if out := run(); strings.Contains(out, "enforce decision:") {
-		t.Errorf("enforce-off must not run the gate; stderr=%q", out)
+	if !strings.Contains(errOut, "enforce decision:") {
+		t.Errorf("PreToolUse must always obtain + log a decision; stderr=%q", errOut)
 	}
-
-	t.Setenv(envEnforce, "1")
-	if out := run(); !strings.Contains(out, "enforce decision:") {
-		t.Errorf("enforce-on must obtain + log a decision; stderr=%q", out)
+	if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
+		t.Errorf("no reachable control plane must deny (delivery is always fail-closed); permissionDecision = %q, stdout=%q", d, out)
 	}
 }
 
-// TestRunHook_EnforceOnlyPreToolUse guards AC-6: even in enforce mode, a non-
-// PreToolUse hook never dials the sidecar (the gate is a pre-execution
-// concept).
+// TestRunHook_EnforceOnlyPreToolUse guards AC-6: a non-PreToolUse hook never
+// dials the sidecar (the gate is a pre-execution concept), regardless of
+// enforcement (always on now).
 func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envEnforce, "1")
 
 	payload := `{"hook_event_name":"PostToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
 	var stderr bytes.Buffer
 	logger := log.New(&stderr, "", 0)
 	RunHook("PostToolUse", strings.NewReader(payload), &bytes.Buffer{}, logger)
 	if strings.Contains(stderr.String(), "enforce decision:") {
-		t.Errorf("PostToolUse must not run the enforce gate even in enforce mode; stderr=%q", stderr.String())
+		t.Errorf("PostToolUse must not run the enforce gate; stderr=%q", stderr.String())
 	}
 }
 
@@ -812,11 +812,6 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 	if out := run(); strings.TrimSpace(out) != "" {
 		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
 	}
-
-	t.Setenv(envEnforce, "0")
-	if out := run(); strings.TrimSpace(out) != "" {
-		t.Errorf("enforce-off must not deny even under fail_closed=1; stdout=%q", out)
-	}
 }
 
 // TestRecordEnforcement_GuardrailCategoryOnly guards the durable-audit half of
@@ -1061,11 +1056,6 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	}
 	if rec.AppliedDecision != ccDecisionDeny || rec.Verdict != string(client.VerdictHalt) {
 		t.Errorf("record = %+v, want an unanswered approval recorded as HALT/deny", rec)
-	}
-
-	t.Setenv(envEnforce, "0")
-	if out := run(); strings.TrimSpace(out) != "" {
-		t.Errorf("enforce-off must write nothing; stdout=%q", out)
 	}
 }
 

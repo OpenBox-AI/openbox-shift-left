@@ -584,34 +584,36 @@ func TestResolveRealtime_DefaultOn(t *testing.T) {
 	}
 }
 
-func TestBoolFlagPrecedence(t *testing.T) {
+// TestResolveEnforceAlwaysReportsTrue inverts the old bool-flag-precedence
+// test: enforce is deprecated and inert now, so no combination of config
+// field or env override can change ResolveEnforce's answer. The key still
+// parses (no error on any of these files), it just selects nothing.
+func TestResolveEnforceAlwaysReportsTrue(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "dev.json")
 	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }
 	t.Setenv(EnvConfigPath, cfgPath)
 	os.Unsetenv(EnvEnforce)
 
-	// Safe because enforcement is inert without an org policy and fail_closed
-	// stays off, so an outage never blocks a tool call.
 	write(`{"developer_did":"` + testDID + `"}`)
 	if !ResolveEnforce() {
-		t.Error("an absent enforce field must resolve to ON ")
+		t.Error("an absent enforce field must resolve to ON")
 	}
 	write(`{"developer_did":"` + testDID + `","enforce":false}`)
-	if ResolveEnforce() {
-		t.Error("enforce:false in config must opt out")
+	if !ResolveEnforce() {
+		t.Error("enforce:false in config must be ignored")
 	}
 	write(`{"developer_did":"` + testDID + `","enforce":true}`)
 	if !ResolveEnforce() {
-		t.Error("enforce:true in config should enable")
+		t.Error("enforce:true in config should still resolve ON")
 	}
 	t.Setenv(EnvEnforce, "false")
-	if ResolveEnforce() {
-		t.Error("env false must override config true")
+	if !ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=false must be ignored")
 	}
 	write(`{"developer_did":"` + testDID + `"}`)
 	t.Setenv(EnvEnforce, "1")
 	if !ResolveEnforce() {
-		t.Error("env 1 must override config absent/false")
+		t.Error("OPENBOX_ENFORCE=1 must still resolve ON")
 	}
 }
 

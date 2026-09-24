@@ -28,6 +28,17 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
 	t.Setenv("OPENBOX_FINDINGS_CURSOR", filepath.Join(dir, "findings.cursor"))
 	t.Setenv("OPENBOX_ENFORCEMENT_FILE", filepath.Join(dir, "enforcements.jsonl"))
+	// This helper's own callers are a mix of gated- and never-gated-hook
+	// tests, and most of them (SessionStart/PostToolUse/SessionEnd/finops/
+	// turn tests) inspect the LOCAL spool file afterward, which only works
+	// with no reachable core (nothing flushes away what they want to
+	// inspect). DefaultHaltDir falls back to the real OS $HOME
+	// (os.UserConfigDir), not devconfig.EnvHome above: with no reachable
+	// control plane, delivery is always fail-closed now
+	// (HaltOnDeliveryFailure), so a caller here that DOES exercise a gated
+	// hook would otherwise latch into the process-wide sentinel HOME
+	// (testmain_test.go).
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	return spool
 }
 
@@ -39,9 +50,13 @@ func runHook(t *testing.T, sub, payload string) (stdout, stderr string) {
 	return out.String(), errb.String()
 }
 
-// TestRunHook_ObserveOnlyContract (AC-3/AC-7 in-process): a PreToolUse with
-// content in tool_input writes nothing to stdout, spools one ToolCall, and the
-// content never reaches the spool.
+// TestRunHook_ObserveOnlyContract (AC-3/AC-7 in-process): a PreToolUse spools
+// one ToolCall and the content never reaches the spool. PreToolUse is gated
+// unconditionally now (ResolveEnforce always reports true); with no reachable
+// control plane the gate itself denies (delivery is always fail-closed), but
+// the escalation was never attempted (no client configured), so the gate's
+// own SpoolObserve still appends this call's observe copy to the local spool
+// as its first delivery attempt -- what this test actually exercises.
 func TestRunHook_ObserveOnlyContract(t *testing.T) {
 	spool := setHookEnv(t)
 	secret := "TOP-SECRET-COMMAND-do-not-egress"
@@ -50,8 +65,9 @@ func TestRunHook_ObserveOnlyContract(t *testing.T) {
 		`"tool_input":{"command":"` + secret + `"},"transcript_path":null}`
 
 	stdout, _ := runHook(t, "PreToolUse", payload)
-	if stdout != "" {
-		t.Fatalf("stdout must be empty (Codex parses hook stdout as output JSON), got %q", stdout)
+	d, _, _ := parsePreToolUse(t, []byte(stdout))
+	if d != codexDecisionDeny {
+		t.Fatalf("no reachable control plane must deny (delivery is always fail-closed); permissionDecision = %q, stdout=%q", d, stdout)
 	}
 
 	entries, err := os.ReadDir(spool)

@@ -73,6 +73,13 @@ func TestRunHook_FindingsSurfacedOnPostToolUseAndPrompt(t *testing.T) {
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	// Unrelated to enforcement: UserPromptSubmit is a gated hook now
+	// unconditionally, and a gated call with no reachable control plane
+	// denies before ever reaching SurfaceFindings, which is what this test
+	// actually exercises. A real ALLOW verdict keeps the gate from emitting
+	// anything, so SurfaceFindings still runs.
+	serveVerdict(t, `{"verdict":"allow"}`)
+	t.Setenv(envAgentID, testAgentID)
 	seedAdvisories(t, adv,
 		hookflow.AdvisoryRecord{Verdict: "ALLOW", GuardrailReasons: mkReasonsFull("secret", "api_key", "leaked AKIAsecretVALUE123")},
 		hookflow.AdvisoryRecord{Verdict: "ALLOW", DriftDetected: true, DriftViolations: 1},
@@ -105,6 +112,12 @@ func TestRunHook_FindingsOffIsByteIdentical(t *testing.T) {
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	// Unrelated to enforcement: UserPromptSubmit is a gated hook now
+	// unconditionally; a real ALLOW verdict keeps the gate from emitting
+	// anything, so "must write nothing" tests findings, not the gate's own
+	// deny.
+	serveVerdict(t, `{"verdict":"allow"}`)
+	t.Setenv(envAgentID, testAgentID)
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true, RiskScore: 0.9})
 
 	for _, hook := range []string{"PostToolUse", "UserPromptSubmit"} {
@@ -126,6 +139,13 @@ func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	// Unrelated to enforcement: PreToolUse is gated unconditionally, and a
+	// fail-closed deny reason also starts with "OpenBox governance:", which
+	// would otherwise be mistaken for a findings summary. A real ALLOW
+	// verdict keeps the gate silent so this only proves findings, never runs
+	// on PreToolUse.
+	serveVerdict(t, `{"verdict":"allow"}`)
+	t.Setenv(envAgentID, testAgentID)
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true})
 
 	var out bytes.Buffer
@@ -148,7 +168,11 @@ func TestRunHook_FindingsNeverSurfacedOnObserveOnlyNewHooks(t *testing.T) {
 	t.Setenv(envAgentID, testAgentID)
 	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
 	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
-	t.Setenv(envEnforce, "0") // observe-only path; the findings guard is what's under test
+	// ConfigChange (source=user_settings) is gated unconditionally now; a real
+	// ALLOW verdict keeps the gate silent so every one of the 21 cases below
+	// only proves the findings guard, never a gate deny.
+	serveVerdict(t, `{"verdict":"allow"}`)
+	t.Setenv(envAgentID, testAgentID)
 	seedAdvisories(t, adv, hookflow.AdvisoryRecord{Verdict: "BLOCK", WouldBlock: true})
 
 	cases := signalCases()

@@ -210,6 +210,65 @@ func TestAnAgedOrphanIsDiscardedNotRedelivered(t *testing.T) {
 	}
 }
 
+// TestAnUnreadableAgedOrphanIsLedgeredOnceNotRetriedForever: a read failure
+// that is not "the file is already gone" (permissions, a damaged directory
+// entry) must not vanish silently -- no ledger line and no OnFailure would
+// be an event neither delivered nor accounted for anywhere -- but it also
+// carries no event to decode, so no run is known to latch. It is ledgered
+// once, by file, and removed so a later pass never re-ledgers the same
+// file on every drain forever.
+func TestAnUnreadableAgedOrphanIsLedgeredOnceNotRetriedForever(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: file permissions do not block a read")
+	}
+	dir := t.TempDir()
+	sp := Spool{Dir: dir}
+	var failed []string
+	sp.OnFailure = func(ev client.DevEvent, err error) { failed = append(failed, ev.EventID) }
+
+	orphan := filepath.Join(dir, "sess.jsonl.flushing.cc-unreadable")
+	line, _ := jsonLine(ev("sess", "orphan1"))
+	if err := os.WriteFile(orphan, line, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	aged := time.Now().Add(-2 * ReclaimOrphanAfter)
+	if err := os.Chtimes(orphan, aged, aged); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(orphan, 0o000); err != nil {
+		t.Fatal(err)
+	}
+
+	fn, got := drainCollect()
+	n, err := sp.FlushAll(context.Background(), fn)
+	if err != nil {
+		t.Fatalf("flushall: %v", err)
+	}
+	if n != 0 || len(*got) != 0 {
+		t.Fatalf("an unreadable orphan must never be delivered, got n=%d got=%v", n, *got)
+	}
+	if len(failed) != 0 {
+		t.Errorf("OnFailure must not run for an unreadable orphan: no event could be decoded from it, so no run is known to fail; got %v", failed)
+	}
+	if got := sp.DiscardedCount(); got != 1 {
+		t.Errorf("DiscardedCount = %d, want 1: the file itself must still be ledgered once", got)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("an unreadable orphan must be removed once it is ledgered, not retried every pass; stat err=%v", err)
+	}
+
+	n2, err := sp.FlushAll(context.Background(), fn)
+	if err != nil {
+		t.Fatalf("second flushall: %v", err)
+	}
+	if n2 != 0 {
+		t.Fatalf("second pass delivered %d, want 0", n2)
+	}
+	if got := sp.DiscardedCount(); got != 1 {
+		t.Errorf("a second pass re-ledgered the same (already-removed) file: DiscardedCount = %d, want still 1", got)
+	}
+}
+
 // TestASweepDoesNotReclaimALiveDrainsFile is the other half of the orphan
 // rule: collectSession holds its rotated file for the whole delivery loop, and
 // a sweep that treats it as an aged orphan mid-drain would redeliver every

@@ -39,8 +39,18 @@ type EnforceGate struct {
 	// Record writes the durable audit line. Off the blocking path, best-effort,
 	// never fails a tool call.
 	Record func(dec decision.Decision, res ApplyResult)
-	// SpoolObserve appends the gated call's observe copy to the local spool.
+	// SpoolObserve appends the gated call's observe copy to the local spool,
+	// as this call's OWN first delivery attempt: only for
+	// EscalationNotAttempted (no client, or no budget left -- the escalation
+	// POST was never sent).
 	SpoolObserve func()
+	// SpoolObserveHead appends the gated call's observe copy directly to the
+	// session's head file, ahead of its tail: only for EscalationUnanswered
+	// (the escalation WAS sent, but this call's own budget ran out before
+	// core answered). Never invoked alongside SpoolObserve for the same
+	// call; an explicit non-acceptance (EscalationSettled, already latched
+	// by HaltOnDeliveryFailure) invokes neither.
+	SpoolObserveHead func()
 	// RunID is the run this call belongs to (phase 08, R11/V14): what
 	// WriteSessionHalt latches on. "" (the zero value) falls back to
 	// t.SessionID(), the same selection client.runIDFor makes, and is what
@@ -63,15 +73,24 @@ func (g EnforceGate) runID(t EnforceTarget) string {
 
 // Run gates one call.
 func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writer, t EnforceTarget) ApplyResult {
-	if g.SpoolObserve != nil {
-		var delivered atomic.Bool
-		g.Evaluator.OnDelivered = func() { delivered.Store(true) }
-		defer func() {
-			if !delivered.Load() {
+	// Zero value EscalationSettled: nothing to spool unless the escalation
+	// itself reports otherwise. atomic because run's own goroutine (the one
+	// Escalate spawns) can still be writing this after Escalate has already
+	// returned via its own timeout branch.
+	var outcome atomic.Int32
+	g.Evaluator.OnOutcome = func(o EscalationOutcome) { outcome.Store(int32(o)) }
+	defer func() {
+		switch EscalationOutcome(outcome.Load()) {
+		case EscalationNotAttempted:
+			if g.SpoolObserve != nil {
 				g.SpoolObserve()
 			}
-		}()
-	}
+		case EscalationUnanswered:
+			if g.SpoolObserveHead != nil {
+				g.SpoolObserveHead()
+			}
+		}
+	}()
 
 	enforceStart := time.Now()
 
@@ -118,6 +137,12 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t EnforceTarget, redacted *client.Content, enforceStart time.Time) (decision.Decision, client.ApprovalKey) {
 	ev, ok := t.DevEvent(redacted)
 	if !ok {
+		// No escalation POST exists to send at all: the same "nothing was
+		// ever attempted" outcome a missing client or an exhausted budget
+		// reports, so the caller's own (separately mapped) observe copy
+		// still gets spooled as this event's first and only attempt rather
+		// than silently dropped.
+		g.Evaluator.reportOutcome(EscalationNotAttempted)
 		return EvaluationFailOpen("event not mappable"), client.ApprovalKey{}
 	}
 	dec := g.Evaluator.Escalate(ctx, logger, ev, g.Evaluator.Budget(enforceStart, DefaultEvaluationTimeout))

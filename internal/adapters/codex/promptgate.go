@@ -46,7 +46,7 @@ func (t promptTarget) DecisionRequest(bool) decision.DecisionRequest {
 
 // DevEvent maps the prompt for the inline evaluation through the same Mapper
 // (and pinned clock) the observe copy uses, so the two derive one event_id and
-// the gate's OnDelivered dedupe holds. It inherits the Mapper's RedactContent
+// the gate's own EscalationOutcome tracking holds. It inherits the Mapper's RedactContent
 // collaborator, so the evaluated copy is scanned exactly like the spooled one.
 func (t promptTarget) DevEvent(*client.Content) (client.DevEvent, bool) {
 	return t.mapper.Map(HookUserPromptSubmit, t.ev)

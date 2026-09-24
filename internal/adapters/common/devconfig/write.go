@@ -26,7 +26,6 @@ type Update struct {
 	// the product default on a first install); non-nil ⇒ this run chose it
 	// explicitly, including a deliberate downgrade.
 	ContentCapture *bool
-	Enforce        *bool
 	Tier2          *bool
 	Findings       *bool
 	InstallGitHook *bool
@@ -49,7 +48,6 @@ func WriteConfig(path string, u Update) error {
 		cfg.DID = ""
 	}
 
-	setBoolPtr(&cfg.Enforce, u.Enforce)
 	setBool(&cfg.InstallGitHook, u.InstallGitHook)
 	setBoolPtr(&cfg.ContentCapture, u.ContentCapture)
 	setBoolPtr(&cfg.Tier2, u.Tier2)
@@ -66,21 +64,6 @@ func WriteConfig(path string, u Update) error {
 		return fmt.Errorf("dev config: write %s: %w", path, err)
 	}
 	return nil
-}
-
-// WouldDowngradeEnforce reports whether writing next to the config at path
-// turns enforcement off, so the caller can say so out loud rather than let a
-// posture change happen quietly. Next is the tri-state Update.Enforce: nil
-// never downgrades, which is the point.
-func WouldDowngradeEnforce(path string, next *bool) bool {
-	if next == nil || *next {
-		return false
-	}
-	prior, err := Load(path)
-	if err != nil {
-		return true
-	}
-	return prior.Enforce == nil || *prior.Enforce
 }
 
 func setString(dst *string, v string) {

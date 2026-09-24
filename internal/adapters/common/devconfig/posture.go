@@ -52,10 +52,20 @@ func EffectivePosture() Posture {
 	warnDeprecatedKeys()
 
 	p.DecisionAuthority = DecisionAuthorityControlPlane
-	p.FailurePolicy = FailurePolicyFailOpen
-	if p.FailClosed {
-		p.FailurePolicy = FailurePolicyFailClosed
-	}
+	// Delivery is always fail-closed now: any event core does not accept
+	// halts the run (HaltOnDeliveryFailure), regardless of what
+	// `fail_closed`/OPENBOX_FAIL_CLOSED say. The key is still resolved above
+	// (ConfigSource["fail_closed"] still names where a now-ignored value
+	// came from, for the doctor label), but the wire posture and this
+	// return value both always report fail_closed.
+	p.FailClosed = true
+	p.FailurePolicy = FailurePolicyFailClosed
+	// Enforcement is always on now: every gated tool call is evaluated by
+	// OpenBox unconditionally (ResolveEnforce). The `enforce` key is still
+	// resolved above (ConfigSource["enforce"] still names where a now-ignored
+	// value came from, for the doctor label), but the wire posture and this
+	// return value both always report enforce.
+	p.Enforce = true
 	return p
 }
 
@@ -92,7 +102,7 @@ type postureField struct {
 var postureFieldTable = []postureField{
 	{"enforce", func(c DevConfig) *bool { return c.Enforce }, true, EnvEnforce,
 		func(p *Posture) *bool { return &p.Enforce }},
-	{"fail_closed", func(c DevConfig) *bool { b := c.FailClosed; return &b }, false, EnvFailClosed,
+	{"fail_closed", func(c DevConfig) *bool { return c.FailClosed }, false, EnvFailClosed,
 		func(p *Posture) *bool { return &p.FailClosed }},
 	{"secret_detection", func(c DevConfig) *bool { return c.SecretDetection }, true, EnvSecretDetection,
 		func(p *Posture) *bool { return &p.SecretDetection }},

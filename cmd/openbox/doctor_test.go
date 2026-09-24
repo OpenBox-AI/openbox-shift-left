@@ -3,13 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
@@ -345,5 +348,120 @@ func TestCodexHooksPresent(t *testing.T) {
 	}
 	if path != hooksPath {
 		t.Errorf("codexHooksPresent() path = %q, want %q", path, hooksPath)
+	}
+}
+
+// TestDoctorReportsOfflineAlwaysDeniesAndFailClosed is R5: delivery is
+// always fail-closed now, so doctor's "if offline" row always says gated
+// calls are denied, never the retired "PROCEED" wording for a fail-open
+// posture that no longer exists.
+func TestDoctorReportsOfflineAlwaysDeniesAndFailClosed(t *testing.T) {
+	isolateHomeUnbound(t)
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	if !strings.Contains(out, "fail_closed") {
+		t.Errorf("doctor does not report fail_closed as the failure policy:\n%s", out)
+	}
+	if !strings.Contains(out, "gated calls are DENIED and the run halts") {
+		t.Errorf("doctor does not name the always-fail-closed consequence:\n%s", out)
+	}
+	if strings.Contains(out, "PROCEED") {
+		t.Errorf("doctor still describes a fail-open posture that no longer exists:\n%s", out)
+	}
+}
+
+// TestDoctorReportsHaltedRuns is R5's latch row: doctor shows the latch
+// count and, per latched run, the preserved cause -- never the reason text
+// (INV-2 content-free), which a delivery failure's own latch also carries.
+func TestDoctorReportsHaltedRuns(t *testing.T) {
+	isolateHomeUnbound(t)
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	if strings.Contains(out, "Halted runs") {
+		t.Errorf("an unlatched machine must not render the halted-runs section:\n%s", out)
+	}
+
+	hookflow.HaltOnDeliveryFailure(discardMainLogger(), client.DevEvent{
+		EventID: "e1", EventType: client.EventToolCall, SessionID: "sess-doctor-halt",
+	}, client.ErrDelivery)
+
+	out, code = runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	if !strings.Contains(out, "Halted runs") {
+		t.Fatalf("a latched run must render the halted-runs section:\n%s", out)
+	}
+	if !strings.Contains(out, "1 run(s) total") {
+		t.Errorf("doctor does not report the latch count:\n%s", out)
+	}
+	if !strings.Contains(out, client.FailureClass(client.ErrDelivery)) || !strings.Contains(out, "ToolCall") {
+		t.Errorf("doctor does not name the preserved cause and event type:\n%s", out)
+	}
+	if !strings.Contains(out, "never expire") {
+		t.Errorf("doctor does not say latches never expire on their own:\n%s", out)
+	}
+}
+
+// TestDoctorRendersAnEmptyLatchAsUnreadableNotBlank: WriteSessionHaltIfAbsent's
+// create-then-write leaves a brief window where a concurrent reader can see
+// a present but empty (0-byte) file; doctor must still count and report it,
+// with a generic "(unreadable)" row rather than a blank line or a panic --
+// the same treatment a corrupt (non-JSON) latch already gets.
+func TestDoctorRendersAnEmptyLatchAsUnreadableNotBlank(t *testing.T) {
+	isolateHomeUnbound(t)
+
+	haltDir := hookflow.DefaultHaltDir()
+	if err := os.MkdirAll(haltDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(haltDir, "sess-empty-abcd1234.json"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	if !strings.Contains(out, "1 run(s) total") {
+		t.Errorf("doctor does not count the empty latch:\n%s", out)
+	}
+	if !strings.Contains(out, "(unreadable)") {
+		t.Errorf("doctor does not render the empty latch generically:\n%s", out)
+	}
+}
+
+// TestDoctorCapsHaltedRunsListAt10 latches have no expiry and no remove path
+// except `openbox uninstall`, so a long-lived machine can accumulate many;
+// the report must stay bounded (total count + the 10 most recent) rather
+// than growing the doctor output without limit.
+func TestDoctorCapsHaltedRunsListAt10(t *testing.T) {
+	isolateHomeUnbound(t)
+
+	const total = 13
+	for i := 0; i < total; i++ {
+		hookflow.HaltOnDeliveryFailure(discardMainLogger(), client.DevEvent{
+			EventID: "e", EventType: client.EventToolCall, SessionID: fmt.Sprintf("sess-cap-%02d", i),
+		}, client.ErrDelivery)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	if !strings.Contains(out, fmt.Sprintf("%d run(s) total", total)) {
+		t.Errorf("doctor does not report the true total count (%d):\n%s", total, out)
+	}
+	row := fmt.Sprintf("%s (%s) at", client.FailureClass(client.ErrDelivery), client.EventToolCall)
+	if got := strings.Count(out, row); got != 10 {
+		t.Errorf("doctor rendered %d latch row(s), want exactly the 10 most recent:\n%s", got, out)
+	}
+	if !strings.Contains(out, "most recent") {
+		t.Errorf("doctor does not say the list is capped to the most recent:\n%s", out)
 	}
 }

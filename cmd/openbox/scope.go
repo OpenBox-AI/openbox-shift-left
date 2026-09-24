@@ -113,7 +113,7 @@ func (a *app) printGovernedScope(o devinit.Options) {
 // reasons they are the right defaults are `openbox doctor`'s, and the two
 // environment variables that opt out are in this command's own --help.
 func (a *app) printPosture(o devinit.Options) {
-	a.row("posture", "mode: ENFORCE, fail-open; commit trailers ON")
+	a.row("posture", "mode: ENFORCE (always on), fail-closed; commit trailers ON")
 	if o.Provider == "claude-code" {
 		a.row("summaries", "ON; showThinkingSummaries, restored by `openbox uninstall`")
 	}
@@ -158,9 +158,8 @@ func (a *app) initUsage(fs *flag.FlagSet) func() {
 			fmt.Fprintf(a.stderr, "  -%s\n        %s\n", f.Name, f.Usage)
 		}
 		fmt.Fprintf(a.stderr, "\nThere are no other flags. One install governs every session on this machine,\n")
-		fmt.Fprintf(a.stderr, "enforcing, with every lane the provider supports and commit trailers on. The\n")
-		fmt.Fprintf(a.stderr, "two postures that remain per-machine are environment variables, not flags:\n")
-		fmt.Fprintf(a.stderr, "  OPENBOX_ENFORCE=false            observe only, for this run\n")
+		fmt.Fprintf(a.stderr, "always enforcing, with every lane the provider supports and commit trailers on.\n")
+		fmt.Fprintf(a.stderr, "The one posture that remains per-machine is an environment variable, not a flag:\n")
 		fmt.Fprintf(a.stderr, "  OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks\n")
 		fmt.Fprintf(a.stderr, "Removal is `openbox uninstall`. The organization connection is `openbox auth`.\n")
 	}

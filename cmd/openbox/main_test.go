@@ -448,12 +448,19 @@ func setHookEnv(t *testing.T) string {
 	// posture to the default would silently start asserting the capture-ON
 	// behaviour.
 	t.Setenv(devconfig.EnvContentCapture, "0")
+	t.Setenv(devconfig.EnvHaltDir, filepath.Join(dir, "halted-sessions"))
 	return spool
 }
 
 // TestHookIsObserveOnlyInProcess drives the unified subcommand in-process and
 // asserts the INV-3 contract: exit 0, empty stdout, event spooled, no content
 // (tool_input) leaked into the spool.
+// TestHookIsObserveOnlyInProcess drives PreToolUse in-process. PreToolUse is
+// gated unconditionally now (ResolveEnforce always reports true); with no
+// reachable control plane it denies (delivery is always fail-closed), but the
+// escalation was never attempted (no client configured), so the gate's own
+// SpoolObserve still appends this call's observe copy to the local spool as
+// its first delivery attempt -- what this test actually exercises.
 func TestHookIsObserveOnlyInProcess(t *testing.T) {
 	spool := setHookEnv(t)
 	a, out, errb := testApp(nil)
@@ -464,8 +471,8 @@ func TestHookIsObserveOnlyInProcess(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("hook exit = %d, want 0; stderr=%q", code, errb.String())
 	}
-	if out.Len() != 0 {
-		t.Fatalf("stdout must be empty (no context injection / no block), got %q", out.String())
+	if !strings.Contains(out.String(), `"permissionDecision":"deny"`) {
+		t.Fatalf("no reachable control plane must deny (delivery is always fail-closed), got %q", out.String())
 	}
 	raw, _ := os.ReadFile(filepath.Join(spool, onlySpoolFile(t, spool)))
 	if strings.Contains(string(raw), secret) {
@@ -494,8 +501,12 @@ func TestHookMisuseIsSafe(t *testing.T) {
 }
 
 // TestUnifiedBinaryHookObserveOnlyContract is the G_SEC re-verify: the SL-4
-// exit-0/empty-stdout contract must survive folding the hook into the multi-
-// command `openbox` binary.
+// exit-0 contract must survive folding the hook into the multi-command
+// `openbox` binary. PreToolUse is gated unconditionally now (ResolveEnforce
+// always reports true); with no reachable control plane it denies (delivery
+// is always fail-closed), but the escalation was never attempted (no client
+// configured), so the gate's own SpoolObserve still appends this call's
+// observe copy to the local spool as its first delivery attempt.
 func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
@@ -521,14 +532,15 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
 		devconfig.EnvContentCapture+"=0",
+		devconfig.EnvHaltDir+"="+filepath.Join(dir, "halted-sessions"),
 	)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("`openbox hook` must exit 0 (observe-only), got %v\nstderr: %s", err, stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout must be empty on the unified binary, got %q", stdout.String())
+	if !strings.Contains(stdout.String(), `"permissionDecision":"deny"`) {
+		t.Fatalf("no reachable control plane must deny (delivery is always fail-closed), got %q", stdout.String())
 	}
 	spoolFile := onlySpoolFile(t, spool)
 	if raw, _ := os.ReadFile(filepath.Join(spool, spoolFile)); strings.Contains(string(raw), secret) {
@@ -983,12 +995,17 @@ func setCodexHookEnv(t *testing.T) string {
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
 	t.Setenv("OPENBOX_FINDINGS_CURSOR", filepath.Join(dir, "findings.cursor"))
 	t.Setenv("OPENBOX_ENFORCEMENT_FILE", filepath.Join(dir, "enforcements.jsonl"))
+	t.Setenv(devconfig.EnvHaltDir, filepath.Join(dir, "halted-sessions"))
 	return spool
 }
 
 // TestCodexHookIsObserveOnlyInProcess mirrors the claude-code routing test for
-// the new provider: exit 0, empty stdout (Codex parses hook stdout as output
-// JSON), event spooled, no tool_input content in the spool (SL3-SEC-3).
+// the new provider: exit 0, event spooled, no tool_input content in the spool
+// (SL3-SEC-3). PreToolUse is gated unconditionally now (ResolveEnforce always
+// reports true); with no reachable control plane it denies (delivery is
+// always fail-closed), but the escalation was never attempted (no client
+// configured), so the gate's own SpoolObserve still appends this call's
+// observe copy to the local spool as its first delivery attempt.
 func TestCodexHookIsObserveOnlyInProcess(t *testing.T) {
 	spool := setCodexHookEnv(t)
 	a, out, errb := testApp(nil)
@@ -999,8 +1016,8 @@ func TestCodexHookIsObserveOnlyInProcess(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("hook exit = %d, want 0; stderr=%q", code, errb.String())
 	}
-	if out.Len() != 0 {
-		t.Fatalf("stdout must be empty (Codex hook-output parser / no block), got %q", out.String())
+	if !strings.Contains(out.String(), `"permissionDecision":"deny"`) {
+		t.Fatalf("no reachable control plane must deny (delivery is always fail-closed), got %q", out.String())
 	}
 	raw, _ := os.ReadFile(filepath.Join(spool, onlySpoolFile(t, spool)))
 	if !strings.Contains(string(raw), "ToolCall") {
@@ -1054,8 +1071,16 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_FINDINGS_CURSOR="+filepath.Join(dir, "findings.cursor"),
 		"OPENBOX_ENFORCEMENT_FILE="+filepath.Join(dir, "enforcements.jsonl"),
+		"OPENBOX_HALT_DIR="+filepath.Join(dir, "halted-sessions"),
 	)
 
+	// UserPromptSubmit/PreToolUse are gated unconditionally now (ResolveEnforce
+	// always reports true); with no reachable control plane they deny
+	// (delivery is always fail-closed), but the escalation was never
+	// attempted (no client configured), so the gate's own SpoolObserve still
+	// appends each one's observe copy to the local spool as its first
+	// delivery attempt, same as the other three (never-gated) hooks below.
+	gated := map[string]bool{"UserPromptSubmit": true, "PreToolUse": true}
 	for _, e := range []struct{ hook, fixture string }{
 		{"SessionStart", "sessionstart.json"},
 		{"UserPromptSubmit", "userpromptsubmit.json"},
@@ -1074,7 +1099,12 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("%s must exit 0 (observe-only), got %v\nstderr: %s", e.hook, err, stderr.String())
 		}
-		if stdout.Len() != 0 {
+		switch {
+		case gated[e.hook]:
+			if !strings.Contains(stdout.String(), `"permissionDecision":"deny"`) && !strings.Contains(stdout.String(), `"decision":"block"`) {
+				t.Fatalf("%s: gated with no reachable control plane must deny, got %q", e.hook, stdout.String())
+			}
+		case stdout.Len() != 0:
 			t.Fatalf("%s stdout must be EMPTY, got %q", e.hook, stdout.String())
 		}
 	}

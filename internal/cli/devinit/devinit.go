@@ -56,10 +56,8 @@ type Options struct {
 	// the adapter merges its hook block into <dir>/.claude/settings.local.json,
 	// so sessions in that project are governed and sessions elsewhere are not.
 	ProjectDir string
-	// Enforce turns enforce mode on or off and persists it (plus its companions,
-	// Findings) into the dev config, so no runtime env var is needed (that
-	// decision for the mechanism).
-	Enforce  *bool
+	// Findings persists the findings-loop posture into the dev config, so no
+	// runtime env var is needed (that decision for the mechanism).
 	Findings *bool
 }
 
@@ -203,7 +201,6 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		// Empty = global scope, whose activation is a managed-settings deployment
 		// this command cannot perform.
 		ProjectDir: o.ProjectDir,
-		Enforce:    o.Enforce,
 		Findings:   o.Findings,
 	}
 	res := &Result{AgentName: name}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
@@ -75,6 +76,7 @@ func TestObserveDropsUnusable(t *testing.T) {
 // emitter returns a deny verdict or a transport error; the whole point of
 // observe-only + fail-open (INV-3 / D7).
 func TestFlushIsObserveOnly(t *testing.T) {
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	dir := t.TempDir()
 	ad := New(Identity{DeveloperDID: testDID}, dir)
 	ad.Advisory.Path = filepath.Join(dir, "advisories.jsonl") // keep the real HOME clean

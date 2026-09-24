@@ -9,16 +9,17 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
-// TestWriteConfig_ReInitKeepsEnforcePosture the bug this file exists for:
-// an explicit enforce opt-in followed by a plain `init` (to repair hooks, refresh the
-// bundle, anything) used to drop the developer from enforce to observe with
-// exit 0 and no message, because the installers rebuilt dev.json from the
-// current run's flags and only carried forward the sync coordinates.
-func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
+// TestWriteConfig_ReInitKeepsPostureItWasNotGiven a plain `init` (to repair
+// hooks, refresh the bundle, anything) must not drop an explicit posture
+// opt-in with exit 0 and no message, because the installers rebuild dev.json
+// from the current run's flags and only carry forward the sync coordinates.
+// Enforce itself has no Update field any more (no install-time knob left at
+// all, since ResolveEnforce always reports true) -- this now proves the
+// general merge behavior against Tier2/Findings instead.
+func TestWriteConfig_ReInitKeepsPostureItWasNotGiven(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.json")
 
 	if err := WriteConfig(path, Update{
-		Enforce:  boolPtr(true),
 		Tier2:    boolPtr(true),
 		Findings: boolPtr(true),
 	}); err != nil {
@@ -30,9 +31,6 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	}
 
 	cfg := mustLoad(t, path)
-	if cfg.Enforce == nil || !*cfg.Enforce {
-		t.Error("re-init turned enforcement off; a run that never mentioned it must leave it alone")
-	}
 	if cfg.Tier2 == nil || !*cfg.Tier2 {
 		t.Error("re-init dropped tier2")
 	}
@@ -41,43 +39,6 @@ func TestWriteConfig_ReInitKeepsEnforcePosture(t *testing.T) {
 	}
 	if cfg.BaseURL != "https://core.example" {
 		t.Errorf("re-init did not apply the new value: base_url = %q", cfg.BaseURL)
-	}
-}
-
-// TestWriteConfig_ExplicitDowngradeApplies preserving on silence would be a
-// one-way ratchet without an explicit way back down, so --no-enforce has to
-// actually work.
-func TestWriteConfig_ExplicitDowngradeApplies(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
-		t.Fatal(err)
-	}
-
-	u := Update{Enforce: boolPtr(false)}
-	if !WouldDowngradeEnforce(path, u.Enforce) {
-		t.Error("an explicit false against a prior true must be reported as a downgrade so the CLI can say so")
-	}
-	if err := WriteConfig(path, u); err != nil {
-		t.Fatal(err)
-	}
-	got := mustLoad(t, path).Enforce
-	if got == nil {
-		t.Fatal("the opt-out was dropped from the file; an absent enforce now means ON")
-	}
-	if *got {
-		t.Error("--no-enforce did not turn enforcement off")
-	}
-}
-
-// TestWriteConfig_SilenceIsNotADowngrade silence is not a downgrade; otherwise
-// every ordinary re-init would print a posture warning.
-func TestWriteConfig_SilenceIsNotADowngrade(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dev.json")
-	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
-		t.Fatal(err)
-	}
-	if WouldDowngradeEnforce(path, nil) {
-		t.Error("a run that does not mention enforce must not report a downgrade")
 	}
 }
 
@@ -121,7 +82,7 @@ func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 	seed := DevConfig{
 		DID:              "did:aip:x",
 		Finops:           boolPtr(true),
-		FailClosed:       true,
+		FailClosed:       boolPtr(true),
 		Tier2TimeoutMS:   2500,
 		OrgSigningPubKey: "Zm9vYmFy",
 		SecretDetection:  boolPtr(false),
@@ -134,12 +95,12 @@ func TestWriteConfig_KeepsFieldsTheUpdateCannotExpress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
+	if err := WriteConfig(path, Update{ContentCapture: boolPtr(true)}); err != nil {
 		t.Fatal(err)
 	}
 
 	cfg := mustLoad(t, path)
-	if cfg.Finops == nil || !*cfg.Finops || !cfg.FailClosed || cfg.Tier2TimeoutMS != 2500 ||
+	if cfg.Finops == nil || !*cfg.Finops || cfg.FailClosed == nil || !*cfg.FailClosed || cfg.Tier2TimeoutMS != 2500 ||
 		cfg.OrgSigningPubKey != "Zm9vYmFy" ||
 		cfg.SecretDetection == nil || *cfg.SecretDetection {
 		t.Errorf("hand-tuned settings did not survive a re-init: %+v", cfg)
@@ -153,11 +114,11 @@ func TestWriteConfig_OverwritesUnparseablePriorConfig(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{ this is not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteConfig(path, Update{Enforce: boolPtr(true)}); err != nil {
+	if err := WriteConfig(path, Update{ContentCapture: boolPtr(true)}); err != nil {
 		t.Fatalf("write over a corrupt config: %v", err)
 	}
 	cfg := mustLoad(t, path)
-	if cfg.Enforce == nil || !*cfg.Enforce {
+	if cfg.ContentCapture == nil || !*cfg.ContentCapture {
 		t.Errorf("recovery write did not take: %+v", cfg)
 	}
 }

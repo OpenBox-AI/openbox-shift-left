@@ -159,8 +159,11 @@ func TestPostureMetadata_ValuesBounded(t *testing.T) {
 func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	t.Setenv(EnvConfigPath, "/nonexistent/dev.json") // defaults only
 	p := EffectivePosture()
+	// FailClosed excluded from the drift check: delivery is always
+	// fail-closed now (HaltOnDeliveryFailure), so the posture no longer
+	// tracks ResolveFailClosed's own (now-ignored) resolved value -- see the
+	// dedicated assertion below.
 	if p.Enforce != ResolveEnforce() ||
-		p.FailClosed != ResolveFailClosed() ||
 		p.SecretDetection != ResolveSecretDetection() ||
 		p.ContentCapture != ResolveContentCapture() ||
 		p.Findings != ResolveFindings() ||
@@ -173,14 +176,14 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	if _, reported := p.Flags()["require_verified_bundle"]; reported {
 		t.Error("require_verified_bundle is still reported; it cannot engage, so reporting it overstates")
 	}
-	// That decision reversed the default deliberately, and the INV-3 property it
-	// cited is preserved elsewhere and unchanged: a failure never blocks a tool
-	// call, because fail_closed defaults off and the gate fails open on error.
 	if !p.Enforce {
 		t.Error("enforce must default ON ")
 	}
-	if p.FailClosed {
-		t.Error("fail_closed must stay off; enforce-by-default is only defensible while an outage cannot block a developer")
+	// Delivery is always fail-closed: an event core does not accept halts the
+	// run regardless of what the (now-ignored, deprecated) fail_closed key
+	// says.
+	if !p.FailClosed {
+		t.Error("fail_closed must always be true; delivery is always fail-closed now")
 	}
 	if !p.SecretDetection || !p.ContentCapture {
 		t.Errorf("secret_detection and content_capture default on, got %+v", p)
@@ -191,18 +194,20 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 // coordinates, and the replacement has to answer a question posture can
 // actually answer at the moment it is built.
 func TestPostureReportsDecisionProvenance(t *testing.T) {
-	t.Run("default is control plane, fail-open", func(t *testing.T) {
+	t.Run("default is control plane, always fail-closed", func(t *testing.T) {
 		isolateConfig(t)
 		p := EffectivePosture()
 		if p.DecisionAuthority != DecisionAuthorityControlPlane {
 			t.Errorf("decision authority = %q, want %q", p.DecisionAuthority, DecisionAuthorityControlPlane)
 		}
-		if p.FailurePolicy != FailurePolicyFailOpen {
-			t.Errorf("failure policy = %q, want %q; the default must not overstate", p.FailurePolicy, FailurePolicyFailOpen)
+		// Delivery is always fail-closed now: an unaccepted event halts the
+		// run regardless of the (deprecated, ignored) fail_closed key.
+		if p.FailurePolicy != FailurePolicyFailClosed {
+			t.Errorf("failure policy = %q, want %q; delivery is always fail-closed", p.FailurePolicy, FailurePolicyFailClosed)
 		}
 	})
 
-	t.Run("fail_closed is reported", func(t *testing.T) {
+	t.Run("fail_closed set is still reported fail-closed (the key is ignored, not honoured)", func(t *testing.T) {
 		isolateConfig(t)
 		t.Setenv(EnvFailClosed, "1")
 		if p := EffectivePosture(); p.FailurePolicy != FailurePolicyFailClosed {
@@ -219,8 +224,8 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 			t.Errorf("decision_authority = %v, want %q; that decision makes this posture's policy-provenance evidence",
 				m["decision_authority"], DecisionAuthorityControlPlane)
 		}
-		if m["failure_policy"] != FailurePolicyFailOpen {
-			t.Errorf("failure_policy = %v, want %q", m["failure_policy"], FailurePolicyFailOpen)
+		if m["failure_policy"] != FailurePolicyFailClosed {
+			t.Errorf("failure_policy = %v, want %q; delivery is always fail-closed", m["failure_policy"], FailurePolicyFailClosed)
 		}
 		for k := range m {
 			if strings.HasPrefix(k, "bundle_") || k == "staleness" {
@@ -265,6 +270,10 @@ func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
 		{"tier2 on", EnvTier2, "1", "`tier2`"},
 		{"tier2_timeout_ms", EnvTier2Timeout, "500", "`tier2_timeout_ms`"},
 		{"require_verified_bundle", EnvRequireVerified, "1", "`require_verified_bundle`"},
+		{"fail_closed on", EnvFailClosed, "1", "`fail_closed`"},
+		{"fail_closed explicitly off", EnvFailClosed, "0", "`fail_closed`"},
+		{"enforce on", EnvEnforce, "1", "`enforce`"},
+		{"enforce explicitly off", EnvEnforce, "0", "`enforce`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateConfig(t)
