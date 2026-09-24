@@ -194,7 +194,7 @@ func finishPair(lane Lane, requestID string, halves ...client.DevEvent) []client
 }
 
 func semanticTypeFor(class PathClass) string {
-	if class == ClassCompletion {
+	if class == ClassCompletion || class == ClassChatCompletion {
 		return client.ActivityTypeLLMCompletion
 	}
 	return "internal"

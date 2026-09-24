@@ -254,6 +254,8 @@ func (a *app) printSystemPACActive(o activation.Outcome) {
 	a.note(
 		"Desktop apps and browser sessions on this machine's governed hosts now pass",
 		"through a local relay that decrypts them with an OpenBox-held key.",
+		"A claude.ai chat (browser or the Claude app) is RECORDED as its own session,",
+		"one per conversation, prompt and reply included under content_capture.",
 		"The CA is unconstrained: a leaked ~/.openbox key could mint a certificate for",
 		"any site this Mac trusts it for. File mode 0600 is the protection;",
 		"`openbox uninstall` removes it.",

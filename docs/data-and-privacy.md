@@ -613,6 +613,17 @@ byte-for-byte, and `openbox uninstall` removes only the block it owns.
 Neither happens on Linux or Windows yet, and neither happens on macOS without
 your `sudo` password, asked once per `openbox init` run that needs it.
 
+What that routing records: a **claude.ai chat**, in a browser tab or the Claude
+desktop app, becomes its own session in OpenBox, keyed on the conversation
+(`chat:claude-ai:<conversation-uuid>`), signed by the machine's `claude-code`
+agent. Each completion call is one `llm_completion` activity carrying the
+request and the streamed reply under the one `content_capture` key, redacted
+before it is attached like every other body; `surface` and `chat_client`
+(`desktop` or `browser`, from the User-Agent) ride metadata. Nothing else on
+claude.ai is recorded (titles, notices, conversation reads), the session cookie
+never leaves the machine (the relay redacts it from every captured header), and
+a chat session never records an end, since the relay cannot see one.
+
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories*; never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |

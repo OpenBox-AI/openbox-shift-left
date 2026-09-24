@@ -193,6 +193,16 @@
         "provider": {
           "type": "string"
         },
+        "surface": {
+          "type": "string",
+          "enum": ["claude-ai"],
+          "description": "The consumer chat surface a relayed chat record came from (a chat: session, which no tool opened). Set only by the transport lane's chat mapper."
+        },
+        "chat_client": {
+          "type": "string",
+          "enum": ["desktop", "browser"],
+          "description": "Which client of the chat surface made the call, from its User-Agent. Attribution detail only: the conversation, not the client, is the session."
+        },
         "source": {
           "type": "string",
           "description": "Meaning is per event type (session source, directory-add source, config-change source, model-switch source); kept as a plain string here because those vocabularies differ."

@@ -135,9 +135,7 @@ func (a *app) runTransport(args []string) int {
 
 	// The taxonomy lives in gatewayemit, which transport's import guard excludes.
 	opts := []transport.Option{
-		transport.WithBodyCapture(func(r *http.Request) bool {
-			return gatewayemit.CapturesBody(r.URL.Path)
-		}),
+		transport.WithBodyCapture(relayCapturesBody),
 		// Same reason: the attribution parser lives in gatewayemit too.
 		transport.WithRequestAttribution(gatewayemit.ParseRequestAttribution),
 		// The cross-lane HALT latch: a run any lane latched halted refuses
@@ -357,4 +355,12 @@ func hostOf(rawURL string) string {
 		return ""
 	}
 	return u.Host
+}
+
+// relayCapturesBody is the transport lane's body predicate. It passes the
+// request's host as well as its path: a claude.ai chat completion shares its
+// /api/ prefix with Claude Code's own telemetry on api.anthropic.com, and only
+// the host says which one is a model call whose body is kept.
+func relayCapturesBody(r *http.Request) bool {
+	return gatewayemit.CapturesBodyAt(r.Host, r.URL.Path)
 }

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -21,6 +22,11 @@ const (
 	ClassToolTelemetry
 	// ClassUnknown is an unrecognized path. Still emitted, never mislabelled.
 	ClassUnknown
+	// ClassChatCompletion is a claude.ai chat completion: a model call from a
+	// consumer chat surface, keyed on its conversation rather than a tool
+	// session. Only the host tells it apart from ClassToolTelemetry, whose
+	// /api/ prefix it shares.
+	ClassChatCompletion
 )
 
 const (
@@ -43,7 +49,7 @@ func (c PathClass) ActivityType() string {
 
 // CarriesContent reports whether this class may egress bodies; a probe may not.
 func (c PathClass) CarriesContent() bool {
-	return c == ClassCompletion || c == ClassUnknown
+	return c == ClassCompletion || c == ClassUnknown || c == ClassChatCompletion
 }
 
 // WarnsOnMissingSession reports whether a headerless request is worth a warning.
@@ -58,14 +64,24 @@ func (c PathClass) WarnsOnMissingSession() bool {
 func (c PathClass) Emits() bool { return c != ClassTokenCount }
 
 func (c PathClass) Subject(rawURL string) string {
-	if c == ClassCompletion {
+	switch c {
+	case ClassCompletion:
 		return "relayed model calls"
+	case ClassChatCompletion:
+		return "relayed claude.ai chat completions"
 	}
 	return "a relayed POST to " + requestPath(rawURL)
 }
 
+// classifyPath reads the host as well as the path: a relayed call's capture
+// URL is absolute (upstream plus request URI), and a bare path -- what the
+// gateway lane's body predicate passes -- has no host, which is never a chat
+// host.
 func classifyPath(rawURL string) PathClass {
 	path := requestPath(rawURL)
+	if _, ok := sessionkey.ResolveChat(requestHost(rawURL), path); ok {
+		return ClassChatCompletion
+	}
 	switch {
 	case path == pathCountToken:
 		return ClassTokenCount
@@ -91,7 +107,20 @@ func requestPath(rawURL string) string {
 	return path
 }
 
+func requestHost(rawURL string) string {
+	if u, err := url.Parse(rawURL); err == nil {
+		return u.Host
+	}
+	return ""
+}
+
 // CapturesBody is the relay-side half of CarriesContent.
 func CapturesBody(rawURL string) bool {
 	return classifyPath(rawURL).CarriesContent()
+}
+
+// CapturesBodyAt is CapturesBody for a request whose host arrives apart from
+// its path, as the relay's body predicate sees it (r.Host, r.URL.Path).
+func CapturesBodyAt(host, path string) bool {
+	return classifyPath((&url.URL{Scheme: "https", Host: host, Path: path}).String()).CarriesContent()
 }

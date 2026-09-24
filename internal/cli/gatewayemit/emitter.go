@@ -112,6 +112,9 @@ type Emitter struct {
 	// spooled. It is the local audit fact that survives the dropped emission:
 	// identifiers and counts only, reported through vlog, never egressed.
 	probesSkipped uint64
+	// announcedChats holds the chat conversations this daemon has opened a
+	// session for (bounded; see maxAnnouncedChats).
+	announcedChats map[string]struct{}
 }
 
 func (e *Emitter) electionProblem() string {
@@ -184,7 +187,13 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 			"This is a wiring defect, not a setting.")
 		return
 	}
-	if !e.Elected() {
+	// A claude.ai chat completion has exactly one possible producer, this
+	// relay: no hook fires for it and no telemetry exports it. The election
+	// decides which lane describes a tool session's model calls, so it has
+	// nothing to say about a chat, and losing it must not silence one.
+	class := classifyPath(c.HTTPURL)
+	chat := class == ClassChatCompletion && e.Lane.Name == LaneProxy.Name
+	if !chat && !e.Elected() {
 		if problem := e.electionProblem(); problem != "" {
 			e.vlog("  capture: DROPPED; the election cannot be resolved: %s", problem)
 			e.warnThrottled(&e.lastUndecidedWarn, "openbox: %s. Until that is readable this lane "+
@@ -220,6 +229,11 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		return
 	}
 
+	if chat {
+		e.emitChat(ctx, c, did)
+		return
+	}
+
 	sessionID := c.RequestHeaders[sessionHeader]
 	if sessionID != "" && !usableSessionID(sessionID) {
 		e.vlog("  capture: SKIPPED; %s is not a usable session id", sessionHeader)
@@ -230,14 +244,14 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	if sessionID == "" {
 		e.vlog("  capture: SKIPPED; the call carries no %s header, so it cannot be attributed to a session", sessionHeader)
 		// isModelCall stays permissive for the WARN decision; the class decides care.
-		if class := classifyPath(c.HTTPURL); isModelCall(c) && class.WarnsOnMissingSession() {
+		if isModelCall(c) && class.WarnsOnMissingSession() {
 			e.warnThrottled(e.noSessionWarnClock(class), "openbox gateway: no %s header on %s, so nothing can be attributed to a session and no governance event is being sent. "+
 				"The model calls themselves are unaffected.", sessionHeader, class.Subject(c.HTTPURL))
 		}
 		return
 	}
 
-	if class := classifyPath(c.HTTPURL); !class.Emits() {
+	if !class.Emits() {
 		n := atomic.AddUint64(&e.probesSkipped, 1)
 		e.vlog("  capture: SKIPPED; %s is a token-count probe, which is classified but never emits a governance event (%d seen so far)",
 			class.Subject(c.HTTPURL), n)
@@ -259,33 +273,78 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		e.warn("openbox: dropped a captured call: %v", err)
 		return
 	}
+	if !e.deliverAll(ctx, events, requestID) {
+		return
+	}
+	e.recorded(c, sessionID, requestID, len(events))
+}
+
+// emitChat records a claude.ai chat completion under its conversation's key,
+// opening that session first when this daemon has not yet: no hook ever will.
+// It is signed by the claude-code identity (did), the store that governs
+// Anthropic's hosts on this machine.
+func (e *Emitter) emitChat(ctx context.Context, c gateway.Captured, did string) {
+	key, ok := sessionkey.ResolveChat(requestHost(c.HTTPURL), requestPath(c.HTTPURL))
+	if !ok {
+		// Unreachable while classifyPath and ResolveChat share one predicate.
+		e.vlog("  capture: SKIPPED; a chat completion with no usable conversation id")
+		return
+	}
+	id := Identity{SessionID: key, DeveloperDID: did, ToolName: chatToolName}
+	requestID := e.requestID(c)
+	events, err := EventsFor(e.Lane, id, requestID, e.now(), c)
+	if err != nil {
+		e.vlog("  capture: DROPPED; %v", err)
+		e.warn("openbox: dropped a captured call: %v", err)
+		return
+	}
+	for i := range events {
+		events[i].Metadata = chatMetadata(c)
+	}
+	announce := !e.chatAnnounced(key)
+	if announce {
+		started, _ := boundsOf(c, e.now())
+		events = append([]client.DevEvent{e.chatSessionStarted(id, started, chatMetadata(c))}, events...)
+	}
+	if !e.deliverAll(ctx, events, requestID) {
+		return
+	}
+	if announce {
+		e.markChatAnnounced(key)
+	}
+	e.recorded(c, key, requestID, len(events))
+}
+
+// deliverAll submits events in order and reports whether every one was
+// accepted. Order matters twice: an opening event must be SUBMITTED first;
+// and the loop STOPS when a submission is refused (the pool is saturated),
+// because submitting Completed after Started was dropped files the
+// single-sided activity this pairing eliminates. Delivery itself happens off
+// this goroutine; accepted here means queued for one attempt, not confirmed
+// on the wire.
+func (e *Emitter) deliverAll(ctx context.Context, events []client.DevEvent, requestID string) bool {
 	if e.Deliver == nil {
 		e.vlog("  capture: DROPPED; this emitter has no delivery seam configured")
 		e.warn("openbox: a model-call emitter was constructed with no Deliver seam, so captured calls " +
 			"cannot reach core and are being DROPPED. This is a wiring defect, not a setting.")
-		return
+		return false
 	}
-
-	// Order matters twice: Started must be SUBMITTED first; and the loop STOPS
-	// when a submission is refused (the pool is saturated), because submitting
-	// Completed after Started was dropped files the single-sided activity this
-	// pairing eliminates. Delivery itself happens off this goroutine; accepted
-	// here means queued for one attempt, not confirmed on the wire.
 	accepted := 0
 	for _, ev := range events {
 		if ok := e.Deliver(ctx, ev); !ok {
 			e.vlog("  capture: DROPPED; the delivery pool is saturated")
 			e.warn("openbox gateway: dropped event %s (%s) for activity %s: the delivery pool is saturated. %s",
 				ev.EventID, ev.EventType, requestID, abandonNote(accepted))
-			break
+			return false
 		}
 		accepted++
 	}
-	if accepted < len(events) {
-		return
-	}
+	return true
+}
+
+func (e *Emitter) recorded(c gateway.Captured, sessionID, requestID string, n int) {
 	e.vlog("  capture: recorded session=%s activity=%s:%s:%s as %d event(s) in %s",
-		sessionID, sessionID, e.Lane.Name, requestID, len(events), c.Elapsed().Round(time.Millisecond))
+		sessionID, sessionID, e.Lane.Name, requestID, n, c.Elapsed().Round(time.Millisecond))
 	if e.Flush != nil {
 		e.Flush(sessionID)
 	}

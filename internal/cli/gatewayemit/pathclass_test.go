@@ -244,3 +244,45 @@ func TestAProbeIsClassifiedAndNotSpooled(t *testing.T) {
 		t.Errorf("a completion capture spooled %d event(s), want 2", len(got))
 	}
 }
+
+const chatURL = "https://claude.ai/api/organizations/5c1d9a7e-3b2f-4e8a-b6c4-9f0e1d2a3b4c/" +
+	"chat_conversations/0f8e2d4c-6b1a-4c3e-9d7f-2a5b8c1e4f60/completion"
+
+// TestClassifyPathReadsTheHostForAChatCompletion the same /api/ prefix means
+// Claude Code reporting on itself on api.anthropic.com and a model call on
+// claude.ai; only the host tells them apart.
+func TestClassifyPathReadsTheHostForAChatCompletion(t *testing.T) {
+	if got := classifyPath(chatURL); got != ClassChatCompletion {
+		t.Fatalf("classifyPath(claude.ai completion) = %v, want ClassChatCompletion", got)
+	}
+	if got := ClassChatCompletion.ActivityType(); got != client.ActivityTypeLLMCompletion {
+		t.Errorf("ActivityType = %q, want llm_completion", got)
+	}
+	if !ClassChatCompletion.CarriesContent() || !ClassChatCompletion.Emits() {
+		t.Error("a chat completion is a model call: it carries content and emits")
+	}
+	apiTwin := strings.Replace(chatURL, "https://claude.ai", "https://api.anthropic.com", 1)
+	if got := classifyPath(apiTwin); got != ClassToolTelemetry {
+		t.Errorf("the same path on api.anthropic.com = %v, want ClassToolTelemetry (unchanged)", got)
+	}
+	title := strings.Replace(chatURL, "/completion", "/title", 1)
+	if got := classifyPath(title); got == ClassChatCompletion {
+		t.Errorf("a claude.ai title call classified as a chat completion")
+	}
+}
+
+// TestCapturesBodyAtKeepsAChatCompletionBody the relay's body predicate sees
+// the request's host separately from its path; without it a chat completion's
+// body would never be captured.
+func TestCapturesBodyAtKeepsAChatCompletionBody(t *testing.T) {
+	path := strings.TrimPrefix(chatURL, "https://claude.ai")
+	if !CapturesBodyAt("claude.ai", path) {
+		t.Error("a claude.ai chat completion body must be captured")
+	}
+	if CapturesBodyAt("api.anthropic.com", path) {
+		t.Error("the same path on api.anthropic.com is tool telemetry and keeps no body")
+	}
+	if !CapturesBodyAt("127.0.0.1:8788", pathMessages) {
+		t.Error("the gateway lane's /v1/messages body must still be captured")
+	}
+}

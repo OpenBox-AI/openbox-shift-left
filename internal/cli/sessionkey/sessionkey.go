@@ -6,14 +6,15 @@
 // question a lane's own emitter already answers, without duplicating the
 // table.
 //
-// Scope: hooks, OTel and the proxy lane's per-provider carrier. No
-// `chat:<surface>:<uuid>` namespace and no `pac_activated` election input --
-// both belong to a chat session key, out of scope here.
+// Scope: hooks, OTel and the proxy lane's per-provider carrier, plus the one
+// chat key space, `chat:<surface>:<uuid>` (chat.go), for a consumer chat that
+// has no tool session at all.
 //
-// This package never mints a session key. Every Resolve-shaped function
-// returns ok=false for an absent or unusable carrier; the caller's existing
-// skip-and-count behavior is unchanged (a headerless call to an API host
-// stays skipped and counted).
+// Every Resolve-shaped function returns ok=false for an absent or unusable
+// carrier; the caller's existing skip-and-count behavior is unchanged (a
+// headerless call to an API host stays skipped and counted). ResolveChat is
+// the only one that builds a key rather than reading one, and only for a chat
+// host's proved completion path.
 package sessionkey
 
 // Provider names a governed tool. The string values match
