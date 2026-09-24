@@ -9,10 +9,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// DefaultPoolSize and DefaultPoolTimeout size the two in-process lane
-// daemons' delivery pool (8 concurrent, 10s per emit, matching the gate's
-// evaluateTimeout). A lane daemon has no spool and no flusher behind it, so
-// these are the only backpressure this path has.
+// DefaultPoolSize and DefaultPoolTimeout size the transport lane's own
+// claude.ai CHAT delivery pool (8 concurrent, 10s per emit, matching the
+// gate's evaluateTimeout). A chat conversation has no session-scoped spool
+// of its own (chats are not tool sessions; see sessionkey.IsChatKey) and no
+// flusher behind it, so this pool's own backpressure is the only one this
+// path has.
 const (
 	DefaultPoolSize    = 8
 	DefaultPoolTimeout = 10 * time.Second
@@ -21,10 +23,18 @@ const (
 // DeliverPool bounds concurrent in-process delivery for a lane daemon that
 // sends records itself instead of spooling them for a flusher: never the
 // request goroutine, one attempt per record, a per-emit timeout, and a
-// dropped-record counter `doctor` can read. It replaces Spool.Append +
-// RealtimeTrigger.Maybe for a lane's OWN model-call records; it has nothing
-// to do with the hooks lane's spool, which keeps Spool, RealtimeTrigger and
-// Sweeper unchanged.
+// dropped-record counter `doctor` can read.
+//
+// Its one production caller today is the transport lane's own claude.ai
+// CHAT records (a conversation has no tool session, so it has no per-session
+// spool to append into and drain the way LaneQueue does). Every OTHER lane
+// record -- a Claude Code or Codex model-call turn, on either the transport
+// or telemetry lane -- goes through LaneQueue instead, which appends into
+// and drains that provider's own session spool (the same one its hook
+// events queue through), so a record interleaves with its session's hook
+// events in append order rather than racing them through a separate,
+// spool-less pool. It has nothing to do with the hooks lane's own spool,
+// which keeps Spool, RealtimeTrigger and Sweeper unchanged.
 type DeliverPool struct {
 	sem     chan struct{}
 	timeout time.Duration

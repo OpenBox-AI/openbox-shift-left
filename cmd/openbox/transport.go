@@ -20,7 +20,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
-	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
@@ -46,7 +45,7 @@ func (a *app) runTransport(args []string) int {
 
 	fs := a.newFlagSet("transport")
 	addr := fs.String("addr", transport.DefaultAddr, "loopback listen address (host:port)")
-	grace := fs.Duration("shutdown-grace", 10*time.Second, "how long to let in-flight relays finish after a stop signal")
+	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight relays finish after a stop signal")
 	verbose := fs.Bool("verbose", false, "report every CONNECT and the capture outcome of every relayed call")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to the governed tool's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
@@ -81,9 +80,9 @@ func (a *app) runTransport(args []string) int {
 	// process cannot dial out, so its events still land in cc-spool/codex-spool
 	// for a flusher, and this daemon keeps sweeping both -- the completeness
 	// net for a session that never got a realtime nudge.
-	ccHookSpool := hookflow.Spool{Dir: devconfig.SpoolDir(transportSpoolSubdir)}
+	ccHookSpool := hookflow.Spool{Dir: laneSpoolDir(transportSpoolSubdir, logger)}
 	ccSweeper := hookflow.Sweeper{Spool: ccHookSpool, Provider: transportSpoolProvider}
-	codexHookSpool := hookflow.Spool{Dir: providers.CodexSpoolDir()}
+	codexHookSpool := hookflow.Spool{Dir: laneSpoolDir("codex-spool", logger)}
 	codexSweeper := hookflow.Sweeper{Spool: codexHookSpool, Provider: string(provider.Codex)}
 
 	// Pre-resolved ONCE at startup, never per record. The transport/proxy lane
@@ -92,35 +91,40 @@ func (a *app) runTransport(args []string) int {
 	// second provider lands on this lane too.
 	identities := resolveProviderIdentities(logger.Printf)
 	advisory := &hookflow.Advisory{Path: hookflow.DefaultAdvisoryPath(), Log: logger}
-	pool := hookflow.NewDeliverPool(hookflow.DefaultPoolSize, hookflow.DefaultPoolTimeout,
-		func(ctx context.Context, ev client.DevEvent) {
-			id, ok := identities[ev.Tool.Name]
-			if !ok {
-				logger.Printf("openbox transport: no resolved identity for %q; dropping event %s", ev.Tool.Name, ev.EventID)
-				return
-			}
-			if _, err := hookflow.Deliver(ctx, id.Client, advisory, ev, logger); err != nil {
-				logger.Printf("openbox transport: delivery failed for %s: %v", ev.EventID, err)
-			}
-		})
+
+	// Every Claude Code/Codex lane record of this daemon's own now appends
+	// into and drains through that provider's own session spool -- the SAME
+	// one its hook events queue through -- instead of the spool-less bounded
+	// pool this lane used to send every record through: a lane record now
+	// interleaves with its session's hook events in append order, and an
+	// unaccepted one halts the run exactly like any other single-attempt
+	// delivery (CLAUDE.md; A4).
+	queues := laneQueues(identities, logger)
+
+	// A claude.ai chat completion has no tool session at all (no hook will
+	// ever fire for one, so it has no session spool to append into), and
+	// keeps the earlier in-process, spool-less pool -- signed by the
+	// claude-code identity, the one that governs Anthropic's hosts on this
+	// machine.
+	chatPool, chatDeliver := newChatPool(identities, advisory, logger)
+
 	// doctor is a separate process with no channel into this daemon's memory,
 	// so the dropped-record count it discloses has to live on disk: a small,
 	// rate-limited, atomically-written status file under the OpenBox home
 	// this daemon already resolves for every other sink it owns. No IPC, no
 	// port. An unresolvable home degrades to no status file, not an error.
 	statusPersister := hookflow.NewStatusPersister(deliveryStatusPath("transport"), deliveryStatusInterval)
+	dropped := combinedDroppedFrom(queues, chatPool)
 
 	settingsPath := a.laneSettingsPath(*settings)
 	em := &gatewayemit.Emitter{
 		Lane: gatewayemit.LaneProxy,
-		// In-process, bounded delivery: no Spool.Append, no
-		// RealtimeTrigger.Maybe, no spawned flusher for this lane's OWN
-		// records.
-		Deliver: func(ctx context.Context, ev client.DevEvent) bool {
-			return pool.Submit(ev)
-		},
-		DID:  devconfig.ResolveDIDOrEmpty,
-		Warn: logger.Printf,
+		// A claude.ai chat completion (sessionkey.IsChatKey) keeps the
+		// in-process pool; every other record appends into and drains
+		// through its own provider's LaneQueue.
+		Deliver: routeLaneRecord(queues, chatDeliver, logger, "transport"),
+		DID:     devconfig.ResolveDIDOrEmpty,
+		Warn:    logger.Printf,
 		// Re-resolved PER RECORD, never cached: see electedFn.
 		Elected: electedFn(settingsPath, activation.LaneTransport, elected),
 		// Not derivable from Elected(): a false there means either "another lane
@@ -175,7 +179,7 @@ func (a *app) runTransport(args []string) int {
 
 	go ccSweeper.Run(ctx, logger)
 	go codexSweeper.Run(ctx, logger)
-	go reportDeliveryStatusPeriodically(ctx, statusPersister, pool)
+	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
 
 	logger.Printf("openbox transport: listening on %s", cfg.Addr)
 	logger.Printf("openbox transport: intercepting %s; every other host is tunnelled uninspected",
@@ -216,20 +220,35 @@ func (a *app) runTransport(args []string) int {
 		logger.Printf("openbox transport: shutdown: %v", err)
 	}
 	// srv.Shutdown only stops the relay taking new connections; it says
-	// nothing about a delivery Submit already accepted into the pool. Without
-	// this drain, os.Exit right behind runTransport's return kills an
-	// otherwise-healthy in-flight delivery mid-goroutine, uncounted.
+	// nothing about a delivery already accepted into the chat pool or already
+	// draining through a LaneQueue. Without this drain, os.Exit right behind
+	// runTransport's return kills an otherwise-healthy in-flight delivery
+	// mid-goroutine, uncounted (a LaneQueue's own drain instead leaves an
+	// ordinary, reclaimable orphan; see LaneQueue.Close's own doc).
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), poolDrainDeadline(*grace))
-	if abandoned := pool.Close(drainCtx); abandoned > 0 {
+	closers := make([]shutdownCloser, 0, 1+len(queues))
+	closers = append(closers, chatPool)
+	for _, q := range queues {
+		closers = append(closers, q)
+	}
+	abandoned := closeAllConcurrently(drainCtx, closers...)
+	if abandoned > 0 {
 		logger.Printf("openbox transport: %d delivery(ies) still in flight at shutdown; abandoned", abandoned)
 	}
 	drainCancel()
 	// Flush, not Report: the final count matters most and must not be the one
 	// a rate limit ate.
-	statusPersister.Flush(pool.Dropped())
-	logger.Printf("openbox transport: stopped; delivery pool dropped=%d", pool.Dropped())
+	statusPersister.Flush(dropped.Dropped())
+	logger.Printf("openbox transport: stopped; delivery pool dropped=%d", dropped.Dropped())
 	return exitOK
 }
+
+// errChatPoolUnavailable is what chatDeliver reports to HaltOnDeliveryFailure
+// when the chat pool itself could not accept a record (saturated, or already
+// shutting down): the record never reached core either way, and
+// client.FailureClass's own catch-all ("network") is an honest enough class
+// for "never even attempted" as any other unclassified failure.
+var errChatPoolUnavailable = errors.New("the delivery pool could not accept this chat event (saturated, or shutting down)")
 
 // providersFromFlag turns --providers' raw value into transport.Config's own
 // nil/present-but-empty distinction: seen is false when the flag never
@@ -315,17 +334,29 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 // resolved is never treated as latched: the caller falls through to next
 // (or allow), exactly the skip-and-count posture every other consumer of an
 // unresolvable carrier already takes.
+//
+// A claude.ai chat completion carries no CLI carrier header at all (the
+// browser/desktop client, never Claude Code, made the request), so
+// sessionkey.ResolveProxy always misses for one; ResolveChat is tried next,
+// keyed directly on the conversation -- a chat has no runs (git.RunStore
+// never sees one), so its latch key IS the chat key itself, the same
+// resolution HaltOnDeliveryFailure/runIDFor already fall back to for a chat
+// event carrying no RunID (gatewayemit/emitter.go's own emitChat never sets
+// one).
 func (h haltDecorator) haltedRun(c gateway.Captured) (string, hookflow.SessionHaltInfo, bool) {
 	providerName, ok := transport.ProviderForHost(hostOf(c.HTTPURL))
 	if !ok {
 		return "", hookflow.SessionHaltInfo{}, false
 	}
-	sessionID, ok := sessionkey.ResolveProxy(sessionkey.Provider(providerName), c.RequestHeaders)
-	if !ok {
-		return "", hookflow.SessionHaltInfo{}, false
+	if sessionID, ok := sessionkey.ResolveProxy(sessionkey.Provider(providerName), c.RequestHeaders); ok {
+		info, halted := hookflow.SessionHalted(haltDecoratorRunID(sessionID))
+		return sessionID, info, halted
 	}
-	info, halted := hookflow.SessionHalted(haltDecoratorRunID(sessionID))
-	return sessionID, info, halted
+	if chatKey, ok := sessionkey.ResolveChat(hostOf(c.HTTPURL), pathOf(c.HTTPURL)); ok {
+		info, halted := hookflow.SessionHalted(chatKey)
+		return chatKey, info, halted
+	}
+	return "", hookflow.SessionHaltInfo{}, false
 }
 
 // haltDecoratorRunID resolves session to the run it CURRENTLY belongs to
@@ -355,6 +386,17 @@ func hostOf(rawURL string) string {
 		return ""
 	}
 	return u.Host
+}
+
+// pathOf is hostOf's own path half, for sessionkey.ResolveChat's other
+// argument -- the same gateway.Captured.HTTPURL, already stripped of its
+// query.
+func pathOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Path
 }
 
 // relayCapturesBody is the transport lane's body predicate. It passes the

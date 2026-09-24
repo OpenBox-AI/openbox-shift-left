@@ -2,14 +2,20 @@ package main
 
 import (
 	"context"
+	"io"
+	"log"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
-
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
 // TestProvidersFromFlagDistinguishesAbsentFromEmpty is the whole point of
@@ -92,5 +98,85 @@ func TestTransportCommandProvidersEmptyInterceptsNothing(t *testing.T) {
 
 	if !strings.Contains(errb.String(), "intercepting ;") {
 		t.Errorf("--providers \"\" did not produce an empty intercept set; stderr: %s", errb.String())
+	}
+}
+
+// TestLaneRecordInterleavesWithHookEventsInAppendOrder pins: a claude-code
+// lane record appends into and drains through the SAME cc-spool file a hook
+// process already queued its own event into (seeded here to stand in for
+// one), so core receives them in append order regardless of producer, and
+// the session's spool ends up EMPTY -- everything queued got its one
+// attempt (CLAUDE.md's own "lane records queue through it").
+func TestLaneRecordInterleavesWithHookEventsInAppendOrder(t *testing.T) {
+	memhttptest.RequireBind(t)
+
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+	// Belt and braces: nothing in this test SHOULD fail delivery, but an
+	// isolated halt dir keeps any accidental failure off the real machine
+	// instead of the hermeticity guard's own real-write scan being the first
+	// thing to notice it.
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+
+	fake := fakecore.New(t, fakecore.Script{})
+	t.Setenv(devconfig.EnvBaseURL, fake.URL())
+	seedV3EnvIdentity(t)
+
+	logger := log.New(io.Discard, "", 0)
+	identities := resolveProviderIdentities(logger.Printf)
+	queues := laneQueues(identities, logger)
+
+	const sessionID = "sess-lane-order-1"
+	// Seeded directly into the exact spool file laneQueues' own claude-code
+	// Engine will drain: standing in for a hook process that queued its own
+	// event before any relayed call happened.
+	hookSpool := hookflow.Spool{Dir: devconfig.SpoolDir("cc-spool")}
+	if err := hookSpool.Append(client.DevEvent{
+		SchemaVersion: client.SchemaVersion,
+		EventID:       "hook-session-started",
+		EventType:     client.EventSessionStarted,
+		SessionID:     sessionID,
+		DeveloperDID:  devconfig.ResolveDIDOrEmpty(),
+		Tool:          client.Tool{Name: "claude-code", Kind: client.ToolShell},
+		Timestamp:     "2026-09-24T00:00:00Z",
+	}); err != nil {
+		t.Fatalf("seeding the hook's own event: %v", err)
+	}
+
+	ca, err := transport.LoadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadOrCreateCA: %v", err)
+	}
+	em := &gatewayemit.Emitter{
+		Lane:    gatewayemit.LaneProxy,
+		Elected: func() bool { return true },
+		Deliver: routeLaneRecord(queues, nil, logger, "transport"),
+		DID:     devconfig.ResolveDIDOrEmpty,
+		Warn:    logger.Printf,
+	}
+	p, err := transport.New(transport.Config{Upstream: refusedUpstream}, ca, em)
+	if err != nil {
+		t.Fatalf("transport.New: %v", err)
+	}
+
+	serveOneCall(t, p, ca, sessionID)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && len(fake.Inbox()) < 3 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	inbox := fake.Inbox()
+	if len(inbox) != 3 {
+		t.Fatalf("fake core received %d event(s), want 3 (the seeded hook event plus the relayed "+
+			"call's Started/Completed pair); rejections=%v", len(inbox), fake.Rejections())
+	}
+	if got := inbox[0].EventType(); got != "WorkflowStarted" {
+		t.Errorf("first event reaching core = %q, want WorkflowStarted (the hook's own, seeded first "+
+			"and drained first): append order was not preserved", got)
+	}
+
+	if n := hookSpool.PendingCount(sessionID); n != 0 {
+		t.Errorf("PendingCount(%s) = %d after both producers' events were drained, want 0 (spool empty)",
+			sessionID, n)
 	}
 }

@@ -129,6 +129,12 @@ func (a *app) removeLane(in laneRemoval) error {
 	return nil
 }
 
+// advisoryFileEnvKey is the env name hookflow.DefaultAdvisoryPath() itself
+// checks first (hookflow/advisory.go); named here, not imported, because
+// hookflow does not export it as a constant -- this is the same value, kept
+// in sync by grep (there is exactly one other literal of it in the repo).
+const advisoryFileEnvKey = "OPENBOX_ADVISORY_FILE"
+
 // laneUnitEnv is the coordinate environment the unit has to carry, captured
 // from the installing process. A supervisor starts a daemon with no
 // environment of its own, so devconfig.Home() inside it resolves the real
@@ -136,12 +142,12 @@ func (a *app) removeLane(in laneRemoval) error {
 // named — and the transport CA check then refuses a certificate that is not
 // where it looked.
 //
-// Five keys now, and only path coordinates: a unit file is world-readable,
-// so the API key and the signing seed must never reach one. The first two are
-// overrides this process's own environment may or may not carry, so they are
-// copied only when set. The last three, OPENBOX_SESSION_DIR, OPENBOX_HALT_DIR
-// and OPENBOX_ENFORCEMENT_FILE, are different in kind: each is RESOLVED rather
-// than copied, because a daemon has no $HOME at all -- their shared
+// Seven keys now, and only path coordinates: a unit file is world-readable,
+// so the API key and the signing seed must never reach one. The first two
+// (OPENBOX_HOME, OPENBOX_SPOOL_DIR) are overrides this process's own
+// environment may or may not carry, so they are copied only when set. The
+// remaining five are different in kind: each is RESOLVED rather than
+// copied, because a daemon has no $HOME at all -- their shared
 // os.UserConfigDir() fallback (through devconfig.ConfigDir()) would resolve
 // differently, or not at all, inside it.
 // Without OPENBOX_SESSION_DIR the gateway/proxy lanes would read (or bump) a
@@ -150,9 +156,16 @@ func (a *app) removeLane(in laneRemoval) error {
 // HALT-latch write, and the transport lane's cross-lane read of it, would
 // each resolve a DIFFERENT, wrong directory instead of the one hooks already
 // write to; without OPENBOX_ENFORCEMENT_FILE the transport lane's record of a
-// latched refusal would land somewhere no one reads, or nowhere.
+// latched refusal would land somewhere no one reads, or nowhere; without
+// OPENBOX_SPOOL_ROOT a lane record's own LaneQueue would spool into a
+// DIFFERENT directory than the one that tool's hook events already queue
+// through, breaking the append-order interleave A4 relies on; without
+// OPENBOX_ADVISORY_FILE the daemon's own Advisory sink (wired by
+// hookflow.NewEngine into every LaneQueue's own Engine) would resolve a
+// bogus relative path (".config/openbox/advisories.jsonl") instead of
+// erroring loudly, since a daemon's $HOME is not this process's own.
 func (a *app) laneUnitEnv() map[string]string {
-	env := make(map[string]string, 5)
+	env := make(map[string]string, 7)
 	for _, key := range []string{devconfig.EnvHome, devconfig.EnvSpoolDir} {
 		if v := a.getenv(key); v != "" {
 			env[key] = v
@@ -161,6 +174,8 @@ func (a *app) laneUnitEnv() map[string]string {
 	env[obgit.EnvSessionDir] = obgit.DefaultSessionDir()
 	env[devconfig.EnvHaltDir] = hookflow.DefaultHaltDir()
 	env[devconfig.EnvEnforcementFile] = hookflow.DefaultEnforcementPath()
+	env[devconfig.EnvSpoolRoot] = devconfig.ConfigDir()
+	env[advisoryFileEnvKey] = hookflow.DefaultAdvisoryPath()
 	return env
 }
 

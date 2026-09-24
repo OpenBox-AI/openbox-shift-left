@@ -670,12 +670,13 @@ func (a *app) reportLanes() {
 	a.reportDeliveryDrops()
 }
 
-// reportDeliveryDrops discloses each lane daemon's own DeliverPool.Dropped()
-// count: a record it could not accept (saturation) or could not finish
-// delivering before a shutdown drain gave up on it, under the accepted
-// one-attempt-per-record risk of sending in-process with no spool behind
-// these two lanes. `doctor` runs as a separate process with no channel into
-// a running daemon's memory, so this reads a small status file the daemon
+// reportDeliveryDrops discloses each lane daemon's own combined drop count
+// (hookflow.LaneQueue.Dropped() for every provider's own lane records, plus
+// -- on the transport lane -- its chat DeliverPool.Dropped()): an append
+// that never reached the spool, an event a drain attempted that core did not
+// accept, a chat record the pool could not accept, or one abandoned by a
+// shutdown drain. `doctor` runs as a separate process with no channel into a
+// running daemon's memory, so this reads a small status file the daemon
 // itself persists (hookflow.StatusPersister) -- no IPC, no port. Renders
 // nothing for a lane whose status file is absent, which is what keeps a
 // machine that has never run these daemons (or a binary from before this
@@ -692,10 +693,11 @@ func (a *app) reportDeliveryDrops() {
 			continue
 		}
 		if !printed {
-			fmt.Fprintf(a.stdout, "\nDelivery (each lane daemon's own in-process send; one attempt per record, by design)\n")
+			fmt.Fprintf(a.stdout, "\nDelivery (lane records queue through each tool's session spool; "+
+				"one attempt each; a failure halts its run)\n")
 			printed = true
 		}
-		a.row(lane, "dropped %d record(s) since %s", status.Dropped, status.Since.Local().Format(time.RFC3339))
+		a.row(lane, "%d record(s) not accepted since %s", status.Dropped, status.Since.Local().Format(time.RFC3339))
 	}
 }
 

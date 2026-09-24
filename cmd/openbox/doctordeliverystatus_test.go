@@ -19,7 +19,7 @@ func TestDoctorOmitsDeliveryDropsWhenNoStatusFileExists(t *testing.T) {
 	if code := a.runDoctor(nil); code != exitOK && code != exitError {
 		t.Fatalf("doctor exit = %d; stderr=%q", code, errb.String())
 	}
-	if strings.Contains(out.String(), "Delivery (each lane daemon's own in-process send") {
+	if strings.Contains(out.String(), "Delivery (lane records queue through each tool's session spool") {
 		t.Errorf("doctor reported a delivery-drops section with no status file on disk:\n%s", out.String())
 	}
 }
@@ -39,13 +39,13 @@ func TestDoctorReportsADeliveryDropsRowWhenAStatusFileExists(t *testing.T) {
 		t.Fatalf("doctor exit = %d; stderr=%q", code, errb.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "Delivery (each lane daemon's own in-process send") {
+	if !strings.Contains(s, "Delivery (lane records queue through each tool's session spool") {
 		t.Fatalf("doctor did not report the delivery-drops section with a status file present:\n%s", s)
 	}
-	if !strings.Contains(s, "telemetry") || !strings.Contains(s, "dropped 7 record(s) since") {
+	if !strings.Contains(s, "telemetry") || !strings.Contains(s, "7 record(s) not accepted since") {
 		t.Errorf("doctor did not report telemetry's dropped count:\n%s", s)
 	}
-	if strings.Contains(s, "transport") && strings.Contains(s, "dropped 0 record(s)") {
+	if strings.Contains(s, "transport") && strings.Contains(s, "0 record(s) not accepted") {
 		t.Errorf("doctor invented a transport row with no status file for it:\n%s", s)
 	}
 }
@@ -62,10 +62,10 @@ func TestDoctorReportsBothLanesIndependently(t *testing.T) {
 		t.Fatalf("doctor exit = %d; stderr=%q", code, errb.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "dropped 2 record(s) since") {
+	if !strings.Contains(s, "2 record(s) not accepted since") {
 		t.Errorf("doctor did not report telemetry's own count:\n%s", s)
 	}
-	if !strings.Contains(s, "dropped 9 record(s) since") {
+	if !strings.Contains(s, "9 record(s) not accepted since") {
 		t.Errorf("doctor did not report transport's own count:\n%s", s)
 	}
 }
@@ -83,7 +83,7 @@ func TestDoctorTreatsAnUnparsableStatusFileAsAbsent(t *testing.T) {
 	if code := a.runDoctor(nil); code != exitOK && code != exitError {
 		t.Fatalf("doctor exit = %d; stderr=%q", code, errb.String())
 	}
-	if strings.Contains(out.String(), "Delivery (each lane daemon's own in-process send") {
+	if strings.Contains(out.String(), "Delivery (lane records queue through each tool's session spool") {
 		t.Errorf("doctor reported a delivery-drops section from an unparsable status file:\n%s", out.String())
 	}
 }

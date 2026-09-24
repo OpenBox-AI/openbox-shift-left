@@ -59,6 +59,16 @@ const (
 	EnvBackendURL       = "OPENBOX_BACKEND_URL"
 	EnvControlToken     = "OPENBOX_CONTROL_TOKEN"
 	EnvSpoolDir         = "OPENBOX_SPOOL_DIR"
+	// EnvSpoolRoot relocates the BASE every subdir-scoped spool resolves
+	// under (SpoolDir's own fallback join point), one level above
+	// EnvSpoolDir: a lane daemon's unit resolves this once, from the
+	// installing process's own ConfigDir(), so cc-spool and codex-spool
+	// still land in the SAME directory a hook flusher's own SpoolDir call
+	// resolves -- os.UserConfigDir() alone cannot be trusted to agree with
+	// itself across a daemon that has no $HOME at all. EnvSpoolDir still
+	// outranks it (it names the whole path, collapsing every subdir into
+	// one directory on purpose; see providers.OwnedSpoolDirs's own doc).
+	EnvSpoolRoot = "OPENBOX_SPOOL_ROOT"
 
 	// DefaultBaseURL is the core data-plane base used when nothing configures
 	// one.
@@ -291,11 +301,17 @@ func ResolveCoordinates() (baseURL, did string) {
 	return baseURL, ResolveDIDOrEmpty()
 }
 
-// SpoolDir is where hot-path events are spooled before flush: the
-// OPENBOX_SPOOL_DIR override when set, else `<user-config>/openbox/<subdir>`.
+// SpoolDir is where hot-path events are spooled before flush:
+// OPENBOX_SPOOL_DIR (the whole path) when set, else OPENBOX_SPOOL_ROOT/subdir
+// when THAT is set, else `<user-config>/openbox/<subdir>` -- the same base
+// ConfigDir() resolves, just not routed through it (ConfigDir has no subdir
+// parameter), so an unset root still joins the identical directory.
 func SpoolDir(subdir string) string {
 	if p := os.Getenv(EnvSpoolDir); p != "" {
 		return p
+	}
+	if root := os.Getenv(EnvSpoolRoot); root != "" {
+		return filepath.Join(root, subdir)
 	}
 	return filepath.Join(userConfigDir(), "openbox", subdir)
 }

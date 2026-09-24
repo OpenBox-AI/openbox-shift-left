@@ -34,6 +34,11 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 
 	fake := fakecore.New(t, fakecore.Script{})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
+	// Every LaneQueue now appends into a real, provider-scoped spool dir
+	// (devconfig.SpoolDir/providers.CodexSpoolDir); without this, an
+	// isolated OPENBOX_HOME alone would still resolve the developer's real
+	// spool (SpoolDir does not consult OPENBOX_HOME at all).
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
 	seedV3EnvIdentity(t)
 	t.Setenv("OPENBOX_REALTIME", "0")
@@ -247,6 +252,7 @@ func TestTelemetryCommandRecordsCodexAndClaudeCodeSeparately(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv(devconfig.EnvHome, home)
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
 	t.Setenv(devconfig.EnvConfigPath, "") // per-tool dev.json, not one pinned file
 	t.Setenv(devconfig.EnvDID, "")        // no exported DID: it would outrank every per-tool store
 	t.Setenv("OPENBOX_REALTIME", "0")
@@ -299,15 +305,6 @@ func TestTelemetryCommandRecordsCodexAndClaudeCodeSeparately(t *testing.T) {
 	post(t, otlpAPIRequest("cc-session", "req_cc_seam"))
 	post(t, otlpCodexAPIRequest("codex-conv-1", "req_codex_seam"))
 
-	waitForInbox := func(fake *fakecore.Server, want int) {
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
-			if len(fake.Inbox()) >= want {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
 	waitForInbox(ccFake, 2)
 	waitForInbox(codexFake, 2)
 
@@ -364,6 +361,7 @@ func TestTelemetryCommandDrainsInFlightDeliveryOnShutdown(t *testing.T) {
 
 	fake := fakecore.New(t, fakecore.Script{Delay: 500 * time.Millisecond})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
 	seedV3EnvIdentity(t)
 	t.Setenv("OPENBOX_REALTIME", "0")
@@ -424,13 +422,19 @@ func TestTelemetryCommandDrainsInFlightDeliveryOnShutdown(t *testing.T) {
 
 // TestTelemetryCommandAbandonsAndCountsADeliveryPastTheDrainDeadline is the
 // asymmetric case: a shutdown-grace shorter than a slow delivery must not
-// hang the daemon forever, and whatever it gives up on must be counted, not
-// silently lost the way an uncounted os.Exit kill used to be.
-func TestTelemetryCommandAbandonsAndCountsADeliveryPastTheDrainDeadline(t *testing.T) {
+// hang the daemon forever. Unlike the transport lane's own chat pool (which
+// really does lose an abandoned delivery), a LaneQueue's own abandoned drain
+// leaves the record durably spooled -- this daemon's shutdown log names it
+// "abandoned" for the operator, but it is deliberately NOT added to the
+// dropped total here (LaneQueue.Close's own doc): it survives on disk and
+// will be counted, exactly once, by whichever drainer reclaims it, so
+// counting it again at this exact moment would double it.
+func TestTelemetryCommandAbandonsButDoesNotDoubleCountADeliveryPastTheDrainDeadline(t *testing.T) {
 	memhttptest.RequireBind(t)
 
 	fake := fakecore.New(t, fakecore.Script{Delay: 2 * time.Second})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
 	seedV3EnvIdentity(t)
 	t.Setenv("OPENBOX_REALTIME", "0")
@@ -475,9 +479,18 @@ func TestTelemetryCommandAbandonsAndCountsADeliveryPastTheDrainDeadline(t *testi
 	if !strings.Contains(errb.String(), "abandoned") {
 		t.Errorf("a delivery still running past the drain deadline must be reported abandoned; stderr: %s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "delivery pool dropped=") || strings.Contains(errb.String(), "delivery pool dropped=0") {
-		t.Errorf("an abandoned delivery must be counted in the dropped total; stderr: %s", errb.String())
+	if !strings.Contains(errb.String(), "delivery pool dropped=0") {
+		t.Errorf("an abandoned-but-not-lost LaneQueue drain must NOT be counted in the dropped total "+
+			"(it survives on disk for the next drainer to count once, for real); stderr: %s", errb.String())
 	}
+
+	// Let the abandoned drain's own background goroutine actually finish
+	// (the fake's 2s delay, not a hang) BEFORE this test function returns:
+	// otherwise it keeps running past t.Setenv's own teardown and races the
+	// fake core's Cleanup-driven shutdown with a real network call using an
+	// environment that no longer isolates it -- exactly the kind of leak the
+	// hermeticity guard exists to catch.
+	waitForInbox(fake, 2)
 }
 
 // TestTelemetryCommandHonoursEachToolsOwnRecordingPosture is the other half
@@ -492,6 +505,7 @@ func TestTelemetryCommandHonoursEachToolsOwnRecordingPosture(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv(devconfig.EnvHome, home)
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
 	t.Setenv(devconfig.EnvConfigPath, "")
 	t.Setenv(devconfig.EnvDID, "")
 	t.Setenv("OPENBOX_REALTIME", "0")
@@ -702,6 +716,19 @@ func otlpAPIRequest(session, requestID string) string {
 	now := time.Now().UnixNano()
 	return fmt.Sprintf(`{"resourceLogs":[{"resource":{"attributes":[%s]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"%d","attributes":[%s]}]}]}]}`,
 		attr("service.name", "claude-code-desktop"), now, attrs)
+}
+
+// waitForInbox polls fake.Inbox() until it holds at least want events or 10s
+// elapses; a timeout leaves whatever the caller's own next assertion reports,
+// rather than failing here with a less specific message.
+func waitForInbox(fake *fakecore.Server, want int) {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(fake.Inbox()) >= want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func spoolFiles(t *testing.T, spoolDir string) []string {

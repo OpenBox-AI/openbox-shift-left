@@ -654,6 +654,28 @@ func TestSpoolDir(t *testing.T) {
 	}
 }
 
+// TestSpoolDirRootPrecedence pins the three-way order a lane daemon's own
+// unit relies on: EnvSpoolDir (the whole path) always outranks EnvSpoolRoot
+// (one level up, joined with subdir), and an unset root falls back to the
+// same base ConfigDir() resolves.
+func TestSpoolDirRootPrecedence(t *testing.T) {
+	t.Setenv(EnvSpoolDir, "")
+	t.Setenv(EnvSpoolRoot, "")
+	if d := SpoolDir("cc-spool"); filepath.Base(d) != "cc-spool" || filepath.Base(filepath.Dir(d)) != "openbox" {
+		t.Errorf("with neither set, SpoolDir = %q, want …/openbox/cc-spool", d)
+	}
+
+	t.Setenv(EnvSpoolRoot, "/root/only")
+	if d := SpoolDir("cc-spool"); d != filepath.Join("/root/only", "cc-spool") {
+		t.Errorf("EnvSpoolRoot alone: SpoolDir = %q, want /root/only/cc-spool", d)
+	}
+
+	t.Setenv(EnvSpoolDir, "/pinned/whole/path")
+	if d := SpoolDir("cc-spool"); d != "/pinned/whole/path" {
+		t.Errorf("EnvSpoolDir must outrank EnvSpoolRoot: SpoolDir = %q, want /pinned/whole/path", d)
+	}
+}
+
 // TestTelemetryOptOutSurvivesARoundTrip is why Telemetry is a *bool.
 // `omitempty` drops a plain `false`, so an org's deliberate `telemetry:false`
 // would vanish from the file the next time anything rewrote it; and since the

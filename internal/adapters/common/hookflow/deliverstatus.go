@@ -7,17 +7,22 @@ import (
 	"time"
 )
 
-// DeliverStatus is what a lane daemon persists about its DeliverPool for
-// `doctor` -- a separate process with no channel back into a running
-// daemon's memory -- to read. No IPC, no port: a small JSON file under the
+// DeliverStatus is what a lane daemon persists about its own delivery --
+// DeliverPool.Dropped() (the transport lane's claude.ai chat pool) and/or
+// LaneQueue.Dropped() (every provider's own lane records, on either daemon)
+// -- for `doctor`, a separate process with no channel back into a running
+// daemon's memory, to read. No IPC, no port: a small JSON file under the
 // OpenBox home the daemon already resolves for every other sink it owns
 // (the spool, the advisory record, the CA), the same way those are read
 // across a process boundary.
 type DeliverStatus struct {
-	// Dropped is DeliverPool.Dropped() at the last persisted moment: records
-	// this lane could not accept (saturation) or could not finish delivering
-	// before a shutdown drain gave up on them (Close's deadline), added
-	// together, since Dropped() itself does not distinguish them.
+	// Dropped is one daemon's combined drop count at the last persisted
+	// moment: every LaneQueue's own Dropped() (an append that never reached
+	// the spool, plus every event a drain attempted that core did not
+	// accept) plus, on the transport lane, its chat DeliverPool's own
+	// Dropped() (a saturation drop, or a delivery a shutdown drain gave up
+	// on) -- added together, since a single status file reports one number
+	// per daemon, not a breakdown by source.
 	Dropped uint64 `json:"dropped"`
 	// Since is when this persister -- and so this daemon's counting -- started.
 	Since time.Time `json:"since"`

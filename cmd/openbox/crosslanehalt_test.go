@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,6 +26,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
@@ -441,5 +444,118 @@ func TestHaltDecoratorRecordsALatchedRefusal(t *testing.T) {
 	}
 	if rec.SessionID != sessionID || rec.Verdict != string(client.VerdictHalt) || rec.Source != hookflow.SourceSessionHalt {
 		t.Errorf("enforcement record = %+v; want session %q, verdict HALT, source %q", rec, sessionID, hookflow.SourceSessionHalt)
+	}
+}
+
+// TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery pins:
+// core refusing a lane record (a 503 on every v3 evaluate
+// request) gives that record exactly one attempt each -- through a REAL
+// LaneQueue drain, not a hand-called HaltOnDeliveryFailure -- and latches the
+// run through the same writer every drainer shares (LaneQueue's own wired
+// Spool.OnFailure); the run's next relayed call is then refused by
+// haltDecorator (proven directly, the same way
+// TestHaltDecoratorRefusesARunLatchedByADeliveryFailure already does, since
+// that half of the contract is already pinned there); and recovery (the fake
+// would answer normally from here on, though nothing calls it again for this
+// session) does not resend anything -- fakecore.AttemptsByKey's own count per
+// event_id (its Idempotency-Key) is unchanged after the refusal.
+//
+// The relay's own capture records g.upstream+RequestURI as HTTPURL (gateway/
+// proxy.go), not the intercepted TLS host, so a test pinning Upstream to a
+// refused loopback port (as this one does, to stay network-free) would make
+// haltDecorator's own host-table lookup miss -- that mismatch exists only
+// under a forced Upstream override, never in production (a.runTransport
+// leaves Upstream empty, so UpstreamFor(host) resolves the real intercepted
+// host). Proving the refusal itself through the real relay would therefore
+// prove an artifact of this test's own plumbing, not the daemon's; the direct
+// call below is what the existing test already established is equivalent.
+func TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery(t *testing.T) {
+	memhttptest.RequireBind(t)
+
+	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "enforcements.jsonl"))
+	t.Setenv(obgit.EnvSessionDir, t.TempDir())
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+
+	fake := fakecore.New(t, fakecore.Script{AlwaysStatus: http.StatusServiceUnavailable})
+	t.Setenv(devconfig.EnvBaseURL, fake.URL())
+	seedV3EnvIdentity(t)
+
+	logger := log.New(io.Discard, "", 0)
+	identities := resolveProviderIdentities(logger.Printf)
+	queues := laneQueues(identities, logger)
+
+	ca, err := transport.LoadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadOrCreateCA: %v", err)
+	}
+	em := &gatewayemit.Emitter{
+		Lane:    gatewayemit.LaneProxy,
+		Elected: func() bool { return true },
+		Deliver: routeLaneRecord(queues, nil, logger, "transport"),
+		DID:     devconfig.ResolveDIDOrEmpty,
+		Warn:    logger.Printf,
+	}
+	p, err := transport.New(transport.Config{Upstream: refusedUpstream}, ca, em)
+	if err != nil {
+		t.Fatalf("transport.New: %v", err)
+	}
+
+	const sessionID = "sess-lane-outage-halt-1"
+	serveOneCall(t, p, ca, sessionID)
+
+	// Wait for the queue's own drain to go fully idle -- BOTH halves of the
+	// captured call attempted, not merely the first -- before snapshotting
+	// anything. The halt latch already exists the instant the FIRST event's
+	// own failure lands, but its paired event (e.g. Completed behind
+	// Started) is still draining right behind it in the SAME pass; a
+	// snapshot taken as soon as the latch appears can race that second
+	// attempt landing at the fake core moments later, which is exactly what
+	// made this test flaky under a full -race run. Close blocks until the
+	// in-flight drain genuinely finishes (or its own generous deadline), so
+	// nothing is still in flight by the time AttemptsByKey is read.
+	idleCtx, idleCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	queues["claude-code"].Close(idleCtx)
+	idleCancel()
+
+	if _, halted := hookflow.SessionHalted(sessionID); !halted {
+		t.Fatalf("the run was never latched after core refused its lane record; fake evaluate attempts=%d",
+			fake.V3EvaluateAttempts())
+	}
+
+	attemptsAfterFirst := fake.AttemptsByKey()
+	if len(attemptsAfterFirst) == 0 {
+		t.Fatal("no v3 evaluate attempt reached the fake core for the first call")
+	}
+	for key, n := range attemptsAfterFirst {
+		if n != 1 {
+			t.Errorf("event (idempotency key %s) was attempted %d time(s), want exactly 1", key, n)
+		}
+	}
+
+	// The run's own next relayed call: haltDecorator's own resolution
+	// (already the exact same seam TestHaltDecoratorRefusesARunLatchedByADeliveryFailure
+	// pins) reads the latch LaneQueue's real drain just wrote above and
+	// refuses, with no further /evaluate round trip.
+	c := gateway.Captured{
+		HTTPURL:        "https://api.anthropic.com/v1/messages",
+		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": sessionID},
+	}
+	eval, err := (haltDecorator{logger: logger}).Evaluate(context.Background(), c)
+	if err != nil {
+		t.Fatalf("Evaluate (should be latched): %v", err)
+	}
+	if eval.Verdict != client.VerdictHalt {
+		t.Fatalf("the run's next relayed call resolved verdict %q, want HALT", eval.Verdict)
+	}
+	if !strings.Contains(eval.Reason, "could not record") {
+		t.Errorf("refusal reason does not carry the delivery-failure latch's own text: %q", eval.Reason)
+	}
+
+	attemptsAfterSecond := fake.AttemptsByKey()
+	if !reflect.DeepEqual(attemptsAfterFirst, attemptsAfterSecond) {
+		t.Errorf("attempt counts changed after the refused call (nothing should have reached core again): "+
+			"before=%v after=%v", attemptsAfterFirst, attemptsAfterSecond)
 	}
 }

@@ -84,6 +84,13 @@ func TestLaneUnitsCarryTheInstallersCoordinates(t *testing.T) {
 						tc.lane, key, want, body)
 				}
 			}
+			// Unconditional, resolved (not copied) the same way as the three
+			// above: a daemon has no $HOME to derive either from.
+			for _, key := range []string{devconfig.EnvSpoolRoot, advisoryFileEnvKey} {
+				if !strings.Contains(string(body), key) {
+					t.Errorf("%s unit does not carry %s at all:\n%s", tc.lane, key, body)
+				}
+			}
 		})
 	}
 }
@@ -120,6 +127,12 @@ func TestLaneUnitsCarryNoConditionalEnvironmentWhenTheInstallerHadNone(t *testin
 	if !strings.Contains(string(body), devconfig.EnvHaltDir) {
 		t.Errorf("the unit does not carry %s, which is unconditional (a daemon has no $HOME):\n%s", devconfig.EnvHaltDir, body)
 	}
+	if !strings.Contains(string(body), devconfig.EnvSpoolRoot) {
+		t.Errorf("the unit does not carry %s, which is unconditional (a daemon has no $HOME):\n%s", devconfig.EnvSpoolRoot, body)
+	}
+	if !strings.Contains(string(body), advisoryFileEnvKey) {
+		t.Errorf("the unit does not carry %s, which is unconditional (a daemon has no $HOME):\n%s", advisoryFileEnvKey, body)
+	}
 	if strings.Contains(string(body), devconfig.EnvSpoolDir) {
 		t.Errorf("the unit carries %s though the installer set nothing:\n%s", devconfig.EnvSpoolDir, body)
 	}
@@ -144,10 +157,11 @@ func TestLaneUnitEnvCarriesOnlyCoordinates(t *testing.T) {
 		devconfig.EnvControlToken:    "token",
 	})
 	env := a.laneUnitEnv()
-	if len(env) != 5 || env[devconfig.EnvHome] != "/h" || env[devconfig.EnvSpoolDir] != "/s" ||
+	if len(env) != 7 || env[devconfig.EnvHome] != "/h" || env[devconfig.EnvSpoolDir] != "/s" ||
 		env[obgit.EnvSessionDir] != dir || env[devconfig.EnvHaltDir] != haltDir ||
-		env[devconfig.EnvEnforcementFile] != enforcementFile {
-		t.Fatalf("laneUnitEnv carried %v; want exactly the five path coordinates", env)
+		env[devconfig.EnvEnforcementFile] != enforcementFile ||
+		env[devconfig.EnvSpoolRoot] == "" || env[advisoryFileEnvKey] == "" {
+		t.Fatalf("laneUnitEnv carried %v; want exactly the seven path coordinates", env)
 	}
 	for _, v := range env {
 		for _, secret := range []string{"obx_secret", "seed", "token"} {

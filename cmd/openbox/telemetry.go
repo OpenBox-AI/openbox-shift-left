@@ -13,10 +13,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
-	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
-	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
@@ -81,7 +79,7 @@ func (a *app) runTelemetry(args []string) int {
 
 	fs := a.newFlagSet("telemetry")
 	addr := fs.String("addr", telemetry.DefaultAddr, "loopback listen address (host:port)")
-	grace := fs.Duration("shutdown-grace", 10*time.Second, "how long to let in-flight exports finish after a stop signal")
+	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight exports finish after a stop signal")
 	verbose := fs.Bool("verbose", false, "report the outcome of every record (recorded, skipped, dropped)")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to Claude Code's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
@@ -101,29 +99,26 @@ func (a *app) runTelemetry(args []string) int {
 	// configured tool for its whole life, so there is no BindProvider dance on
 	// the record path at all.
 	identities := resolveProviderIdentities(logger.Printf)
-	advisory := &hookflow.Advisory{Path: hookflow.DefaultAdvisoryPath(), Log: logger}
 
-	// In-process, bounded delivery: no Spool.Append, no RealtimeTrigger.Maybe,
-	// no spawned flusher for this lane's OWN records. The client that signs is
-	// resolved from the event's own Tool.Name, so a Codex record is never
-	// sent by the Claude Code client.
-	pool := hookflow.NewDeliverPool(hookflow.DefaultPoolSize, hookflow.DefaultPoolTimeout,
-		func(ctx context.Context, ev client.DevEvent) {
-			id, ok := identities[ev.Tool.Name]
-			if !ok {
-				logger.Printf("openbox telemetry: no resolved identity for %q; dropping event %s", ev.Tool.Name, ev.EventID)
-				return
-			}
-			if _, err := hookflow.Deliver(ctx, id.Client, advisory, ev, logger); err != nil {
-				logger.Printf("openbox telemetry: delivery failed for %s: %v", ev.EventID, err)
-			}
-		})
+	// Every record now appends into and drains through that provider's own
+	// session spool -- the SAME one its hook events queue through -- instead
+	// of the spool-less bounded pool this lane used to send every record
+	// through: a record interleaves with its session's hook events in append
+	// order, and an unaccepted one halts the run exactly like any other
+	// single-attempt delivery (CLAUDE.md; A4). The client that signs is
+	// resolved from the event's own Tool.Name via each provider's own queue,
+	// so a Codex record is never sent by the Claude Code client. Telemetry has
+	// no chat completions (claude.ai is a transport/proxy concept only), so
+	// routeLaneRecord is built with no chat delivery seam at all.
+	queues := laneQueues(identities, logger)
+	deliver := routeLaneRecord(queues, nil, logger, "telemetry")
 	// doctor is a separate process with no channel into this daemon's memory,
 	// so the dropped-record count it discloses has to live on disk: a small,
 	// rate-limited, atomically-written status file under the OpenBox home
 	// this daemon already resolves for every other sink it owns. No IPC, no
 	// port. An unresolvable home degrades to no status file, not an error.
 	statusPersister := hookflow.NewStatusPersister(deliveryStatusPath("telemetry"), deliveryStatusInterval)
+	dropped := combinedDroppedFrom(queues)
 
 	// The HOOKS lane's own spool is untouched by the daemons' in-process sender
 	// (that only replaces the two daemons' OWN records): a hook process cannot
@@ -131,9 +126,9 @@ func (a *app) runTelemetry(args []string) int {
 	// flusher, and this daemon keeps sweeping both -- the completeness net for
 	// a session that never got a realtime nudge, or a hook process that could
 	// not spawn one.
-	ccHookSpool := hookflow.Spool{Dir: devconfig.SpoolDir(telemetrySpoolSubdir)}
+	ccHookSpool := hookflow.Spool{Dir: laneSpoolDir(telemetrySpoolSubdir, logger)}
 	ccSweeper := hookflow.Sweeper{Spool: ccHookSpool, Provider: telemetrySpoolProvider}
-	codexHookSpool := hookflow.Spool{Dir: providers.CodexSpoolDir()}
+	codexHookSpool := hookflow.Spool{Dir: laneSpoolDir("codex-spool", logger)}
 	codexSweeper := hookflow.Sweeper{Spool: codexHookSpool, Provider: string(provider.Codex)}
 
 	settingsPath := a.laneSettingsPath(*settings)
@@ -149,12 +144,10 @@ func (a *app) runTelemetry(args []string) int {
 	emitting := electedNow()
 
 	ccEmitter := &telemetryemit.Emitter{
-		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}),
-		DID:    func() string { return identities[string(provider.ClaudeCode)].DID },
-		Warn:   logger.Printf,
-		Deliver: func(ctx context.Context, ev client.DevEvent) bool {
-			return pool.Submit(ev)
-		},
+		Mapper:  telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}),
+		DID:     func() string { return identities[string(provider.ClaudeCode)].DID },
+		Warn:    logger.Printf,
+		Deliver: deliver,
 	}
 	var codexEmitter *telemetryemit.Emitter
 	var codexRecording func() bool
@@ -165,11 +158,9 @@ func (a *app) runTelemetry(args []string) int {
 		codexEmitter = &telemetryemit.Emitter{
 			Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: codexElectedNow}).
 				WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)),
-			DID:  func() string { return identities[string(provider.Codex)].DID },
-			Warn: logger.Printf,
-			Deliver: func(ctx context.Context, ev client.DevEvent) bool {
-				return pool.Submit(ev)
-			},
+			DID:     func() string { return identities[string(provider.Codex)].DID },
+			Warn:    logger.Printf,
+			Deliver: deliver,
 		}
 	}
 	em := &dualProviderTelemetryEmitter{cc: ccEmitter, codex: codexEmitter}
@@ -198,7 +189,7 @@ func (a *app) runTelemetry(args []string) int {
 
 	go ccSweeper.Run(ctx, logger)
 	go codexSweeper.Run(ctx, logger)
-	go reportDeliveryStatusPeriodically(ctx, statusPersister, pool)
+	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
 
 	if err := rec.StartStandalone(ctx); err != nil {
 		return a.errorf("starting the telemetry receiver: %v", err)
@@ -234,31 +225,38 @@ func (a *app) runTelemetry(args []string) int {
 		logger.Printf("openbox telemetry: shutdown: %v", err)
 	}
 	// rec.Shutdown only stops the receiver taking new exports; it says
-	// nothing about a delivery Submit already accepted into the pool. Without
+	// nothing about a delivery already draining through a LaneQueue. Without
 	// this drain, os.Exit right behind runTelemetry's return kills an
-	// otherwise-healthy in-flight delivery mid-goroutine, uncounted. The
-	// deadline stays at or under the pool's own per-emit timeout: waiting
-	// longer cannot help a delivery that has already given up on its own
-	// context.
+	// otherwise-healthy in-flight delivery mid-goroutine (a LaneQueue's own
+	// drain instead leaves an ordinary, reclaimable orphan; see
+	// LaneQueue.Close's own doc). The deadline stays at or under the
+	// single-attempt bound: waiting longer cannot help a delivery that has
+	// already given up on its own context.
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), poolDrainDeadline(*grace))
-	if abandoned := pool.Close(drainCtx); abandoned > 0 {
+	closers := make([]shutdownCloser, 0, len(queues))
+	for _, q := range queues {
+		closers = append(closers, q)
+	}
+	abandoned := closeAllConcurrently(drainCtx, closers...)
+	if abandoned > 0 {
 		logger.Printf("openbox telemetry: %d delivery(ies) still in flight at shutdown; abandoned", abandoned)
 	}
 	drainCancel()
 	// Flush, not Report: the final count matters most and must not be the one
 	// a rate limit ate.
-	statusPersister.Flush(pool.Dropped())
-	logger.Printf("openbox telemetry: stopped; %s; delivery pool dropped=%d", em, pool.Dropped())
+	statusPersister.Flush(dropped.Dropped())
+	logger.Printf("openbox telemetry: stopped; %s; delivery pool dropped=%d", em, dropped.Dropped())
 	return exitOK
 }
 
-// poolDrainDeadline bounds a shutdown-time DeliverPool.Close call to at most
-// the pool's own per-emit timeout, whatever the caller's own shutdown-grace
+// poolDrainDeadline bounds a shutdown-time drain (a LaneQueue.Close, or the
+// transport lane's own chat DeliverPool.Close) to at most the single-attempt
+// bound (DeliveryAttemptTimeout), whatever the caller's own shutdown-grace
 // setting says: waiting past the point a delivery gives up on its own
 // context only delays process exit for nothing.
 func poolDrainDeadline(grace time.Duration) time.Duration {
-	if grace <= 0 || grace > hookflow.DefaultPoolTimeout {
-		return hookflow.DefaultPoolTimeout
+	if grace <= 0 || grace > hookflow.DeliveryAttemptTimeout {
+		return hookflow.DeliveryAttemptTimeout
 	}
 	return grace
 }
