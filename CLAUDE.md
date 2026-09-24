@@ -513,6 +513,11 @@ and are worth not re-litigating:
   `credential-read-then-egress`, `untrusted-input-then-egress`,
   `mcp-fetch-then-write`, and guardrail `prompt-injection-markers` — so do not
   template from them.
+- **Delivery is a new policy version, never PUT.** A policy change is a new
+  version and POST makes it the only active one. The report says "POST the
+  current rules plus this one", and the dashboard's Accept does exactly that
+  (ADR-0022). Evaluation checks run on read in the backend, not in core,
+  because approval decisions land after a session ends.
 - **`inconclusive` needs a missing REQUIRED authority.** The demo once came out
   `inconclusive` with a complete defect chain sitting in `backend.json`, because
   `behavior.json` is only an index and the analyst never decoded the records it
