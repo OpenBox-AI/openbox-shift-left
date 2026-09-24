@@ -590,7 +590,7 @@ byte-for-byte, and `openbox uninstall` removes only the block it owns.
 | `gateway.log` | `~/.openbox/` | the gateway daemon's stdio, only on a machine that ran an older gateway install. Diagnostics; that it started, and its throttled warnings that it is recording nothing. Not a copy of relayed traffic |
 | `gateway-prior-env.json` | `~/.openbox/` | the one `ANTHROPIC_BASE_URL` an older gateway install displaced, so retiring or removing it restores your org's own relay instead of deleting it. A URL, no credential |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | the same, for the other two lanes. They exist for the same reason: launchd sends a daemon's stdio to `/dev/null` by default, and a throttled warning is the only signal that a perfectly working relay is recording nothing |
-| `telemetry-delivery-status.json`, `transport-delivery-status.json` | `~/.openbox/` | how many of that lane's own model-call records its in-process delivery pool has dropped, and since when; `openbox doctor` reads this for its dropped-record row. No content, no credentials |
+| `telemetry-delivery-status.json`, `transport-delivery-status.json` | `~/.openbox/` | how many of that lane's own model-call records core has not accepted (its one delivery attempt failed, or the append to the session spool itself failed), and since when; `openbox doctor` reads this for its delivery row. A record counted here also halts its own run. No content, no credentials |
 | `activation.json` | `~/.openbox/` | `0600`. Per lane: the environment keys OpenBox wrote into the tool's settings, and **the values that were there first**, with a before/after SHA-256. It is what lets a removal restore your own relay or corporate proxy key by key instead of truncating a settings file. **On macOS**, it also carries a `system` entry once `openbox init` activates the system PAC: which network services it touched and their prior auto-proxy URL/state, and the CA's SHA-1 and keychain path — the record `openbox uninstall` restores from before untrusting and deleting the CA. No credentials |
 | `claude-code-prior-settings.json` | `~/.openbox/` | `0600`. What Claude Code's `showThinkingSummaries` held before `init` forced it: whether the key was there at all, and its raw JSON value, so a removal puts back exactly those bytes rather than a boolean OpenBox reinterpreted. One key, no credential. It is a settings key rather than an environment key, which is why it is not in `activation.json` |
 | `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | **a certificate authority and its private key**, on any machine whose install brought the transport lane up. Generated once on this machine, never transmitted. It has no more at-rest protection than `.env` does: anything running as you can read it. It is generated **unconstrained** (owner ruling 2026-09-22, reversing an earlier name-constraint bound), so with it a leaked key can mint a certificate for **any** site this machine is made to trust the CA for; containment is the per-provider intercept allowlist instead of the certificate — see [Architecture](architecture.md)'s decision record. A machine still holding an older, constrained CA keeps working: it tunnels rather than intercepts any host it cannot mint for, and `openbox doctor` names those hosts as a "legacy constrained CA" finding until the CA is re-issued; a plain `openbox init` re-run now does that itself. `openbox uninstall` untrusts the CA (macOS: removes it from the System keychain by SHA-1 first) then deletes it rather than leaving it behind a relay that is gone |
@@ -627,7 +627,7 @@ a chat session never records an end, since the relay cannot see one.
 | `policy-bundle.json` | **inert leftover.** There is no local policy bundle since; nothing reads this file and it can be deleted |
 | `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories*; never the secret, never the body |
 | `advisories.jsonl` | advisory verdicts and guardrail findings |
-| `cc-spool/` | hook-derived events awaiting flush: session, prompt, tool-call and MCP-call bodies (commands, file contents, tool output, subagent prompts, notification and task text, compaction instructions and summaries, elicitation prompts and answers) with content capture on (the default); already secret-redacted, in plaintext files readable by you, drained continuously so this is an empty queue unless delivery is failing. The `telemetry` and `transport` daemons no longer spool their own model-call records here — each delivers in-process, one attempt per record, with no spool behind it (see [Architecture](architecture.md)'s lane-daemon delivery); a record that attempt cannot land is dropped and counted in `<lane>-delivery-status.json` above, never queued here. A machine still running the retired `gateway` lane is the one exception: it still spools its own model-call bodies (including decompressed provider responses) here, roughly 67 KB each |
+| `cc-spool/` (Codex: `codex-spool/`) | the one ordered, per-session queue for this tool: session, prompt, tool-call and MCP-call bodies (commands, file contents, tool output, subagent prompts, notification and task text, compaction instructions and summaries, elicitation prompts and answers) with content capture on (the default); already secret-redacted, in plaintext files readable by you. The `telemetry` and `transport` daemons now queue their own model-call records here too, in the same per-session order as the hook events, and drain them in-process (see [Architecture](architecture.md)'s delivery record); each event gets exactly one delivery attempt, so this is an empty queue unless something is still waiting for its own first attempt. An event core does not accept is ledgered and gone immediately, never held here for a later retry, and halts its run; it is counted in `<lane>-delivery-status.json` above only for a lane record, since a hook event's own failure has no lane status file to add to. A machine still running the retired `gateway` lane is the one exception: it still spools its own model-call bodies (including decompressed provider responses) here, roughly 67 KB each, under the same one-attempt rule |
 | `cc-spool/flusher.log` | what the delivery processes said. New, and it exists because they used to say nothing at all: a flusher that died before delivering was indistinguishable from one that was never started, which is why two missed flushes had to be diagnosed from file timestamps. Diagnostics only, capped, no bodies |
 | `cc-spool/.discarded` | one line per batch this machine gave up on: a timestamp, the session, and how many events were lost. Never the events themselves. It exists because the give-up was previously silent |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
@@ -772,16 +772,24 @@ overwritten.
 a root-owned `managed-settings.json` express a mandate rather than OpenBox
 state, and removing either would silently downgrade a governed machine.
 
-### Undelivered evidence is now retired after 30 days, and the deletion is reported
+### Undelivered evidence is retired after 30 days, and every outcome is reported
 
-A spool file nothing can deliver used to accumulate indefinitely -- one on the
-development machine held 1,048 events untouched for eighteen days. Two changes
-follow, and they point in opposite directions, so both are stated:
+**Historically** (before delivery became single-attempt), a spool file nothing
+could deliver accumulated indefinitely -- one on the development machine held
+1,048 events untouched for eighteen days, retried forever. That no longer
+happens: delivery is now single-attempt everywhere, so an event core does not
+accept is ledgered and gone within that one attempt, not held for a later
+retry. What can still sit in a spool for a while is narrower -- an event
+nothing has yet **attempted** at all (a session with no further hook activity
+to trigger a drain, or a crash-orphaned file waiting past the 5-minute
+reclaim window) -- and two changes cover that case, pointing in opposite
+directions, so both are stated:
 
-- **A lane daemon now sweeps the spool periodically**, which means evidence that
-  had never left your machine will be **delivered** the first time a sweep runs
-  after an upgrade, including whatever content was captured at the time. If you
-  have a backlog you do not want egressed, delete it before installing.
+- **A lane daemon still sweeps the spool periodically**, which means evidence
+  that has never yet been attempted will be **delivered** the first time a
+  sweep runs after an upgrade, including whatever content was captured at the
+  time. If you have a backlog you do not want egressed, delete it before
+  installing.
 - **A file older than 30 days is deleted**, with its event count recorded in
   `.discarded`. Deleting evidence is irreversible in a governance product, so the
   age errs long and the deletion is loud rather than silent. Nothing inside the

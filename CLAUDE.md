@@ -78,21 +78,33 @@ derive a base64 test fixture in code.
 
 **`/evaluate` is the only decider.** Every gated class goes to the server; risk
 is a property of the policy. `ApplyFailurePolicy` must run *after* the
-evaluation: before it, under `fail_closed`, it synthesizes a HALT that reads as
-"already tightened" and suppresses the round trip, denying every gated call
-without asking. Deprecated keys (`tier2`, `tier2_timeout_ms`,
-`require_verified_bundle`) stay parseable so they can warn; `tier2` is not
-honoured. **One store per field**: `.env` holds only secrets and `dev.json` only
-coordinates (now `agent_id`, not a DID); relaxing
-`TestEnvFileIsNotACoordinateSource` reopens the two-store bug this split
-exists to prevent -- historically, a stale DID silently reverting a corrected
-one on every install.
+evaluation: before it, it would synthesize a fail-closed deny that reads as
+"already tightened" and suppress the round trip -- skipping the one delivery
+attempt entirely, so core never gets a chance to accept the event and the
+attempt/unanswered/explicit-failure classification the halt path depends on
+never happens either. Deprecated keys (`tier2`,
+`tier2_timeout_ms`, `require_verified_bundle`, `fail_closed`, `enforce`) stay
+parseable so they can warn; none of them is honoured. **One store per
+field**: `.env` holds only secrets and `dev.json` only coordinates (now
+`agent_id`, not a DID); relaxing `TestEnvFileIsNotACoordinateSource` reopens
+the two-store bug this split exists to prevent -- historically, a stale DID
+silently reverting a corrected one on every install.
 
-**A flag defaulting to true cannot express "said nothing".** `Enforce` is a
-`*bool` and must stay nil when a run says nothing about it; `flagPassed` makes the
-distinction. Check reads and writes separately and test the *second* invocation:
-fifteen green tests missed this because each ran `init` once. Like `usage.go`'s
-INV-2 allowlist, a change making that test pass trivially is a defect.
+**A flag defaulting to true cannot express "said nothing".** `Enforce` used
+to be exactly this trap and no longer needs the guard: there is no write path
+for it left at all (`Update.Enforce`, `flagPassed` and every dead-write
+plumbing that threaded it are gone; `ResolveEnforce()` is hardcoded `true`).
+The rule they existed for still binds every *bool* posture field `Update`
+does still carry (`ContentCapture`, `Tier2`, `Findings`, `InstallGitHook`):
+each must stay nil when a run says nothing about it, distinct from an
+explicit `false`, or a written default becomes indistinguishable from a
+choice. Check reads and writes separately and test the *second* invocation --
+`initenforce_test.go`'s `TestInitWritesNoEnforceKeyEverAgain` is the shape to
+copy (loop over two `init` runs, assert no stray key on either), even though
+the field it now regression-tests no longer exists to have the trap at all.
+Fifteen green tests once missed this because each ran `init` only once; like
+`usage.go`'s INV-2 allowlist, a change making that test pass trivially is a
+defect.
 
 **No event carries `spans[]`, and re-adding one is a regression.** The control
 plane *parses* it and then **discards** it (persistence is gated on
@@ -109,10 +121,28 @@ each; `SignalReceived` alone is unpaired): every in-path row was single-sided
 for the life of the feature, because the live pairing check filters to *tool*
 types. A tool blocked before it ran -- a `PreToolUse` hook erroring, so nothing
 executed and no `PostToolUse*` could fire -- produces the started row only, and
-so does a lane daemon's own record whose Completed half its one delivery
-attempt could not land (core outage, timeout, 401: `hookflow.DeliverPool` never
-retries). Fabricating a completion would be worse than either asymmetry. Check
-per `activity_id`, never by parity.
+so does ANY producer's own record whose Completed half its one delivery
+attempt did not land (core outage, timeout, 401, any explicit non-acceptance):
+delivery is single-attempt everywhere now, never only the lane daemons'
+`hookflow.DeliverPool` (chat's own delivery path, unchanged). Fabricating a
+completion would be worse than either asymmetry. Check per `activity_id`,
+never by parity.
+
+**Delivery is all-or-nothing.** One drainer per session, append order ==
+delivery order, one attempt per event; an unaccepted event ledgers and
+latches its run (write-if-absent: whichever cause reaches a run's first
+failure wins); a gate drains its own session's backlog in slack and re-reads
+the latch before escalating; appenders never wait on the drain lock. The only
+reorder this allows is narrow and bounded: an event a gate's own drain sent
+but never heard back from within ITS OWN budget is requeued for the 30s
+drainers, and core's idempotency key dedupes the one resulting resend --
+never a general retry, and never triggered by anything short of an explicit,
+proven non-acceptance for the halt itself. `enforce`/`fail_closed` are
+deprecated the same way `tier2` is: parsed so `openbox doctor` can warn, not
+honoured (`devconfig.ResolveEnforce()`/`ResolveFailurePolicy()` are both
+hardcoded now). See
+`plans/260924-1911-ordered-session-event-queue/reports/decision-260925-0511-all-or-nothing-ordered-delivery.md`
+for the ruling and its shape.
 
 **Bounds have owners.** `MaxCommandLen` bounds a local decision request, never
 egress; egress is `MaxRedactBody` then `capBody`, and `maxThinkingBytes` must stay

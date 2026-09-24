@@ -150,20 +150,20 @@ older install, key rotation and troubleshooting, continue to
 
 ### Two things to know before you rely on it
 
-**It enforces by default.** Blocking, ask-for-approval and local secret
-redaction are on from the first session. But enforcement acts on *your
-organization's policy*, so until your organization publishes one, nothing is
-blocked — you get observability either way. To observe only for one run:
+**It enforces, unconditionally.** Blocking, ask-for-approval and local secret
+redaction are on from the first session, with no opt-out: `OPENBOX_ENFORCE`
+and `"enforce"` in `dev.json` still parse, so `openbox doctor` can name them
+as ignored, but neither turns enforcement off any more. Enforcement acts on
+*your organization's policy*, so until your organization publishes one,
+nothing is blocked — you get observability either way.
 
-```bash
-OPENBOX_ENFORCE=false claude
-```
-
-**It fails open by default.** Every risky action is decided by your platform.
-If the platform cannot be reached, the action proceeds and the outage never
-blocks your work. The trade is that enforcement depends on reachability. An
-organization that needs it to survive an outage sets `fail_closed: true` in
-`~/.openbox/<tool>/dev.json` — and accepts that an outage then blocks work.
+**It is unconditionally fail-closed.** Every risky action, and every delivery
+attempt behind it, gets exactly one try. If your platform cannot be reached,
+or does not accept it, that action denies — and once an attempt was actually
+sent and explicitly refused (not merely timed out on its own budget), the
+whole session halts until you start a new one. `fail_closed: true` in
+`~/.openbox/<tool>/dev.json` still parses but no longer selects anything:
+there is no setting left that makes an outage proceed instead of denying.
 
 ## How it works
 
@@ -312,9 +312,10 @@ Five commands. `init` is the only one with a flag.
 | `openbox uninstall` | the full reversal, every tool's credentials and the control token included. It finds what is installed rather than being told |
 | `openbox version` | |
 
-Two settings are environment variables rather than flags: `OPENBOX_ENFORCE=false`
-observes only for one run, and `OPENBOX_INSTALL_GIT_HOOK=false` leaves every
-repository's `.git/hooks` alone.
+One setting is an environment variable rather than a flag:
+`OPENBOX_INSTALL_GIT_HOOK=false` leaves every repository's `.git/hooks` alone.
+`OPENBOX_ENFORCE` is no longer one of these; it still parses, but does not
+turn enforcement off.
 
 ## Documentation
 

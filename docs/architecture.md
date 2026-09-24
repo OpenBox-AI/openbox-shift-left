@@ -38,11 +38,13 @@ assertion with the tool's workload private key, and exchanges it at Keycloak
 for a bearer. The bearer and the bootstrap document share one lifetime, capped
 at 270 seconds, cached to disk, and reused by the next hook until it expires;
 a cached token that gets a flat 401 is deleted immediately rather than resent
-(core answers 401 identically for a bad key and for a fault of its own, so a
-401 never spends a delivery attempt). Keycloak unreachable, or any stage of
-this dance failing, degrades exactly like a core outage: the call proceeds
-and the event spools for a later flush -- authentication is never a second
-reason to block a tool call. `/api/v3/auth/validate` is the one route that
+(core answers 401 identically for a bad key and for a fault of its own).
+Delivery is single-attempt and unconditionally fail-closed: Keycloak
+unreachable, or any stage of this dance failing once a client exists to make
+the attempt, is an explicit, proven non-acceptance exactly like a core outage
+or a 401 from `/evaluate` itself -- the gated call denies and the run halts
+(a durable, run-keyed latch) until a new session starts; nothing is held in a
+spool waiting for a later retry. `/api/v3/auth/validate` is the one route that
 also answers outside this dance, for a caller (doctor, git-action) that only
 needs to confirm which agent a credential belongs to.
 
@@ -57,42 +59,68 @@ Two paths, deliberately separate:
   can see.
 
 That is the trade: enforcement now depends on reaching the control plane, and
-under the default `fail_closed:false` a gated call proceeds when it cannot be
-reached. What it buys is that an org whose policy is hand-written rego is
-actually enforced; the local evaluator could never evaluate that at all, so
-those gates simply opened.
+it is unconditionally fail-closed -- a gated call denies when the control
+plane cannot be reached or does not answer, and the run halts until a new
+session starts (`fail_closed` stays parseable so `openbox doctor` can name it
+as ignored; it no longer selects anything). What it buys is that an org whose
+policy is hand-written rego is actually enforced; the local evaluator could
+never evaluate that at all, so those gates simply opened.
 
 The one thing that stays local is **secret redaction**: it must run before
 content leaves the machine, and it sees the whole body where the server sees at
 most the first 64KB.
-- **Hook-derived telemetry is spooled and flushed off the hot path.** A slow or
-  absent OpenBox cannot slow a tool call or block one; undelivered events are
-  retried, not dropped. Delivery is near-real-time by default: after an event is
-  spooled, the hook nudges a detached, debounced flusher for its session
-  (`hookflow.RealtimeTrigger`, ~2s window), so events are queryable in core
-  while the session is still running. The hook process itself still performs
-  zero network I/O; its worst case is one lockfile check plus, at most once per
-  window, spawning the flusher. SessionEnd's flush remains the completeness
-  safety net, and `realtime_flush:false` / `OPENBOX_REALTIME=0` restores
-  batch-at-session-end. Overlapping drains cannot double-count: spool rotation
-  is an atomic rename and core deduplicates on each event's Idempotency-Key.
-  The legacy `gateway` lane (superseded by `transport`; still running on any
-  machine that installed it before) keeps this same spool-and-flush shape for
-  its own records unchanged.
-- **A lane daemon's own records are not spooled, and can be lost.** The
-  `telemetry` (OTLP receiver) and `transport` (relay) daemons send each of
-  their own model-call records in-process, through a bounded pool
-  (`hookflow.DeliverPool`: 8 concurrent, a 10s per-emit timeout) rather than a
-  spool and a flusher. One attempt per record: a saturated pool drops it, and a
-  shutdown drain abandons whatever delivery is still in flight past its own
-  deadline; either way the drop is counted, never retried. A core outage, a
-  5xx, a timeout, or a 401 therefore loses that record by design (owner ruling
-  2026-09-22) instead of queuing it for later delivery. Both daemons still run
-  the hooks-spool `Sweeper` for hook-derived events (unrelated to their own
-  records) as before. Each daemon persists its drop count to a small status
-  file (`hookflow.DeliverStatus`) so `openbox doctor` -- a separate process
-  with no channel into a running daemon's memory -- can print a dropped-record
-  row per lane.
+- **Every producer shares one ordered, per-session queue, and every event gets
+  exactly one delivery attempt** (owner ruling 2026-09-24, superseding the
+  2026-09-01 hold-and-retry policy and the 2026-09-22 in-process-lanes
+  ruling; decision record:
+  [`decision-260925-0511-all-or-nothing-ordered-delivery.md`](../plans/260924-1911-ordered-session-event-queue/reports/decision-260925-0511-all-or-nothing-ordered-delivery.md)).
+  Hook events, the enforcement gate's own escalation, and a lane daemon's own
+  model-call records all append to and drain from the SAME per-session,
+  per-tool spool (one drainer per session, 64 striped locks, append order ==
+  delivery order); a hook process still performs zero network I/O of its own.
+  **If core does not accept an event, for any reason** (a proven refusal, a
+  5xx, a timeout, a 401, or a network fault at the request itself) **the
+  client halts that run**: a write-if-absent latch refuses every later gated
+  call, prompt and relayed model call of that run until a new session starts.
+  Nothing is retried, redelivered, or held for a later attempt on a failure --
+  only an event a drain never got to attempt (a cut pass, a budget that ran
+  out) stays queued, never a failure. `SessionStart` and `SessionEnd` each send
+  inline, in their own hook, within a window measured from the hook's own
+  start, before anything else of the run can reach core; whatever that leaves
+  queued falls back to a detached flusher (a 30-second attempt bound) spawned
+  regardless of the realtime-flush toggle. Overlapping drains cannot
+  double-count: a session's own stripe lock and core's Idempotency-Key dedupe
+  together close that. The legacy `gateway` lane (superseded by `transport`;
+  still running on any machine that installed it before) keeps this same
+  spool-and-flush shape for its own records unchanged.
+- **A gate drains its own session's backlog in slack, then evaluates.** Before
+  escalating, a gated PreToolUse/UserPromptSubmit call drains whatever is
+  already queued for its session (within the budget slack left after
+  reserving one evaluation's worth) and re-reads the run's halt latch; a
+  delivery failure or a HALT verdict the drain itself finds denies that call
+  without ever escalating. A slow core never halts a run from inside a gate:
+  an event the drain could not even start stays queued, and an event it sent
+  but never heard back from within its own budget is requeued for the 30s
+  drainers (core's idempotency key dedupes the one resulting resend); only an
+  explicit non-acceptance halts.
+- **A lane daemon's own records now queue through the same session spool the
+  hooks use**, not an in-process bounded pool (superseding the 2026-09-22
+  in-process ruling above): `telemetry` and `transport` each drain their
+  session's own backlog in-process, single-flight per session, one attempt
+  per record (30s bound). An append that never reaches the spool at all halts
+  immediately -- a lane record has no gated call to deny synchronously, so the
+  latch is the only non-silent outcome. Both daemons still run the same
+  `Sweeper` as before for genuinely stale, never-attempted backlogs (30-day
+  retirement, unrelated to an attempted-and-failed event, which is ledgered
+  and gone immediately). `chat:` sessions are the one exception: they have no
+  session-scoped hook events to interleave with, so they keep an in-process
+  bounded pool (`hookflow.DeliverPool`, retimed to the same 30s per-emit
+  bound); a chat record core does not accept latches that conversation
+  (hashed, Windows-legal filename) instead of a run, and the relay refuses its
+  next completion. Each daemon persists its drop count to a small status file
+  (`hookflow.DeliverStatus`/`LaneQueue.Dropped()`) so `openbox doctor` -- a
+  separate process with no channel into a running daemon's memory -- can
+  print an unaccepted-record row per lane.
 
 ## Layout
 
@@ -176,10 +204,13 @@ can be on without the others:
   is applied before the tool runs. Every gated class, not a risk-selected
   subset; risk is a property of the policy. Prompts gate the same way:
   `UserPromptSubmit` evaluates the `PromptSubmitted` event before the prompt is
-  processed, and a HALT/BLOCK blocks (and erases) the prompt. If the control
-  plane cannot be reached, the org's `fail_closed` decides: fail-open proceeds
-  (the default), fail-closed denies. No retry: one hiccup must not become a
-  client-side amplifier across every tool call of every session.
+  processed, and a HALT/BLOCK blocks (and erases) the prompt. Delivery is
+  single-attempt and unconditionally fail-closed: an unreachable control
+  plane, or any other proven non-acceptance, denies this call, and if the
+  attempt was actually sent and explicitly refused (not merely never reached
+  in the caller's own budget) the run halts until a new session starts. No
+  retry: one hiccup must not become a client-side amplifier across every tool
+  call of every session -- it becomes a halt instead.
 - **HALT ends the session.** A HALT the control plane returns is a session
   verdict, not a call verdict: the response carries Claude Code's
   `continue:false` (the turn stops immediately) and a local latch
@@ -268,8 +299,9 @@ Being precise here is part of the product.
   older `ANTHROPIC_BASE_URL` gateway if it finds one; where no lane is packaged,
   tool calls are governed and model calls are not, because the hooks never see a
   model request. A lane records a model call; only the transport lane refuses
-  one today, and only for a run some lane already latched HALTed (a local
-  latch check, no `/evaluate` round trip) — the synchronous, per-call
+  one today, and only for a run some lane already latched -- a HALT verdict
+  or a delivery failure, either one, checked locally with no `/evaluate` round
+  trip -- the synchronous, per-call
   server-verdict refusal path is still written and has no production caller,
   pending the probe that would say what shape it must take. Three limits are
   worth stating plainly rather than discovering:
@@ -586,26 +618,36 @@ was made on the smaller number.
   not a real control plane. In particular, **that a raw-rego org is now enforced
   is unproven**, and that is the headline argument for the change. The test
   phase that would prove it exists and has not run.
-- **Enforcement depends on reaching the control plane, and under the default it
-  is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
-  call; there is no local policy to fall back on. If the control plane cannot be
-  reached, the org's `fail_closed` setting decides, and it defaults to
-  **fail-open**; so blocking a single hostname disables enforcement for that
-  developer. An org that needs enforcement to survive a developer who does not
-  want it must set `fail_closed`, and accept that a control-plane outage then
-  blocks work. This replaced a local evaluator that kept deciding while offline;
-  the trade is deliberate, and the reason it was worth making is that
-  hand-written rego could never be evaluated locally at all, so those orgs'
-  gates simply opened.
+- **Enforcement depends on reaching the control plane, and it is unconditionally
+  fail-closed.** Every gated tool call is decided by a synchronous `/evaluate`
+  call; there is no local policy to fall back on. If the control plane cannot
+  be reached, or any delivery attempt (auth, the evaluation itself, a lane's
+  own model-call record) does not get a proven acceptance, the call denies --
+  and if that was an explicit, proven non-acceptance rather than the caller's
+  own budget simply running out first, the whole run halts until a new session
+  starts. `fail_closed` stays parseable so `openbox doctor` can name it as
+  ignored; it no longer selects anything, and there is no way to make an
+  outage proceed instead of denying. This replaced a local evaluator that kept
+  deciding while offline; the trade is deliberate, and the reason it was worth
+  making is that hand-written rego could never be evaluated locally at all, so
+  those orgs' gates simply opened. Blocking a single hostname now denies every
+  gated call for that developer rather than silently disabling enforcement for
+  it; whether it also halts the run depends on how the block manifests -- a
+  fast refusal (a reset connection, a proxy's own error page) is an explicit,
+  proven non-acceptance and halts, while a silently dropped connection the
+  caller's own attempt timeout catches first denies without halting, and the
+  next call gets its own fresh attempt.
 - **A control-plane verdict is applied even when no policy authored it.** The
   enforce path trusts every `/evaluate` HALT as a policy decision, and core can
   express an operational precondition failure as one: once its record of a
   session goes terminal, observed when a `SessionEnded` was recorded while the
   session was still live, it answers every later event `HALT` ("Session is no
-  longer active") with **no policy id and no governance event**. Both
-  default-posture mitigations miss it: "inert until your org publishes a policy"
-  is falsified directly, and fail-open never engages because the failure policy
-  covers *no verdict*, not *a HALT verdict*. One such HALT latches the
+  longer active") with **no policy id and no governance event**. The
+  default-posture mitigation misses it: "inert until your org publishes a
+  policy" is falsified directly, and unconditional fail-closed does not help
+  distinguish this case either, since it governs what happens when core gives
+  *no verdict*, not what happens to *a HALT verdict* core did give. One such
+  HALT latches the
   server-side session, so the remainder of that session denies until a new
   session restores a pending record; and the denial itself stores no governance
   event, so the control plane holds no record of the blocking it did. The client
@@ -636,7 +678,8 @@ was made on the smaller number.
   controls, and OpenBox records that posture as evidence. With an in-path lane it
   carries and records the model call, and it still allow-lists nothing; the
   transport lane also refuses a call locally when the run it belongs to was
-  already latched HALTed by some lane (no `/evaluate` round trip), but a
+  already latched -- a HALT verdict or a delivery failure, checked with no
+  `/evaluate` round trip -- but a
   synchronous per-call server verdict is still unwired, and the legacy
   `gateway` lane refuses nothing at all. Everything else the tool talks to is
   untouched either way.

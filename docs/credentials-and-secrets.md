@@ -33,13 +33,14 @@ coordinate; the `did:aip:…` attribution label a spooled event carries is
 derived from it in memory on every read (`uuid5(namespace, agent_id)`) and
 never written to disk or sent as a header -- see [Data and privacy](data-and-privacy.md).
 
-**If your org's Keycloak is unreachable, hooks fail open, not closed.** A hook
-that cannot bootstrap or exchange for a bearer proceeds exactly as it would
-during a core outage: the tool call is allowed, and the event that could not
-be delivered synchronously is held in the spool for the next flush to retry.
-The tool is ungoverned for the duration, silently -- there is no separate
-"Keycloak is down" warning distinct from an ordinary outage, because from the
-hook's side they look the same: no bearer, no verdict, proceed.
+**If your org's Keycloak is unreachable, hooks fail closed and the run halts,
+exactly as a core outage would.** A hook that cannot bootstrap or exchange for
+a bearer is an explicit, proven non-acceptance -- delivery is single-attempt
+and unconditionally fail-closed now, so the gated call denies, the event is
+ledgered and gone (never held in the spool waiting for a retry), and the run
+halts until a new session starts. There is no separate "Keycloak is down"
+warning distinct from an ordinary outage, because from the hook's side they
+look the same: no bearer, no verdict, deny and halt.
 
 **One org-level file**, shared by every tool, holding the organization
 connection and nothing else:

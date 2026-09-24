@@ -5,10 +5,15 @@ The first realization of the generic Provider Adapter Contract (architecture
 contract and emits them through the shared AIP-signed transport.
 
 It has **two legs, and they are not the same posture.** The telemetry leg is
-observe-only and fail-open: it spools and never affects the tool call. The
-enforce leg gates a call synchronously and can deny it. Content capture is on by
-default on both. `capabilities.go` is the authority on which is which — every
-capability key carries what it does and what it deliberately does not.
+observe-only: it spools and never renders a verdict, so it never denies the
+current tool call. It is not fail-open any more in the sense that once mattered:
+delivery is single-attempt and unconditionally fail-closed, so an event this
+leg cannot deliver halts the *run* (every later gated call and prompt denies)
+even though it never touched the call that produced it. The enforce leg gates
+a call synchronously and can deny it, unconditionally now (there is no
+observe-only opt-out for a gated hook). Content capture is on by default on
+both. `capabilities.go` is the authority on which is which — every capability
+key carries what it does and what it deliberately does not.
 
 ```
 Claude Code hook (stdin JSON)
@@ -16,10 +21,14 @@ Claude Code hook (stdin JSON)
         ├─ map → normalized DevEvent       # mapper.go
         ├─ append → local spool            # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout            # telemetry leg: no verdict to render
-   gated call (PreToolUse / UserPromptSubmit / ConfigChange)
-        └─ /evaluate → outputcontract.go   # enforce leg: renders deny/block
-   SessionEnd / `flush`
-        └─ drain spool → client.Emit → POST /api/v1/governance/evaluate  (off the hot path)
+   gated call (PreToolUse / UserPromptSubmit / ConfigChange[user_settings])
+        ├─ drain this session's own queued backlog, in slack   # gate.go: hooks/lanes interleaved
+        └─ /evaluate → outputcontract.go   # enforce leg: renders deny/block, always
+   SessionStart / SessionEnd
+        └─ inline, in the hook itself: one drain attempt within its own window,
+           falling back to the detached flusher only if that window runs out
+   `flush` (spawned fallback, or explicit)
+        └─ drain spool → client.Emit → POST /api/v3/governance/evaluate  (off the hot path)
 ```
 
 ## Why a spool instead of emitting inline
@@ -28,22 +37,41 @@ Claude Code command hooks are synchronous; a slow hook delays the tool call.
 Doing network I/O on `PreToolUse`/`PostToolUse` would blow the NFR-2 `<50 ms`
 budget and couple the tool call to OpenBox reachability. So the hot path only
 maps + appends one JSON line to a per-session spool file (local,
-sub-millisecond), and delivery happens off the hot path at `SessionEnd` (bounded
-to 12 s) or via the `flush` subcommand. Delivery is **best-effort and
-fail-open**: an outage delays telemetry, never a tool call, and an undelivered
-event is retried on a later flush rather than dropped; up to
-`maxRecoveryAttempts`, after which loss becomes permanent. A flush cut short by
-its time budget persists the **undelivered remainder** to a recovery file that
-the next `SessionEnd` re-drains (`SweepRecovery`, or an explicit
-`flush`/`FlushAll`); the tail is not dropped, and delivered events are never
-re-sent. The sweep is not scoped to the ending session: a recovery file belongs
-to a session that has already finished, so nothing else would ever retry it.
+sub-millisecond); delivery itself happens either **inline, in the hook that
+just appended it** (`SessionStart`/`SessionEnd` only, each within its own
+window measured from the hook process's own start: 4s window/3s attempt for
+`SessionStart`, 12s/10s for `SessionEnd`, both strictly inside their installed
+hook timeout of 5s/15s), or **off the hot path** via a detached `flush`
+subcommand (60s attempt bound) that a `SessionStart`/`SessionEnd` inline
+attempt spawns only when its own window runs out before every queued event
+was attempted, or that a periodic `Sweeper` spawns for a session nothing else
+has touched in a while.
+
+Delivery is **single-attempt and unconditionally fail-closed**, not
+best-effort: every event -- a hook's own, or a lane daemon's, since
+`telemetry`/`transport` drain this same per-session spool too -- gets exactly
+one delivery attempt, in append order, through one striped per-session
+drainer. If core does not accept it (a proven refusal, a 5xx, a timeout, a
+401, or a network fault at the request itself, as opposed to the drain's own
+budget simply running out before an answer arrived), the event is ledgered
+and gone, and **the run halts**: every later gated call and prompt in it is
+refused until a new session starts. There is no recovery file, no retry
+count, and no permanent-loss threshold any more -- an attempted-and-refused
+event is never resent, on any later flush. What a spool file still holds
+between drains is only what has not been **attempted** yet: a backlog with no
+further hook activity to trigger a drain, or a crash-orphaned file waiting
+past its 5-minute reclaim window; a periodic sweep picks those up, and a file
+untouched for 30 days is deleted with its count recorded (`.discarded`),
+never silently. A cut-short drain pass is not a failure either: whatever it
+could not get to stays queued, unchanged, for the next drain.
 
 Each event's `event_id` is derived deterministically from its structural fields
 (`deriveID` in `mapper.go`): the same logical event always hashes to the same id
 and two distinct events never collide, so the id is stable through the whole
-spool → rotate → flush → recovery lifecycle (INV-5). That is the client half of
-idempotency. The server-side half is partial and lives outside this adapter -
+spool → rotate → drain → reclaim lifecycle (INV-5) -- there is no separate
+recovery-file stage any more; a crash-orphaned file is reclaimed by the same
+drain path as an ordinary one. That is the client half of idempotency. The
+server-side half is partial and lives outside this adapter -
 [`client/README.md`](../../client/README.md) owns which events core deduplicates
 and which it does not.
 
@@ -115,11 +143,14 @@ capture-OFF half.
   is never derived here. The numbers come from reading `transcript_path`, off
   the hot path. `capabilities.go`'s `telemetry.tokens` and `telemetry.model`
   state the bound exactly.
-- **At-most-once delivery.** The client's `Emit` is fail-open and does not
-  signal delivery success, so a delivered-then-lost event can't be retried
-  without risk of a double-send. (The undelivered *remainder* of a
-  budget-bounded flush IS preserved and re-drained.) True durable retry awaits a
-  client success signal.
+- **At-most-once delivery, by design, not as an interim limitation.** The
+  client's `Emit` return (its error, classified by `client.FailureClass`) is
+  exactly what decides one attempt's outcome: an explicit non-acceptance halts
+  the run rather than being retried, because a durable retry risks a
+  double-send core cannot always dedupe. (An **unattempted** remainder of a
+  budget-bounded drain -- as opposed to an attempted-and-refused one -- IS
+  preserved and picked up by the next drain; that is not a retry of a failure,
+  since nothing was attempted yet.)
 - **A new hook needs `openbox init` re-run.** Registration happens at install
   time, so a machine that upgrades this binary keeps observing its pre-upgrade
   hook set until a human re-runs `init`. Nothing schedules that.

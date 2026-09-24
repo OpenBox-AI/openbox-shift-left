@@ -216,25 +216,35 @@ A `SessionEnded` event carries what the client knows about its own delivery, in
 | Key | Scope | Means |
 |---|---|---|
 | `evidence_state` | this session | `complete`, or `degraded` when either count below is non-zero |
-| `evidence_undelivered` | this session | events waiting in carry-over (recovery) files: an earlier flush failed and will retry. Omitted when zero |
-| `evidence_discarded` | **machine-wide, cumulative** | events this machine gave up on entirely -- past `MaxRecoveryAttempts`, or past the retention age. Omitted when zero |
+| `evidence_undelivered` | this session | this session's own not-yet-**attempted** backlog: head-file lines (attempted too late to start a pass, requeued ahead of the tail) plus tail-file lines never yet drained at all (`Spool.PendingCount`, via `UndeliveredCountFor`). Never counts an event that WAS attempted and refused -- that is ledgered and gone immediately (see `evidence_discarded`), never left pending. Omitted when zero |
+| `evidence_discarded` | **machine-wide, cumulative** | events this machine's ledger recorded as gone: an attempted delivery core explicitly did not accept, a crash-orphaned line whose outcome could not be proven, a legacy artifact discarded on sight, or a genuinely unattempted backlog past the 30-day retention age (`Spool.DiscardedCount`, reading `.discarded`). Omitted when zero |
 
 Three decisions a reader will otherwise find surprising.
 
-**`evidence_undelivered` stays session-scoped and counts carry-over files only**,
-which is what it has always measured. That is deliberately narrow, and the
-narrowness is what made a real gap invisible: it read **71** on a machine where
-**118** events sat in plain session files, which are not carry-over files and so
-are not counted. The machine-wide backlog is surfaced by `openbox doctor`, where
-it is actionable, rather than by widening a per-session field into something a
-reader would misinterpret.
+**`evidence_undelivered` stays session-scoped, and now sums the session's
+entire own queue (head-plus-tail), not a narrower "recovery file" subset.**
+Historically it counted only carry-over (recovery) files -- a narrower
+category than the session's real backlog -- and that narrowness is what made
+a real gap invisible: it read **71** on a machine where **118** events sat in
+plain session files, which were not carry-over files and so went uncounted.
+Delivery is single-attempt now and there is no separate recovery-file stage
+any more (a spool file is a tail, a head, or a reclaimed orphan; `PendingCount`
+already sums the first two), so that specific gap is closed at the session
+level: the field is the session's own complete still-queued count. It
+remains deliberately narrower than a machine-wide figure in one respect
+only -- another session's own backlog sitting in the same spool directory is
+never counted here, by design; that machine-wide view is surfaced by
+`openbox doctor`, where it is actionable, rather than by widening a
+per-session field into something a reader would misinterpret.
 
 **`evidence_discarded` is machine-wide on purpose.** Loss is not scoped to the
-session that happens to end next. It exists because the bound was already there
-and silent: `writeRecovery` stopped re-queueing past `MaxRecoveryAttempts` with no
-log line, no counter and no telemetry -- governance evidence discarded with nothing
-said. Every discard is now also recorded, with a timestamp and a count, in
-`.discarded` beside the spool.
+session that happens to end next. It exists because an earlier bound was
+already there and silent (the pre-single-attempt design stopped re-queueing
+past a retry count with no log line, no counter and no telemetry -- governance
+evidence discarded with nothing said); every discard is now recorded, with a
+timestamp, an event count and a reason, in `.discarded` beside the spool --
+which today is most discards' only path in, since a single failed attempt is
+ledgered immediately rather than retried toward any count.
 
 **One definition, not one per adapter.** `EvidenceState` lives in
 `internal/adapters/common/hookflow` and both adapters alias it. It was two

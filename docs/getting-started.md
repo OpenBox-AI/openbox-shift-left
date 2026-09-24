@@ -41,9 +41,10 @@ instead.
 **Rolling this out to more than one machine or tool?** Do it in this order:
 run the identity-provider generation command once per organization, upgrade
 every machine's `openbox` binary, then re-run `openbox init --provider <tool>`
-on each one. Skipping the first step does not fail loudly: hooks fail open, so
-every tool on a machine that re-inits against an uninitialized org is silently
-ungoverned until the operator command runs and `init` is re-run.
+on each one. Skipping the first step does not fail silently: delivery is
+always fail-closed now, so every tool on a machine that re-inits against an
+uninitialized org denies every gated call (and halts each session after its
+first) until the operator command runs and `init` is re-run.
 
 ## 1. Install the engine
 
@@ -181,8 +182,9 @@ overrides the per-tool one — but it does *not* override `.env`, which stays pe
 tool. So two tools governed under one `OPENBOX_CONFIG` share an `agent_id`
 while holding different agent keys, and events from at least one of them
 authenticate as an identity that key does not belong to: the control plane
-answers a flat 401, and a 401 is never resent, so the spool grows and nothing
-says why. Use it for one tool, or not at all.
+answers a flat 401, and a 401 is never resent -- that tool's session halts
+instead (`openbox doctor` names the halted run and the event it could not
+record). Use it for one tool, or not at all.
 
 **There is no rotate-in-place.** Deleting `~/.openbox/<tool>/.env` and
 re-running `openbox init --provider <tool>` does **not** reuse that agent: the
@@ -290,7 +292,7 @@ Four things differ, and each is deliberate (`internal/adapters/codex/README.md`)
 - There are **no model-call lanes** for Codex. `init` says so rather than
   reporting a service it did not install.
 
-### Two defaults you should know
+### What you should know before you rely on it
 
 **It governs every session on this machine, in any directory, immediately.**
 The tool watches its settings file, so sessions already running are governed
@@ -298,45 +300,34 @@ too; there is nothing to restart, and absence of events is therefore evidence
 about the work rather than about the scope. `init` prints what it governed and
 which file it changed, every time.
 
-**It enforces.** Blocking, ask-for-approval and local secret redaction are on by
-default; on tool calls AND on prompts: every gated tool call and every submitted
-prompt is decided by your org's policy before it runs, and a **HALT verdict ends
-the session on the spot** (the current turn stops, and every later prompt or
-tool call in that session is refused locally until you start a new session).
-BLOCK refuses just the one call or prompt. Two things keep that from being a
-surprise you cannot recover from: enforcement acts on *your org's policy*, so
-until your org publishes one nothing is blocked and you get observability either
-way; and `fail_closed` stays **off**, so an OpenBox outage never blocks a tool
-call. One diagnosed defect escapes both today; a control-plane precondition
-failure expressed as a HALT, which now ends the session rather than denying
-calls; the symptom and the recovery are in [Troubleshooting](#troubleshooting)
-under `Session is no longer active`. Want telemetry without enforcement:
+**It enforces, unconditionally, and it is unconditionally fail-closed.**
+Blocking, ask-for-approval and local secret redaction are always on; on tool
+calls AND on prompts: every gated tool call and every submitted prompt is
+decided by your org's policy before it runs, and a **HALT verdict ends the
+session on the spot** (the current turn stops, and every later prompt or tool
+call in that session is refused locally until you start a new session). BLOCK
+refuses just the one call or prompt. There is no observe-only mode and no
+opt-out: enforcement acts on *your org's policy*, so until your org publishes
+one nothing is blocked and you get observability either way; but there is no
+longer an environment variable or config key that turns enforcement off, or
+that lets an OpenBox outage proceed instead of denying. Every event -- the
+gated call itself, the auth exchange behind it, a lane's own model-call
+record -- gets exactly one delivery attempt; if core does not accept it, that
+call denies, and the whole run halts (every later prompt and tool call in it
+refused) until you start a new session. `enforce`/`OPENBOX_ENFORCE` and
+`fail_closed` still parse (so `openbox doctor` can name them as ignored, and a
+managed config can still lock them without effect) but no longer select
+anything. One diagnosed core-side defect can still end a session for a reason
+that is not a delivery failure or your org's policy: a control-plane
+precondition failure expressed as a HALT; the symptom and the recovery are in
+[Troubleshooting](#troubleshooting) under `Session is no longer active`.
 
-```bash
-OPENBOX_ENFORCE=false claude    # observe only, for this run
-```
-
-It is an environment variable rather than a flag, and nothing is persisted
-either way. That is deliberate: a stored `enforce: true` written by an install
-is indistinguishable from one somebody chose, so the install writes no key at
-all and an absent key resolves to on.
-
-**What happens when OpenBox is unreachable** is one setting, and it is worth
-knowing before you need it. Every gated tool call is decided by OpenBox, there
-is no local policy to fall back on, so `fail_closed` decides what an unreachable
-control plane means:
-
-```jsonc
-// ~/.openbox/dev.json
-{ "fail_closed": true }   // deny gated calls when OpenBox cannot be reached
-```
-
-It defaults to **false**: gated calls proceed, and an outage never blocks work.
-That also means enforcement depends on reachability; blocking one hostname
-disables it. An org that needs enforcement to survive a developer who does not
-want it sets `fail_closed: true` and accepts that an outage then blocks work.
-Either way an org can pin the choice through the managed config so a developer
-cannot change it, and `openbox doctor` always prints the effective value.
+**Halted is not always ungoverned.** A halted run denies every gated call; it
+does not silently proceed. `openbox doctor` lists halted runs and names the
+event OpenBox could not record for each. A Claude Code `/clear` or `--resume`
+starts a fresh run and is unhalted even though the session id is unchanged; a
+Codex `resume` continues the same run, so a halted Codex session stays halted
+until a genuinely new session starts.
 
 ### Governing everything (the fleet rollout)
 
@@ -575,9 +566,12 @@ own `~/.openbox/<tool>/` store. There is **no fallback**: a machine that was
 working before this release has its identity at the old org-level path, and
 nothing reads it any more.
 
-**The symptom is silence.** Hooks still fire, fail to resolve credentials, and
-fail open — so the tool works normally and nothing is governed. No error, no
-blocked call, no events in the dashboard.
+**The symptom is every gated call denied, not silence.** Hooks still fire and
+fail to resolve credentials; delivery is unconditionally fail-closed now, so
+every gated tool call and prompt denies (and each session halts after its
+first) rather than the tool working normally with nothing governed. No events
+reach the dashboard either way, but the tool itself is now visibly blocked
+rather than silently ungoverned.
 
 **The check and the fix:**
 
@@ -633,15 +627,15 @@ Two more things to clean up:
   copy of live credentials; worse than a current one, because nobody rotates it.
 
 Then run `openbox init --provider <tool>` once. One install governs every
-session on the machine, and enforcement is on by default.
+session on the machine, and enforcement is unconditional.
 
 ## Changing your mind later
 
 | Want to | Do |
 |---|---|
-| Turn enforcement off | `OPENBOX_ENFORCE=false` for one run, or `"enforce": false` in `~/.openbox/<tool>/dev.json` to persist it for that tool |
-| Turn it back on | re-run `init`; enforce is the default |
+| Turn enforcement off | not possible any more: enforcement and fail-closed delivery are both unconditional; `enforce`/`OPENBOX_ENFORCE`/`fail_closed` still parse, so `openbox doctor` names them as ignored, but none of them select anything |
 | Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>`; the prompt gate and its raised hook timeout are installer-registered, so an old registration keeps the old behavior until then |
+| Pick up ordered, single-attempt lane delivery on an existing install | re-run `openbox init --provider <tool>` (or reinstall the `transport`/`telemetry` units); an old unit lacks the coordinate env keys (`OPENBOX_SPOOL_ROOT`, `OPENBOX_ADVISORY_FILE`) this needs and Codex's `UserPromptSubmit` hook timeout, until then |
 | Change the organization connection | `openbox auth` (re-run it any time; blank keeps what is already there). Re-run `init` per tool afterwards to carry a changed URL across |
 | Move a tool's agent to a new machine (there is no rotate-in-place) | `openbox init --adopt` on the new machine, with that agent's id, API key and workload private-key file; deleting `.env` and re-running `init` plainly registers a new, suffixed agent instead |
 | Stop sending prompt text | `"content_capture": false` (see [Data and privacy](data-and-privacy.md)) |
@@ -651,9 +645,9 @@ session on the machine, and enforcement is on by default.
 | Stop governing model calls | `openbox uninstall`; it is all or nothing, because a machine with hooks and no lane records tool calls while its model calls go unseen |
 | Uninstall | `openbox uninstall`; it detects what is installed, prints the inventory, and removes hooks, lanes, the CA, posture, the spool and your credentials. It needs no credential to run |
 
-A plain re-run of `init` never downgrades your posture silently: turning
-enforcement off takes an explicit `OPENBOX_ENFORCE=false` or a config key, and `init` says so when it
-does.
+A plain re-run of `init` never downgrades your posture silently: there is no
+key or environment variable left that turns enforcement off or makes an
+outage proceed instead of denying, so a re-run cannot regress either one.
 
 ## What is not verified
 
@@ -696,9 +690,9 @@ the flow changed.
 | `openbox auth needs a terminal` | `auth` takes no flags. Use one of the three automation routes in step 3; the first, exporting `OPENBOX_CONTROL_TOKEN` and running `init` per tool, is the one that mints an identity. |
 | Hooks never fire | The session was started before `init`, or you are in a directory where `init` was not run (project scope is the default). Restart the tool; for Codex run `/hooks` and trust them. |
 | No events at all, and `doctor` looks fine | Check `doctor`'s `can they run` line. An org-managed machine can have the hooks installed, correct, and disabled by managed policy — the one failure that reports itself as nothing. |
-| Everything is denied | `fail_closed` is on and OpenBox cannot be reached, so every gated call denies. `openbox doctor` shows the failure policy and the last verdict. Restore connectivity, or set `fail_closed:false` to proceed ungoverned instead. |
-| `OpenBox governance: Session is no longer active`; the session stops, and every prompt after it is refused | Not your org's policy; a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it answers the next event with a HALT; since a HALT ends the session; the turn stops and a local latch refuses every later prompt/tool call in it. Fail-open does not apply, because a HALT is a verdict rather than an outage. **Start a new session**; the latch is per-session and a fresh session restores the server-side record. Known core defect, fix in flight. |
-| A session refuses everything with `session halted by a governance HALT verdict` | Your org's policy (or the defect above) HALTed this session earlier; the latch under `~/Library/Application Support/openbox/halted-sessions/` (Linux: `~/.config/openbox/`) is replaying it, by design. Start a new session. The halting verdict and every refusal are in `enforcements.jsonl` (`source:"evaluate"` for the verdict, `source:"session-halt"` for the replays). |
+| Everything is denied and the session will not recover | Delivery is always fail-closed now: OpenBox cannot be reached (or a request to it explicitly failed), so a gated call denied and the run halted. `openbox doctor` lists halted runs and names the event it could not record. There is no `fail_closed:false` any more to proceed ungoverned instead; restore connectivity and **start a new session** (Codex: a genuinely new session, not a `resume` of the halted one, which stays halted). |
+| `OpenBox governance: Session is no longer active`; the session stops, and every prompt after it is refused | Not your org's policy; a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it answers the next event with a HALT; since a HALT ends the session; the turn stops and a local latch refuses every later prompt/tool call in it. This is a genuine server verdict, not a delivery failure -- fail-closed does not distinguish them, both deny. **Start a new session**; the latch is per-session and a fresh session restores the server-side record. Known core defect, fix in flight. |
+| A session refuses everything with `session halted by a governance HALT verdict`, or `OpenBox could not record … for this session` | The first is your org's policy (or the defect above) HALTing the session; the second is OpenBox itself failing to deliver one event -- either way the latch under `~/Library/Application Support/openbox/halted-sessions/` (Linux: `~/.config/openbox/`) is replaying it, by design. Start a new session (Codex `resume` continues the same run and stays halted). The halting cause and every refusal are in `enforcements.jsonl` (`source:"evaluate"` for a verdict, `source:"session-halt"` for the replays); `openbox doctor` names the event a delivery-failure latch could not record. |
 | A session hangs on a tool call | An approval is filed and undecided. It is in the dashboard's queue; deciding it releases the session. |
 | Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice; usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
 | Every model call fails after an install | The elected lane is not listening and a dead loopback port fails closed. `openbox doctor` says whether it is alive; `~/.openbox/transport.log` and `telemetry.log` say why it exited; `openbox transport` in the foreground shows the same in real time. `openbox uninstall` gets you working again immediately. |

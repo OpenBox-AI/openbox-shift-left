@@ -158,22 +158,32 @@ path + event names only; no key, DID, or URL.
 `openbox init --provider codex` writes OpenBox-owned entries for the eleven
 events into `$CODEX_HOME/hooks.json` (default `~/.codex/hooks.json`), each
 `{"type":"command","command":"\"<engine>\" hook codex <Event>","timeout":5}` (3
-s for SessionEnd, 30 s for PreToolUse; Codex timeouts are in seconds), with
-matcher `"*"` on the tool hooks. The two **gating** hooks — `PreToolUse` and
-`PermissionRequest` — carry the raised ceiling, because they are the ones that
-can hold for a real approval decision; a tighter bound on either would time out
+s for SessionEnd, 30 s for the gated hooks; Codex timeouts are in seconds), with
+matcher `"*"` on the tool hooks. The **three gating** hooks — `PreToolUse`,
+`PermissionRequest` and `UserPromptSubmit` — carry the raised 30 s ceiling
+(`installer.go`'s `gatedHooks`, the one source of truth the runtime gate check
+reads too), because each can hold for a real approval decision or a gate drain
+of its own session's backlog; a tighter bound on any of them would time out
 mid-decision and fail the call open. The ceiling is not a delay; the engine
-spends it only
-when a high-risk class escalated and core filed an approval.
+spends it only when a high-risk class escalated and core filed an approval, or
+when a gate drains a backlog within its own slack.
 
 SessionEnd's 3 s is **not a choice**: Codex clamps that hook to 3 s and logs
 that it did (`clamping SessionEnd hook timeout to 3s in <hooks.json>`, measured
 on 0.150.0-alpha.8). Registering the old 15 was fiction, and the engine's drain
 budget sat above the real ceiling, so the flush was killed mid-drain every time.
-The budget now sits under it (`hookrun.go`'s `flushBudget`) and the flush
-finishes. Nothing is lost to the smaller window: every non-SessionEnd hook
-already nudges a realtime flush, and an undrained tail is swept by the next
-hook's carry-over. The engine path is
+The budget now sits under it: SessionEnd sends inline, in the hook itself,
+within its own 2 s window (1 s per attempt, `hookrun.go`'s
+`sessionEndInlineWindow`/`sessionEndAttemptTimeout`), not the detached
+`flush` subcommand's own 60 s budget (`flushBudget`), which only bounds the
+spawned fallback flusher SessionEnd starts when its inline window runs out
+before every queued event was attempted. Nothing is lost to the smaller
+window: every hook nudges a realtime flush or, for SessionStart/SessionEnd,
+attempts delivery inline first, and whatever a session's own inline attempt or
+nudge leaves queued is later swept by the periodic sweep (30-day retirement
+for a genuinely unattempted backlog) -- single-attempt delivery has no
+carry-over: an attempted-and-refused event is ledgered and gone immediately,
+never held for a later retry. The engine path is
 this running `openbox` binary (`os.Executable` via the CLI registry; the CC
 `EngineBinary` precedent; no bundle, no binary copy). The merge is **idempotent
 and ownership-aware**: re-install updates entries whose command invokes `… hook
@@ -269,22 +279,28 @@ byte-identical to the pre-the Codex adapter's usage leg path.
 
 ## Enforce leg
 
-**On by default.** `openbox init --provider codex` leaves the posture enforcing
-without writing a key for it: a bool that defaults to true cannot express "said
-nothing", so an absent key resolves to on and a deliberate opt-out survives a
-re-install. `OPENBOX_ENFORCE=false` observes for one run. With enforce **off**
-the observe path is **byte-identical** —
-the decider is never invoked (asserted: `TestObserveByteParity_EnforceOff`).
-Enforcement gates **only** the PreToolUse hook, pre-execution, hard-bounded,
-fail-open by default (an owner decision / INV-3b). Exit code is always 0; we speak Codex's
+**Unconditional.** `openbox init --provider codex` leaves the posture
+enforcing without writing a key for it: a bool that defaults to true cannot
+express "said nothing", so an absent key resolves to on. `enforce`/
+`OPENBOX_ENFORCE` still parse -- so `openbox doctor` can name them as ignored
+-- but neither turns enforcement off any more; `ResolveEnforce()` always
+reports `true` (`TestResolveEnforce_Codex`), and there is no observe path left
+for a gated hook to fall back to (`TestObserveByteParity_EnforceOff` is gone;
+`TestObserveByteParity_NeverGatedHooks` covers only the hook classes that were
+never gated in the first place). Enforcement gates **three** hook classes --
+`PreToolUse`, `PermissionRequest`, `UserPromptSubmit` -- each pre-execution,
+hard-bounded, single-attempt and unconditionally fail-closed (an owner
+decision, superseding the earlier fail-open-by-default / INV-3b framing: an
+outage now denies the call and, once an attempt is actually sent and
+explicitly refused, halts the run). Exit code is always 0; we speak Codex's
 output JSON, never the exit-2 block signal.
 
 The cascade is the shipped Claude Code E6 stack (`decision/` consumed unchanged,
 an in-process decider; no socket, no daemon, microseconds, no network on the T1
-path): **obtain** → **failure policy** (fail-open default / opt-in fail-closed
-on outage only) → **apply** onto Codex's PreToolUse contract, plus inline
-`/evaluate` evaluation of every gated call and the findings loop. Only the two
-provider edges differ from CC; the middle is shared.
+path): **obtain** → **apply** onto Codex's PreToolUse contract (delivery is
+unconditionally fail-closed now; there is no failure-policy choice left to
+make), plus inline `/evaluate` evaluation of every gated call and the findings
+loop. Only the two provider edges differ from CC; the middle is shared.
 
 ### Codex-shaped deltas (each grounded @ `rust-v0.145.0` + the binary output schemas, recorded in the enforce-leg probes)
 

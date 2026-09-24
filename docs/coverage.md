@@ -591,11 +591,16 @@ fail-open** by default, `failClosed:true` to flip; Codex feature-gated
 `features.hooks`, stable and on by default ≥ 0.145.0).
 
 Enforcement **shipped** in Phase-2 (E6 for Claude Code for Codex) and is
-**on by default**; `OPENBOX_ENFORCE=false` opts out for one run, and an observing
-session treats every verdict as allow ([INV-3](dev-event-contract.md#invariants)). Two bounds come with that default
-and both must stay true: enforcement is inert until the org publishes a policy,
-and `fail_closed` stays off. The verdict itself is the server's; nothing local
-decides one. What the hook does in-process (its no-sidecar shape) is apply it,
+**unconditional**; `enforce`/`OPENBOX_ENFORCE` still parse (so `openbox doctor`
+can name them as ignored) but no longer opt out, and there is no
+`OPENBOX_ENFORCE=false` session left that treats every verdict as advisory
+([INV-3](dev-event-contract.md#invariants) is unaffected for a hook class the
+adapter never gates at all). One bound still holds: enforcement is inert
+until the org publishes a policy. Delivery is
+unconditionally fail-closed too -- `fail_closed` still parses but no longer
+selects anything, and an unaccepted event halts its run rather than proceeding.
+The verdict itself is the server's; nothing local decides one. What the hook
+does in-process (its no-sidecar shape) is apply it,
 **tighten-only**; it never turns a provider's own deny into an allow, and the
 one `allow` it may emit rides a redacting rewrite, never a grant.
 
