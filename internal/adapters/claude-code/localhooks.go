@@ -295,6 +295,18 @@ type LocalHookAudit struct {
 	// DuplicateEvents are the events where one invocation is registered more than
 	// once; the same defect within a single engine path.
 	DuplicateEvents []string
+	// ShortTimeoutEvents are the events where an OpenBox-owned primary handler
+	// (the "hook claude-code <event>" invocation, not the PreToolUse rewake
+	// helper, which carries its own much larger spec) is installed with a
+	// "timeout" below that event's current spec in localHookEvents. `openbox
+	// init` always writes the current spec (reconcileLocalHook rewrites
+	// "timeout" on every run), so a lower value here is residue from before a
+	// budget increase: this machine's settings file, not the running binary,
+	// is stale. Claude Code kills a hook that outruns its timeout, and a
+	// killed gated hook is a non-blocking error to Claude Code, so the tool
+	// call it was supposed to gate proceeds ungoverned. An absent "timeout" is
+	// Claude Code's own default (60s) and is never short.
+	ShortTimeoutEvents []string
 }
 
 // AuditHooks reports what OpenBox registrations one settings file holds, so
@@ -323,6 +335,7 @@ func AuditHooks(settingsPath string) (LocalHookAudit, error) {
 	for _, ev := range localHookEvents {
 		entries, _ := hooks[ev.Event].([]any)
 		counts := map[string]int{}
+		shortTimeout := false
 		for _, e := range entries {
 			entry, _ := e.(map[string]any)
 			inner, _ := entry["hooks"].([]any)
@@ -337,6 +350,19 @@ func AuditHooks(settingsPath string) (LocalHookAudit, error) {
 				engines[path] = true
 				_, invocation, _ := splitEngineToken(strings.TrimSpace(command))
 				counts[invocation]++
+				// Only the event's own primary handler carries this event's spec;
+				// PreToolUse's "rewake claude-code" helper is a different invocation
+				// with its own much larger timeout (rewakeHookTimeoutSec) and would
+				// false-flag against ev.Timeout otherwise.
+				if invocation != "hook claude-code "+ev.Event {
+					continue
+				}
+				if raw, present := hook["timeout"]; present {
+					// JSON numbers decode as float64 through map[string]any.
+					if got, ok := raw.(float64); ok && got < float64(ev.Timeout) {
+						shortTimeout = true
+					}
+				}
 			}
 		}
 		for _, n := range counts {
@@ -344,6 +370,9 @@ func AuditHooks(settingsPath string) (LocalHookAudit, error) {
 				audit.DuplicateEvents = append(audit.DuplicateEvents, ev.Event)
 				break
 			}
+		}
+		if shortTimeout {
+			audit.ShortTimeoutEvents = append(audit.ShortTimeoutEvents, ev.Event)
 		}
 	}
 	for e := range engines {

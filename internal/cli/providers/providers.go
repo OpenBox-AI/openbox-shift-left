@@ -30,10 +30,11 @@ func Engine(name string) (provider.HookEngine, error) {
 // registration, re-declared here so command code can read it without importing
 // an adapter (TestOnlyTheRegistryImportsAdapters).
 type LocalHookAudit struct {
-	SettingsPath    string
-	Present         bool
-	Engines         []string
-	DuplicateEvents []string
+	SettingsPath       string
+	Present            bool
+	Engines            []string
+	DuplicateEvents    []string
+	ShortTimeoutEvents []string
 }
 
 // AuditHooks reports which OpenBox engines one settings file registers. The
@@ -45,10 +46,11 @@ type LocalHookAudit struct {
 func AuditHooks(settingsPath string) (LocalHookAudit, error) {
 	a, err := claudecode.AuditHooks(settingsPath)
 	return LocalHookAudit{
-		SettingsPath:    a.SettingsPath,
-		Present:         a.Present,
-		Engines:         a.Engines,
-		DuplicateEvents: a.DuplicateEvents,
+		SettingsPath:       a.SettingsPath,
+		Present:            a.Present,
+		Engines:            a.Engines,
+		DuplicateEvents:    a.DuplicateEvents,
+		ShortTimeoutEvents: a.ShortTimeoutEvents,
 	}, err
 }
 

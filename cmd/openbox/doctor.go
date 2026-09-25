@@ -1086,6 +1086,11 @@ func (a *app) reportHookRegistration() {
 			fmt.Fprintf(a.stdout, "    WARNING: registered more than once for: %s; same duplication.\n", strings.Join(audit.DuplicateEvents, ", "))
 			fmt.Fprintf(a.stdout, "      Run `openbox init`.\n")
 		}
+		if len(audit.ShortTimeoutEvents) > 0 {
+			fmt.Fprintf(a.stdout, "    WARNING: installed with a shorter timeout than the current spec for: %s.\n", strings.Join(audit.ShortTimeoutEvents, ", "))
+			fmt.Fprintf(a.stdout, "      Claude Code may kill the hook before governance answers, and a killed\n")
+			fmt.Fprintf(a.stdout, "      hook lets the tool call through ungoverned. Run `openbox init`.\n")
+		}
 	}
 
 	a.reportCrossLevelHooks(engines)

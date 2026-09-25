@@ -87,6 +87,46 @@ func TestDoctorWarnsWhenOneInvocationIsRegisteredTwice(t *testing.T) {
 	}
 }
 
+// TestDoctorWarnsOnAShortTimeout a PreToolUse entry installed at 5s predates
+// the gate's evaluation budget moving up (currently 30s): Claude Code will
+// kill the hook before governance answers, and a killed gated hook is a
+// non-blocking error, so the tool call it was supposed to gate proceeds
+// ungoverned. `openbox init` already rewrites the timeout; doctor must say so.
+func TestDoctorWarnsOnAShortTimeout(t *testing.T) {
+	out := inDirWithSettings(t, map[string]any{"hooks": map[string]any{
+		"PreToolUse": []any{
+			map[string]any{"matcher": "*", "hooks": []any{
+				map[string]any{"type": "command", "command": `"/opt/a/bin/openbox" hook claude-code PreToolUse`, "timeout": 5},
+			}},
+		},
+	}})
+
+	if !strings.Contains(out, "WARNING") || !strings.Contains(out, "PreToolUse") {
+		t.Errorf("a short-timeout entry produced no WARNING naming the event:\n%s", out)
+	}
+	if !strings.Contains(out, "openbox init") {
+		t.Errorf("doctor did not tell the reader to run `openbox init`:\n%s", out)
+	}
+}
+
+// TestDoctorDoesNotWarnOnATimeoutAtSpec an entry installed at the current spec
+// must not warn: TestDoctorDoesNotWarnOnASingleEngine already proves a
+// timeout-less fixture is silent, so this proves an explicit, current timeout
+// is equally silent.
+func TestDoctorDoesNotWarnOnATimeoutAtSpec(t *testing.T) {
+	out := inDirWithSettings(t, map[string]any{"hooks": map[string]any{
+		"PreToolUse": []any{
+			map[string]any{"matcher": "*", "hooks": []any{
+				map[string]any{"type": "command", "command": `"/opt/a/bin/openbox" hook claude-code PreToolUse`, "timeout": 30},
+			}},
+		},
+	}})
+
+	if strings.Contains(out, "shorter timeout") {
+		t.Errorf("a current-spec timeout warned:\n%s", out)
+	}
+}
+
 // TestDoctorReportsAnAbsentProjectHookFileAsAFact an absent file is the normal
 // state; a global-scope install, or any directory that was never initialized.
 // It must read as a fact about this directory, not as a fault, and never as
