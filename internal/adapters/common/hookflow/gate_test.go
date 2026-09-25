@@ -444,8 +444,9 @@ func TestGate_ExhaustedSlackSkipsTheDrain(t *testing.T) {
 		Contract: testContract{approval: "ask"},
 		Evaluator: Evaluator{
 			// Gating - HookBudgetMargin(1s) == DefaultEvaluationTimeout
-			// (3.5s): the escalation's own budget consumes essentially all
-			// of it, leaving ~0 slack for the drain.
+			// (10s): the escalation's own budget consumes essentially all
+			// of it, leaving ~0 slack for the drain -- well under
+			// GateDrainAttemptTimeout (3.5s), so the drain is skipped.
 			Ceiling:    provider.HookCeiling{Gating: DefaultEvaluationTimeout + HookBudgetMargin},
 			MaxTimeout: 10 * time.Second,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
@@ -488,9 +489,10 @@ func TestGate_BusyStripePastSlackSkipsTheDrain(t *testing.T) {
 		Contract: testContract{approval: "ask"},
 		Evaluator: Evaluator{
 			// Gating - HookBudgetMargin - the escalation's own budget still
-			// leaves a slack (~4.5s) comfortably above DefaultEvaluationTimeout,
-			// so the drain is attempted (and blocks on the busy stripe) rather
-			// than skipped outright for being too small to cover one attempt.
+			// leaves a slack (~4.5s) comfortably above GateDrainAttemptTimeout
+			// (3.5s), so the drain is attempted (and blocks on the busy stripe)
+			// rather than skipped outright for being too small to cover one
+			// attempt.
 			Ceiling:    provider.HookCeiling{Gating: 6 * time.Second},
 			MaxTimeout: 500 * time.Millisecond,
 			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },

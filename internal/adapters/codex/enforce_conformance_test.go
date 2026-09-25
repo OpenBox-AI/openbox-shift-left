@@ -149,8 +149,8 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 			t.Fatalf("whole-hook budget %v must be < installed gate-hook timeout %v (else Codex's fail-open kill defeats fail-closed)",
 				hookflow.EnforceBudget((Engine{}).HookCeilings()), (Engine{}).HookCeilings().Gating)
 		}
-		if maxEvaluationTimeout > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
-			t.Errorf("T2 clamp %v must stay within the whole-hook budget %v", maxEvaluationTimeout, hookflow.EnforceBudget((Engine{}).HookCeilings()))
+		if worst := hookflow.GateDrainAttemptTimeout + hookflow.DefaultEvaluationTimeout + hookflow.MaxStripeWait; worst >= hookflow.EnforceBudget((Engine{}).HookCeilings()) {
+			t.Errorf("contended gate worst case %v must stay under the whole-hook budget %v", worst, hookflow.EnforceBudget((Engine{}).HookCeilings()))
 		}
 	})
 

@@ -1,17 +1,11 @@
 package codex
 
 import (
-	"time"
-
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-const (
-	envEnforcementFile = devconfig.EnvEnforcementFile
-	envTier2Timeout    = devconfig.EnvTier2Timeout
-)
+const envEnforcementFile = devconfig.EnvEnforcementFile
 
 // DevConfig is the shared non-secret coordinate file contract.
 type DevConfig = devconfig.DevConfig
@@ -150,18 +144,3 @@ func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 // ResolveOrgSigningKey returns the org's pinned policy-bundle signing key
 // (base64 raw Ed25519) and its id, from the shared dev config (E8-S6).
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }
-
-// ResolveEvaluationTimeout resolves the in-binary budget for one escalation:
-// config first, env-if-parseable wins; <=0 yields defaultEvaluationTimeout;
-// clamped to maxEvaluationTimeout (the Codex whole-hook wall-clock bound; see
-// enforce_tier2.go).
-func ResolveEvaluationTimeout() time.Duration {
-	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
-	if ms <= 0 {
-		return hookflow.DefaultEvaluationTimeout
-	}
-	if maxMS := int64(maxEvaluationTimeout / time.Millisecond); int64(ms) > maxMS {
-		return maxEvaluationTimeout
-	}
-	return time.Duration(ms) * time.Millisecond
-}

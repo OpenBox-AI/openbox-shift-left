@@ -323,7 +323,7 @@ func TestClampsDerivedFromInstalledTimeout(t *testing.T) {
 	if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
 		t.Errorf("the whole-hook budget must land strictly before Codex's hook kill (probe P1 fail-open)")
 	}
-	if maxEvaluationTimeout > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
-		t.Errorf("the T2 clamp must stay within the whole-hook budget")
+	if evaluator.MaxTimeout != 0 {
+		t.Errorf("evaluator.MaxTimeout = %v; production must leave it zero or it re-clamps the gate's escalation budget", evaluator.MaxTimeout)
 	}
 }

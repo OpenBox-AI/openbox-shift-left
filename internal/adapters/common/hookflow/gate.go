@@ -236,41 +236,61 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 // same 5s regardless of how large that backlog is.
 const MaxStripeWait = 5 * time.Second
 
+// GateDrainAttemptTimeout bounds ONE drain attempt inside a gated call's own
+// slack -- deliberately shorter than DefaultEvaluationTimeout (the gate's own
+// escalation budget), not equal to it. An attempt this short that goes
+// unanswered is requeued for the 30s background drainers
+// (RequeueUnanswered), so a short attempt costs this call nothing beyond the
+// time it waited; only a live-but-slower-than-3.5s core pays a repeated toll
+// (one doomed 3.5s attempt per gated call, with the backlog only actually
+// clearing via the 30s drainers). It must never exceed
+// DefaultEvaluationTimeout: the contended worst case is GateDrainAttemptTimeout
+// + DefaultEvaluationTimeout + MaxStripeWait (18.5s today), and matching the
+// two would push it to 25s.
+const GateDrainAttemptTimeout = 3500 * time.Millisecond
+
 // drain runs this call's own queue-drain step: whatever fits in the slack
-// left over once the escalation's own budget is reserved out of what
-// remains of the hook's own ceiling, waiting at most MaxStripeWait to take
-// this session's own stripe (this call owns it for its own duration, the
-// same as an inline SessionStart/SessionEnd attempt, once acquired) and
-// requeuing -- never failing -- an attempt this call's own window could not
-// get an answer for (RequeueUnanswered: the identical unanswered-vs-
-// explicit-failure discriminator the escalation step below reuses through
-// EscalateWith). A stripe still busy past MaxStripeWait, or an exhausted
-// slack, both leave the backlog exactly where it was: unattempted, never a
-// failure. A drain that could not even start one attempt (its own slack
-// already below one evaluation's worth of budget) touches nothing at all --
-// DrainSession's own contract -- so calling this with a slack of, say, a few
-// milliseconds costs nothing beyond the call itself.
+// left over once the escalation's own budget (DefaultEvaluationTimeout, or
+// less under MaxTimeout/remaining) is reserved out of what remains of the
+// hook's own ceiling, waiting at most MaxStripeWait to take this session's
+// own stripe (this call owns it for its own duration, the same as an inline
+// SessionStart/SessionEnd attempt, once acquired) and requeuing -- never
+// failing -- an attempt this call's own window could not get an answer for
+// (RequeueUnanswered: the identical unanswered-vs-explicit-failure
+// discriminator the escalation step below reuses through EscalateWith). A
+// stripe still busy past MaxStripeWait, or an exhausted slack, both leave the
+// backlog exactly where it was: unattempted, never a failure. A drain that
+// could not even start one attempt (its own slack already below
+// GateDrainAttemptTimeout) touches nothing at all -- DrainSession's own
+// contract -- so calling this with a slack of, say, a few milliseconds costs
+// nothing beyond the call itself.
+//
+// The attempt itself is bounded by GateDrainAttemptTimeout, NOT by
+// DefaultEvaluationTimeout: the two are deliberately different budgets now
+// (see GateDrainAttemptTimeout's own comment) -- a short, disposable drain
+// attempt inside this call's own slack, versus the full budget this call's
+// own escalation gets afterward.
 func (g EnforceGate) drain(ctx context.Context, logger *log.Logger, sessionID string, cl Governor, enforceStart time.Time) {
 	slack := g.Evaluator.remaining(enforceStart) - g.Evaluator.Budget(enforceStart, DefaultEvaluationTimeout)
 	// AttemptTimeout is NEVER clamped down to slack: a pass never starts an
 	// attempt it cannot finish (DrainSession's own contract), so if slack
-	// itself is shorter than one full evaluation, the right answer is to
-	// skip entirely -- not to shrink the attempt bound to match slack
-	// exactly, which would make DrainSession's "don't start what can't
-	// finish" guard compare slack to itself: a comparison with no real
-	// margin, decided by a few microseconds of scheduling on either side of
-	// the boundary, that lets a doomed-to-time-out attempt fire (and take
-	// the stripe lock for it) roughly as often as it correctly skips.
-	// Checked here, before ever calling DrainSession, so a slack too small
-	// for one attempt never even reaches for the lock.
-	if slack < DefaultEvaluationTimeout {
+	// itself is shorter than one drain attempt, the right answer is to skip
+	// entirely -- not to shrink the attempt bound to match slack exactly,
+	// which would make DrainSession's "don't start what can't finish" guard
+	// compare slack to itself: a comparison with no real margin, decided by a
+	// few microseconds of scheduling on either side of the boundary, that
+	// lets a doomed-to-time-out attempt fire (and take the stripe lock for
+	// it) roughly as often as it correctly skips. Checked here, before ever
+	// calling DrainSession, so a slack too small for one attempt never even
+	// reaches for the lock.
+	if slack < GateDrainAttemptTimeout {
 		return
 	}
 	dctx, cancel := context.WithTimeout(ctx, slack)
 	defer cancel()
 	n, err := g.Queue.DrainSession(dctx, sessionID, cl, DrainOptions{
 		Mode:              Block,
-		AttemptTimeout:    DefaultEvaluationTimeout,
+		AttemptTimeout:    GateDrainAttemptTimeout,
 		RequeueUnanswered: true,
 		LockWait:          MaxStripeWait,
 	})

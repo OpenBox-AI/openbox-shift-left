@@ -1,10 +1,7 @@
 package claudecode
 
 import (
-	"time"
-
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -20,7 +17,6 @@ const (
 	envEnforce         = devconfig.EnvEnforce
 	envFailClosed      = devconfig.EnvFailClosed
 	envTier2           = devconfig.EnvTier2
-	envTier2Timeout    = devconfig.EnvTier2Timeout
 	envSecretDetection = devconfig.EnvSecretDetection
 	envFindings        = devconfig.EnvFindings
 	envFindingsCursor  = devconfig.EnvFindingsCursor
@@ -133,21 +129,6 @@ func ResolveFailClosed() bool { return devconfig.ResolveFailClosed() }
 // devconfig.ResolveTier2 for why an explicit false is deliberately not
 // honoured.
 func ResolveTier2() bool { return devconfig.ResolveTier2() }
-
-// ResolveEvaluationTimeout resolves the in-binary budget for one /evaluate
-// escalation: config first, env-if-parseable wins; <=0 yields
-// defaultEvaluationTimeout; clamped to maxEvaluationTimeout (the CC 5s-hook-
-// kill bound).
-func ResolveEvaluationTimeout() time.Duration {
-	ms := devconfig.ResolveTimeoutMS(func(c DevConfig) int { return c.Tier2TimeoutMS }, envTier2Timeout)
-	if ms <= 0 {
-		return hookflow.DefaultEvaluationTimeout
-	}
-	if maxMS := int64(maxEvaluationTimeout / time.Millisecond); int64(ms) > maxMS {
-		return maxEvaluationTimeout
-	}
-	return time.Duration(ms) * time.Millisecond
-}
 
 // ResolveAgentID resolves the backend agent id for policy sync/staleness.
 func ResolveAgentID() string { return devconfig.ResolveAgentID() }

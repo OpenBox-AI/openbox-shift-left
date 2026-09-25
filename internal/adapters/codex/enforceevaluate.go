@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"context"
 	"log"
 	"time"
 
@@ -21,11 +20,8 @@ func (Engine) HookCeilings() providerspi.HookCeiling {
 	}
 }
 
-var maxEvaluationTimeout = hookflow.EnforceBudget(Engine{}.HookCeilings())
-
 var evaluator = hookflow.Evaluator{
-	Ceiling:    Engine{}.HookCeilings(),
-	MaxTimeout: maxEvaluationTimeout,
+	Ceiling: Engine{}.HookCeilings(),
 	NewClient: func(logger *log.Logger) (hookflow.Governor, error) {
 		creds, err := ResolveCredentials()
 		if err != nil {
@@ -33,10 +29,6 @@ var evaluator = hookflow.Evaluator{
 		}
 		return creds.NewClient(logger)
 	},
-}
-
-func evaluationBudget(enforceStart time.Time) time.Duration {
-	return evaluator.Budget(enforceStart, ResolveEvaluationTimeout())
 }
 
 func isHighRiskClass(toolName string) bool {
@@ -49,12 +41,4 @@ func isHighRiskClass(toolName string) bool {
 
 func decisionTightens(dec decision.Decision) bool {
 	return hookflow.DecisionTightens(dec, contract)
-}
-
-func escalateEvaluation(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
-	devEv, ok := m.Map(HookPreToolUse, ev)
-	if !ok {
-		return hookflow.EvaluationFailOpen("event not mappable")
-	}
-	return evaluator.Escalate(ctx, logger, devEv, budget)
 }

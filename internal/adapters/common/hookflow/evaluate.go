@@ -17,8 +17,21 @@ const (
 	SourceEvaluateFailOpen = "evaluate:fail-open"
 )
 
-// DefaultEvaluationTimeout is the default budget for one evaluation.
-const DefaultEvaluationTimeout = 3500 * time.Millisecond
+// DefaultEvaluationTimeout is the budget for the gate's own escalation POST:
+// the one, single-attempt /evaluate round-trip a gated call makes once its
+// own drain step (if any) is done. Sized so a core that is slow but still
+// answering yields a real verdict under always-fail-closed, rather than a
+// fail-closed deny after too short a wait.
+//
+// This is the dominant term in the gate's worst-case wall clock against a
+// hung core: uncontended, one gated call pays at most
+// GateDrainAttemptTimeout (one doomed drain attempt, if a backlog is queued)
+// + DefaultEvaluationTimeout (its own escalation) = 3.5s + 10s = 13.5s; add
+// MaxStripeWait (5s) for the contended case where another drainer already
+// holds the session's stripe, for 18.5s. Both must stay well inside
+// EnforceBudget (29s for a 30s gated-hook ceiling) so the drain step keeps
+// real slack rather than being squeezed to zero by this alone.
+const DefaultEvaluationTimeout = 10 * time.Second
 
 // HookBudgetMargin is the slack reserved under the provider's declared gating
 // ceiling for the non-gate work that brackets the gate: config reads,
@@ -37,7 +50,10 @@ func EnforceBudget(c provider.HookCeiling) time.Duration {
 type Evaluator struct {
 	// Ceiling is the provider's declared hook-kill limit.
 	Ceiling provider.HookCeiling
-	// MaxTimeout clamps the configured per-evaluation budget.
+	// MaxTimeout is a TEST SEAM, not a configuration knob: it clamps the
+	// configured per-evaluation budget (Budget) so a test can run in
+	// milliseconds instead of DefaultEvaluationTimeout's real 10s. Zero (its
+	// default) means no clamp. Every production adapter leaves this zero.
 	MaxTimeout time.Duration
 	// NewClient builds the control-plane transport for the evaluation and for the
 	// approval hold that can follow it.

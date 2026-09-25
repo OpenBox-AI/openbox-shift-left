@@ -113,28 +113,6 @@ func TestResolveTier2(t *testing.T) {
 	}
 }
 
-func TestResolveEvaluationTimeout(t *testing.T) {
-	isolateConfig(t)
-	if got := ResolveEvaluationTimeout(); got != hookflow.DefaultEvaluationTimeout {
-		t.Errorf("default = %v, want %v", got, hookflow.DefaultEvaluationTimeout)
-	}
-	t.Setenv(envTier2Timeout, "1000")
-	if got := ResolveEvaluationTimeout(); got != time.Second {
-		t.Errorf("1000ms env = %v, want 1s", got)
-	}
-	t.Setenv(envTier2Timeout, "60000")
-	if got := ResolveEvaluationTimeout(); got != maxEvaluationTimeout {
-		t.Errorf("60000ms env = %v, want the %v clamp", got, maxEvaluationTimeout)
-	}
-	t.Setenv(envTier2Timeout, "notanumber")
-	if got := ResolveEvaluationTimeout(); got != hookflow.DefaultEvaluationTimeout {
-		t.Errorf("garbage env = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
-	}
-	if maxEvaluationTimeout >= 5*time.Second {
-		t.Errorf("maxEvaluationTimeout %v must stay under CC's 5s hook timeout (fails OPEN)", maxEvaluationTimeout)
-	}
-}
-
 // TestPinnedClockStableEventID proves the minor-1 fix: with the Mapper clock
 // pinned (as RunHook does per-invocation), mapping the same PreToolUse payload
 // twice; the Observe spool copy + the T2 /evaluate copy; yields the same
@@ -165,16 +143,6 @@ func TestPinnedClockStableEventID(t *testing.T) {
 	}
 }
 
-func TestTier2Budget(t *testing.T) {
-	isolateConfig(t) // default T2 budget = hookflow.DefaultEvaluationTimeout (3.5s)
-	if got := evaluationBudget(time.Now()); got != hookflow.DefaultEvaluationTimeout {
-		t.Errorf("fresh enforceStart budget = %v, want default %v", got, hookflow.DefaultEvaluationTimeout)
-	}
-	if got := evaluationBudget(time.Now().Add(-hookflow.EnforceBudget(Engine{}.HookCeilings()) - time.Second)); got > 0 {
-		t.Errorf("exhausted-cap budget = %v, want <= 0 (immediate fail-open)", got)
-	}
-}
-
 // TestEnforceBudgetStaysUnderTheDeclaredCeiling the verdict-before-ceiling
 // pin. It is stated against the SPI-declared ceiling and the timeout the
 // installer actually writes, never a literal, so raising one raises the other
@@ -191,9 +159,12 @@ func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
 		t.Errorf("whole-hook budget %v must stay strictly under the ceiling %v; "+
 			"a hook killed mid-gate lets the tool run ungoverned", budget, ceiling.Gating)
 	}
-	if maxEvaluationTimeout > budget {
-		t.Errorf("the evaluation clamp %v must stay within the whole-hook budget %v",
-			maxEvaluationTimeout, budget)
+	if evaluator.MaxTimeout != 0 {
+		t.Errorf("evaluator.MaxTimeout = %v; production must leave it zero or it re-clamps the gate's escalation budget",
+			evaluator.MaxTimeout)
+	}
+	if worst := hookflow.GateDrainAttemptTimeout + hookflow.DefaultEvaluationTimeout + hookflow.MaxStripeWait; worst >= budget {
+		t.Errorf("contended gate worst case %v must stay under the whole-hook budget %v", worst, budget)
 	}
 	if ceiling.Other <= 0 {
 		t.Error("a non-gating ceiling of zero would make every non-gate hook budget negative")
@@ -400,6 +371,17 @@ func TestEscalateTier2_BudgetBound(t *testing.T) {
 	if !dec.FailOpen {
 		t.Error("a budget-exceeding /evaluate must yield a fail-open decision")
 	}
+}
+
+// escalateEvaluation maps a PreToolUse event and escalates it through the
+// adapter's own production evaluator, so these tests exercise the real
+// credential and client wiring the gate uses.
+func escalateEvaluation(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
+	devEv, ok := m.Map(HookPreToolUse, ev)
+	if !ok {
+		return hookflow.EvaluationFailOpen("event not mappable")
+	}
+	return evaluator.Escalate(ctx, logger, devEv, budget)
 }
 
 type nopWriter struct{}

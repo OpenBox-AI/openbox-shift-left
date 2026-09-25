@@ -52,12 +52,12 @@ func TestEvaluationDecision_Codex(t *testing.T) {
 
 func TestTier2Budget_ClampsUnderWholeHookBudget(t *testing.T) {
 	start := time.Now().Add(-(hookflow.EnforceBudget((Engine{}).HookCeilings()) - 200*time.Millisecond))
-	if b := evaluationBudget(start); b > 300*time.Millisecond {
-		t.Errorf("evaluationBudget = %v, want it clamped to the remaining whole-hook budget", b)
+	if b := evaluator.Budget(start, hookflow.DefaultEvaluationTimeout); b > 300*time.Millisecond {
+		t.Errorf("Budget = %v, want it clamped to the remaining whole-hook budget", b)
 	}
 	over := time.Now().Add(-2 * hookflow.EnforceBudget((Engine{}).HookCeilings()))
-	if b := evaluationBudget(over); b > 0 {
-		t.Errorf("evaluationBudget after overrun = %v, want non-positive (immediate fail-open)", b)
+	if b := evaluator.Budget(over, hookflow.DefaultEvaluationTimeout); b > 0 {
+		t.Errorf("Budget after overrun = %v, want non-positive (immediate fail-open)", b)
 	}
 }
 
@@ -103,6 +103,17 @@ func TestTier2EventIDMatchesObserve(t *testing.T) {
 	if a.EventID == b.EventID {
 		t.Skip("clock resolution too coarse to demonstrate divergence; the pinned-equality assertion above is the load-bearing one")
 	}
+}
+
+// escalateEvaluation maps a PreToolUse event and escalates it through the
+// adapter's own production evaluator, so these tests exercise the real
+// credential and client wiring the gate uses.
+func escalateEvaluation(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
+	devEv, ok := m.Map(HookPreToolUse, ev)
+	if !ok {
+		return hookflow.EvaluationFailOpen("event not mappable")
+	}
+	return evaluator.Escalate(ctx, logger, devEv, budget)
 }
 
 type nopWriter struct{}

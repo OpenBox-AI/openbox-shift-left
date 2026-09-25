@@ -160,7 +160,7 @@ neither can change it, through managed config (see
 | `secret_detection` | `OPENBOX_SECRET_DETECTION` | `true` | Redact secrets locally before sending. |
 | `findings` | `OPENBOX_FINDINGS` | `false` | Show asynchronous guardrail findings back in the session. |
 | `realtime_flush` | `OPENBOX_REALTIME` | `true` | Deliver events within seconds, instead of at session end. |
-| `approval_hold_ms` | `OPENBOX_APPROVAL_HOLD_MS` | `20000` | How long a call waits for an approver. |
+| `approval_hold_ms` | `OPENBOX_APPROVAL_HOLD_MS` | `20000` | How long a call waits for an approver; less if the governance check itself was slow, since the whole hook has 30s. |
 
 For the environment variables, `1`, `true`, `yes` or `on` means on; any other
 value means off.
@@ -298,7 +298,9 @@ A halted session stays halted until you start a new one. On Claude Code,
 ## Approvals
 
 When your policy requires approval, the call is filed with the platform and
-the session waits (20 seconds by default, `approval_hold_ms`). An approver
+the session waits (20 seconds by default, `approval_hold_ms`; less when the
+governance check itself was slow to answer, since the whole hook has 30
+seconds). An approver
 decides from the dashboard, with their own login.
 
 - Answered in time: the call proceeds.

@@ -90,7 +90,7 @@ A gated call's verdict is applied before the tool runs:
 |---|---|
 | allow | proceed |
 | block | refuse this one call or prompt |
-| require approval | file an approval and wait (default 20s); deny if nobody answers in time |
+| require approval | file an approval and wait (default 20s, less if the evaluation was slow); deny if nobody answers in time |
 | halt | stop the session and latch it; every later call in the run is refused locally |
 
 Enforcement is always on and always fails closed. The config keys that once
