@@ -159,11 +159,15 @@ nothing is blocked — you get observability either way.
 
 **It is unconditionally fail-closed.** Every risky action, and every delivery
 attempt behind it, gets exactly one try. If your platform cannot be reached,
-or does not accept it, that action denies — and once an attempt was actually
-sent and explicitly refused (not merely timed out on its own budget), the
-whole session halts until you start a new one. `fail_closed: true` in
-`~/.openbox/<tool>/dev.json` still parses but no longer selects anything:
-there is no setting left that makes an outage proceed instead of denying.
+or does not accept it, that action denies. And if that delivery attempt was
+proven to fail rather than merely timing out on its own local budget --
+a connection refused, a 5xx, a timeout answered by the platform itself, a 401
+-- the whole run halts (every later gated call and prompt in it) until you
+start a new session; a delivery attempt that simply never heard back within
+its own budget denies that one call but does not halt the run. `fail_closed:
+true` in `~/.openbox/<tool>/dev.json` still parses but no longer selects
+anything: there is no setting left that makes an outage proceed instead of
+denying.
 
 ## How it works
 

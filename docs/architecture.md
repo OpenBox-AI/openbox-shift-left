@@ -93,15 +93,26 @@ most the first 64KB.
   together close that. The legacy `gateway` lane (superseded by `transport`;
   still running on any machine that installed it before) keeps this same
   spool-and-flush shape for its own records unchanged.
-- **A gate drains its own session's backlog in slack, then evaluates.** Before
-  escalating, a gated PreToolUse/UserPromptSubmit call drains whatever is
-  already queued for its session (within the budget slack left after
+- **A gate drains its own session's backlog within slack, then evaluates.**
+  Before escalating, a gated PreToolUse/UserPromptSubmit call drains whatever
+  is already queued for its session (within the slack the budget left after
   reserving one evaluation's worth) and re-reads the run's halt latch; a
   delivery failure or a HALT verdict the drain itself finds denies that call
-  without ever escalating. A slow core never halts a run from inside a gate:
-  an event the drain could not even start stays queued, and an event it sent
-  but never heard back from within its own budget is requeued for the 30s
-  drainers (core's idempotency key dedupes the one resulting resend); only an
+  without ever escalating. The drain waits at most `MaxStripeWait` (5s) for
+  the session's own stripe if another drainer (a lane daemon, a detached
+  flusher) already holds it; once it holds the stripe, the drain gets the
+  full remaining slack, not a smaller cap -- the 5s bound only limits the
+  wait for contention, not a legitimate uncontended backlog. A slow core
+  never halts a run from inside a gate: an event the drain could not even
+  start (the stripe stayed busy past that wait, or slack ran out first) stays
+  queued, and this call's own escalation may still reach core before it --
+  **`WorkflowStarted` reaching core first is the one guaranteed ordering
+  invariant; the rest of a run's order is best-effort within these bounds,
+  not a hard guarantee.** An event the drain sent but never heard back from
+  within its own budget is requeued for the 30s drainers; core dedupes that
+  resend on its idempotency key only if core finished processing the first
+  attempt before the resend arrives, so a resend racing a still-in-flight
+  first attempt can produce two rows rather than a guaranteed dedupe. Only an
   explicit non-acceptance halts.
 - **A lane daemon's own records now queue through the same session spool the
   hooks use**, not an in-process bounded pool (superseding the 2026-09-22
@@ -211,15 +222,33 @@ can be on without the others:
   in the caller's own budget) the run halts until a new session starts. No
   retry: one hiccup must not become a client-side amplifier across every tool
   call of every session -- it becomes a halt instead.
-- **HALT ends the session.** A HALT the control plane returns is a session
-  verdict, not a call verdict: the response carries Claude Code's
-  `continue:false` (the turn stops immediately) and a local latch
-  (`halted-sessions/` beside the other sinks) refuses every later prompt and
-  tool call in that session with no re-evaluation; `--resume` included. BLOCK
-  stays per-call. A *synthesized* HALT, the fail-closed outage answer, an
-  unanswered approval, never ends the session: only the server's own HALT does.
-  Codex has no session-stop lever, so a HALT there renders as its strongest
-  per-call deny and no latch is written.
+- **HALT ends the session -- from any hook whose contract renders one, plus
+  every hook once a delivery failure latches instead.** A HALT the control
+  plane returns is a session verdict, not a call verdict. On Claude Code
+  every gated contract (`PreToolUse`, `UserPromptSubmit`, `ConfigChange`) can
+  render the stop (`continue:false` + a stop reason) and each one that does
+  also writes the local latch (verified: `TestSessionHaltConformance`'s own
+  "C27 tool HALT denies, stops the session, and latches"). On Codex only the
+  prompt contract (`UserPromptSubmit`) can; its tool contracts (`PreToolUse`,
+  `PermissionRequest`) fold a HALT verdict into an ordinary per-call deny
+  with no session-stop rendering and no latch from that path (verified:
+  `codex/outputcontract.go`'s tool `Render` maps `DecisionHalt` to a plain
+  `deny`; its prompt `Render` does not). Either way, once any hook's contract
+  writes the run-keyed latch (`halted-sessions/` beside the other sinks),
+  every later gated call and prompt of that SAME RUN is refused with no
+  re-evaluation -- the read side checks the latch for every gated call,
+  regardless of which hook is asking or which one wrote it. BLOCK stays
+  per-call. A Claude Code `/clear` or `--resume` starts a fresh run id and is
+  unhalted even though the session id is unchanged; a Codex resume continues
+  the same run id, so a halted Codex session stays halted across a resume.
+  **A delivery failure now latches the run too, independent of any
+  contract's own rendering:** an explicit, proven non-acceptance (a network
+  fault, a 5xx, a timeout, a 401, or core's own outage) writes the identical
+  latch through a separate path (`HaltOnDeliveryFailure`) the instant it
+  happens, before any output is even rendered -- so a Codex `PreToolUse` call
+  CAN still latch the run, just never from a verdict alone. Only the reason
+  differs (no policy id; it names the event core could not record instead).
+  An unanswered approval never latches by itself.
 - **Findings.** Asynchronous guardrail and drift findings surfaced back into the
   session after the fact. Off by default (`findings`).
 

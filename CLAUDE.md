@@ -128,19 +128,31 @@ delivery is single-attempt everywhere now, never only the lane daemons'
 completion would be worse than either asymmetry. Check per `activity_id`,
 never by parity.
 
-**Delivery is all-or-nothing.** One drainer per session, append order ==
+**Delivery is all-or-nothing; ordering beyond `WorkflowStarted`-first is
+best-effort, not guaranteed.** One drainer per session, append order ==
 delivery order, one attempt per event; an unaccepted event ledgers and
 latches its run (write-if-absent: whichever cause reaches a run's first
-failure wins); a gate drains its own session's backlog in slack and re-reads
-the latch before escalating; appenders never wait on the drain lock. The only
-reorder this allows is narrow and bounded: an event a gate's own drain sent
-but never heard back from within ITS OWN budget is requeued for the 30s
-drainers, and core's idempotency key dedupes the one resulting resend --
-never a general retry, and never triggered by anything short of an explicit,
-proven non-acceptance for the halt itself. `enforce`/`fail_closed` are
-deprecated the same way `tier2` is: parsed so `openbox doctor` can warn, not
-honoured (`devconfig.ResolveEnforce()`/`ResolveFailurePolicy()` are both
-hardcoded now). See
+failure wins); appenders never wait on the drain lock. A gate drains its own
+session's backlog within the slack its escalation budget leaves, waiting at
+most `MaxStripeWait` (5s) for the session's stripe if another drainer already
+holds it; once it holds the stripe, the drain gets the FULL remaining slack,
+not a smaller cap -- the cap bounds the wait for contention, not an
+uncontended drain. An event the drain could not even start (the stripe stayed
+busy past that 5s wait, or the slack ran out first) stays queued, and this
+call's own escalation may still reach core before it: **`WorkflowStarted`
+reaching core before anything else of the run is the one guaranteed
+invariant; the rest of a run's order is best-effort within these bounds.** An
+event the drain DID send but never heard back from within its own budget is
+requeued for the 30s drainers; core dedupes that resend on its idempotency
+key **only if core finished processing the first attempt before the resend
+arrives** (lookup-then-remember happens after the pipeline runs, not before
+-- `openbox-core internal/api/governance.go` ~113-115 looks up, ~246-248
+remembers only once the response is built) -- a resend racing a
+still-in-flight first attempt can produce two rows, not a guaranteed dedupe.
+`enforce`/`fail_closed` are deprecated the same way `tier2` is: parsed so
+`openbox doctor` can warn, not honoured
+(`devconfig.ResolveEnforce()`/`ResolveFailurePolicy()` are both hardcoded
+now). See
 `plans/260924-1911-ordered-session-event-queue/reports/decision-260925-0511-all-or-nothing-ordered-delivery.md`
 for the ruling and its shape.
 

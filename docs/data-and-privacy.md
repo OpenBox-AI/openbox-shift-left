@@ -632,7 +632,7 @@ a chat session never records an end, since the relay cannot see one.
 | `cc-spool/.discarded` | one line per batch this machine gave up on: a timestamp, the session, and how many events were lost. Never the events themselves. It exists because the give-up was previously silent |
 | `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
 | `pending-approvals/`, `stale/` | content-free markers keyed by session id |
-| `halted-sessions/` | one small file per HALTed session; the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused; deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
+| `halted-sessions/` | one small file per halted **run** (a Claude Code run id once it has bumped past `--resume`, otherwise the session id; the session id for Codex, which never bumps; a chat's own hashed key for a halted claude.ai conversation): the reason, a policy id for a genuine HALT verdict, or a failure class (`cause`) and the event type (`event_type`) OpenBox could not record for a delivery-failure latch, and a timestamp -- never tool content. It is what keeps that run refused; deleting it un-halts only this machine's view, and a verdict-originated halt is already recorded server-side (a delivery-failure latch has no server-side record to fall back on) |
 | `approvals-auto.jsonl` | an autonomous approver's decisions, if you run one |
 
 ### The three model-call lanes send different amounts, and one sends no content at all
