@@ -721,14 +721,31 @@ Named by claim, and enumerable: `go test -run TestGovernanceEval -v ./cmd/openbo
 | Every grader can actually fail | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalMutations` |
 | A renamed or wrong-typed `metadata` key is caught | E1 | `internal/conformance/conformance_test.go` · `TestInvalidSamplesRejected` |
 | A turn's thinking is gated with the rest of the content | E1 | `internal/adapters/claude-code/content_conformance_test.go` · `TestContentCaptureConformance` |
+| A fresh session's first core row is `WorkflowStarted`, `claude-code` and `codex` alike | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEval`; `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalCodexTwinOrdersTheSameWay` |
+| A live binary reaches core with `WorkflowStarted` first even under a slow, real flusher (20/20) | E2 | `cmd/openbox/main_test.go` · `TestSessionStartReachesCoreFirstWithALiveFlusher` |
+| A lane record and a gated hook event order through the same session spool by append order | E2 | `cmd/openbox/session_order_eval_test.go` · `TestLaneRecordAndAGatedHookOrderThroughTheSameSpool` |
+| `claude -p`'s headless run opens on the prompt itself, with no `SessionStart` ahead of it | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalHeadlessPromptOpensTheRun` |
+| Core down at session start denies the first gated call, latches the run, and a NEW session after recovery is unaffected | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers` |
+| Every delivery-failure class (network, 5xx, 401, token-exchange-failure, 4xx) is exactly one attempt and latches the run | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalOneAttemptPerFailureClass` |
+| The timeout delivery-failure class is exactly one attempt and latches the run, through the real flusher/lane-drain wiring | E2 | `internal/adapters/common/hookflow/deliveryhalt_test.go` · `TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt` |
+| A new run after a halt (CC `/clear`, `--resume`) is unhalted; a Codex resume of a halted session stays halted | E2 | `cmd/openbox/session_order_eval_test.go` · `TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted` |
+| `enforce:false`/`OPENBOX_ENFORCE=false` are ignored; every gated class still gates | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalEnforceIsIgnoredButEveryGatedClassStillGates` |
+| A gated verdict renders within budget under a 50-record backlog and a cold token | E2 | `cmd/openbox/session_order_eval_test.go` · `TestGatedVerdictWithinBudgetUnderBacklog` |
+| A gate never waits past `MaxStripeWait` for a busy stripe, but an uncontended backlog still drains past it when slack allows | E2 | `cmd/openbox/session_order_eval_test.go` · `TestGatedVerdictWhileAFlusherHoldsTheStripeOnASlowEvent`; `internal/adapters/common/hookflow/gate_test.go` · `TestGate_StripeHeldPastMaxStripeWaitSkipsTheDrainAndEscalatesPromptly`; `internal/adapters/common/hookflow/gate_test.go` · `TestGate_UncontendedBacklogStillDrainsPastMaxStripeWaitWhenSlackAllows` |
 
 **The graders behind those rows**, each a predicate that returns reasons rather
 than a verdict, and each executed against its own deliberate mutation so that it
 has been watched failing: `pairing`, `completeness`, `activity-type`,
-`delivery-once`, `signal-args`, `content-gate`, `redaction`. Two further
-graders, `reference/parity` and `reference/exempt-all`, are the *wrong* answers
-kept executable — they are not evidence, they are what proves the fixtures still
-tell the two hard cases apart.
+`delivery-once`, `signal-args`, `content-gate`, `redaction`, `start-first`,
+`one-attempt`, `halted-after-failure`. Two further graders, `reference/parity`
+and `reference/exempt-all`, are the *wrong* answers kept executable — they are
+not evidence, they are what proves the fixtures still tell the two hard cases
+apart. `one-attempt` and `halted-after-failure` are registered with no
+`Mutate` (like `redaction`): no sequence of distinct native hook payloads can
+produce a same-key double-send (claude-code's own mapper timestamps each
+event fresh per invocation, INV-5) or un-halt a healthy binary mid-run: each
+is proven red directly, against a hand-built `Run`, in
+`internal/client/fakecore/graderreasons_test.go`'s own table instead.
 
 Thinking sits at E1 on purpose: reaching it needs a `transcript_path` fixture
 the native hook payload has no slot for, so no scenario here can produce one.

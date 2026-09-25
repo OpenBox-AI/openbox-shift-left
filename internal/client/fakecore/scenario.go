@@ -40,13 +40,32 @@ type Scenario struct {
 	// session (with the date), or authored. A field on the scenario, never a
 	// key inside a native payload, which would change the shape under test.
 	Provenance string
+	// Provider is the hook subcommand argv[0] this scenario drives (`openbox
+	// hook <Provider> <Event>`): "" defaults to "claude-code", the only
+	// provider every scenario before this field existed ever spoke. A Codex
+	// twin scenario sets this to "codex" so the SAME payload-list shape
+	// drives the other adapter without a second runner.
+	Provider string
+	// Setup runs once, after the fake and its base environment are wired
+	// (evalEnv) but before the first payload fires: a scenario's own hook to
+	// script the fake further (Revoke, SetExchangeFailure, TokenEndpointDown)
+	// or set an env var evalEnv itself never touches (a deliberately
+	// misconfigured OPENBOX_ENFORCE, an env-only base URL override) without
+	// the runner needing a bespoke driver loop of its own. Nil is a no-op.
+	Setup func(t TB, fake *Server)
 }
 
 // Posture holds the environment knobs a scenario varies. Strings, not bools:
 // these are env values and "" genuinely means "say nothing and take the
 // default", which is a third state a bool cannot carry.
+//
+// Enforce is gone: enforcement is unconditional now (devconfig.ResolveEnforce
+// always reports true), so there is no longer a mode for a scenario to
+// select. `OPENBOX_ENFORCE`/the `enforce` key still parse (so they can warn),
+// but no scenario posture selects them any more -- a test that wants to prove
+// they are ignored sets the environment variable directly, not through this
+// struct.
 type Posture struct {
-	Enforce        string // "0" | "1"
 	FailClosed     string // "0" | "1"
 	ContentCapture string // "0" | "1"
 	// SecretDetection is "" (the default, on) or "0". Turning it off is how a

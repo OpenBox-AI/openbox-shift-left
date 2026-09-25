@@ -786,6 +786,118 @@ func TestHookRealtimeDelivery(t *testing.T) {
 	}
 }
 
+// TestSessionStartReachesCoreFirstWithALiveFlusher: SessionStart's own
+// inline WorkflowStarted attempt is on the critical path
+// of the SessionStart hook itself -- the hook process does not exit until
+// that attempt settles -- so even with core holding its response for ~1s and
+// realtime ON, a PreToolUse fired only once SessionStart has RETURNED (the
+// real product's own hook lifecycle: one tool never fires a later hook for a
+// session before an earlier one's own process has exited) can never overtake
+// it: the run's first core row is always WorkflowStarted, and SessionStart's
+// own wall time proves the hold was genuinely on that critical path rather
+// than skipped or backgrounded. Run 20 times (fresh session, fresh spool,
+// fresh fakecore each iteration): a flaky pass here is a real ordering bug,
+// never something to paper over with a longer hold or a sleep.
+//
+// A genuinely CONCURRENT SessionStart+PreToolUse (both processes launched
+// before either reaches the spool) was tried while building this test and
+// does not hold: the session stripe lock only serializes ACCESS to an
+// already-queued event, not "wait for the other hook's whole process to
+// finish" -- if PreToolUse's own gate drain reaches the stripe before
+// SessionStart has even appended its own observe copy, it finds nothing
+// queued and proceeds straight to its own (unrelated, un-delayed) live
+// escalation, which can then reach core before SessionStart's held attempt
+// does. That shape is not one Claude Code's own hook lifecycle can produce
+// (a tool call is never dispatched before the session's own SessionStart
+// hook has returned), so this test drives the sequential shape that
+// lifecycle actually guarantees, not an adversarial one nothing produces.
+func TestSessionStartReachesCoreFirstWithALiveFlusher(t *testing.T) {
+	memhttptest.RequireBind(t)
+	if testing.Short() {
+		t.Skip("builds a binary + spawns detached flushers; skipped in -short")
+	}
+
+	buildDir := t.TempDir()
+	bin := filepath.Join(buildDir, "openbox-r5")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build openbox: %v\n%s", err, out)
+	}
+
+	const iterations = 20
+	const hold = 1 * time.Second
+	sessionStartWallTimes := make([]time.Duration, 0, iterations)
+
+	for i := 0; i < iterations; i++ {
+		srv := fakecore.NewReal(t, fakecore.Script{DelayFor: map[string]time.Duration{fakecore.WireWorkflowStarted: hold}})
+
+		dir := t.TempDir()
+		spool := filepath.Join(dir, "spool")
+		workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := append(os.Environ(),
+			"OPENBOX_AGENT_ID="+fakecore.AgentID(),
+			"OPENBOX_SPOOL_DIR="+spool,
+			"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
+			"OPENBOX_HOME="+dir,
+			devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
+			devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
+			devconfig.EnvHaltDir+"="+filepath.Join(dir, "halts"),
+			"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
+			"OPENBOX_SESSION_DIR="+filepath.Join(dir, "sessions"),
+			"OPENBOX_BASE_URL="+srv.URL(),
+			devconfig.EnvAPIKeyDirect+"="+fakecore.APIKey(),
+			devconfig.EnvWorkloadPrivateKey+"="+workloadKey,
+			// Realtime deliberately left ON (the default): this is the
+			// binary/live-flusher half of the claim; every in-process eval
+			// turns it off instead.
+		)
+		sessionID := fmt.Sprintf("session-start-race-%d", i)
+		runHook := func(hook, payload string) time.Duration {
+			t.Helper()
+			cmd := exec.Command(bin, "hook", "claude-code", hook)
+			cmd.Stdin = strings.NewReader(payload)
+			cmd.Env = env
+			var stdout, stderr strings.Builder
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			start := time.Now()
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("iteration %d: %s exit != 0: %v\nstderr: %s", i, hook, err, stderr.String())
+			}
+			return time.Since(start)
+		}
+
+		sessionStartElapsed := runHook("SessionStart", `{"hook_event_name":"SessionStart","session_id":"`+sessionID+`","cwd":"/r","source":"startup"}`)
+		runHook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"`+sessionID+`","cwd":"/r","tool_name":"Bash","tool_use_id":"call-1","tool_input":{"command":"ls"}}`)
+
+		deadline := time.Now().Add(10 * time.Second)
+		var inbox []fakecore.Received
+		for time.Now().Before(deadline) {
+			inbox = srv.Inbox()
+			if len(inbox) > 0 {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if len(inbox) == 0 {
+			t.Fatalf("iteration %d: nothing reached core", i)
+		}
+		if got := inbox[0].EventType(); got != fakecore.WireWorkflowStarted {
+			t.Fatalf("iteration %d: first row = %q, want WorkflowStarted", i, got)
+		}
+		// Proves the hold was genuinely paid inline, on the SessionStart
+		// hook's own critical path, before its process ever returned --
+		// not skipped, not backgrounded to a detached flusher.
+		if sessionStartElapsed < 900*time.Millisecond {
+			t.Errorf("iteration %d: SessionStart returned in %v, want >= ~%v (the inline attempt must hold the hook open for it)", i, sessionStartElapsed, hold)
+		}
+		sessionStartWallTimes = append(sessionStartWallTimes, sessionStartElapsed)
+	}
+
+	t.Logf("session-start-reaches-core-first: %d/%d iterations passed; SessionStart wall times: %v", iterations, iterations, sessionStartWallTimes)
+}
+
 // TestUnifiedBinaryGitHookStampsCommit proves the od17 git-hook fold end-to-
 // end: `openbox hook git install` writes a prepare-commit-msg hook that re-
 // invokes the unified binary as `openbox hook git prepare-commit-msg`, and a

@@ -202,14 +202,20 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	LogEnforceDecision(logger, t.ToolName(), dec, policy)
 	res := ApplyDecision(stdout, dec, localRedaction, t.ToolInput(), g.Contract)
 	// Only a contract that RENDERS a session stop reports DecisionHalt back, so
-	// only such a contract latches. Both providers deliberately keep that to one
-	// contract each -- the prompt contract, the single surface either vendor
-	// gives a session-stop lever on. Every tool contract folds HALT into its
-	// per-call refusal and returns that instead, so no tool call can latch.
+	// only such a contract latches -- and the two providers do not agree on
+	// which contracts that is. Claude Code's own TOOL contract (PreToolUse)
+	// DOES render one (continue:false + stopReason) and returns the HALT
+	// literal itself, so a tool-call HALT latches there too
+	// (TestSessionHaltConformance "C27 tool HALT denies, stops the session,
+	// and latches"). Codex's tool contracts (PreToolUse, PermissionRequest)
+	// fold a HALT into an ordinary per-call deny instead (outputcontract.go,
+	// permissiongate.go) -- Codex has exactly one contract with a stop lever,
+	// its own UserPromptSubmit prompt contract, and that is the only Codex
+	// surface where a HALT latches.
 	//
 	// The read side is wider than the write side on purpose: every gated class
-	// consults the latch, or a session halted at the prompt would keep running
-	// tools.
+	// consults the latch, or a session halted on one contract would keep
+	// running calls a different contract renders.
 	if res.Decision == DecisionHalt {
 		WriteSessionHalt(logger, g.runID(t), dec.Evaluation)
 	}
@@ -217,20 +223,33 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 	return res
 }
 
+// MaxStripeWait caps how long a gated call's own drain step (below) will
+// ever wait to ACQUIRE a busy stripe -- a live detached flusher or lane
+// daemon may be mid-delivery on one slow event, holding this session's own
+// stripe for as long as its own attempt takes -- so a gated call is never
+// held hostage by someone else's slow event: a measured stripe-held gate
+// wall p95 above 5s is the pre-decided trigger this cap answers. It bounds
+// ONLY the wait to take the lock (DrainOptions.LockWait), never the drain
+// PASS itself: once this call's own drain acquires an uncontended stripe, it
+// still gets the full slack to clear a real backlog (the "try hardest not to
+// let an event slip through" governing principle), never cut short at this
+// same 5s regardless of how large that backlog is.
+const MaxStripeWait = 5 * time.Second
+
 // drain runs this call's own queue-drain step: whatever fits in the slack
 // left over once the escalation's own budget is reserved out of what
-// remains of the hook's own ceiling, blocking for this session's stripe
-// (this call owns it for its own duration, the same as an inline
-// SessionStart/SessionEnd attempt) and requeuing -- never failing -- an
-// attempt this call's own window could not get an answer for
-// (RequeueUnanswered: the identical unanswered-vs-explicit-failure
-// discriminator the escalation step below reuses through EscalateWith). A
-// stripe already held by another drainer, or an exhausted slack, both leave
-// the backlog exactly where it was: unattempted, never a failure. A drain
-// that could not even start one attempt (its own slack already below one
-// evaluation's worth of budget) touches nothing at all -- DrainSession's own
-// contract -- so calling this with a slack of, say, a few milliseconds costs
-// nothing beyond the call itself.
+// remains of the hook's own ceiling, waiting at most MaxStripeWait to take
+// this session's own stripe (this call owns it for its own duration, the
+// same as an inline SessionStart/SessionEnd attempt, once acquired) and
+// requeuing -- never failing -- an attempt this call's own window could not
+// get an answer for (RequeueUnanswered: the identical unanswered-vs-
+// explicit-failure discriminator the escalation step below reuses through
+// EscalateWith). A stripe still busy past MaxStripeWait, or an exhausted
+// slack, both leave the backlog exactly where it was: unattempted, never a
+// failure. A drain that could not even start one attempt (its own slack
+// already below one evaluation's worth of budget) touches nothing at all --
+// DrainSession's own contract -- so calling this with a slack of, say, a few
+// milliseconds costs nothing beyond the call itself.
 func (g EnforceGate) drain(ctx context.Context, logger *log.Logger, sessionID string, cl Governor, enforceStart time.Time) {
 	slack := g.Evaluator.remaining(enforceStart) - g.Evaluator.Budget(enforceStart, DefaultEvaluationTimeout)
 	// AttemptTimeout is NEVER clamped down to slack: a pass never starts an
@@ -253,6 +272,7 @@ func (g EnforceGate) drain(ctx context.Context, logger *log.Logger, sessionID st
 		Mode:              Block,
 		AttemptTimeout:    DefaultEvaluationTimeout,
 		RequeueUnanswered: true,
+		LockWait:          MaxStripeWait,
 	})
 	if n > 0 {
 		logger.Printf("gate drain: drained %d event(s) in %v", n, time.Since(enforceStart))

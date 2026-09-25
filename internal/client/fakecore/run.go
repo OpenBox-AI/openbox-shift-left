@@ -33,6 +33,18 @@ type Run struct {
 	// Dir is the scenario's private state directory: halt latch,
 	// pending-approval markers, spool.
 	Dir string
+	// AttemptsByKey is fakecore.Server.AttemptsByKey()'s own snapshot, taken
+	// once the scenario finished driving the binary: every v3-evaluate
+	// request that reached the wire, accepted or not, grouped by its own
+	// Idempotency-Key. The OneAttempt grader's oracle -- Inbox alone cannot
+	// prove "sent twice", since a held-and-refused attempt is never in it.
+	AttemptsByKey map[string]int
+	// HeldByKey narrows AttemptsByKey to the attempts the scenario's own
+	// script actually held (Delay/DelayFor > 0): OneAttempt subtracts it so a
+	// legitimate slow-core requeue (the one class this plan accepts as a
+	// second attempt for the same event) reads differently from any other,
+	// unexplained repeat.
+	HeldByKey map[string]int
 }
 
 // DecisionFor returns the decision recorded for a tool call, and whether one

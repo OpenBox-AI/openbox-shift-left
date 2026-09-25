@@ -215,6 +215,9 @@ func TestGate_DoesNotRetryAFailedEvaluation(t *testing.T) {
 // answers per event id: an explicit error (errFor), a verdict (verdictFor,
 // default ALLOW), or blocks until its own ctx is done (sleepUntilDone) to
 // stand in for an attempt whose answer never arrives within its own window.
+// delay, when set, holds every answer by that long first -- standing in for
+// a real per-event network cost so a many-event drain pass takes real wall
+// time (a many-event backlog test's own point).
 type orderedGovernor struct {
 	*fakeGovernor
 	mu             sync.Mutex
@@ -222,6 +225,7 @@ type orderedGovernor struct {
 	errFor         map[string]error
 	verdictFor     map[string]client.Evaluation
 	sleepUntilDone map[string]bool
+	delay          time.Duration
 }
 
 func (g *orderedGovernor) Emit(ctx context.Context, ev client.DevEvent) (client.Evaluation, error) {
@@ -231,6 +235,13 @@ func (g *orderedGovernor) Emit(ctx context.Context, ev client.DevEvent) (client.
 	if g.sleepUntilDone[ev.EventID] {
 		<-ctx.Done()
 		return client.Evaluation{}, ctx.Err()
+	}
+	if g.delay > 0 {
+		select {
+		case <-time.After(g.delay):
+		case <-ctx.Done():
+			return client.Evaluation{}, ctx.Err()
+		}
 	}
 	if err, ok := g.errFor[ev.EventID]; ok {
 		return client.Evaluation{}, err
@@ -498,6 +509,131 @@ func TestGate_BusyStripePastSlackSkipsTheDrain(t *testing.T) {
 	}
 	if n := engine.Spool.PendingCount("sess-1"); n != 1 {
 		t.Errorf("pending count = %d, want 1; the untouched backlog must stay queued", n)
+	}
+}
+
+// stripeHoldingEmitter's Emit holds its own stripe (DrainSession holds the lock
+// across the whole call) for exactly hold, and closes started the instant it
+// is actually invoked -- which only happens once it holds the lock -- so a
+// caller can synchronize on "the stripe is now genuinely held" instead of a
+// fixed sleep guessing at it.
+type stripeHoldingEmitter struct {
+	started chan struct{}
+	once    sync.Once
+	hold    time.Duration
+}
+
+func (e *stripeHoldingEmitter) Emit(ctx context.Context, _ client.DevEvent) (client.Evaluation, error) {
+	e.once.Do(func() { close(e.started) })
+	select {
+	case <-time.After(e.hold):
+	case <-ctx.Done():
+	}
+	return client.Evaluation{Verdict: client.VerdictAllow}, nil
+}
+
+// TestGate_StripeHeldPastMaxStripeWaitSkipsTheDrainAndEscalatesPromptly pins
+// MaxStripeWait's own bound directly: a background drainer holds this
+// session's stripe for 8s (a live detached flusher or lane daemon mid-
+// delivery on one slow event), well past MaxStripeWait (5s). The gate's own
+// drain step must give up on the LOCK within ~MaxStripeWait and proceed to
+// its own escalation, never waited on for anywhere near the full 8s hold.
+func TestGate_StripeHeldPastMaxStripeWaitSkipsTheDrainAndEscalatesPromptly(t *testing.T) {
+	gateDrainEnv(t)
+	defer devconfig.Pin()()
+
+	engine := NewEngine(t.TempDir())
+	seedQueued(t, engine, "sess-1", "seed-1", client.EventToolCall)
+
+	be := &stripeHoldingEmitter{started: make(chan struct{}), hold: 8 * time.Second}
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		_, _ = engine.DrainSession(context.Background(), "sess-1", be, DrainOptions{
+			Mode: Block, AttemptTimeout: 10 * time.Second,
+		})
+	}()
+	<-be.started // the background drainer now genuinely holds the stripe
+	defer func() { <-drainDone }()
+
+	gov := &orderedGovernor{fakeGovernor: &fakeGovernor{}}
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 4 * time.Second,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record: func(decision.Decision, ApplyResult) {},
+		Queue:  engine,
+	}
+	start := time.Now()
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+	if elapsed := time.Since(start); elapsed >= 5500*time.Millisecond {
+		t.Errorf("gate.Run took %v, want < 5.5s: a stripe held past MaxStripeWait must never be waited on that long", elapsed)
+	}
+
+	if got := gov.Order(); !reflect.DeepEqual(got, []string{"evt-1"}) {
+		t.Errorf("emit order = %v, want only the gate's own escalation; a stripe held past MaxStripeWait must not attempt the backlog", got)
+	}
+	// PendingCount is deliberately NOT asserted here: the background drainer
+	// already rotated "seed-1" out of the visible tail into its own
+	// in-flight attempt the instant it took the stripe (collectSession, held
+	// only in memory until its own Emit returns), so the queue reads as
+	// EMPTY during this exact window even though nothing has been
+	// delivered yet -- gov.Order() above is what actually proves the gate's
+	// own client never touched it.
+}
+
+// TestGate_UncontendedBacklogStillDrainsPastMaxStripeWaitWhenSlackAllows is
+// MaxStripeWait's own negative space: the cap bounds ONLY the wait to
+// ACQUIRE an uncontended stripe (acquired at once here, nothing to wait
+// for), never the drain PASS itself once held. 60 events at a real 100ms
+// each is 6s of genuine delivery time -- past MaxStripeWait -- and every one
+// of them must still be delivered, in order, before the gate's own
+// escalation: a large uncontended backlog must never be cut short at 5s
+// merely because MaxStripeWait happens to be 5s too.
+func TestGate_UncontendedBacklogStillDrainsPastMaxStripeWaitWhenSlackAllows(t *testing.T) {
+	gateDrainEnv(t)
+	defer devconfig.Pin()()
+
+	engine := NewEngine(t.TempDir())
+	const n = 60
+	for i := 0; i < n; i++ {
+		seedQueued(t, engine, "sess-1", fmt.Sprintf("seed-%02d", i), client.EventToolCall)
+	}
+
+	gov := &orderedGovernor{fakeGovernor: &fakeGovernor{}, delay: 100 * time.Millisecond}
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 4 * time.Second,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record: func(decision.Decision, ApplyResult) {},
+		Queue:  engine,
+	}
+	start := time.Now()
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+	if elapsed := time.Since(start); elapsed < 6*time.Second {
+		t.Errorf("gate.Run took only %v, want >= 6s (60 events x 100ms of real, uncontended delivery time): "+
+			"the pass was cut short, as if MaxStripeWait capped the drain itself rather than only the lock wait", elapsed)
+	}
+
+	got := gov.Order()
+	if len(got) != n+1 {
+		t.Fatalf("emit count = %d, want %d (the whole backlog, then the gate's own escalation)", len(got), n+1)
+	}
+	for i := 0; i < n; i++ {
+		if want := fmt.Sprintf("seed-%02d", i); got[i] != want {
+			t.Errorf("emit[%d] = %q, want %q; the backlog must drain in order", i, got[i], want)
+		}
+	}
+	if got[n] != "evt-1" {
+		t.Errorf("last emit = %q, want the gate's own escalation event", got[n])
 	}
 }
 

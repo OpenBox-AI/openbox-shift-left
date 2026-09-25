@@ -161,7 +161,7 @@ const ReclaimOrphanAfter = 5 * time.Minute
 // non-nil, reports that cutoff (or ctx's own error); it never means an event
 // was lost.
 func (s Spool) DrainSession(ctx context.Context, sessionID string, fn FlushFunc, opts DrainOptions) (int, error) {
-	release, lockErr := s.lockSession(ctx, sessionID, opts.Mode)
+	release, lockErr := s.lockSession(ctx, sessionID, opts.Mode, opts.LockWait)
 	defer release()
 	if lockErr != nil {
 		return 0, lockErr
@@ -259,6 +259,17 @@ type DrainOptions struct {
 	// it, to keep order intact) is left queued for the detached flusher's
 	// own, unbounded try instead of being scored as a failure.
 	RequeueUnanswered bool
+	// LockWait bounds ONLY a Block mode caller's own wait for the session's
+	// stripe (sessionlock.go's own lockSession): 0 (every caller before this
+	// field existed) leaves the wait bounded by ctx alone; a positive value
+	// additionally gives up once that much time has passed even if ctx
+	// itself still has budget left. Ignored in Try mode, which never waits
+	// at all. A caller whose own stripe-wait bound must be strictly
+	// narrower than its overall ctx (a gate's own drain step, sharing its
+	// session's stripe with a live flusher or lane daemon that may be
+	// mid-delivery on a slow event) sets this; the drain PASS itself, once
+	// the stripe is acquired, still gets everything ctx leaves it.
+	LockWait time.Duration
 }
 
 // errPassCutShort reports that a pass's own budget ran out before another

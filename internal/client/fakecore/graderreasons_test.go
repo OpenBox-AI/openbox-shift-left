@@ -191,6 +191,53 @@ func TestEveryGraderReasonIsReachable(t *testing.T) {
 			}},
 			"outside",
 		},
+		{
+			"start-first: a row for a run reached core before that run's own WorkflowStarted",
+			StartFirst(), Scenario{},
+			Run{Inbox: []Received{
+				row(WireActivityStarted, "act-1", id, map[string]any{"workflow_id": "w1", "run_id": "r1"}),
+			}},
+			"before run",
+		},
+		{
+			"one-attempt: an idempotency key was attempted twice with nothing held for it",
+			OneAttempt(), Scenario{},
+			Run{AttemptsByKey: map[string]int{"ev-1": 2}, HeldByKey: map[string]int{}},
+			"a double delivery",
+		},
+		{
+			"halted-after-failure: a later gated call rendered nothing at all (a silent allow) after the run was already halted",
+			HaltedAfterFailure(), Scenario{},
+			Run{Decisions: []Decision{
+				{Payload: 0, Event: "PreToolUse", ToolUseID: id, Verb: "deny",
+					Reason: "OpenBox could not record ToolCall for this session (network); the run is halted so nothing it does goes unrecorded. Start a new session to continue."},
+				// The REAL shape a silent ALLOW takes: Verb == "" (decodeDecision's
+				// own contract for a call that stayed silent), never the literal
+				// word "allow".
+				{Payload: 1, Event: "PreToolUse", ToolUseID: other, Verb: ""},
+			}},
+			"a silent allow",
+		},
+		{
+			"halted-after-failure: a live HALT verdict's own policy-authored reason (no fixed phrase) still marks the run halted, via the ledger",
+			HaltedAfterFailure(), Scenario{},
+			Run{
+				Decisions: []Decision{
+					// A tool contract folds a HALT into a plain deny with no
+					// distinguishing text at all -- "org kill switch" carries none
+					// of isHaltReplyReason's own fixed phrases, and Stop is false
+					// (only the prompt contract renders a stop lever) -- so ONLY
+					// the ledger's own applied_decision:"halt" can mark this halted.
+					{Payload: 0, Event: "PreToolUse", ToolUseID: id, Verb: "deny", Reason: "org kill switch"},
+					{Payload: 1, Event: "PreToolUse", ToolUseID: other, Verb: ""},
+				},
+				Ledger: []map[string]any{
+					{"applied_decision": "halt"},
+					{"applied_decision": ""},
+				},
+			},
+			"a silent allow",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reasons := tc.grader.Check(tc.sc, tc.run)
@@ -266,7 +313,7 @@ var graderSources = []string{"pairing.go", "graders.go", "contentgrader.go"}
 // fails here; the fix is to add a case to the table above that makes the new
 // reason fire, then update this number. Deleting a reason fails here too, which
 // is the point: it is a prompt to delete its case as well.
-const reasonSites = 22
+const reasonSites = 25
 
 // TestEveryReasonSiteHasACase is the tripwire for the defect class this file
 // exists to close.

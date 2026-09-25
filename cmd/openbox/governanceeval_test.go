@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
@@ -30,8 +31,10 @@ import (
 // Decision entry at all, which is how a grader tells "not gated" from "gated
 // and stayed silent".
 var gatedEvents = map[string]bool{
-	"PreToolUse":       true,
-	"UserPromptSubmit": true,
+	"PreToolUse":        true,
+	"UserPromptSubmit":  true,
+	"ConfigChange":      true, // Claude Code only
+	"PermissionRequest": true, // Codex only
 }
 
 type evalRun struct {
@@ -57,6 +60,11 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 	t.Helper()
 	requireUsableFixture(t, sc)
 
+	provider := sc.Provider
+	if provider == "" {
+		provider = "claude-code"
+	}
+
 	fake := fakecore.New(t, sc.Script())
 	if sc.Approval != nil {
 		fake.Approval(sc.Approval)
@@ -64,23 +72,22 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
 	evalEnv(t, fake, dir, spool, sc.Posture)
+	if sc.Setup != nil {
+		sc.Setup(t, fake)
+	}
 
 	run := evalRun{Fake: fake, Spool: spool}
 	run.Dir = dir
+	var sessionOrder []string
+	seenSession := map[string]bool{}
+	seenSpoolLine := map[string]bool{}
 	for i, p := range sc.Payloads {
 		if sc.OutageDuring != nil {
 			fake.SetOutage(sc.OutageDuring(i, p.Event))
 		}
 		a, out, errb := testApp(nil)
 		a.stdin = strings.NewReader(p.JSON)
-		// The spooled DevEvents are held to the contract before the flush
-		// drains them. Not the wire body: that is a different object with a
-		// four-value vocabulary, and ValidateDevEvent pointed at it would
-		// reject every event.
-		if p.Event == "SessionEnd" {
-			validateSpool(t, spool, sc.Posture.ContentCapture == "1")
-		}
-		if code := a.run([]string{"hook", "claude-code", p.Event}); code != exitOK {
+		if code := a.run([]string{"hook", provider, p.Event}); code != exitOK {
 			t.Fatalf("%s payload #%d exit = %d; stderr=%q", p.Event, i, code, errb.String())
 		}
 		// runHook always returns 0 and recovers panics, so the exit code says
@@ -96,10 +103,49 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 		if gatedEvents[p.Event] {
 			run.Decisions = append(run.Decisions, decodeDecision(t, i, p, out.String()))
 		}
+		if id := p.SessionID(); id != "" && !seenSession[id] {
+			seenSession[id] = true
+			sessionOrder = append(sessionOrder, id)
+		}
+		// The spooled DevEvents are held to the contract after EVERY payload,
+		// not only at SessionEnd: whatever a gate's own observe copy or a
+		// halted-run replay left behind must already be contract-conformant
+		// at the point it exists, not merely by the time the session ends.
+		// Not the wire body: that is a different object with a four-value
+		// vocabulary, and ValidateDevEvent pointed at it would reject every
+		// event. seenSpoolLine validates each line once, the moment it
+		// first appears, rather than re-validating the whole spool (most of
+		// it unchanged) after every single payload.
+		validateSpool(t, spool, sc.Posture.ContentCapture == "1", seenSpoolLine)
+	}
+
+	// SessionEnd's own inline attempt no longer falls back to a spawned
+	// detached flusher inside THIS process: RealtimeTrigger refuses to spawn
+	// a `*.test` binary (it would re-run the whole suite recursively), so
+	// whatever a scenario deliberately left queued past its own inline
+	// window (a slow-core backlog, a session halted before it could drain)
+	// is drained here by invoking the real `flush` subcommand directly --
+	// the exact code path a live detached flusher runs, exercised end to end
+	// rather than skipped. A no-op when nothing is left queued (the common
+	// case), since FlushOrSweep drains an empty spool in zero passes.
+	// Flushed in payload order (sessionOrder, not a map range), so a
+	// multi-session scenario's own flush passes happen in the same order
+	// their sessions were first seen -- deterministic, not incidental.
+	for _, id := range sessionOrder {
+		t.Setenv(hookflow.EnvFlushSession, id)
+		a, _, errb := testApp(nil)
+		if code := a.run([]string{"hook", provider, "flush"}); code != exitOK {
+			t.Fatalf("flush for session %s exit = %d; stderr=%q", id, code, errb.String())
+		}
+		if panicked(errb.String()) {
+			t.Fatalf("flush for session %s panicked: %s", id, errb.String())
+		}
 	}
 
 	run.Inbox = fake.Inbox()
 	run.Ledger = readLedger(t, dir)
+	run.AttemptsByKey = fake.AttemptsByKey()
+	run.HeldByKey = fake.HeldByKey()
 	// A refusal means the binary put something on the wire that core would
 	// have rejected, or reached a route core does not serve. Either is a
 	// finding, and leaving it for a grader to notice would let it pass as an
@@ -128,6 +174,14 @@ func decodeDecision(t *testing.T, i int, p fakecore.HookPayload, stdout string) 
 		HookSpecificOutput struct {
 			PermissionDecision       string `json:"permissionDecision"`
 			PermissionDecisionReason string `json:"permissionDecisionReason"`
+			// Decision is Codex's OWN PermissionRequest shape
+			// (permissiongate.go's permissionHookSpecificOutput): nested
+			// under hookSpecificOutput, unlike every other gated class on
+			// either provider.
+			Decision struct {
+				Behavior string `json:"behavior"`
+				Message  string `json:"message"`
+			} `json:"decision"`
 		} `json:"hookSpecificOutput"`
 		Decision string `json:"decision"`
 		Reason   string `json:"reason"`
@@ -137,9 +191,13 @@ func decodeDecision(t *testing.T, i int, p fakecore.HookPayload, stdout string) 
 	}
 	d.Verb = got.HookSpecificOutput.PermissionDecision
 	d.Reason = got.HookSpecificOutput.PermissionDecisionReason
+	if d.Verb == "" && got.HookSpecificOutput.Decision.Behavior != "" {
+		d.Verb = got.HookSpecificOutput.Decision.Behavior
+		d.Reason = got.HookSpecificOutput.Decision.Message
+	}
 	if d.Verb == "" && got.Decision != "" {
-		// UserPromptSubmit renders `decision:"block"`; there is no permission
-		// verb for a prompt.
+		// UserPromptSubmit and ConfigChange render `decision:"block"`; there
+		// is no permission verb for either.
 		d.Verb = got.Decision
 		d.Reason = got.Reason
 	}
@@ -196,15 +254,26 @@ func requireUsableFixture(t *testing.T, sc fakecore.Scenario) {
 // synchronously at the gate and its observe copy is discarded, so ToolCall and
 // PromptSubmitted never reach the spool at all. The observe-only scenario is
 // what puts those two under the validator.
-func validateSpool(t *testing.T, spoolDir string, contentCapture bool) {
+//
+// seen is the caller's own line-content set, persisted across every call for
+// one scenario run: a line already validated once (its content still on
+// disk, or already delivered and gone) is never re-checked, so N payloads
+// against a spool that mostly does not change between them costs one
+// validation per line, not N.
+func validateSpool(t *testing.T, spoolDir string, contentCapture bool, seen map[string]bool) {
 	t.Helper()
-	for i, line := range fakecore.SpoolLines(spoolDir) {
+	for _, line := range fakecore.SpoolLines(spoolDir) {
+		key := string(line)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		// The posture is an argument, not a constant: the validator refuses an
 		// event carrying content when capture is off, so hard-coding "off"
 		// would call a correctly captured session non-conformant.
 		if err := conformance.ValidateDevEvent(line, contentCapture); err != nil {
 			// The line itself is never echoed: INV-2 applies to test logs.
-			t.Errorf("spooled event #%d is not contract-conformant: %v", i, err)
+			t.Errorf("spooled event is not contract-conformant: %v", err)
 		}
 	}
 }
@@ -248,7 +317,6 @@ func evalEnv(t *testing.T, fake *fakecore.Server, dir, spool string, p fakecore.
 		}
 		t.Setenv(name, value)
 	}
-	set(devconfig.EnvEnforce, p.Enforce, "1")
 	set(devconfig.EnvFailClosed, p.FailClosed, "0")
 	set(devconfig.EnvContentCapture, p.ContentCapture, "0")
 	if p.ApprovalHoldMS != "" {

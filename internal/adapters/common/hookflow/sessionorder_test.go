@@ -142,8 +142,14 @@ func TestSessionOrder_ConcurrentDrainersNeverDuplicateOrReorder(t *testing.T) {
 
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go func() { defer wg.Done(); _, _ = sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}) }()
-		go func() { defer wg.Done(); _, _ = sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}) }()
+		go func() {
+			defer wg.Done()
+			_, _ = sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
+		}()
+		go func() {
+			defer wg.Done()
+			_, _ = sp.DrainSession(context.Background(), "sess", fn, DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout})
+		}()
 		wg.Wait()
 
 		// A residual pass: whichever drainer rotated an empty tail second gets
@@ -327,7 +333,7 @@ func TestSessionOrder_TryOnBusyStripeReportsBusy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	release, err := sp.lockSession(context.Background(), "sess", Try)
+	release, err := sp.lockSession(context.Background(), "sess", Try, 0)
 	if err != nil {
 		t.Fatalf("lockSession: %v", err)
 	}

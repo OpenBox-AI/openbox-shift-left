@@ -173,6 +173,62 @@ func TestNewEngine_OnFailureLedgersAndLatches(t *testing.T) {
 	}
 }
 
+// TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt proves the timeout
+// failure class through the SAME wiring the real 30s flusher/lane-drain
+// path uses (Engine.NewEngine's own default Spool.OnFailure ->
+// HaltOnDeliveryFailure), without waiting out the real 30s bound: a short
+// AttemptTimeout stands in for it. RequeueUnanswered is left false (the
+// zero value, matching every non-inline drainer -- the detached flusher,
+// the sweep, a lane daemon's own queue), so an attempt whose own ctx expires
+// before the emitter returns is scored as an ordinary failure, not
+// requeued -- exactly the "gate timeouts requeue, never halt; only the
+// flusher/drain path's own fixed 30s bound can" distinction this repo's own
+// gate.go documents.
+func TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt(t *testing.T) {
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+
+	e := NewEngine(t.TempDir())
+	const sessionID = "sess-timeout-class"
+	ev := client.DevEvent{EventID: "e1", EventType: client.EventToolCall, SessionID: sessionID}
+	if err := e.Spool.Append(ev); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	attempts := 0
+	blockPastDeadline := emitterFunc(func(ctx context.Context, _ client.DevEvent) error {
+		attempts++
+		<-ctx.Done()
+		// %w on ctx.Err() too (not %s): client.FailureClass classifies
+		// "timeout" via errors.Is(err, context.DeadlineExceeded), which a
+		// merely-stringified ctx.Err() could never satisfy.
+		return fmt.Errorf("%w: %w", client.ErrDelivery, ctx.Err())
+	})
+
+	const attemptTimeout = 50 * time.Millisecond
+	n, err := e.DrainSession(context.Background(), sessionID, blockPastDeadline, DrainOptions{
+		Mode: Block, AttemptTimeout: attemptTimeout,
+	})
+	if err != nil {
+		t.Fatalf("DrainSession: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("delivered = %d, want 0 (the only line timed out)", n)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want exactly 1", attempts)
+	}
+	info, halted := SessionHalted(sessionID)
+	if !halted {
+		t.Fatal("a timed-out delivery must latch the run, exactly like any other explicit failure")
+	}
+	if info.Cause != "timeout" {
+		t.Errorf("latch Cause = %q, want %q", info.Cause, "timeout")
+	}
+	if got := e.Spool.DiscardedCount(); got != 1 {
+		t.Errorf("DiscardedCount = %d, want 1 (the ledger line every drain has always written)", got)
+	}
+}
+
 // emitterFunc adapts a plain func to the Emitter interface DrainSession
 // consumes (through Engine.emitFunc -> Deliver), for a test that only cares
 // about the failure path, not a real verdict.

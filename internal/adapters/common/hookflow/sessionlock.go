@@ -51,34 +51,63 @@ func (s Spool) sessionStripePath(sessionID string) string {
 
 // lockSession takes sessionID's stripe per mode and returns its release,
 // which is always safe to call (a no-op when nothing was actually locked).
+// lockWait bounds ONLY the wait for a Block mode caller: 0 leaves the wait
+// bounded by ctx alone (every caller before DrainOptions.LockWait existed,
+// and every caller today that leaves it unset); a positive value additionally
+// gives up once THAT much time has passed, even if ctx itself still has
+// budget left -- the gate's own "never wait past this long for a busy
+// stripe" bound, distinct from (and always <=) the caller's overall ctx.
 //
 // An unlockable filesystem -- the lock file itself cannot be opened, not
 // merely held -- proceeds unlocked with one log line, the same fail-open
 // posture lockSpool takes for the directory-level lock (spool.go). That is
-// different from a Block wait simply running out of ITS OWN ctx budget while
-// the stripe stays genuinely held: that is reported as an ordinary ctx-cut
-// pass (err == ctx.Err()), not a locking fault.
-func (s Spool) lockSession(ctx context.Context, sessionID string, mode DrainMode) (release func(), err error) {
+// different from a Block wait simply running out of ITS OWN ctx budget (or
+// lockWait) while the stripe stays genuinely held: that is reported as an
+// ordinary cut (ctx.Err(), or ErrSessionBusy when it was lockWait rather
+// than ctx that ran out), never a locking fault.
+func (s Spool) lockSession(ctx context.Context, sessionID string, mode DrainMode, lockWait time.Duration) (release func(), err error) {
 	path := s.sessionStripePath(sessionID)
 	fl := flock.New(path)
 	noop := func() {}
 
-	var ok bool
 	if mode == Try {
-		ok, err = fl.TryLock()
-	} else {
-		ok, err = fl.TryLockContext(ctx, sessionStripeRetry)
+		ok, tryErr := fl.TryLock()
+		switch {
+		case ok:
+			return func() { _ = fl.Unlock() }, nil
+		case tryErr != nil:
+			s.logf("spool: %s stripe lock unavailable, draining unlocked: %v", filepath.Base(path), tryErr)
+			return noop, nil
+		default:
+			// The stripe is genuinely held by another drainer.
+			return noop, ErrSessionBusy
+		}
 	}
+
+	waitCtx := ctx
+	if lockWait > 0 {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, lockWait)
+		defer cancel()
+	}
+	ok, lockErr := fl.TryLockContext(waitCtx, sessionStripeRetry)
 	switch {
 	case ok:
 		return func() { _ = fl.Unlock() }, nil
-	case err != nil && ctx.Err() != nil:
+	case ctx.Err() != nil:
+		// The CALLER's own ctx ran out (with or without a lockWait set):
+		// unchanged from before lockWait existed.
 		return noop, ctx.Err()
-	case err != nil:
-		s.logf("spool: %s stripe lock unavailable, draining unlocked: %v", filepath.Base(path), err)
+	case waitCtx.Err() != nil:
+		// Only our OWN derived wait (lockWait) elapsed; the caller's ctx
+		// still has budget left. The stripe is busy, not a filesystem
+		// fault -- report it exactly like Try mode's own busy case, since
+		// that is what it is: this caller simply chose not to wait forever.
+		return noop, ErrSessionBusy
+	case lockErr != nil:
+		s.logf("spool: %s stripe lock unavailable, draining unlocked: %v", filepath.Base(path), lockErr)
 		return noop, nil
 	default:
-		// mode == Try and the stripe is genuinely held by another drainer.
 		return noop, ErrSessionBusy
 	}
 }
