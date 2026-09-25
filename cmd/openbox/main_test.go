@@ -1521,8 +1521,8 @@ func TestDoctorDegradesWhenTheControlPlaneIsUnreachable(t *testing.T) {
 }
 
 // TestDoctorSaysWhenThereAreNoCredentialsToCheckWith. Distinct from
-// unreachable: hooks that fire, fail to resolve credentials and fail open
-// govern nothing while looking installed, so the remedy has to be named.
+// unreachable: hooks that fire and fail to resolve credentials deny every
+// gated call while looking installed, so the remedy has to be named.
 func TestDoctorSaysWhenThereAreNoCredentialsToCheckWith(t *testing.T) {
 	isolateHome(t)
 	t.Setenv("OPENBOX_API_KEY", "")

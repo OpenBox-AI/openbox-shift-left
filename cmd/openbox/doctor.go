@@ -223,7 +223,9 @@ func recentConfigDenials(n int) (out []string, unreadable bool) {
 			continue // an unreadable line is skipped, not fatal to the section
 		}
 		parsed++
-		if rec.ToolKind != configDenialToolKind {
+		// A change the gate let proceed is recorded too, with no applied
+		// decision: only a change something actually refused is a denial.
+		if rec.ToolKind != configDenialToolKind || rec.AppliedDecision == "" {
 			continue
 		}
 		out = append(out, fmt.Sprintf("%s  %s (policy %s): %s",
@@ -1184,7 +1186,7 @@ func (a *app) reportStoreReachability(tool string) {
 	if err != nil {
 		a.row(tool, "NOT CHECKED; %v", err)
 		a.row("", "Run `openbox init --provider %s`. Until then its hooks fire, fail", tool)
-		a.row("", "to resolve credentials, and fail open -- governing nothing, silently.")
+		a.row("", "to resolve credentials, and every gated call is DENIED (fail-closed).")
 		return
 	}
 

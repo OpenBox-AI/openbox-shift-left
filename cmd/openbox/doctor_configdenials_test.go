@@ -122,6 +122,27 @@ func TestRecentConfigDenials_FiltersToolKind(t *testing.T) {
 	}
 }
 
+// TestRecentConfigDenials_SkipsAllowedChanges: a config change the gate let
+// proceed is recorded too (verdict ALLOW, no applied_decision), and must not
+// be reported as a denial.
+func TestRecentConfigDenials_SkipsAllowedChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "enf.jsonl")
+	t.Setenv(devconfig.EnvEnforcementFile, path)
+
+	writeEnforcementLines(t, path,
+		`{"session_id":"s1","tool_kind":"config","verdict":"block","applied_decision":"block","policy_id":"cc-1","ts":"2026-01-01T00:00:01Z","reason":"unauthorized edit"}`,
+		`{"session_id":"s2","tool_kind":"config","verdict":"ALLOW","would_block":false,"source":"evaluate","policy_id":"00000000-0000-0000-0000-000000000000","ts":"2026-01-01T00:00:02Z"}`,
+	)
+
+	got, unreadable := recentConfigDenials(5)
+	if unreadable {
+		t.Fatal("a fully parseable sink must not report unreadable")
+	}
+	if len(got) != 1 || !strings.Contains(got[0], "cc-1") {
+		t.Fatalf("recentConfigDenials = %v, want only the blocked change", got)
+	}
+}
+
 // TestRecentConfigDenials_StopsAtN: with more than N config denials present,
 // only the most recent N are returned.
 func TestRecentConfigDenials_StopsAtN(t *testing.T) {
