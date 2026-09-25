@@ -281,12 +281,16 @@ func (t Evaluator) runWith(cctx context.Context, logger *log.Logger, ev client.D
 		// unanswered attempt from a proven one.
 		unanswered := cctx.Err() != nil
 		logger.Printf("inline evaluation degrading (emit): %v", err)
-		if unanswered {
+		// A transient failure (timeout, network, 5xx) is treated like
+		// silence: the call is still denied, but the run is not latched here.
+		// The gated call's recorded copy goes back to the drainers, whose
+		// attempt and one retry decide whether the run halts.
+		if unanswered || client.RetryableDelivery(err) {
 			t.reportOutcome(EscalationUnanswered)
 			return EvaluationFailOpen("evaluation undelivered")
 		}
-		// An explicit, proven non-acceptance: latch the run so nothing later
-		// in it goes unrecorded either; never resent (single attempt).
+		// A non-transient non-acceptance (401, 429, other 4xx): latch the run
+		// at once so nothing later in it goes unrecorded either.
 		HaltOnDeliveryFailure(logger, ev, err)
 		t.reportOutcome(EscalationSettled)
 		return EvaluationFailOpen("evaluation undelivered")

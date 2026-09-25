@@ -34,14 +34,16 @@ func verdictDecision(v client.Verdict) decision.Decision {
 // replace a local deny/ask with VerdictUnknown and let the call through;
 // enforcement loosening itself on an outage.
 
-// explicitFailGovernor answers an explicit, proven non-acceptance
+// explicitFailGovernor answers an explicit, non-transient failure
 // immediately (no delay), so run's own unanswered check reads cctx as still
 // alive: the scenario this test needs is an explicit failure that
-// genuinely happened before the budget ran out, not a slow one.
+// genuinely happened before the budget ran out, not a slow one. It is
+// non-transient on purpose: a transient one (timeout, network, 5xx) is
+// requeued rather than latched (TestEscalation_TransientFailureRequeuesInsteadOfHalting).
 type explicitFailGovernor struct{}
 
 func (explicitFailGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
-	return client.Evaluation{}, client.ErrDelivery
+	return client.Evaluation{}, errNonTransient
 }
 func (explicitFailGovernor) PollApproval(context.Context, client.ApprovalKey) (client.ApprovalStatus, error) {
 	return client.ApprovalStatus{}, nil

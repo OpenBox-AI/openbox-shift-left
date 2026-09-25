@@ -45,6 +45,11 @@ type Run struct {
 	// second attempt for the same event) reads differently from any other,
 	// unexplained repeat.
 	HeldByKey map[string]int
+	// TransientByKey narrows AttemptsByKey to the attempts answered with a
+	// 5xx: a transient failure earns its event one retry, so OneAttempt
+	// accepts a re-send after one of these the same way it does after a held
+	// answer.
+	TransientByKey map[string]int
 }
 
 // DecisionFor returns the decision recorded for a tool call, and whether one

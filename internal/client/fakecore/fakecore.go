@@ -136,6 +136,11 @@ type Server struct {
 	// request this Script's own Delay/DelayFor actually held (delay > 0) --
 	// HeldByKey's own backing store, a subset of v3EvaluateKeys.
 	v3EvaluateHeldKeys []string
+	// v3EvaluateTransientKeys is the Idempotency-Key header of every v3
+	// evaluate request answered with a 5xx (the outage switch, or a scripted
+	// status) -- TransientByKey's own backing store, a subset of
+	// v3EvaluateKeys.
+	v3EvaluateTransientKeys []string
 }
 
 // New starts a fake core. The workload identity a client under test

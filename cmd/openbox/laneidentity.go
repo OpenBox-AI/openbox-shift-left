@@ -249,22 +249,35 @@ func closeAllConcurrently(ctx context.Context, closers ...shutdownCloser) int {
 // bounded, spool-less DeliverPool (a chat conversation has no tool session
 // spool to append into, so this is the one place a lane record still uses
 // the pool rather than LaneQueue), signed by the claude-code identity (the
-// one that governs Anthropic's hosts on this machine) and bounded at
-// DeliveryAttemptTimeout (30s, the single-attempt bound every other drainer
-// uses, not the shorter gate-matched default this pool used before). The
-// returned deliver closure additionally latches a chat event the pool could
+// one that governs Anthropic's hosts on this machine). Each attempt is
+// bounded at DeliveryAttemptTimeout (30s, the bound every other drainer
+// uses), and a transient failure (client.RetryableDelivery) gets exactly one
+// retry before the conversation is latched, so the pool's own timeout covers
+// two attempts. The returned deliver closure additionally latches a chat
+// event the pool could
 // not even ACCEPT (saturated, or shutting down): it never reached core
 // either, so it is treated exactly like an attempted-and-refused one (R4a)
 // rather than silently counted only as a pool drop.
 func newChatPool(identities map[string]providerIdentity, advisory *hookflow.Advisory, logger *log.Logger) (*hookflow.DeliverPool, func(client.DevEvent) bool) {
-	pool := hookflow.NewDeliverPool(hookflow.DefaultPoolSize, hookflow.DeliveryAttemptTimeout,
+	pool := hookflow.NewDeliverPool(hookflow.DefaultPoolSize, 2*hookflow.DeliveryAttemptTimeout,
 		func(ctx context.Context, ev client.DevEvent) {
 			id, ok := identities[string(provider.ClaudeCode)]
 			if !ok {
 				logger.Printf("openbox transport: no resolved claude-code identity; dropping chat event %s", ev.EventID)
 				return
 			}
-			if _, err := hookflow.Deliver(ctx, id.Client, advisory, ev, logger); err != nil {
+			attempt := func() error {
+				actx, cancel := context.WithTimeout(ctx, hookflow.DeliveryAttemptTimeout)
+				defer cancel()
+				_, err := hookflow.Deliver(actx, id.Client, advisory, ev, logger)
+				return err
+			}
+			err := attempt()
+			if err != nil && client.RetryableDelivery(err) && ctx.Err() == nil {
+				logger.Printf("openbox transport: chat event %s not accepted (%s); retrying once", ev.EventID, client.FailureClass(err))
+				err = attempt()
+			}
+			if err != nil {
 				logger.Printf("openbox transport: chat delivery failed for %s: %v", ev.EventID, err)
 				hookflow.HaltOnDeliveryFailure(logger, ev, err)
 			}

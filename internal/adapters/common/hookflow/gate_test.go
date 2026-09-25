@@ -162,10 +162,17 @@ func mustDevEvent(t *testing.T) client.DevEvent {
 	return ev
 }
 
+// degradedGovernor fails every escalation with a non-transient error, the
+// case that still latches the run on the first failure.
 type degradedGovernor struct{ *fakeGovernor }
 
+// errNonTransient is a failure that earns no retry (client.RetryableDelivery
+// is false for it). 401, 429 and other 4xx carry an HTTP status only a real
+// client can produce; client.TestRetryableDelivery pins those classes.
+var errNonTransient = fmt.Errorf("%w: event refused", client.ErrUnbuildable)
+
 func (g degradedGovernor) Emit(context.Context, client.DevEvent) (client.Evaluation, error) {
-	return client.Evaluation{}, client.ErrDelivery
+	return client.Evaluation{}, errNonTransient
 }
 
 type countingGovernor struct {
@@ -380,8 +387,10 @@ func TestGate_DrainedDeliveryFailureDeniesWithoutEscalating(t *testing.T) {
 	if res.Decision != DecisionDeny {
 		t.Errorf("Run's own return = %+v, want the OnHalted render", res)
 	}
-	if got := gov.Order(); !reflect.DeepEqual(got, []string{"seed-started"}) {
-		t.Errorf("emit order = %v, want exactly the drained backlog event; the gate's own escalation must never run", got)
+	// A bare ErrDelivery is a transient (network) failure: the drain sends the
+	// backlog event once and retries it once, then halts.
+	if got := gov.Order(); !reflect.DeepEqual(got, []string{"seed-started", "seed-started"}) {
+		t.Errorf("emit order = %v, want the drained backlog event and its one retry; the gate's own escalation must never run", got)
 	}
 	if onHaltedInfo.EventType != string(client.EventSessionStarted) {
 		t.Errorf("latch EventType = %q, want %q", onHaltedInfo.EventType, client.EventSessionStarted)

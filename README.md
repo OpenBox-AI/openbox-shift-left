@@ -119,10 +119,11 @@ For self-hosting, CI setup, approvals, upgrades and troubleshooting, see
 - **Enforcement is always on.** Blocking, approvals and secret redaction apply
   from the first session. They act on your organization's policy, so until a
   policy is published nothing is blocked and you only get visibility.
-- **It fails closed.** Each event gets exactly one delivery attempt. If the
-  platform cannot be reached or does not accept an event, the action is denied.
-  If the platform explicitly refused or failed it, the rest of that session is
-  also refused until you start a new one. `openbox doctor` shows halted
+- **It fails closed.** Each event gets one delivery attempt, and one retry if
+  the platform timed out, could not be reached or returned a server error. If
+  a governance check gets no answer, the action is denied. If an event still
+  is not accepted after that, the rest of that session is also refused until
+  you start a new one. `openbox doctor` shows halted
   sessions and why.
 - **A HALT verdict from your policy ends the session.** A BLOCK verdict refuses
   only the one action.

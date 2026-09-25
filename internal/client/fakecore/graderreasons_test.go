@@ -206,6 +206,12 @@ func TestEveryGraderReasonIsReachable(t *testing.T) {
 			"a double delivery",
 		},
 		{
+			"one-attempt: a key re-sent after its one 5xx answer and then again after acceptance",
+			OneAttempt(), Scenario{},
+			Run{AttemptsByKey: map[string]int{"ev-1": 3}, HeldByKey: map[string]int{}, TransientByKey: map[string]int{"ev-1": 1}},
+			"a double delivery",
+		},
+		{
 			"halted-after-failure: a later gated call rendered nothing at all (a silent allow) after the run was already halted",
 			HaltedAfterFailure(), Scenario{},
 			Run{Decisions: []Decision{

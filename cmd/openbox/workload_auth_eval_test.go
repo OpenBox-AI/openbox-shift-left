@@ -131,18 +131,16 @@ func TestWarmHookMakesOneEvaluateAndNoAuthCalls(t *testing.T) {
 }
 
 // TestKeycloakDownDeniesAndHaltsTheRun: with Keycloak's token endpoint
-// unreachable, a token-acquisition failure is an explicit, proven
-// non-acceptance like any other now (plan round 3: "a brief network drop...
-// halts the developer's active session"; client.Emit never reaches
-// /evaluate on it, so it is never mistaken for a judged refusal, but it
-// still counts as "core did not accept this event"). The call denies, the
-// run halts (HaltOnDeliveryFailure), and the event is ledgered and gone --
-// single-attempt delivery has no carry-over, so it is NOT held in the spool
-// for a later drain, superseding the old fail-open pin. Because the failure
-// is caught before any bearer exists, the binary must never fall back to an
-// unauthenticated or legacy request: zero evaluate attempts, and nothing
-// beyond the bootstrap route ever reaches the fake at all (so no /api/v1
-// path could have been hit either).
+// unreachable, a token-acquisition failure is a transient (network) delivery
+// failure; client.Emit never reaches /evaluate on it, so it is never mistaken
+// for a judged refusal. The first call denies (always fail-closed), but its
+// escalation failure only requeues the call's record. The next call's drain
+// sends that record once and retries it once; both fail, so the run halts
+// (HaltOnDeliveryFailure) and the record is ledgered and gone. Because the
+// failure is caught before any bearer exists, the binary must never fall
+// back to an unauthenticated or legacy request: zero evaluate attempts, and
+// nothing beyond the bootstrap route ever reaches the fake at all (so no
+// /api/v1 path could have been hit either).
 func TestKeycloakDownDeniesAndHaltsTheRun(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{})
 	fake.TokenEndpointDown()
@@ -159,6 +157,17 @@ func TestKeycloakDownDeniesAndHaltsTheRun(t *testing.T) {
 	if got := fake.BootstrapHits(); got == 0 {
 		t.Fatal("bootstrap was never even attempted; the scripted outage never happened")
 	}
+	if !spoolStillHolds(t, spool) {
+		t.Error("a transient escalation failure must requeue the call's record for its one retry")
+	}
+	if n := countFiles(t, filepath.Join(dir, "halts")); n != 0 {
+		t.Errorf("%d session halt latch(es) after the first call, want 0: its record has not had its retry yet", n)
+	}
+
+	stdout, _ = driveHookOK(t, preBash("toolu_kcdown2", "pwd"))
+	if v := permissionVerb(t, stdout); v != "deny" {
+		t.Errorf("the next call while Keycloak is still down must deny, got permissionDecision=%q", v)
+	}
 	if got := fake.V3EvaluateAttempts(); got != 0 {
 		t.Errorf("evaluate attempts = %d, want 0: a token-acquisition failure must never reach /evaluate at all", got)
 	}
@@ -168,11 +177,21 @@ func TestKeycloakDownDeniesAndHaltsTheRun(t *testing.T) {
 	if n := len(fake.Rejections()); n != 0 {
 		t.Errorf("the fake refused %d request(s) (want 0, including zero \"v1 route\" rejections): %v", n, fake.Rejections())
 	}
-	if spoolStillHolds(t, spool) {
-		t.Error("single-attempt delivery has no carry-over: the tool call's one attempt failed, so it must be ledgered and gone, not held in the spool")
+	// The first call's record failed its attempt and its one retry: it is
+	// ledgered and gone. Whatever the spool still holds is the second call's
+	// own record, queued when the halt denied it.
+	ledger, _ := os.ReadFile(filepath.Join(spool, ".discarded"))
+	if n := strings.Count(strings.TrimSpace(string(ledger)), "\n") + 1; len(strings.TrimSpace(string(ledger))) == 0 || n != 1 {
+		t.Errorf("discard ledger has %q, want exactly one line for the first call's record", ledger)
+	}
+	if !spoolHoldsText(t, spool, `"toolu_kcdown2"`) {
+		t.Fatal("the second call's record is not in the spool, so the check below could not see the first one either")
+	}
+	if spoolHoldsText(t, spool, `"toolu_kcdown"`) {
+		t.Error("the first call's record is still queued; after its attempt and one retry it must be ledgered and gone")
 	}
 	if n := countFiles(t, filepath.Join(dir, "halts")); n != 1 {
-		t.Errorf("%d session halt latch(es), want exactly 1: an auth-plane failure halts the run", n)
+		t.Errorf("%d session halt latch(es), want exactly 1: an auth-plane failure that outlasts the retry halts the run", n)
 	}
 }
 
@@ -301,3 +320,23 @@ func TestLegacyStoreGovernsNothingAndSaysSo(t *testing.T) {
 // never share a test binary or a port timeline once this one moves to
 // cmd/openbox-git-action's own `go test` process, so the collision cannot
 // occur there.
+
+// spoolHoldsText reports whether any spooled .jsonl file under spool contains
+// needle.
+func spoolHoldsText(t *testing.T, spool, needle string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(spool)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		b, _ := os.ReadFile(filepath.Join(spool, e.Name()))
+		if strings.Contains(string(b), needle) {
+			return true
+		}
+	}
+	return false
+}

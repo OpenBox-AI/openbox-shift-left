@@ -191,6 +191,19 @@ func (f *Server) HeldByKey() map[string]int {
 	return out
 }
 
+// TransientByKey narrows AttemptsByKey to the attempts answered with a 5xx:
+// the transient failures a drainer retries once. With HeldByKey it is what
+// OneAttempt accepts as the reason an event was sent again.
+func (f *Server) TransientByKey() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]int, len(f.v3EvaluateTransientKeys))
+	for _, k := range f.v3EvaluateTransientKeys {
+		out[k]++
+	}
+	return out
+}
+
 // TokenEndpointDown makes the next bootstrap document's token_endpoint point
 // at an unregistered address, so the client's exchange call fails at the
 // transport level (a real connection refused) rather than with a scripted
@@ -416,6 +429,7 @@ func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []b
 	f.mu.Lock()
 	if f.outage {
 		f.scripted++
+		f.v3EvaluateTransientKeys = append(f.v3EvaluateTransientKeys, idemKey)
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
@@ -425,6 +439,9 @@ func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []b
 		f.inbox = append(f.inbox, rec)
 	} else {
 		f.scripted++
+	}
+	if status >= 500 {
+		f.v3EvaluateTransientKeys = append(f.v3EvaluateTransientKeys, idemKey)
 	}
 	delay := f.script.delayFor(rec.EventType())
 	if delay > 0 {

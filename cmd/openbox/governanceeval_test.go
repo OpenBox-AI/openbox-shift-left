@@ -146,6 +146,7 @@ func runScenario(t *testing.T, sc fakecore.Scenario) evalRun {
 	run.Ledger = readLedger(t, dir)
 	run.AttemptsByKey = fake.AttemptsByKey()
 	run.HeldByKey = fake.HeldByKey()
+	run.TransientByKey = fake.TransientByKey()
 	// A refusal means the binary put something on the wire that core would
 	// have rejected, or reached a route core does not serve. Either is a
 	// finding, and leaving it for a grader to notice would let it pass as an

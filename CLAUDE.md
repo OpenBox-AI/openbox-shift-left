@@ -121,17 +121,22 @@ each; `SignalReceived` alone is unpaired): every in-path row was single-sided
 for the life of the feature, because the live pairing check filters to *tool*
 types. A tool blocked before it ran -- a `PreToolUse` hook erroring, so nothing
 executed and no `PostToolUse*` could fire -- produces the started row only, and
-so does ANY producer's own record whose Completed half its one delivery
-attempt did not land (core outage, timeout, 401, any explicit non-acceptance):
-delivery is single-attempt everywhere now, never only the lane daemons'
-`hookflow.DeliverPool` (chat's own delivery path, unchanged). Fabricating a
+so does ANY producer's own record whose Completed half was never accepted
+(core outage, timeout, 401, any explicit non-acceptance): delivery rules are
+the same everywhere, never only the lane daemons' `hookflow.DeliverPool`
+(chat's own delivery path, unchanged). Fabricating a
 completion would be worse than either asymmetry. Check per `activity_id`,
 never by parity.
 
 **Delivery is all-or-nothing; ordering beyond `WorkflowStarted`-first is
 best-effort, not guaranteed.** One drainer per session, append order ==
-delivery order, one attempt per event; an unaccepted event ledgers and
-latches its run (write-if-absent: whichever cause reaches a run's first
+delivery order, one attempt per event plus exactly one retry for a transient
+failure (`client.RetryableDelivery`: timeout, network, 5xx; never 401, 429
+or other 4xx), made only if the pass has a full attempt left, else the event
+stays queued unscored and the next pass starts it over (so a short pass can
+send one event more than twice); a gate's own transient escalation failure requeues the observe
+copy instead of latching. An event still unaccepted ledgers and latches its
+run (write-if-absent: whichever cause reaches a run's first
 failure wins); appenders never wait on the drain lock. A gate drains its own
 session's backlog within the slack its escalation budget leaves, waiting at
 most `MaxStripeWait` (5s) for the session's stripe if another drainer already

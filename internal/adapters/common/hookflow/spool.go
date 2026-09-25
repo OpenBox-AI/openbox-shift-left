@@ -22,10 +22,14 @@ import (
 // that reaches it outside this spool has to avoid duplicating itself on its own.
 // That is the rule the double-store bug broke.
 //
-// Every event gets exactly ONE delivery attempt, in append order: no
-// carry-over, no retry, no re-spool. An attempted, unaccepted event goes to
-// OnFailure and is gone; only what a pass could not even START (its budget ran
-// out first) stays queued, in a head file ahead of the tail.
+// Every event gets ONE delivery attempt per pass, in append order, plus
+// exactly one retry when that attempt failed transiently
+// (client.RetryableDelivery). An event still unaccepted after that goes to
+// OnFailure and is gone. What a pass could not even START, or could not fit
+// its retry into (its budget ran out first), stays queued, in a head file
+// ahead of the tail, unscored: the next pass gives it a fresh attempt and
+// retry, so a short pass (a gate's drain slack) can send one event more than
+// twice before its run halts.
 type Spool struct {
 	Dir string
 	// Log reports a loss the spool cannot avoid. Nil ⇒ silent. Reported here rather
@@ -145,7 +149,8 @@ func (s Spool) headPath(sessionID string) string {
 const ReclaimOrphanAfter = 5 * time.Minute
 
 // DrainSession drains one session's queue -- its head file, then its tail --
-// through fn, giving every line exactly ONE delivery attempt in order. Held
+// through fn, giving every line one delivery attempt in order, plus one retry
+// for a transient failure (attemptLines). Held
 // across the whole call is sessionID's stripe lock (mode selects Block/Try;
 // see DrainMode), so two drainers never deliver the same session
 // concurrently and delivery order always equals append order.
@@ -421,8 +426,13 @@ func (s Spool) SpoolObserveHead(ev client.DevEvent) error {
 	return nil
 }
 
-// attemptLines gives each line exactly one delivery attempt, in order:
-// accepted or not, it advances to the next line via onFailure. Two things
+// attemptLines gives each line one delivery attempt, in order, plus exactly
+// one retry when that attempt failed transiently (client.RetryableDelivery:
+// timeout, network, 5xx); accepted or not after that, it advances to the next
+// line via onFailure. A retry the pass cannot fit -- less than attemptTimeout
+// left -- is not attempted: the line and everything after it stay queued for
+// the next pass, never scored as a failure it was not allowed to retry. Two
+// other things
 // stop the loop early, both reported back as a cutoff rather than a failure
 // of any line left in remainder: ctx running out (its own error, or its
 // remaining budget dropping below attemptTimeout before another attempt
@@ -447,10 +457,14 @@ func (s Spool) attemptLines(ctx context.Context, lines [][]byte, fn FlushFunc, o
 			corrupt++
 			continue
 		}
-		attemptCtx, cancel := context.WithTimeout(ctx, opts.AttemptTimeout)
-		derr := fn(attemptCtx, ev)
-		unanswered := attemptCtx.Err() != nil // read BEFORE cancel changes it
-		cancel()
+		derr, unanswered := attemptOne(ctx, fn, ev, opts.AttemptTimeout)
+		if derr != nil && !(opts.RequeueUnanswered && unanswered) && client.RetryableDelivery(derr) {
+			if remaining, ok := ctxRemaining(ctx); ctx.Err() != nil || (ok && remaining < opts.AttemptTimeout) {
+				return delivered, corrupt, lines[i:], true
+			}
+			s.logf("spool: %s for %s not accepted (%s); retrying once", ev.EventType, ev.SessionID, client.FailureClass(derr))
+			derr, unanswered = attemptOne(ctx, fn, ev, opts.AttemptTimeout)
+		}
 		if derr != nil {
 			if opts.RequeueUnanswered && unanswered {
 				return delivered, corrupt, lines[i:], true
@@ -461,6 +475,17 @@ func (s Spool) attemptLines(ctx context.Context, lines [][]byte, fn FlushFunc, o
 		delivered++
 	}
 	return delivered, corrupt, nil, false
+}
+
+// attemptOne makes one delivery attempt bounded by attemptTimeout, and
+// reports whether that attempt's own deadline expired before fn returned
+// (read before cancel can change it), the unanswered-vs-answered signal
+// DrainOptions.RequeueUnanswered relies on.
+func attemptOne(ctx context.Context, fn FlushFunc, ev client.DevEvent, attemptTimeout time.Duration) (err error, unanswered bool) {
+	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
+	defer cancel()
+	err = fn(attemptCtx, ev)
+	return err, attemptCtx.Err() != nil
 }
 
 // reclaimStemLegacy discards every legacy (pre-single-attempt) carry-over

@@ -411,13 +411,16 @@ func StartFirst() Grader {
 	}
 }
 
-// OneAttempt: every Idempotency-Key this run's own traffic used was attempted
-// exactly once, plus one more attempt for each time this run's own script
-// held that same key's response past the caller's budget (the one
-// legitimate re-send this plan accepts: an attempt still unanswered when a
-// gate's own drain had to stop waiting goes back to the queue for the 30s
-// drainers, deduped by core on this same key). Any other repeat is a real
-// double delivery, never loosened away.
+// OneAttempt: every Idempotency-Key this run's own traffic used was sent
+// again only after an answer that permits it -- a held response (the
+// attempt went unanswered past the caller's budget and was requeued) or a 5xx
+// (a transient failure, which earns its event one retry). A key sent more
+// times than 1 + held + 5xx answers was re-sent after being accepted or
+// refused: a real double delivery, never loosened away. The bound is an upper
+// one because the last attempt of a halted event may itself be held or 5xx
+// with nothing after it. That at most ONE retry follows a transient failure
+// is pinned by hookflow's own drain tests, which can see where each send
+// came from; this grader sees only the wire.
 //
 // No Mutate: a same-key double-send cannot be produced by any sequence of
 // DISTINCT native hook payloads. A first attempt at Mutate here repeated a
@@ -449,12 +452,12 @@ func OneAttempt() Grader {
 			sort.Strings(keys)
 			var reasons []string
 			for _, k := range keys {
-				held := run.HeldByKey[k]
-				want := 1 + held
-				if got := run.AttemptsByKey[k]; got != want {
+				held, transient := run.HeldByKey[k], run.TransientByKey[k]
+				limit := 1 + held + transient
+				if got := run.AttemptsByKey[k]; got > limit {
 					reasons = append(reasons, fmt.Sprintf(
-						"idempotency key %s was attempted %d time(s), want %d (one attempt, plus %d requeued after a held response); an unexplained repeat is a double delivery",
-						k, got, want, held))
+						"idempotency key %s was attempted %d time(s), want at most %d (one attempt, plus one per held response (%d) or 5xx answer (%d)); an unexplained repeat is a double delivery",
+						k, got, limit, held, transient))
 				}
 			}
 			return reasons

@@ -468,12 +468,11 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 
 	// C15 pinned "fail-open proceeds / fail-closed denies" (two outcomes from
 	// the SAME outage, gated on the fail_closed value). Delivery is now
-	// always fail-closed (HaltOnDeliveryFailure): every outage denies, one
-	// escalation attempt, and the run it belongs to is latched -- so a
-	// SECOND call for that same session denies via the replay, spending no
-	// further /evaluate attempt. The deprecated fail_closed key sets nothing
-	// either way.
-	t.Run("C15 a T2 outage halts the run; its next call is denied by the latch, not a new attempt", func(t *testing.T) {
+	// always fail-closed: every outage denies, and once the recorded copy's
+	// attempt and one retry both fail, the run is latched -- so later calls
+	// for that session deny via the replay, spending no further /evaluate
+	// attempt. The deprecated fail_closed key sets nothing either way.
+	t.Run("C15 a T2 outage halts the run after one retry; later calls are denied by the latch, not a new attempt", func(t *testing.T) {
 		allowT1(t)
 		url, hits := serveEvaluate(t, `boom`, 500, 0)
 		evalCreds(t, url)
@@ -498,19 +497,31 @@ func TestEnforcementConformance_Tier2(t *testing.T) {
 			t.Errorf("stdout leaked the command (INV-2): %q", out)
 		}
 		if hits.V3EvaluateAttempts() != 1 {
-			t.Errorf("/evaluate hits = %d, want exactly 1 (single delivery attempt)", hits.V3EvaluateAttempts())
+			t.Errorf("/evaluate hits = %d, want exactly 1 (the escalation; its failure requeues, never retries inline)", hits.V3EvaluateAttempts())
 		}
 
 		out2 := run(dangerBash)
 		d2, reason2 := parsePermissionDecision(t, []byte(out2))
 		if d2 != ccDecisionDeny {
-			t.Fatalf("the latched run's next call must also deny; got %q", d2)
+			t.Fatalf("the next call must also deny; got %q", d2)
 		}
 		if !strings.Contains(reason2, "halted") {
-			t.Errorf("reason = %q, want the session-halt replay wording", reason2)
+			t.Errorf("reason = %q, want the session-halt wording", reason2)
 		}
-		if hits.V3EvaluateAttempts() != 1 {
-			t.Errorf("a latched run must not spend a second /evaluate attempt; hits=%d", hits.V3EvaluateAttempts())
+		// The first call's transient (5xx) escalation failure does not latch
+		// the run; it requeues the recorded copy. This call's drain sends it
+		// once more and retries it once (hits 1 -> 3), both fail, and the run
+		// halts.
+		if hits.V3EvaluateAttempts() != 3 {
+			t.Errorf("/evaluate hits = %d, want 3 (the requeued copy's attempt and one retry)", hits.V3EvaluateAttempts())
+		}
+
+		out3 := run(dangerBash)
+		if d3, _ := parsePermissionDecision(t, []byte(out3)); d3 != ccDecisionDeny {
+			t.Fatalf("the latched run's next call must deny; got %q", d3)
+		}
+		if hits.V3EvaluateAttempts() != 3 {
+			t.Errorf("a latched run must not spend another /evaluate attempt; hits=%d", hits.V3EvaluateAttempts())
 		}
 	})
 

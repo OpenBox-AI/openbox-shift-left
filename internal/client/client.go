@@ -477,6 +477,23 @@ func FailureClass(err error) string {
 	return "network"
 }
 
+// RetryableDelivery reports whether a failed Emit earns its event the one
+// delivery retry a drainer allows before halting the run: only a transient
+// fault, where core timed out, was unreachable, or answered 5xx. A 401, a
+// 429, any other 4xx and an unbuildable event halt on the first failure.
+// Only an ErrDelivery qualifies, so a caller's own precondition error is
+// never resent.
+func RetryableDelivery(err error) bool {
+	if !errors.Is(err, ErrDelivery) {
+		return false
+	}
+	switch FailureClass(err) {
+	case "timeout", "network", "5xx":
+		return true
+	}
+	return false
+}
+
 type httpError struct {
 	path   string
 	status int

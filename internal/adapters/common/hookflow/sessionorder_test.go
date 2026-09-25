@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -173,18 +174,16 @@ func TestSessionOrder_ConcurrentDrainersNeverDuplicateOrReorder(t *testing.T) {
 	}
 }
 
-// Each failure class gets exactly one attempt: the fake Emitter's own
-// call count proves it, OnFailure is called once per failed event, and the
-// NEXT line still gets attempted (a failure never stops the drain).
-func TestSessionOrder_OneAttemptPerFailureClass(t *testing.T) {
+// A transient failure gets one attempt and exactly one retry; OnFailure is
+// called once per failed event, and the NEXT line still gets attempted (a
+// failure never stops the drain).
+func TestSessionOrder_OneRetryPerTransientFailure(t *testing.T) {
 	classes := []struct {
 		name string
 		err  error
 	}{
-		{"5xx", fmt.Errorf("%w: core-side fault", client.ErrDelivery)},
-		{"401", fmt.Errorf("%w: invalid token or agent identity", client.ErrDelivery)},
-		{"timeout", fmt.Errorf("%w: %s", client.ErrDelivery, context.DeadlineExceeded)},
-		{"4xx", fmt.Errorf("%w: %w: payload rejected", client.ErrDelivery, client.ErrRefused)},
+		{"network", fmt.Errorf("%w: dial tcp: connection refused", client.ErrDelivery)},
+		{"timeout", fmt.Errorf("%w: %w", client.ErrDelivery, context.DeadlineExceeded)},
 	}
 	for _, tc := range classes {
 		t.Run(tc.name, func(t *testing.T) {
@@ -213,13 +212,13 @@ func TestSessionOrder_OneAttemptPerFailureClass(t *testing.T) {
 			if n != 1 {
 				t.Errorf("delivered = %d, want 1 (only the successful line)", n)
 			}
-			if got := em.attemptsFor("failing"); got != 1 {
-				t.Errorf("attempts for the failing line = %d, want exactly 1", got)
+			if got := em.attemptsFor("failing"); got != 2 {
+				t.Errorf("attempts for the failing line = %d, want exactly 2 (one attempt, one retry)", got)
 			}
 			if len(failed) != 1 || failed[0] != "failing" {
 				t.Errorf("OnFailure called for %v, want exactly [failing]", failed)
 			}
-			if got := em.delivered(); len(got) != 2 || got[1] != "next" {
+			if got := em.delivered(); len(got) != 3 || got[2] != "next" {
 				t.Errorf("the line after a failure must still be attempted, got %v", got)
 			}
 		})
@@ -350,37 +349,44 @@ func TestSessionOrder_TryOnBusyStripeReportsBusy(t *testing.T) {
 }
 
 // A client built with MaxRetries 0 (the same setting claude-code/codex
-// creds.go use) hits a fake, failing core exactly once per event: the retry
-// loop never runs at the HTTP layer either.
-func TestSessionOrder_MaxRetriesZeroHitsCoreOnce(t *testing.T) {
-	fc := fakecore.New(t, fakecore.Script{AlwaysStatus: 503})
-	zero := 0
-	cl, err := client.New(client.Config{
-		BaseURL:            fc.URL(),
-		APIKey:             fakecore.APIKey(),
-		WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
-		MaxRetries:         &zero,
-	})
-	if err != nil {
-		t.Fatalf("client.New: %v", err)
-	}
+// creds.go use) never retries at the HTTP layer, so what core sees is the
+// drainer's own rule: a 5xx is sent once and retried once, while 401, 429
+// and any other 4xx are sent exactly once.
+func TestSessionOrder_CoreSeesOneRetryOnlyForTransientStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   int
+	}{{503, 2}, {520, 2}, {401, 1}, {429, 1}, {400, 1}} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			fc := fakecore.New(t, fakecore.Script{AlwaysStatus: tc.status})
+			zero := 0
+			cl, err := client.New(client.Config{
+				BaseURL:            fc.URL(),
+				APIKey:             fakecore.APIKey(),
+				WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
+				MaxRetries:         &zero,
+			})
+			if err != nil {
+				t.Fatalf("client.New: %v", err)
+			}
 
-	sp := Spool{Dir: t.TempDir()}
-	if err := sp.Append(sessEv("sess", "e1")); err != nil {
-		t.Fatal(err)
-	}
+			sp := Spool{Dir: t.TempDir()}
+			if err := sp.Append(sessEv("sess", "e1")); err != nil {
+				t.Fatal(err)
+			}
+			var failed int
+			sp.OnFailure = func(client.DevEvent, error) { failed++ }
 
-	var failed int
-	sp.OnFailure = func(client.DevEvent, error) { failed++ }
-
-	if _, err := sp.DrainSession(context.Background(), "sess", asFlushFunc(cl), DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}); err != nil {
-		t.Fatalf("DrainSession: %v", err)
-	}
-	if got := fc.V3EvaluateAttempts(); got != 1 {
-		t.Errorf("core saw %d request(s), want exactly 1 (MaxRetries: 0)", got)
-	}
-	if failed != 1 {
-		t.Errorf("OnFailure called %d times, want 1", failed)
+			if _, err := sp.DrainSession(context.Background(), "sess", asFlushFunc(cl), DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}); err != nil {
+				t.Fatalf("DrainSession: %v", err)
+			}
+			if got := fc.V3EvaluateAttempts(); got != tc.want {
+				t.Errorf("core saw %d request(s), want exactly %d", got, tc.want)
+			}
+			if failed != 1 {
+				t.Errorf("OnFailure called %d times, want 1", failed)
+			}
+		})
 	}
 }
 
@@ -455,19 +461,27 @@ func eventIDs(evs []client.DevEvent) []string {
 	return out
 }
 
-// A SessionStart whose inline attempt core explicitly rejects (5xx/401): this
-// phase's contract stops at OnFailure firing once (the ledger line); the
-// run-halt latch itself is a later caller's own OnFailure, wired onto this
-// same seam.
+// A SessionStart that core rejects: OnFailure fires once (the ledger line),
+// after one retry for a 5xx and none for a 401; the run-halt latch itself is
+// a later caller's own OnFailure, wired onto this same seam.
 func TestSessionOrder_RejectedStartCallsOnFailureOnce(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		err  error
-	}{
-		{"5xx", fmt.Errorf("%w: core-side fault", client.ErrDelivery)},
-		{"401", fmt.Errorf("%w: invalid token or agent identity", client.ErrDelivery)},
-	} {
+		name   string
+		status int
+		want   int
+	}{{"5xx", 503, 2}, {"401", 401, 1}} {
 		t.Run(tc.name, func(t *testing.T) {
+			fc := fakecore.New(t, fakecore.Script{AlwaysStatus: tc.status})
+			zero := 0
+			cl, err := client.New(client.Config{
+				BaseURL:            fc.URL(),
+				APIKey:             fakecore.APIKey(),
+				WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
+				MaxRetries:         &zero,
+			})
+			if err != nil {
+				t.Fatalf("client.New: %v", err)
+			}
 			sp := Spool{Dir: t.TempDir()}
 			if err := sp.Append(workflowStarted("sess", "start")); err != nil {
 				t.Fatal(err)
@@ -479,15 +493,14 @@ func TestSessionOrder_RejectedStartCallsOnFailureOnce(t *testing.T) {
 					t.Errorf("OnFailure err = %v, want it to carry ErrDelivery", err)
 				}
 			}
-			em := &countingEmitter{script: map[string]error{"start": tc.err}}
-			if _, err := sp.DrainSession(context.Background(), "sess", asFlushFunc(em), DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}); err != nil {
+			if _, err := sp.DrainSession(context.Background(), "sess", asFlushFunc(cl), DrainOptions{Mode: Block, AttemptTimeout: DeliveryAttemptTimeout}); err != nil {
 				t.Fatalf("DrainSession: %v", err)
 			}
 			if len(failed) != 1 || failed[0] != "start" {
 				t.Fatalf("OnFailure calls = %v, want exactly one for \"start\"", failed)
 			}
-			if got := em.attemptsFor("start"); got != 1 {
-				t.Errorf("core saw %d attempt(s) for the rejected start, want 1", got)
+			if got := fc.V3EvaluateAttempts(); got != tc.want {
+				t.Errorf("core saw %d attempt(s) for the rejected start, want %d", got, tc.want)
 			}
 			if got := sp.PendingCount("sess"); got != 0 {
 				t.Errorf("PendingCount = %d, want 0: a rejected start is attempted-and-gone, not requeued", got)

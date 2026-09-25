@@ -136,7 +136,8 @@ func (e *Engine) ThreadDuration(ev *client.DevEvent) {
 }
 
 // Flush drains the given session's own spooled events -- its head file, then
-// its tail -- one attempt per event (Spool.DrainSession), until empty or ctx
+// its tail -- one attempt per event, plus one retry for a transient failure
+// (Spool.DrainSession), until empty or ctx
 // runs out. It is bounded by ctx (the caller caps session-end flush so
 // teardown is never delayed unduly).
 //
@@ -197,7 +198,8 @@ func (e *Engine) FlushAll(ctx context.Context, em Emitter) (int, error) {
 
 // DrainSession is the exported single-session drain every later caller
 // builds on (a gate's own escalation, a lane daemon's queue): sessionID's
-// events through em, one attempt each, per opts. See Spool.DrainSession for
+// events through em, one attempt each plus one retry for a transient
+// failure, per opts. See Spool.DrainSession for
 // the full contract.
 func (e *Engine) DrainSession(ctx context.Context, sessionID string, em Emitter, opts DrainOptions) (int, error) {
 	return e.speaking().DrainSession(ctx, sessionID, e.emitFunc(em), opts)

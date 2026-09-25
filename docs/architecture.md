@@ -68,17 +68,26 @@ at most the first 64KB.
 - Hook events, the gate's own evaluation, and the lanes' model-call records
   all go through **one ordered queue per session**. There is one drainer per
   session, and events are delivered in the order they were appended.
-- Every event gets **exactly one delivery attempt**. Nothing is retried.
-- If the platform does not accept an event (refused, 5xx, 401, network error),
-  the client **halts that session's current run**: it writes a local latch
-  that refuses every later gated call, prompt and relayed model call in that
-  run. A new session starts clean.
+- Every event gets **one delivery attempt**, plus **exactly one retry** when
+  that attempt failed transiently: a timeout, a network error or a 5xx. A 401,
+  a 429 or any other 4xx is not retried.
+- If the platform still does not accept an event, the client **halts that
+  session's current run**: it writes a local latch that refuses every later
+  gated call, prompt and relayed model call in that run. A new session starts
+  clean.
+- When the gate's own evaluation fails transiently, the call is still denied,
+  but the run is not halted on the spot: the call's record goes back to the
+  queue, and its delivery attempt and retry decide.
 - `WorkflowStarted` (session start) always reaches the platform before any
   other event of the run. Beyond that, ordering is best effort: a gate may
   send its own evaluation before older queued events if the queue is busy.
 
-Why no retries: a platform hiccup retried by every tool call of every session
-turns into a flood. A halt is visible and bounded instead.
+Why only one retry: a platform hiccup retried without limit by every tool call
+of every session turns into a flood. One retry lets a long session survive a
+brief blip, and a real outage still ends in a visible, bounded halt. The cost:
+the platform only deduplicates a resend once it has finished processing the
+first attempt, so a retry that races an attempt still in flight can store the
+event twice.
 
 The implementation lives in `internal/adapters/common/hookflow/`.
 

@@ -173,7 +173,7 @@ func TestNewEngine_OnFailureLedgersAndLatches(t *testing.T) {
 	}
 }
 
-// TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt proves the timeout
+// TestNewEngine_TimeoutClassLatchesAfterOneRetry proves the timeout
 // failure class through the SAME wiring the real 30s flusher/lane-drain
 // path uses (Engine.NewEngine's own default Spool.OnFailure ->
 // HaltOnDeliveryFailure), without waiting out the real 30s bound: a short
@@ -184,7 +184,7 @@ func TestNewEngine_OnFailureLedgersAndLatches(t *testing.T) {
 // requeued -- exactly the "gate timeouts requeue, never halt; only the
 // flusher/drain path's own fixed 30s bound can" distinction this repo's own
 // gate.go documents.
-func TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt(t *testing.T) {
+func TestNewEngine_TimeoutClassLatchesAfterOneRetry(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	e := NewEngine(t.TempDir())
@@ -214,8 +214,8 @@ func TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt(t *testing.T) {
 	if n != 0 {
 		t.Errorf("delivered = %d, want 0 (the only line timed out)", n)
 	}
-	if attempts != 1 {
-		t.Errorf("attempts = %d, want exactly 1", attempts)
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want exactly 2 (one attempt, one retry)", attempts)
 	}
 	info, halted := SessionHalted(sessionID)
 	if !halted {

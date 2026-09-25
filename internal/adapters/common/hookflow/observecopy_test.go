@@ -53,15 +53,12 @@ func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	}
 }
 
-// TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy an explicit,
-// proven non-acceptance (core answered, or the transport refused before this
-// call's own budget ran out) is this event's one delivery attempt, like any
-// other: it halts the run (HaltOnDeliveryFailure) rather than being retried
-// through a second, local copy -- re-spooling it would spend a second
-// attempt on the very event whose first attempt just failed. Supersedes the
-// old fail-open expectation ("nothing reached core, so the spool copy must
-// survive"): delivery is now always fail-closed, and an unaccepted event
-// halts the run instead of being silently re-tried.
+// TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy a
+// non-transient failure of the escalation (401, 429, other 4xx, or an event
+// that could not be built) earns no retry: it halts the run
+// (HaltOnDeliveryFailure) rather than re-spooling a local copy. A transient
+// failure instead requeues the copy for the drainers
+// (TestGate_TransientEscalationFailureRequeuesTheObserveCopy).
 func TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy(t *testing.T) {
 	gov := degradedGovernor{fakeGovernor: &fakeGovernor{}}
 	if deliveringGate(t, gov, "1") {

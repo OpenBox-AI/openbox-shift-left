@@ -343,22 +343,14 @@ func containsFold(haystack, needle string) bool {
 		stringsContainsFold(haystack, needle)
 }
 
-// TestGovernanceEvalGateOutageReportsTheCallOnce pinned the election between
-// the gate's synchronous delivery and the spooled observe copy: the gate used
-// to spool an observe copy whenever the synchronous delivery did not happen,
-// so a scoped outage was still expected to report the call exactly once
-// (either half electing, never both, never neither).
-//
-// Delivery is always fail-closed now (HaltOnDeliveryFailure, plan round 3):
-// an explicit non-acceptance -- this scoped outage answers 503 immediately,
-// well within the gate's own budget -- denies the call, halts the run, and is
-// NEVER resent; there is no more observe-copy fallback for it to elect
-// through. The call now reaches core zero times, not one, and stays that way
-// (single-attempt delivery has no carry-over). PairingGrader is not run here:
-// its "declaredDenied" contract still expects exactly one ActivityStarted row
-// for a blocked call (true for a real BLOCK/HALT verdict, which IS recorded
-// before it renders); a call whose own escalation was never accepted at all
-// is a different shape that grader does not yet model.
+// TestGovernanceEvalGateOutageReportsTheCallOnce: core is down only while
+// the tool call is gated. The call is denied (fail-closed), but a 503 on the
+// gate's own escalation is transient: it does not halt the run, and the
+// call's observe copy is requeued instead. Once core is back, a drainer
+// delivers that copy, so the call is recorded exactly once and no halt latch
+// is written. PairingGrader is not run here: its "declaredDenied" contract
+// expects the ActivityStarted row of a real BLOCK/HALT verdict, not a copy
+// delivered after a denied escalation.
 func TestGovernanceEvalGateOutageReportsTheCallOnce(t *testing.T) {
 	sc := oneCallSession("a-gate-outage-halts-the-run", allowVerdict, true)
 	// Down while the tool call is gated, back up by the time the session ends.
@@ -373,11 +365,11 @@ func TestGovernanceEvalGateOutageReportsTheCallOnce(t *testing.T) {
 		t.Error("a fail-closed deny gave the coding agent no reason at all")
 	}
 
-	if n := countStartedFor(run, noToolUseID); n != 0 {
-		t.Errorf("the call reached the wire %d times, want 0; an explicit delivery failure is never resent (single-attempt delivery)", n)
+	if n := countStartedFor(run, noToolUseID); n != 1 {
+		t.Errorf("the call was recorded %d times, want exactly 1: its requeued observe copy, delivered once core was back", n)
 	}
-	if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
-		t.Errorf("%d session halt latch(es) were written, want exactly 1: an explicit delivery failure halts the run", n)
+	if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 0 {
+		t.Errorf("%d session halt latch(es) were written, want 0: a transient escalation failure that later delivers must not halt the run", n)
 	}
 }
 

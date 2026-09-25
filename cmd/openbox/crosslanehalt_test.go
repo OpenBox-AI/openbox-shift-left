@@ -528,9 +528,11 @@ func TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery(t *te
 	if len(attemptsAfterFirst) == 0 {
 		t.Fatal("no v3 evaluate attempt reached the fake core for the first call")
 	}
+	// A 503 is transient: each record gets one attempt and exactly one retry
+	// before the run halts.
 	for key, n := range attemptsAfterFirst {
-		if n != 1 {
-			t.Errorf("event (idempotency key %s) was attempted %d time(s), want exactly 1", key, n)
+		if n != 2 {
+			t.Errorf("event (idempotency key %s) was attempted %d time(s), want exactly 2 (one attempt, one retry)", key, n)
 		}
 	}
 

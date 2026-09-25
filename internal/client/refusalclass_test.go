@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -148,4 +149,52 @@ func TestFailureClass(t *testing.T) {
 	if got := FailureClass(nil); got != "" {
 		t.Errorf("FailureClass(nil) = %q, want empty", got)
 	}
+}
+
+// TestRetryableDelivery pins which failures earn the one delivery retry:
+// only a transient fault -- core timed out, was unreachable, or answered 5xx.
+// A 401, a 429, any other 4xx and an unbuildable event halt on the first
+// failure.
+func TestRetryableDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   bool
+	}{{500, true}, {502, true}, {520, true}, {401, false}, {429, false}, {400, false}, {404, false}} {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+			srv := fixedRespServer(t, tc.status, `{}`)
+			c, _ := newTestClient(t, srv.URL, false)
+			_, err := c.Emit(context.Background(), sampleEvent())
+			if got := RetryableDelivery(err); got != tc.want {
+				t.Errorf("RetryableDelivery(%v) = %v, want %v", err, got, tc.want)
+			}
+		})
+	}
+
+	t.Run("network fault", func(t *testing.T) {
+		c, _ := newTestClient(t, "http://127.0.0.1:1", false)
+		_, err := c.Emit(context.Background(), sampleEvent())
+		if !RetryableDelivery(err) {
+			t.Errorf("RetryableDelivery(%v) = false, want true", err)
+		}
+	})
+
+	t.Run("timeout", func(t *testing.T) {
+		srv := memhttptest.NewServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			<-r.Context().Done()
+		}))
+		defer srv.Close()
+		c, _ := newTestClient(t, srv.URL, false)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		_, err := c.Emit(ctx, sampleEvent())
+		if !RetryableDelivery(err) {
+			t.Errorf("RetryableDelivery(%v) = false, want true", err)
+		}
+	})
+
+	t.Run("not a delivery failure", func(t *testing.T) {
+		if RetryableDelivery(nil) || RetryableDelivery(errors.New("dial tcp: refused")) {
+			t.Error("only an ErrDelivery can be retried")
+		}
+	})
 }

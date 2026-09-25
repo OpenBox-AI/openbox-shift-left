@@ -92,7 +92,8 @@ func waitUntilChatHalted(t *testing.T, key string, timeout time.Duration) {
 }
 
 // TestChatEventCoreDoesNotAcceptLatchesTheConversation pins: a chat event
-// core refuses gets exactly one attempt (fakecore's own AttemptsByKey), the
+// core answers with a 503 gets one attempt and exactly one retry (fakecore's
+// own AttemptsByKey), the
 // conversation is latched (HaltOnDeliveryFailure, through newChatPool's own
 // deliver closure), and the NEXT completion of that SAME conversation is
 // then refused by haltDecorator naming the event -- while a DIFFERENT
@@ -126,8 +127,8 @@ func TestChatEventCoreDoesNotAcceptLatchesTheConversation(t *testing.T) {
 	waitUntilChatHalted(t, key, 5*time.Second)
 
 	for k, n := range fake.AttemptsByKey() {
-		if n != 1 {
-			t.Errorf("event (idempotency key %s) attempted %d time(s), want exactly 1", k, n)
+		if n != 2 {
+			t.Errorf("event (idempotency key %s) attempted %d time(s), want exactly 2 (one attempt, one retry)", k, n)
 		}
 	}
 
