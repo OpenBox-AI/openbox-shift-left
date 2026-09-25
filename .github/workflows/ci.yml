@@ -194,12 +194,8 @@ jobs:
         # explaining what the tiers WERE are how a reader understands why a
         # deprecated key exists at all. A gate failing on those would be pressure
         # to delete the explanation, which is the opposite of what is wanted.
-        #
-        # The upgrade note names the deprecated keys on purpose.
         run: |
-          hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md \
-            | grep -v '^docs/upgrading-to-inline-evaluation.md' \
-            || true)
+          hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md || true)
           if [ -n "$hits" ]; then
             echo "tier vocabulary in user-facing docs (the tier model is retired):"
             echo "$hits"

@@ -1,266 +1,160 @@
 # Credentials and secret detection
 
-Where this machine's credentials live, and what the local redactor catches
-before anything is attached to an event. The companion to
-[Data and privacy](data-and-privacy.md), which owns what leaves the machine.
+Where this machine's credentials live, what protects them (and what does not),
+and what the local secret redactor catches. For what leaves the machine, see
+[Data and privacy](data-and-privacy.md).
 
 ## Where credentials live
 
-Every one of these files is **plaintext**. Nothing is sent to OpenBox; but there
-is no encryption at rest either, and the difference matters, so here it is
-plainly.
+All of these files are **plaintext**. Nothing in them is sent to OpenBox, but
+nothing encrypts them at rest either.
 
-**One store per governed tool.** Each tool you run `openbox init --provider
-<tool>` for registers its own `keycloak_workload` agent, in its own directory:
+**One store per governed tool:**
 
 ```
-~/.openbox/claude-code/.env
-~/.openbox/codex/.env
-    OPENBOX_API_KEY='obx_…'                 # that tool's agent runtime key
-    OPENBOX_WORKLOAD_PRIVATE_KEY='…'        # the RS256 key that tool authenticates with
-~/.openbox/claude-code/dev.json
-~/.openbox/codex/dev.json
-    agent_id                                # a UUID; a coordinate, not a secret
-~/.openbox/claude-code/workload-token.json
-~/.openbox/codex/workload-token.json
-    a cache, not a store: the bearer Keycloak issued for that agent's key,
-    usable for at most 270 seconds and deletable at any time -- the next hook
-    just re-authenticates and writes a new one
+~/.openbox/<tool>/.env
+    OPENBOX_API_KEY='obx_…'            # the agent's API key
+    OPENBOX_WORKLOAD_PRIVATE_KEY='…'   # the agent's RS256 private key
+~/.openbox/<tool>/dev.json
+    agent_id                           # a UUID; not a secret
+~/.openbox/<tool>/workload-token.json
+    a cache of the current access token (valid at most 270 seconds; safe to delete)
 ```
 
-There is no DID here anymore, stored or otherwise. `agent_id` is the only
-coordinate; the `did:aip:…` attribution label a spooled event carries is
-derived from it in memory on every read (`uuid5(namespace, agent_id)`) and
-never written to disk or sent as a header -- see [Data and privacy](data-and-privacy.md).
-
-**If your org's Keycloak is unreachable, hooks fail closed and the run halts,
-exactly as a core outage would.** A hook that cannot bootstrap or exchange for
-a bearer is an explicit, proven non-acceptance -- delivery is single-attempt
-and unconditionally fail-closed now, so the gated call denies, the event is
-ledgered and gone (never held in the spool waiting for a retry), and the run
-halts until a new session starts. There is no separate "Keycloak is down"
-warning distinct from an ordinary outage, because from the hook's side they
-look the same: no bearer, no verdict, deny and halt.
-
-**One org-level file**, shared by every tool, holding the organization
-connection and nothing else:
+**One organization-level store**, shared by all tools:
 
 ```
 ~/.openbox/.env
-    OPENBOX_CONTROL_TOKEN='obx_key_…'   # written by `openbox auth`; see below
+    OPENBOX_CONTROL_TOKEN='obx_key_…'  # written by `openbox auth`
 ~/.openbox/dev.json
-    backend_url, base_url               # coordinates `init` copies into each tool
+    backend_url, base_url              # copied into each tool's dev.json by `init`
 ```
 
-- **On macOS and Linux** the file is `0600` under a `0700` directory, so other
-  local users cannot read it. Anything running **as you** can: a shell
-  one-liner, a dependency's install script, and **the coding agent under
-  governance**, which by design runs arbitrary commands as you.
-- **On Windows there is no at-rest protection at all.** `0600` is a no-op there,
-  it only toggles the read-only attribute, so the file inherits the parent ACL
-  and other local accounts can read it. Use full-disk encryption; do not treat
-  this file as protected.
-- **It is the only copy.** OpenBox shows the API key and workload key exactly
-  once, at registration, and does not store them. Lose a tool's file and there
-  is no rotation: `openbox init --provider <tool>` finds the old agent's name
-  taken and registers a new, suffixed agent instead (`<name>-<6 hex>`, both
-  names printed), leaving the old one orphaned with work still attributed to
-  it. The only way to keep the same `agent_id` is `openbox init --adopt`,
-  which asks for that agent's id, its API key, and its workload private-key
-  file (PEM or the single-line base64 form) -- so adopting still requires
-  holding the very key you lost.
-- **Never commit it.** The file's own header comment says so; it lives in your
-  home directory rather than anywhere near a repo for that reason.
-- **A killed write can leave a copy.** Every credential write is atomic — the
-  body goes into a temporary file and is renamed over the target — so a process
-  killed in between leaves that copy behind holding the same secrets.
-  `openbox uninstall` sweeps the ones OpenBox writes beside their target
-  (`~/.openbox/**/.env-*.tmp`) and lists them before deleting them. The other
-  atomic writes on this machine — the activation record, the tools' own
-  settings files — stage elsewhere: through the system temp directory
-  (`$TMPDIR`, per-user, `0700`) when it shares a volume with your home, and
-  otherwise beside the target under a name carrying no `.tmp` suffix. Neither
-  is enumerated by `uninstall`. Those hold displaced configuration rather than
-  an OpenBox credential, but if your own settings carried a key, check both
-  places after a crash.
+A file holds either secrets (`.env`) or coordinates (`dev.json`), never both,
+and no value is stored in two places. An old install once kept the same value
+in two stores, and a stale copy kept silently overwriting a corrected one.
 
-What that means for evidence: a signed event or commit attestation proves
-**origin-of-config**, a machine holding this agent's key produced it, not
-tamper-resistance against the developer or the agent they run. The OS keychain
-this replaced did not actually change that, since it was unlocked for the whole
-desktop session and readable by the same processes; the plaintext file just
-makes it obvious.
+### What protects them
 
-**The organization credential is written to the org-level file, and that is a
-real exposure.** `OPENBOX_CONTROL_TOKEN` is what registers an agent, and when it
-is an `obx_key_…` organization key it can **create and rotate agents across your
-whole organization** — a tool's own key compromises one agent, this one
-compromises the fleet.
+- **macOS and Linux:** the files are `0600` in a `0700` directory. Other users
+  cannot read them. **Anything running as you can**, including the coding agent
+  being governed, which runs arbitrary commands as you.
+- **Windows:** no protection. `0600` does nothing there, and other local
+  accounts can read the files. Use full-disk encryption.
+- **They are the only copy.** OpenBox shows the API key and private key once,
+  at registration, and does not keep them. If you lose a tool's `.env`, the
+  next `init` registers a new agent. Only the adopt prompt keeps the same
+  agent, and it needs the original private key.
+- **Never commit them.** They live in your home directory, away from repos,
+  for that reason.
 
-`openbox auth` takes it and persists it to `~/.openbox/.env`, because `auth`
-takes it and `openbox init` needs it, and those are two separate processes with
-nothing exported between them. So it sits on disk in plaintext, `0600` on macOS
-and Linux, unprotected on Windows, readable by anything running as you —
-**including the coding agent under governance**. Everything the first section
-says about at-rest protection applies to this credential too, and it is the one
-worth caring about most.
+So a signed event or commit proves that *a machine holding this agent's key*
+produced it. It does not prove the developer, or the agent they run, could not
+have tampered with it.
 
-Two things bound it. It is **never written to a per-tool `.env`**, so a
-compromised tool store is not a fleet compromise. And it is never accepted as a
-flag, so it cannot leak through argv or shell history.
+### The organization key is the sensitive one
 
-Prefer exporting `OPENBOX_CONTROL_TOKEN` for the one `init` run and skipping
-`auth`'s token prompt if you would rather it never touch the disk; a real
-environment variable wins, and `openbox uninstall` deletes the file either way.
+An `obx_key_…` organization key can create agents across your whole
+organization. One tool's key compromises one agent; this key compromises the
+fleet.
 
-A real environment variable always beats the file, so CI can supply credentials
-without writing anything to disk:
+`auth` saves it to `~/.openbox/.env` because `auth` and `init` are separate
+processes. It is never written to a per-tool store, and never accepted as a
+command-line flag. To keep it off disk entirely, skip it at the `auth` prompt
+and export `OPENBOX_CONTROL_TOKEN` for the one `init` run. `openbox uninstall`
+deletes the file.
+
+### Precedence
+
+An environment variable beats the file, so CI can supply credentials without
+writing to disk:
 
 ```
-secrets       OPENBOX_API_KEY, OPENBOX_WORKLOAD_PRIVATE_KEY  env var > ~/.openbox/<tool>/.env
-coordinates   OPENBOX_AGENT_ID, …                            env var > <tool>/dev.json > default
-org secret    OPENBOX_CONTROL_TOKEN                          ~/.openbox/.env > env var
+secrets       OPENBOX_API_KEY, OPENBOX_WORKLOAD_PRIVATE_KEY  env > ~/.openbox/<tool>/.env
+coordinates   OPENBOX_AGENT_ID, …                            env > ~/.openbox/<tool>/dev.json > default
+org key       OPENBOX_CONTROL_TOKEN                          ~/.openbox/.env > env
 ```
 
-An exported variable outranks **every** store at once: one `OPENBOX_AGENT_ID`
-makes every governed tool report the same identity (and the same derived
-attribution). `openbox doctor` names which source is actually in effect for
-exactly this reason. `OPENBOX_AGENT_DID` is retired: doctor flags it as an
-ignored, no-op export rather than honouring it.
+An exported variable applies to **every** tool at once: one `OPENBOX_AGENT_ID`
+makes every governed tool report the same agent. `openbox doctor` shows which
+source is in effect.
 
-**The organization control token is the one exception, and it runs the other
-way.** It is the only value handed between two commands in two processes —
-`openbox auth` writes it, `openbox init` reads it — so the file wins and the
-variable is the fallback for when the file holds none. That keeps both routes
-that need the variable working (a CI image that never runs `auth` has no file at
-all; declining the token prompt leaves none in it) while stopping a forgotten
-export from silently overriding every `auth` you run. `auth` says so when it
-finds one set.
+The organization key runs the other way because it is the only value passed
+between two commands. If the environment won, a forgotten `export` in an old
+shell would silently override every `auth` you ran.
 
-Secrets and non-secrets never share a file, and no value lives in two places.
+### Leftover temp files
 
-## The transport lane's CA key is a credential too
+Credential writes are atomic (write a temp file, then rename). A process killed
+in between can leave a `~/.openbox/**/.env-*.tmp` holding the same secrets.
+`openbox uninstall` finds and deletes them.
 
-`~/.openbox/transport-ca.pem` and `transport-ca.key` exist on any machine whose
-install brought the transport lane up (see [Data and privacy](data-and-privacy.md)
-for the file table). The key gets no more at-rest protection than `.env` does:
-`0600` on macOS and Linux, nothing on Windows, readable by anything running as
-you — the same boundary this document draws everywhere else, restated because a
-signing key most readers would not think to call a "credential" is one here.
+## The transport CA key is a credential too
 
-The CA is generated **unconstrained** (owner ruling 2026-09-22, reversing an
-earlier name-constraint bound): what the key can do with that access is not
-bounded by the certificate at all, only by the per-provider intercept
-allowlist the relay enforces on top of it (see
-[Architecture](architecture.md)'s decision record). A leaked key can mint a
-certificate for **any** site this machine is made to trust the CA for, not
-only an intercepted one. A machine still holding an older, constrained CA is
-narrower by accident rather than by design: `openbox doctor` names it a
-"legacy constrained CA" finding, and clearing it is a plain `openbox init`
-re-run now — it re-issues the CA itself (deletes both legacy files, generates
-a fresh unconstrained pair under the same names) before the transport unit
-comes back up, then restart the tool. No document should imply this key is
-protected from a process running as you, on either shape of CA.
+`~/.openbox/transport-ca.pem` and `transport-ca.key` exist once the transport
+lane is installed. The key has the same protection as `.env`: `0600` on macOS
+and Linux, none on Windows, readable by anything running as you.
 
-**On macOS, this same CA is also trusted system-wide.** Once `openbox init`
-activates the system PAC (see [Getting started](getting-started.md)'s "System-wide
-PAC and CA trust" section), the CA is added to the **System keychain**
-(`security add-trusted-cert -d -r trustRoot`), which is a wider blast radius
-than the per-tool `NODE_EXTRA_CA_CERTS` trust every platform already gets: any
-process on the machine that consults the System keychain — not only the
-governed tool — now treats this key's certificates as valid, including
-desktop apps and every browser. `openbox uninstall` untrusts the CA (by its
-SHA-1 fingerprint) before deleting the key; a declined or failed untrust still
-deletes the key, since a trusted certificate with no matching key cannot mint
-anything new, and prints the manual command (with the SHA-1) to clear the
-now-dangling System-keychain entry by hand. Linux and Windows keep
-env-scoped trust only, for now.
+The CA is **not restricted to specific hosts**. What limits the lane is the
+per-provider allowlist of hosts it decrypts
+(`internal/transport/hosttable.go`), not the certificate. So a leaked key
+could forge a certificate for **any** site that trusts this CA.
+
+- On every platform, only the governed tool trusts the CA (through
+  `NODE_EXTRA_CA_CERTS` in its settings).
+- **On macOS**, `init` also trusts it in the System keychain, so every app and
+  browser on the machine trusts it.
+
+`openbox uninstall` untrusts the CA, then deletes the key. If untrusting fails,
+it still deletes the key (a trusted certificate with no key cannot sign
+anything new) and prints the command to remove the keychain entry by hand.
+
+A machine with a CA from an older install, which was restricted to one host,
+keeps working: hosts it cannot sign for are passed through undecrypted.
+`openbox doctor` reports it, and re-running `openbox init` replaces it.
 
 ## Secret detection stays local
 
-In enforce mode, a `Write`/`Edit` body is scanned locally for credential
-patterns before the tool runs. A hit is redacted **in the tool input**, the file
-is written with `OPENBOX_REDACTED…` in place of the secret, and the audit
-records the category (`aws_key`, `entropy`, …), never the value. Nothing about
-the finding except the category leaves the machine.
+Every body is scanned on your machine before it is attached to an event: the
+prompt, the reply, thinking, tool input and output, and refusal reasons. A
+match is replaced with a placeholder, and only the category (`aws_key`,
+`entropy`, …) is logged, never the value.
+
+On a gated `Write` or `Edit`, the redaction is applied to the **file itself**:
+the file is written with the placeholder in place of the secret.
+
+The detector lives in `internal/decision/`. It has two layers:
+
+1. **Format rules**: nine local patterns (`secrets.go`) plus gitleaks' rule set
+   (`gitleaks.go`). These match a known credential by its shape, anywhere.
+2. **Keyword and entropy**: a value next to a credential-like key name
+   (`api_key=…`, `"password": …`), or a long high-entropy token in a value
+   position.
 
 ### What the scanner catches; and where it stops
 
-Measured against the real detector, not asserted (conformance
-`TestContentCaptureCredentialCoverage` drives a dotenv dump through a real tool
-event and asserts the flushed bytes):
+Measured against the real detector
+(`TestContentCaptureCredentialCoverage` in the conformance suite):
 
-| In tool output | Redacted? | Why |
+| Input | Redacted? | Why |
 |---|---|---|
-| an AWS / GitHub / Stripe / JWT / `sk-` key, anywhere | yes | matched by shape, so surrounding syntax is irrelevant |
-| a GitLab / Shopify / Twilio / DigitalOcean / Grafana / … token, anywhere | yes | one of gitleaks' 222 rules; shape again, no key name needed |
-| `OPENBOX_API_KEY=obx_…` | yes | the key name matches a known credential keyword |
-| `OPENBOX_WORKLOAD_PRIVATE_KEY=<base64 PKCS8 DER>` | yes | `secret_assignment`: a `private_key`-keyword pattern restricted to a base64 value 64+ chars long, so it does not also fire on this repo's own `WorkloadPrivateKey: creds.WorkloadPrivateKey` source line |
-| a PEM block (`-----BEGIN…PRIVATE KEY-----…-----END…-----`), anywhere | yes | a dedicated local pattern matches the whole block and replaces it before gitleaks' own key-shape rules ever see it |
-| `X-OpenBox-Workload-Token: <a Keycloak-issued bearer>`, anywhere | yes | the JWT-shape rule (three base64url segments, `eyJ…eyJ…`); no keyword needed, so this also catches a leaked bearer with no header name attached |
-| `API_KEY=<64 hex chars>` | yes | keyword match; the value's alphabet does not matter |
-| **`AWS_ACCESS_KEY_ID=<value in no known format>`** | **no** | **the keyword must sit NEXT TO the delimiter, and `_ID` intervenes** |
-| `DEPLOY_HEX=<64 hex chars>` | **no** | no keyword, and hex cannot clear the entropy floor |
-| `{"password":"…"}` or `{"key":"<base64>"}` **nested in tool output** | yes | the generic patterns tolerate JSON quoting and escaping |
+| an AWS, GitHub, Stripe, JWT or `sk-` key, anywhere | yes | matched by shape |
+| a GitLab, Shopify, Twilio, Grafana or other known token | yes | a gitleaks rule |
+| `OPENBOX_API_KEY=obx_…` | yes | credential keyword |
+| `OPENBOX_WORKLOAD_PRIVATE_KEY=<long base64>` | yes | private-key keyword with a long base64 value |
+| a PEM private key block | yes | dedicated pattern |
+| `API_KEY=<64 hex chars>` | yes | keyword match |
+| `{"password":"…"}` nested in JSON tool output | yes | patterns handle JSON quoting and escaping |
+| **`AWS_ACCESS_KEY_ID=<value in no known format>`** | **no** | the keyword must sit right next to the `=`, and `_ID` is in the way |
+| **`DEPLOY_HEX=<64 hex chars>`** | **no** | no keyword, and hex never reaches the entropy threshold |
 
-The format layer is two sets that stack: nine hand-rolled regexes
-(`decision/secrets.go`) beneath gitleaks' 222 maintained rules
-(`decision/gitleaks.go`). The nine are loose where gitleaks is precise,
-gitleaks adds charset, length and entropy floors and allowlists published
-documentation keys, so deleting them in favour of it regressed six conformance
-cases and they were restored as a floor. Both layers run before the
-keyword/entropy layer.
+**Why the entropy threshold is not lower.** It is set above what hex strings
+can reach, so git SHAs, UUIDs and hashes are never flagged. On a file write
+the redactor rewrites the file, so a false positive corrupts real content.
 
-Two standing limits and one recently closed, all measured rather than assumed:
+**Known false positive:** a long base64 string assigned in source code
+(`x := "<48 base64 chars>"`) can be redacted on write. If you keep base64
+fixtures in source, generate them in code instead.
 
-**1. For generic secrets, the keyword decides; not the shape of the value.** A
-high-entropy value next to an unrecognized key name is invisible. That one is
-deliberate: the entropy floor sits above what hex can reach (16 symbols cap it
-at 4.0 bits per character, against a 4.5 threshold) precisely so git SHAs, UUIDs
-and content hashes are never flagged. Lowering it would make the scanner fire on
-ordinary identifiers; and on the enforce path the scanner **rewrites the file
-your tool is about to write**, so a false positive corrupts real content.
-
-**1b. The keyword has to be adjacent to the delimiter.** `access_key=…` is
-caught; `AWS_ACCESS_KEY_ID=…` is not, because `_ID` sits between the recognised
-keyword and the `=`. If the value happens to match one of the 231 format rules
-the format layer catches it anyway, a real AWS key id is caught, but a
-credential-named assignment carrying an unrecognised value is invisible.
-Measured, and it is the gap that caused a real regression: when the nine format
-regexes were briefly deleted, six conformance cases went red on exactly this
-shape.
-
-**A false-positive class worth stating, because the enforce path rewrites
-files.** The entropy pass fires on a base64-class token of ≥24 characters at
-≥4.5 bits per character **in a value position**; and a Go source line like
-`myConstant := "<48 chars of base64>"` is a value position. During this work the
-redactor rewrote three of the repo's own test files that way, replacing a
-fixture with a placeholder on disk. Nothing detected it except a test that then
-measured the wrong thing. If you keep base64 fixtures in source under a governed
-session, that is the shape to know about.
-
-**2. Nested JSON used to be a second gap. It is closed.** A tool's response is
-itself JSON, so a nested value arrives escaped (`{\"key\":\"…\"}`), and both
-generic mechanisms used to miss that shape; which covers `cat config.json` and
-every MCP tool result. Both were widened, so a password or a high-entropy token
-inside nested JSON is now redacted like a flat one. Recorded because the
-scanner's behaviour changed, and because the named formats were never affected:
-an AWS key in JSON was always caught while a database password was not, which is
-exactly what made the gap easy to miss.
-
-If your credentials fall under limit 1, that is the case to plan around: run
-with `content_capture: false`, or keep them out of the working directory of a
-governed session.
-
-The same scanner runs on **every** content body before it is attached to an
-event, enforce mode or not: the prompt, the assistant's reply, tool input, tool
-output, and the refusal reasons. **The prompt is no longer exempt**; it was the
-one field assigned directly instead of through the mapper's redactor, so it
-egressed unscanned with `secret_detection` fully on; that was fixed on
-2026-08-26 and conformance C42 asserts it on the outbound bytes
-(`internal/adapters/claude-code/mapper.go:225`). The same shape is **still live
-for Codex**, whose mapper has no redactor at all; see [coverage.md
-§3.4](coverage.md). Redaction runs **before** attachment in all cases; a
-redaction applied afterwards would pass every code-level test and still ship the
-secret, so the ordering is asserted on the outbound bytes (conformance C18, C26,
-C34).
+If your secrets fall into the "no" rows, turn `content_capture` off, or keep
+them out of the working directory of a governed session.

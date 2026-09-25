@@ -288,8 +288,8 @@ func TestEnforcementConformance(t *testing.T) {
 		agentBodies := strings.Join(rawBodies(srv)[:agentCalls], "")
 		if strings.Contains(agentBodies, awsSecret) || strings.Contains(agentBodies, corpusCredentialText) {
 			t.Errorf("the subagent prompt's secret reached /evaluate; redaction must run BEFORE "+
-				"attachment, same as any other gated class (docs/data-and-privacy.md:37 "+
-				"'redacted then capped'): %s", agentBodies)
+				"attachment, same as any other gated class (docs/data-and-privacy.md, §What an enforced call sends: "+
+				"'redacted'): %s", agentBodies)
 		}
 		if !strings.Contains(agentBodies, "OPENBOX_REDACTED") {
 			t.Errorf("no redaction placeholder attached for the Agent spawn; the case proves "+

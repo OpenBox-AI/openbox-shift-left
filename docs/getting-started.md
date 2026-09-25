@@ -1,123 +1,68 @@
 # Getting started
 
-This guide takes one developer machine from nothing to governed. It assumes
-your organization already runs an OpenBox platform and that you have a login
-to its dashboard. If you have never met this project, read the
-[README](../README.md) first: it defines the handful of terms used below —
-*governed*, *hook*, *agent*, *control token*, *posture*, *lane* — in one table.
+This guide takes one developer machine from nothing to governed, then covers
+configuration, day-to-day operation and troubleshooting. The
+[README](../README.md) has the short version.
 
-Two commands do the setup. After them there is nothing to keep running and no
-environment variable to keep set.
+Setup is two commands:
 
 ```
-openbox auth                     connect your organization; two URLs and the control token
-openbox init --provider <tool>   register that tool's agent, install the hooks
+openbox auth                     save your platform URLs and organization key (once)
+openbox init --provider <tool>   register that tool's agent and install its hooks (once per tool)
 ```
-
-`auth` runs first, once. `init` runs once **per tool you govern** — each tool
-gets its own agent. Run them out of order and each one tells you which to run
-instead.
 
 ## Before you start
 
-- [ ] The OpenBox platform is running and you know its two URLs (or you use
-      the hosted service, whose defaults are already filled in).
-- [ ] You have an **organization control token** from the dashboard, under
-      **Organization → API Keys**. It starts with `obx_key_`. [Section 2](#2-get-the-right-credential)
-      explains which key that is and why the other one will not work.
-- [ ] **Your org's identity provider is initialized.** Every developer-runtime
-      agent registers as a `keycloak_workload` identity, which needs an
-      operator to have run the backend's identity-provider generation command
-      for this organization at least once. If nobody has, `init` translates
-      the resulting 409 into "your org's identity provider is not
-      initialized; ask your OpenBox admin" rather than a raw platform error --
-      ask your admin to run it, then re-run `init`.
-- [ ] You are on **macOS or Linux**. Windows compiles but is not yet tested end
-      to end; see [What is not verified](#what-is-not-verified).
-- [ ] **Claude Code** or **Codex** is installed. Examples below use Claude
-      Code; Codex is the same two commands with `--provider codex`, and its
-      differences are collected in [Using Codex instead](#using-codex-instead).
+- [ ] An OpenBox platform is running, and you know the URLs of its backend
+      (control plane) and core (data plane). The hosted service is the default.
+- [ ] You have an **organization API key** (see [step 2](#2-get-the-right-credential)).
+- [ ] An OpenBox admin has initialized your organization's identity provider.
+      Every agent `openbox` registers is a `keycloak_workload` identity, which
+      needs this done once per organization. If it is not, `init` stops with
+      "your org's identity provider is not initialized".
+- [ ] You are on macOS or Linux, with Claude Code or Codex installed.
 
-**Rolling this out to more than one machine or tool?** Do it in this order:
-run the identity-provider generation command once per organization, upgrade
-every machine's `openbox` binary, then re-run `openbox init --provider <tool>`
-on each one. Skipping the first step does not fail silently: delivery is
-always fail-closed now, so every tool on a machine that re-inits against an
-uninitialized org denies every gated call (and halts each session after its
-first) until the operator command runs and `init` is re-run.
-
-## 1. Install the engine
+## 1. Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
-```
-
-Downloads the prebuilt `openbox` binary for your platform (Linux/macOS,
-amd64/arm64), verifies its checksum, and puts it on your PATH (`~/.local/bin` by
-default). No Go toolchain needed. If no prebuilt asset matches your platform it
-falls back to building from source, which does need Go 1.27+.
-
-```bash
 openbox version
 ```
 
-**Windows:** the binary compiles and CI cross-compiles it on every change, but
-`install.sh` is bash and no automated suite exercises Windows at runtime. Build
-from source with Go 1.27+, and see [What is not
-verified](#what-is-not-verified).
+The script downloads the prebuilt binary for your OS and CPU (macOS or Linux,
+amd64 or arm64), verifies its checksum and installs it to `~/.local/bin`
+(override with `OPENBOX_INSTALL_DIR`). If no prebuilt binary matches, it builds
+from source, which needs Go 1.27+.
+
+**Windows:** the binary builds, but `install.sh` is bash and nothing tests
+Windows at runtime. Build from source with `go build ./cmd/openbox`.
 
 ## 2. Get the right credential
 
-This is the one step people get wrong, because OpenBox has two kinds of key and
-the dashboard shows both.
+OpenBox has two kinds of key, and the dashboard shows both. You need the
+**organization key**.
 
-| | Organization key | Agent runtime key |
+| | Organization key (you need this) | Agent key (not this) |
 |---|---|---|
-| Looks like | `obx_key_…` | `obx_…` / `obx_test_…` |
-| Belongs to | your **organization** | one **agent** |
-| Where you find it | dashboard → **Organization → API Keys** | dashboard → Agent detail (`openbox_api_key`) |
-| Used for | registering each tool's agent, policy sync, approvals, rotation | the runtime itself, read from `~/.openbox/<tool>/.env` |
-| Env var | `OPENBOX_CONTROL_TOKEN` | `OPENBOX_API_KEY`, written for you by `init` |
+| Looks like | `obx_key_…` | `obx_…` or `obx_test_…` |
+| Belongs to | your organization | one agent |
+| Where | dashboard → **Organization → API Keys** | dashboard → agent detail page |
+| Used for | registering a new agent | the agent's own runtime calls |
+| Stored as | `OPENBOX_CONTROL_TOKEN` | `OPENBOX_API_KEY`, written by `init` |
 
-**You want the organization key**, and only to *register*; once a tool has an
-agent, `init --provider <tool>` re-runs offline and needs no org key at all.
-Note *when* it is needed: at **`init`** time, once per tool. `openbox auth` will
-store it for you so `init` can find it later, or you can export it for the one
-run. The agent runtime key is *minted by*
-registration and is never an input to it; paste it as a control token and you
-get a 401, and paste it in the API-key field and `auth` tells you which one you
-used.
+The organization key needs `create:agent` and `read:agent`. It is only used to
+**register** an agent. Once a tool has an agent, re-running `init` for it works
+offline with no organization key at all. Agent keys are created by
+registration; they are never an input to it.
 
-Permissions to grant the key, by what you intend to run:
-
-| Command | Needs |
-|---|---|
-| `openbox init --provider <tool>` (registering that tool's agent) | `create:agent`, `read:agent` |
-| policy reads (server-side, on every gated call) | `read:agent_policy` |
-| deciding an approval (from the dashboard) | `read:agent_session`, `manage:agent_session` |
-
-```bash
-export OPENBOX_CONTROL_TOKEN=obx_key_…
-```
-
-It is never accepted as a flag, so it cannot leak through your shell history or
-`ps`. Note the precedence, which is the reverse of every other value here:
-`~/.openbox/.env` wins for the control token and this variable is the fallback.
-That is deliberate — `auth` writes the token and `init` reads it in a separate
-process, and while the variable won, a forgotten `export` in a long-lived shell
-(or in a GUI editor's environment, which every terminal it spawns inherits)
-silently overrode every `auth` run, with nothing saying why.
+A secret is never accepted as a command-line flag, so it cannot leak through
+shell history or `ps`.
 
 ## 3. Connect your organization
 
 ```bash
 openbox auth
 ```
-
-Three questions, all prefilled with a sensible default or your current value, so
-a re-run to change one URL is mostly pressing Enter. **`auth` registers nothing
-and writes no agent credential**; it connects this machine to an organization
-and stops there.
 
 ```
 Backend URL (control plane)   [https://api.openbox.ai]:
@@ -130,579 +75,294 @@ Organization control token (obx_key_… or JWT):
 Next: openbox init --provider <claude-code|codex>
 ```
 
-The token is masked as you type, and **no flag ever takes a secret value**, so
-nothing lands in your shell history. A blank answer keeps the stored one, which
-is what makes a re-run to fix one URL safe.
+Each prompt is prefilled with the current value, and a blank answer keeps it,
+so re-running `auth` to fix one URL is safe. `auth` registers nothing.
 
-It is persisted because `auth` takes it and `init` needs it, and those are two
-separate processes — see [what that
-costs](#where-your-credentials-live-and-what-that-costs) below, because this is
-the credential with the largest blast radius on the machine. If you would rather
-it never reach the disk, skip the prompt and export `OPENBOX_CONTROL_TOKEN` for
-the one `init` run instead.
+**Self-hosted platform:** answer **both** URL prompts with your own hosts. The
+backend cannot tell `openbox` where your core is, so leaving core at its
+default sends every event to the hosted service, which answers 401.
 
-**Automation.** `auth` takes no flags and needs a terminal, so a machine without
-one is provisioned directly. All three routes are read in preference to anything
-`auth` writes, so none is a lesser path:
+The organization key is saved in plaintext in `~/.openbox/.env`, because
+`auth` and `init` run as separate processes. This key can create agents for
+your whole organization. If you would rather it never touch the disk, leave
+the prompt blank and export `OPENBOX_CONTROL_TOKEN` for the one `init` run
+instead.
 
-```bash
-# 1. Export the org token and let init register each tool's agent. The one to
-#    reach for: it is the only route that mints an identity. It applies when
-#    ~/.openbox/.env holds no token of its own -- that file wins for this one
-#    value, so a machine that has run `auth` uses what `auth` wrote.
-export OPENBOX_CONTROL_TOKEN=obx_key_…
-openbox init --provider claude-code
-openbox init --provider codex
-
-# 2. Or export an agent identity directly. Note the limit: these outrank every
-#    store at once, so one exported OPENBOX_AGENT_ID makes EVERY governed tool
-#    report the same identity. Right for a single-tool CI image, wrong for a
-#    developer machine running two.
-export OPENBOX_API_KEY=… OPENBOX_WORKLOAD_PRIVATE_KEY=… OPENBOX_AGENT_ID=…
-
-# 3. Or write the files by hand, one store per governed tool. OPENBOX_HOME
-#    relocates all of it. There is no key-rotation route here: writing new
-#    values under the SAME agent_id only works if they are that agent's own
-#    key, generated at registration and never re-derivable from anything else.
-umask 077
-mkdir -p ~/.openbox/claude-code
-printf 'OPENBOX_API_KEY=%s\nOPENBOX_WORKLOAD_PRIVATE_KEY=%s\n' "$KEY" "$WORKLOAD_KEY" \
-  > ~/.openbox/claude-code/.env
-cat > ~/.openbox/claude-code/dev.json <<'JSON'
-{ "agent_id": "…", "identity_method": "keycloak_workload",
-  "base_url": "https://…", "backend_url": "https://…" }
-JSON
-```
-
-Keep them separate. `.env` holds only secrets and `dev.json` only coordinates
-(INV-1: one store per field).
-
-**`OPENBOX_CONFIG` is a single-tool knob.** It names one `dev.json` outright and
-overrides the per-tool one — but it does *not* override `.env`, which stays per
-tool. So two tools governed under one `OPENBOX_CONFIG` share an `agent_id`
-while holding different agent keys, and events from at least one of them
-authenticate as an identity that key does not belong to: the control plane
-answers a flat 401, and a 401 is never resent -- that tool's session halts
-instead (`openbox doctor` names the halted run and the event it could not
-record). Use it for one tool, or not at all.
-
-**There is no rotate-in-place.** Deleting `~/.openbox/<tool>/.env` and
-re-running `openbox init --provider <tool>` does **not** reuse that agent: the
-name is taken, so `init` registers a new, suffixed agent instead
-(`<name>-<6 hex>`, both names printed) and the old one is orphaned, with its
-prior work still attributed to it. The only way to keep the same `agent_id` is
-`openbox init --adopt`, which asks for that agent's id, its API key, and its
-workload private-key file -- so you need to still hold that exact key.
-Rewriting `.env` by hand with a **different** key for the same `agent_id`
-does not work either: the new key's `kid` will not match what the platform
-has on record for that agent, and every call authenticates as a mismatched
-identity from the moment you do it.
-
-### Where your credentials live, and what that costs
-
-One store per governed tool — `~/.openbox/<tool>/.env` — plus one org-level
-`~/.openbox/.env` holding the control token. All of it in **plaintext**.
-Relocate the whole directory with `OPENBOX_HOME`. This is a deliberate trade,
-and it is worth understanding rather than skipping:
-
-- **MacOS/Linux:** `0600` under a `0700` directory, so other local users cannot
-  read it. Anything running **as you** can; including the coding agent under
-  governance, which by design runs arbitrary commands as you.
-- **Windows:** no at-rest protection at all. `0600` is a no-op there, so other
-  local accounts can read the file. Use full-disk encryption.
-- **It is the only copy.** OpenBox shows the API key and workload key exactly
-  once and does not store them. Lose a tool's file and there is no rotation --
-  `init` registers a new, suffixed agent -- unless you still hold that exact
-  key, in which case `openbox init --adopt` keeps the same `agent_id`.
-- **The org control token is the big one.** It can create and rotate agents
-  across your whole organization, and `auth` writes it to `~/.openbox/.env`
-  under exactly the conditions above: plaintext, readable by anything running as
-  you, including the governed agent. It is never written to a per-tool store, so
-  one compromised tool store is not a fleet compromise — and `openbox uninstall`
-  deletes it along with everything else.
-- **Never commit any of it.** It lives in your home directory rather than near a
-  repo for that reason, and the files' own headers say so.
-
-What that means for evidence: a signed event or commit attestation proves
-*origin-of-config*, a machine holding this agent's key produced it, not
-tamper-resistance against you or against the agent you run.
-
-## 4. Govern this machine
+## 4. Govern a tool
 
 ```bash
 openbox init --provider claude-code
 ```
 
-That command:
+`init` first settles the tool's **identity**:
 
-- Installs the Claude Code plugin into `~/.claude/plugins/openbox-observe` and
-  copies the engine into it;
-- Merges the hook entries into your **user** settings (`~/.claude/settings.json`
-  for Claude Code, `~/.codex/hooks.json` for Codex), so every session on this
-  machine is governed. Hooks you added yourself are left alone; an OpenBox entry
-  left behind at a *different* engine path, what an install run with another
-  `HOME` leaves, is **replaced**, and one of ours that appears twice at the
-  *same* path is collapsed. It also sweeps a superseded OpenBox entry out of the
-  current directory's own settings file, so nothing registers the same gate
-  twice. Either way the command prints what it removed;
-- Writes this tool's posture and identity to `~/.openbox/claude-code/dev.json`
-  (the org-level `~/.openbox/dev.json` keeps only the two URLs);
-- **Claude Code only:** sets `showThinkingSummaries: true` in that same user
-  settings file, so a thinking block arrives with the model's own reasoning
-  summary instead of an empty one. Whatever was there before -- absent,
-  `false`, or anything else -- is recorded once, in
-  `~/.openbox/claude-code-prior-settings.json`, and put back verbatim by
-  `openbox uninstall`. There is no per-key opt-out; undoing it means
-  uninstalling.
+1. **The tool already has an agent** (`~/.openbox/claude-code/.env` exists):
+   it is reused, offline.
+2. **No agent yet, and you are at a terminal:** `init` asks whether to **adopt**
+   an existing agent. Say yes to move an agent from another machine; you paste
+   its agent id, its API key and its workload private-key file.
+3. **Otherwise** it registers a new agent with your organization key. If the
+   default name is taken (for example by a lost earlier install), it registers
+   `<name>-<6 hex>` instead and prints both.
 
-Before any of that, it settles this tool's **identity**, in this order:
+Then it installs:
 
-1. **This tool already has an agent** (`~/.openbox/claude-code/.env` exists and
-   is complete) → it is reused, offline, with no call to the platform. This is
-   the normal re-run.
-2. **No store yet, but you are at a terminal** → it asks whether to **adopt** an
-   existing agent. Answer yes and paste that agent's id (a UUID), its API key,
-   and its workload private-key file; the `agent_id` stays the same. This is how
-   you move an agent to a new machine, and it needs no organization token -- but
-   it needs that exact key, so it is not a rotation route either.
-3. **No store, and you declined (or there is no terminal)** → it registers a
-   **new** agent with your organization control token, from `auth` or from
-   `OPENBOX_CONTROL_TOKEN`, and writes the credentials it is given. If the
-   default name is already taken (a prior run on this machine, or a lost
-   store), it registers under a suffixed name instead (`<name>-<6 hex>`) and
-   prints both the old agent's id/name and the new one. If there is no token
-   either, it stops, installs nothing, and names both ways to get one.
+- the hooks, in your **user-wide** settings (`~/.claude/settings.json` or
+  `~/.codex/hooks.json`). Your own hooks are left alone; stale or duplicate
+  OpenBox entries are removed and reported;
+- the tool's settings and identity, in `~/.openbox/<tool>/dev.json`;
+- the model-call lanes, if the tool supports them (see
+  [below](#model-call-lanes-claude-code));
+- a git `prepare-commit-msg` hook that stamps commits for
+  [lineage](lineage.md). Set `OPENBOX_INSTALL_GIT_HOOK=false` to skip it;
+- on Claude Code, `showThinkingSummaries: true`, so thinking blocks arrive
+  with content. `openbox uninstall` restores the previous value.
 
-A fresh registration mints a new `agent_id` and a new derived attribution
-label. Work attributed to an old agent stays with the old agent, so adopt when
-you can and still hold that agent's key.
+The change takes effect immediately, for every session on the machine,
+including open ones: the tool watches its settings file. `init` prints what it
+changed.
 
-### Using Codex instead
+### Codex differences
 
-Same two commands with `--provider codex`. Its hooks live in `~/.codex/hooks.json`,
-user-wide like Claude Code's, and it gets its own agent in `~/.openbox/codex/`.
-Four things differ, and each is deliberate (`internal/adapters/codex/README.md`):
+Same command with `--provider codex`. The agent lives in `~/.openbox/codex/`.
 
-- Codex asks you to **trust new hooks** with `/hooks` inside the tool before it
-  will run them. Until you do, nothing is governed and nothing says so.
-- An approval-required verdict is mapped to a **deny**, because Codex has no
-  prompt to hand it to.
-- Codex **cannot wake a session**, so a late approval decision reaches you
-  through the findings channel instead.
-- There are **no model-call lanes** for Codex. `init` says so rather than
-  reporting a service it did not install.
-
-### What you should know before you rely on it
-
-**It governs every session on this machine, in any directory, immediately.**
-The tool watches its settings file, so sessions already running are governed
-too; there is nothing to restart, and absence of events is therefore evidence
-about the work rather than about the scope. `init` prints what it governed and
-which file it changed, every time.
-
-**It enforces, unconditionally, and it is unconditionally fail-closed.**
-Blocking, ask-for-approval and local secret redaction are always on; on tool
-calls AND on prompts: every gated tool call and every submitted prompt is
-decided by your org's policy before it runs, and a **HALT verdict ends the
-session on the spot** (the current turn stops, and every later prompt or tool
-call in that session is refused locally until you start a new session). BLOCK
-refuses just the one call or prompt. There is no observe-only mode and no
-opt-out: enforcement acts on *your org's policy*, so until your org publishes
-one nothing is blocked and you get observability either way; but there is no
-longer an environment variable or config key that turns enforcement off, or
-that lets an OpenBox outage proceed instead of denying. Every event -- the
-gated call itself, the auth exchange behind it, a lane's own model-call
-record -- gets exactly one delivery attempt; if core does not accept it, that
-call denies, and the whole run halts (every later prompt and tool call in it
-refused) until you start a new session. `enforce`/`OPENBOX_ENFORCE` and
-`fail_closed` still parse (so `openbox doctor` can name them as ignored, and a
-managed config can still lock them without effect) but no longer select
-anything. One diagnosed core-side defect can still end a session for a reason
-that is not a delivery failure or your org's policy: a control-plane
-precondition failure expressed as a HALT; the symptom and the recovery are in
-[Troubleshooting](#troubleshooting) under `Session is no longer active`.
-
-**Halted is not always ungoverned.** A halted run denies every gated call; it
-does not silently proceed. `openbox doctor` lists halted runs and names the
-event OpenBox could not record for each. A Claude Code `/clear` or `--resume`
-starts a fresh run and is unhalted even though the session id is unchanged; a
-Codex `resume` continues the same run, so a halted Codex session stays halted
-until a genuinely new session starts.
-
-### Governing everything (the fleet rollout)
-
-The install above already does. One `openbox init` registers the hooks in your
-user-wide settings file, so **every session on this machine is governed**, in
-any directory, and it takes effect immediately — the tool watches that file, so
-sessions already running are governed too.
-
-What a fleet rollout adds is not coverage but **irreversibility**. Deploy
-managed settings with `allowManagedHooksOnly`, and governance stops being the
-developer's to remove; see [`deployments/managed/`](../deployments/managed/).
-That is an administrator's deployment through your own MDM, not something a CLI
-does for one machine.
-
-`openbox doctor` reports both halves: whether a managed policy is in force, and
-— the failure that is otherwise silent — whether that policy allows this
-machine's own hooks to run at all. An org-managed machine can have hooks
-installed, correct, and never executed.
-
-### Governing the model call itself
-
-Everything above governs what the agent *does*. No hook carries the model
-request, so hooks alone leave the model call unrecorded. The install closes that
-for Claude Code, with no flag to set:
-
-```bash
-openbox init --provider claude-code   # hooks + telemetry + transport
-openbox uninstall                     # all of it, back out
-```
-
-- **Telemetry** — a loopback OTLP receiver. The tool exports its own telemetry to
-  it. Additive: it never sits in the path of a model call, so it cannot break
-  one; but it is the tool reporting on itself, which is also its weakness.
-- **Transport** — a loopback CONNECT proxy that terminates TLS for the provider's
-  host with a CA generated on this machine, and tunnels every other host
-  uninspected. It observes the real bytes.
-
-Each installs the same way: write the unit, start it, **prove it is listening**,
-and only then write the settings the tool reads. That order is the safety
-property — writing the routing first would point your tool at a dead port, and a
-dead loopback listener fails closed, so every model call on the machine would
-fail. If any step fails, the unit is rolled back and the settings are left
-alone; `init` says so and the rest of the install still stands. Both are Claude
-Code only: a provider with no lanes gets the hooks and a line saying why, rather
-than an error for something it never asked for. There is no Windows daemon
-packaging yet, and `init` says so there rather than reporting a service it did
-not install; `openbox telemetry` and `openbox transport` still run in the
-foreground, supervised by whatever you choose.
-
-A third lane, an `ANTHROPIC_BASE_URL` gateway, is no longer installed — the
-transport relay sees what it saw without needing the tool to honour a base URL.
-If a previous install left one behind, `init` **retires** it and prints what it
-retired, restoring any `ANTHROPIC_BASE_URL` of your own that the old install had
-displaced (remembered in `~/.openbox/gateway-prior-env.json`). `openbox gateway`
-still runs in the foreground if you want that path deliberately.
-
-**Only one lane reports each model call.** They all describe the same call, so
-if two of them reported it every token count you see would be doubled. OpenBox
-picks one automatically — the in-path lanes outrank telemetry, because they see
-the real bytes — and `openbox doctor` prints which one and why. It also warns
-when the elected lane has nothing listening behind it, which is the one state
-where every other line still looks healthy and nothing is being recorded at all.
-
-Four things to know:
-
-- **The transport lane refuses one case; nothing else does.** A relayed call
-  is forwarded unless its session's current run was already latched HALTed by
-  some lane (hooks, telemetry, or transport itself) — that case is refused
-  locally, before the call reaches the provider, with no round trip to the
-  control plane. Every other verdict still has no in-path refusal: the
-  gateway lane forwards regardless, and the synchronous, per-call
-  server-verdict refusal path on both lanes exists and is unwired on purpose.
-- **The assurance is detection.** Unsetting the routing is enough to go around a
-  lane, and nothing here stops that; what you get is a queryable hole in the
-  record. See [the MDM recipe](gateway-mdm-recipe.md) if you need more.
-- **Your own settings come back.** Every key OpenBox writes is recorded with
-  whatever was there before, in `~/.openbox/activation.json`, and removal puts
-  it back. A corporate `HTTPS_PROXY` or `NO_PROXY` survives the round trip;
-  `NO_PROXY` is merged rather than replaced while a lane is active. If a value
-  changed after OpenBox set it, removal **refuses** and names the key rather
-  than overwriting your edit — nothing overrides that, because a corporate proxy
-  value silently reverted is an outage.
-- **Your open sessions keep their old routing.** A running process keeps the
-  environment it started with, so restart it after installing or removing a
-  lane. This is the one place that caveat applies: hook changes are picked up by
-  the tool's own file watcher and need no restart.
-
-`openbox uninstall` **deletes data, and it is a full purge**: the hooks on every
-surface, the plugin bundle, all three lane units, the CA and its private key,
-the lane logs, the activation record, posture, the spool, and your credentials.
-It prints the whole inventory before touching anything, flushes the spool first
-and reports what could not be delivered as loss, and it works on a machine whose
-credentials are already gone — an offboarded laptop can always stop routing.
-The `obx_` keys and workload private keys cannot be re-retrieved, for any tool,
-and the organization control token goes with them: `openbox init --provider
-<tool>` afterwards registers a **new**, suffixed agent (the old one's name and
-id are printed), and `openbox auth` takes a new token.
-
-```bash
-openbox doctor   # which lane is elected and why, and whether it is listening
-```
-
-### System-wide PAC and CA trust (macOS)
-
-Once the transport lane above is listening, `openbox init` on macOS goes one
-step further: it activates a system-wide PAC and trusts the relay's CA in the
-System keychain, so desktop apps and browser sessions on the same governed
-hosts are covered too, not only the CLI you ran `init` from. Linux and Windows
-are not there yet; `init` prints "not yet supported on this OS in this build"
-and touches nothing at the OS level on those platforms.
-
-What happens, in order: **trust the CA and read it back first**, then set the
-PAC URL (`http://127.0.0.1:<port>/proxy.pac`) on every *enabled* network
-service and read that back too. You will be asked for your **sudo password
-once**; macOS may ask **once more** to confirm the trust change. Every prior
-value is recorded before the first write, so a killed run leaves something
-`openbox init` can reconcile on the next try, and any failure partway through
-rolls back what it already changed.
-
-Four outcomes, all of which leave your lane installed and env-routed either
-way:
-
-- **Activated** — the PAC and trust took; the install report says so and names
-  the disclosure below.
-- **Declined** — you said no to the prompt. The report prints the exact manual
-  commands to finish it yourself later.
-- **Failed** — something after authorization did not work (a scope's PAC
-  write, the trust read-back). Also prints manual commands where the failure
-  point has them.
-- **Not attempted** — no controlling terminal was available to ask at all
-  (for example, a fully non-interactive CI run). Nothing was touched.
-
-A second `openbox init` that finds its own prior activation still matching
-what is actually live does **not** prompt again.
-
-**What this means for your data, stated plainly:** desktop apps *and* browser
-sessions on the governed hosts now pass through a local relay that decrypts
-them with an OpenBox-held key. The CA is unconstrained, so a leaked
-`~/.openbox` key could mint a certificate for any site this Mac is made to
-trust it for — file mode `0600` is the protection, and `openbox uninstall`
-removes the key. The PAC's `; DIRECT` fallback means a stopped relay lets that
-traffic through uninspected; that is not egress control.
-
-`openbox uninstall` reverses this **before** deleting the CA: it restores each
-network service to what it held before (or switches it back off, when the
-prior value was `(null)` — macOS cannot write an empty URL back), untrusts the
-CA, and only then deletes the certificate and key. A declined or failed
-restore still deletes the CA **key** — a trusted certificate with no matching
-key cannot mint anything new — and prints the manual commands, with the
-certificate's SHA-1, to clear the now-dangling trust entry by hand.
-
-```bash
-openbox doctor   # a "System PAC" section: the live per-scope state, drift
-                  # against the record, and whether the CA is trusted by SHA-1
-```
-
-### Self-hosted OpenBox
-
-Set **both** URLs at `auth` time, by answering both prompts ("Backend URL
-(control plane)" and "Core URL (data plane)"). `auth` warns if you set a
-self-hosted backend and leave the core at its hosted default.
-
-```bash
-openbox auth          # answer both URL prompts with your own hosts
-```
-
-The environment variables below are read at *runtime* and outrank the files, so
-they are the override for one shell or a CI job. They do **not** prefill the
-`auth` prompts, which prefill from what is already on the machine:
-
-```bash
-export OPENBOX_BACKEND_URL=http://localhost:3000   # openbox-backend, control plane
-export OPENBOX_BASE_URL=http://localhost:8086      # openbox-core, data plane
-```
-
-The control plane cannot tell the CLI where your core is, so setting only one
-leaves the other at its hosted default and sends every event to
-`core.openbox.ai`; which comes back as a 401 that looks like a broken install.
-`openbox doctor` prints the base URL it resolved and whether it authenticated
-there, so you can check before you commit to it.
-
-**`auth` writes these once, to the org config, and `init` copies them into each
-tool's own config.** A re-run of `auth` that corrects a URL therefore has no
-effect on an already installed tool until you re-run `openbox init --provider
-<tool>` for it. `openbox doctor` flags the drift.
+- Codex asks you to **trust new hooks** (`/hooks` inside Codex) before running
+  them. Until you do, nothing is governed.
+- An approval-required verdict becomes a **deny**, because Codex has no way to
+  pause for one.
+- A HALT verdict ends the session only on a prompt. On a tool call it denies
+  that call.
+- Codex reports token usage once per session, not per turn.
 
 ## 5. Confirm it
 
 ```bash
-openbox doctor   # every posture flag and where its value came from, plus
-                 # whether this machine reaches and authenticates to core
+openbox doctor
 ```
 
-Then just work:
+`doctor` prints, per tool: the identity in use, every setting with its value
+and source (default, config file, environment, or org mandate), whether the
+platform is reachable and accepts the credential, the model-call lane status,
+halted sessions, and warnings for anything silently broken. It is the first
+thing to run for any problem.
+
+## Settings
+
+Settings live in each tool's `~/.openbox/<tool>/dev.json`. An environment
+variable overrides the file. An org can set defaults, or lock a value so
+neither can change it, through managed config (see
+[`deployments/managed/`](../deployments/managed/)).
+
+| Key | Env var | Default | Effect |
+|---|---|---|---|
+| `content_capture` | `OPENBOX_CONTENT_CAPTURE` | `true` | Send prompts, replies, thinking, tool input and output. See [Data and privacy](data-and-privacy.md). |
+| `finops` | `OPENBOX_FINOPS` | `true` | Send token counts and model id per turn. |
+| `secret_detection` | `OPENBOX_SECRET_DETECTION` | `true` | Redact secrets locally before sending. |
+| `findings` | `OPENBOX_FINDINGS` | `false` | Show asynchronous guardrail findings back in the session. |
+| `realtime_flush` | `OPENBOX_REALTIME` | `true` | Deliver events within seconds, instead of at session end. |
+| `approval_hold_ms` | `OPENBOX_APPROVAL_HOLD_MS` | `20000` | How long a call waits for an approver. |
+
+For the environment variables, `1`, `true`, `yes` or `on` means on; any other
+value means off.
+
+`enforce`, `fail_closed` and a few other retired keys still parse, so an old
+config does not break, but they do nothing. `openbox doctor` lists them as
+ignored. Enforcement and fail-closed delivery cannot be turned off.
+
+## Automation and CI
+
+`auth` needs a terminal. On a machine without one, use one of these instead:
 
 ```bash
-claude
+# Option 1 (recommended): export the organization key and let init register agents.
+export OPENBOX_CONTROL_TOKEN=obx_key_…
+openbox init --provider claude-code
+
+# Option 2: provide an existing agent's identity directly. These variables
+# apply to EVERY governed tool on the machine, so use this for single-tool
+# images only.
+export OPENBOX_API_KEY=… OPENBOX_WORKLOAD_PRIVATE_KEY=… OPENBOX_AGENT_ID=…
 ```
 
-Sessions in governed directories emit normalized telemetry, commits are stamped
-for lineage, and risky tool calls are gated locally. There is nothing to keep
-running.
+Other useful variables:
+
+| Variable | Use |
+|---|---|
+| `OPENBOX_BACKEND_URL`, `OPENBOX_BASE_URL` | Override the backend and core URLs at runtime. |
+| `OPENBOX_HOME` | Move the whole `~/.openbox` directory. |
+| `OPENBOX_CONFIG` | Point at one specific `dev.json`. Use it for one tool only: two tools sharing it would share an agent id but not a key, and the platform rejects that. |
+
+Precedence: an environment variable beats every file, for every tool. The one
+exception is `OPENBOX_CONTROL_TOKEN`: the saved `~/.openbox/.env` wins, and the
+variable is used only when the file has none. This stops a forgotten `export`
+in an old shell from silently overriding what `auth` just saved.
+
+## Where files live
+
+| Path | Contents |
+|---|---|
+| `~/.openbox/.env` | organization key (`0600`, plaintext) |
+| `~/.openbox/dev.json` | backend and core URLs |
+| `~/.openbox/<tool>/.env` | that tool's agent API key and workload private key (`0600`, plaintext) |
+| `~/.openbox/<tool>/dev.json` | that tool's agent id, URLs and settings |
+| `~/.openbox/<tool>/workload-token.json` | short-lived access token cache (deletable) |
+| `~/.openbox/transport-ca.*`, `activation.json`, `*.log` | model-call lane files |
+| `~/Library/Application Support/openbox/` (macOS), `~/.config/openbox/` (Linux) | runtime state: the event queue, enforcement log, halted-session markers |
+
+`init` copies the URLs from `~/.openbox/dev.json` into each tool's `dev.json`.
+If you change a URL with `auth`, re-run `init` for each tool to apply it;
+`doctor` flags the mismatch.
+
+Never commit any of these files. What each one holds, and what is protected
+and what is not, is in [Credentials](credentials-and-secrets.md) and
+[Data and privacy](data-and-privacy.md#local-files).
+
+## Model-call lanes (Claude Code)
+
+Hooks see what the agent does, but not the request it sends to the model. The
+**lanes** fill that gap. `init --provider claude-code` installs two, as
+background services on your machine:
+
+- **telemetry**: a local OTLP receiver. Claude Code sends its own telemetry
+  here (token usage, model, timing). It never sits in the path of a model call.
+  Codex gets this lane too.
+- **transport**: a local HTTPS proxy. It decrypts traffic to the model
+  provider's hosts using a certificate authority generated on your machine,
+  records the request and response, and passes it on unchanged. Traffic to any
+  other host is passed through without decryption.
+
+Only one lane reports each model call, so token counts are never doubled.
+`openbox doctor` shows which one and warns if it is not running.
+
+Each lane is installed in a safe order: start the service, confirm it is
+listening, and only then point the tool at it. If any step fails, the service
+is removed and your settings are left untouched. Every setting the lanes
+change is recorded with its previous value in `~/.openbox/activation.json` and
+restored on uninstall. If you edited one of those values since, uninstall
+refuses to overwrite it and tells you which.
+
+Restart open sessions after installing or removing a lane: a running process
+keeps the environment it started with. (Hook changes need no restart.)
+
+**The transport lane refuses one kind of call:** a model call from a session
+that is already halted. Everything else is recorded, not blocked.
+
+**It detects bypass; it does not prevent it.** Unsetting one environment
+variable routes around the lanes. What you get is a visible gap in the record
+and an `openbox doctor` warning. Preventing it needs managed settings and
+network egress control from your MDM.
+
+### macOS: system-wide proxy and CA trust
+
+On macOS, once the transport lane is running, `init` also:
+
+1. trusts the lane's CA in the System keychain, and reads it back;
+2. sets a proxy auto-config (PAC) URL on each enabled network service.
+
+This extends coverage to desktop apps and browsers on the same hosts, for
+example claude.ai chats. It asks for your `sudo` password once, and macOS may
+ask again to confirm the trust change. If you decline, the lane still works
+for the CLI and `init` prints the commands to finish later. A later `init`
+does not ask again if nothing changed.
+
+What this means: browser and desktop traffic to those hosts passes through a
+local proxy that decrypts it with a key stored in `~/.openbox`. The CA is not
+restricted to those hosts, so a leaked key could forge a certificate for any
+site. If the lane stops, traffic goes direct and is not inspected.
+`openbox uninstall` restores the network settings, untrusts the CA, then
+deletes it.
+
+Linux and Windows do not get this yet; `init` says so and changes nothing at
+the OS level.
+
+## Enforcement in practice
+
+Every gated tool call and every prompt is sent to your platform before it
+runs. The verdict decides what happens:
+
+| Verdict | Result |
+|---|---|
+| allow | the action runs |
+| block | this one action is refused |
+| require approval | the session waits for an approver (see below) |
+| halt | the session stops; every later prompt and tool call in it is refused |
+
+If an event cannot be delivered (platform down, timeout, 5xx, 401), the action
+is denied. If the platform explicitly refused or failed it, the session is
+also halted. There is no setting to proceed instead.
+
+A halted session stays halted until you start a new one. On Claude Code,
+`/clear` and `--resume` start a fresh run and are not halted. On Codex,
+`resume` continues the same run and stays halted.
 
 ## Approvals
 
-With enforce on, a call your policy marks approval-required is filed with
-OpenBox and the session pauses briefly (~20s, with a status message) while an
-approver decides. Answer inside the pause, from the dashboard, and the tool call
-simply proceeds. If nobody answers, the
-call is **denied** with the approval id in the reason, so the agent can say what
-it is waiting on and do something else; when the decision lands later, the
-session is woken with the outcome.
+When your policy requires approval, the call is filed with the platform and
+the session waits (20 seconds by default, `approval_hold_ms`). An approver
+decides from the dashboard, with their own login.
 
-Two things worth knowing:
+- Answered in time: the call proceeds.
+- No answer: the call is denied, with the approval id in the reason. When the
+  decision arrives later, Claude Code wakes the session with the outcome;
+  Codex surfaces it as a finding instead.
 
-- **You cannot approve your own request.** Once a request is filed, the local
-  "allow this once?" prompt is not offered: approving on the machine that made
-  the request is a convenience control, not four-eyes.
-- **The pause is tunable**; `approval_hold_ms` in `dev.json`, or
-  `OPENBOX_APPROVAL_HOLD_MS`.
+You cannot approve your own request from the machine that made it.
 
-**Whoever answers does so from the dashboard**, under their own credential.
-There is no second CLI persona to install: a queue client on a developer's
-machine had to hold an organization credential that can create and rotate agents
-fleet-wide, which is a far larger exposure than the agent key beside it, and the
-dashboard calls the same route.
+## Upgrading an older install
 
-Approving on the machine that filed the request is refused by default.
-
-## Upgrading an existing install
-
-### Identity is per tool now, and your machine has none until you re-init
-
-**Read this before upgrading.** Each governed tool carries its own agent, in its
-own `~/.openbox/<tool>/` store. There is **no fallback**: a machine that was
-working before this release has its identity at the old org-level path, and
-nothing reads it any more.
-
-**The symptom is every gated call denied, not silence.** Hooks still fire and
-fail to resolve credentials; delivery is unconditionally fail-closed now, so
-every gated tool call and prompt denies (and each session halts after its
-first) rather than the tool working normally with nothing governed. No events
-reach the dashboard either way, but the tool itself is now visibly blocked
-rather than silently ungoverned.
-
-**The check and the fix:**
+Each tool now has its own agent in `~/.openbox/<tool>/`. Identities from older
+versions (DID/seed identities, or credentials in the OS keychain) are **not
+migrated** and not read. After upgrading, every gated call is denied until you
+re-run `init`:
 
 ```bash
-openbox doctor                        # one Identity row per tool; "no agent" is the answer
-openbox init --provider claude-code   # once for each tool you use
+openbox doctor                        # "no agent" or "legacy" means re-init
+openbox init --provider claude-code   # once per tool you use
 openbox init --provider codex
 ```
 
-`doctor` prints a row per store and names the remedy on any tool that has none:
-a **legacy** store (a pre-IAMv3 DID/seed identity) says "hooks send nothing"
-loudly rather than silently governing nothing, and an **absent** store just
-says no agent. Either way, `init` registers a fresh `keycloak_workload` agent
-with a new `agent_id`; work attributed to the old one stays attached to the
-old one. There is no adopt path from a legacy identity: adopt needs that
-agent's current RSA workload key, and a pre-IAMv3 store never had one.
+This registers a new agent. History from the old agent stays with the old
+agent. If you used `--secret-backend file` in the past, delete the old
+`secrets.json` from the previous config directory; nothing reads it.
 
-If `init` finds the default name already taken -- a previous machine, or an
-earlier lost store on this one -- it registers under a suffixed name instead
-(`<name>-<6 hex>`) and prints both the old agent's id/name and the new one,
-rather than halting. If you still hold that older agent's own workload key and
-API key, `openbox init --adopt` reuses its `agent_id` instead of minting
-another one. Events still queued in this tool's spool under the identity being
-replaced are discarded at that point (the count is printed), not delivered
-under the new agent.
+For a fleet: have the admin initialize the identity provider first, then
+upgrade each machine and re-run `init` there.
 
-`openbox auth` is now the organization connection only — two URLs and the
-control token. It registers nothing, so running it will not fix an ungoverned
-tool.
+## Uninstall
 
-### Credentials from the keychain era
+```bash
+openbox uninstall
+```
 
-Credentials used to live in your OS keychain. **They are not migrated**;
-keychain support is gone entirely, so the new binary cannot see them. Nor does
-adopting them help here: those were Ed25519 signing seeds for the retired v1
-protocol, and a workload agent's RSA key is generated by `openbox init`
-itself, never pasted in from an old value. There is no recovery path from a
-keychain-era or other pre-IAMv3 identity -- **register a fresh agent**:
-`openbox init --provider <tool>`. The old agent's history does not continue
-into the new one, and each tool gets its own new agent.
+This removes everything: hooks, lanes, the CA and its key, settings, the event
+queue and all credentials, including the organization key. It prints the full
+list first, tries to deliver queued events, and restores every setting it
+changed. It works even if credentials are already gone.
 
-Two more things to clean up:
+Credentials cannot be recovered afterwards. A later `init` registers a new
+agent. Your organization's managed settings files are left alone.
 
-- **The org `dev.json` migrates itself** on the first run of
-  `auth` or `init`, from `~/Library/Application Support/openbox/` (macOS),
-  `~/.config/openbox/` (Linux) or `%AppData%\openbox\` (Windows) into
-  `~/.openbox/`. That is the org-level file only; each tool's own `dev.json` is
-  written by `init --provider <tool>`, which copies the organization's URLs into
-  it. The originals are left in place, so rolling back to an older binary still
-  works. Runtime state, the spool and audit logs, stays where it is.
-- **If you used `--secret-backend file`, delete its `secrets.json`** from the
-  old config directory. Nothing reads it any more, and it is a stale plaintext
-  copy of live credentials; worse than a current one, because nobody rotates it.
-
-Then run `openbox init --provider <tool>` once. One install governs every
-session on the machine, and enforcement is unconditional.
-
-## Changing your mind later
-
-| Want to | Do |
-|---|---|
-| Turn enforcement off | not possible any more: enforcement and fail-closed delivery are both unconditional; `enforce`/`OPENBOX_ENFORCE`/`fail_closed` still parse, so `openbox doctor` names them as ignored, but none of them select anything |
-| Get the prompt gate + HALT session stop on an existing install | re-run `openbox init --provider <tool>`; the prompt gate and its raised hook timeout are installer-registered, so an old registration keeps the old behavior until then |
-| Pick up ordered, single-attempt lane delivery on an existing install | re-run `openbox init --provider <tool>` (or reinstall the `transport`/`telemetry` units); an old unit lacks the coordinate env keys (`OPENBOX_SPOOL_ROOT`, `OPENBOX_ADVISORY_FILE`) this needs and Codex's `UserPromptSubmit` hook timeout, until then |
-| Change the organization connection | `openbox auth` (re-run it any time; blank keeps what is already there). Re-run `init` per tool afterwards to carry a changed URL across |
-| Move a tool's agent to a new machine (there is no rotate-in-place) | `openbox init --adopt` on the new machine, with that agent's id, API key and workload private-key file; deleting `.env` and re-running `init` plainly registers a new, suffixed agent instead |
-| Stop sending prompt text | `"content_capture": false` (see [Data and privacy](data-and-privacy.md)) |
-| Stop sending token counts | `"finops": false` |
-| Stop forcing `showThinkingSummaries` (Claude Code) | `openbox uninstall`; it restores whatever that key held before `init` -- there is no narrower opt-out |
-| Govern model calls too | already done on Claude Code: `init` installs the lanes (see [above](#governing-the-model-call-itself)) |
-| Stop governing model calls | `openbox uninstall`; it is all or nothing, because a machine with hooks and no lane records tool calls while its model calls go unseen |
-| Uninstall | `openbox uninstall`; it detects what is installed, prints the inventory, and removes hooks, lanes, the CA, posture, the spool and your credentials. It needs no credential to run |
-
-A plain re-run of `init` never downgrades your posture silently: there is no
-key or environment variable left that turns enforcement off or makes an
-outage proceed instead of denying, so a re-run cannot regress either one.
-
-## What is not verified
-
-Being precise about this is part of the product
-([Assurance](architecture.md#assurance) has the full
-list). Specific to setup:
-
-| | Status |
-|---|---|
-| macOS, Linux | unit-tested, the governance evals green offline, and the CLI driven by hand; **nothing here has been run against a live stack** for this flow |
-| Windows | **build-verified only**; CI cross-compiles every change; no automated suite runs there, and `install.sh` is bash |
-| A managed-settings mandate | **not verifiable by us**; it needs a deployment in a real fleet. `openbox doctor` reports whether one is in force and whether it allows this machine's hooks to run |
-| Credentials at rest | not protected on any platform; `0600` on macOS/Linux, nothing on Windows. That covers each tool's agent key and the organization control token alike |
-| the `ANTHROPIC_BASE_URL` gateway | **never run against a live stack**, and no longer installed. It governs the terminal CLI and **not** the desktop app; that much is measured (2026-08-27). Whether subscription-OAuth traffic follows `ANTHROPIC_BASE_URL` for *that* lane was never settled; the two installed lanes exist for the gap |
-| telemetry, transport | **verified by replay only, and never run against a live stack.** Real recorded model calls run through the shipped code on a host that cannot bind a socket: that proves the bytes, the mapping, the gate and the caps, and proves nothing about bind, listen, TLS to a real socket, or what the control plane stores. The desktop-app and OAuth coverage they exist for is **unconfirmed**. The OTLP intake itself is not in that list; a synthetic export has crossed it end to end on a bind-capable host. But that export was **JSON** and the tool is configured to send **protobuf**, so the decoder real traffic will use is untested, and the real client has never exported to this lane |
-| The telemetry lane's env keys | **unconfirmed against the client.** They are copied verbatim from a set proven in a sibling lab run and pinned as a literal list, but every test asserts JSON we wrote and Claude Code silently ignores a name it does not recognise; so a rename gives a green suite and a receiver that never gets a record |
-
-So: **no platform is end-to-end verified for this setup flow yet.** The
-commands, the credential file, the scope default and the enforce default are all
-covered by tests and by hand-driven runs of the real binary; but "a governed
-session produces events" has not been re-confirmed against a live stack since
-the flow changed.
+There is no key rotation in place. Deleting a tool's `.env` and running `init`
+registers a new agent. To keep the same agent on a new machine, answer yes to
+the adopt prompt; that needs the agent's original workload private key.
 
 ## Troubleshooting
 
-| Symptom | Cause and fix |
+| Symptom | Fix |
 |---|---|
-| `no agent identity for this tool, and no organization credential` from `init` | This tool has no store and there is no token to register one with. Run `openbox auth` (it stores the token) or export `OPENBOX_CONTROL_TOKEN`, then re-run. Already hold this tool's agent id, API key and workload private-key file? Re-run with a terminal and answer **yes** to the adopt question; that needs no org credential. |
-| `your org's identity provider is not initialized; ask your OpenBox admin` | `init`'s translation of a 409 an org gets before anyone has run the backend's identity-provider generation command for it (operator: `bootstrap-legacy-did-authority --apply`). Ask your admin to run it once, then re-run `init`. |
-| `your org issues agent identities from an external provider (Okta/Entra)` | `init`'s translation of the 409 an Okta/Entra-linked org returns for an OpenBox-generated identity. This binary only registers OpenBox-generated `keycloak_workload` agents; an externally-linked org is out of scope. |
-| `an agent named … already exists in this org` | The default (or an explicit `--name`) collides with a name already registered -- your own earlier run, or a lost store. `init` does not halt: it registers under a suffixed name instead (`<name>-<6 hex>`) and prints both the old agent's id/name and the new one. If you still hold the old agent's key, `openbox init --adopt` reuses it instead of accumulating a new one. |
-| Governance stopped after an upgrade, with no error | Identity is per tool now and there is no fallback. Run `openbox doctor`; a **legacy** store says "hooks send nothing" loudly, an absent one just says no agent. See [Upgrading](#upgrading-an-existing-install). |
-| `looks like an AGENT RUNTIME key` | You pasted the key from the Agent page into the API-key field, or an `obx_key_` org key where the runtime key belongs. See step 2. |
-| `--org moved to openbox auth` | Both are gone. Run `openbox auth` to connect the organization, then `openbox init --provider <tool>` for each tool. `--org` did nothing even on auth; nothing read it. |
-| `--secret-backend was removed` | There is no secret store to choose. Each tool's credentials are `~/.openbox/<tool>/.env`, written by `openbox init --provider <tool>`. |
-| `no obx_ API key available` | No credential in the environment or `~/.openbox/<tool>/.env`. Upgrading from an older install? See [Upgrading](#upgrading-an-existing-install); neither keychain credentials nor an old org-level `.env` are migrated. |
-| `OPENBOX_WORKLOAD_PRIVATE_KEY: not a PEM block or standard-base64 PKCS#8 DER` | The pasted/exported key is truncated, or it is a PKCS#1 (`RSA PRIVATE KEY`) PEM block, which is refused rather than silently accepted; convert it first (`openssl pkcs8 -topk8 -nocrypt -in key.pem -out key8.pem`). |
-| `doctor` → `reachable NO; 401 identity rejected` | Either the data plane is wrong (usually a self-hosted core with only one URL set) or the agent's API key/workload key was revoked or rotated server-side. `doctor` prints the base URL it resolved per tool; re-run `auth` answering BOTH URL prompts, then `openbox init --provider <tool>` for each tool to carry them across. If the URLs are right, it is the identity: see the token-exchange row below. |
-| A hook makes a request and gets an immediate 400 from the token exchange, mentioning the assertion or its expiry | Host clock skew: the client assertion lives exactly 60 seconds, so a host clock more than a little off from real time makes every assertion look already expired (or not yet valid) to Keycloak. Check NTP. |
-| `openbox auth needs a terminal` | `auth` takes no flags. Use one of the three automation routes in step 3; the first, exporting `OPENBOX_CONTROL_TOKEN` and running `init` per tool, is the one that mints an identity. |
-| Hooks never fire | The session was started before `init`, or you are in a directory where `init` was not run (project scope is the default). Restart the tool; for Codex run `/hooks` and trust them. |
-| No events at all, and `doctor` looks fine | Check `doctor`'s `can they run` line. An org-managed machine can have the hooks installed, correct, and disabled by managed policy — the one failure that reports itself as nothing. |
-| Everything is denied and the session will not recover | Delivery is always fail-closed now: OpenBox cannot be reached (or a request to it explicitly failed), so a gated call denied and the run halted. `openbox doctor` lists halted runs and names the event it could not record. There is no `fail_closed:false` any more to proceed ungoverned instead; restore connectivity and **start a new session** (Codex: a genuinely new session, not a `resume` of the halted one, which stays halted). |
-| `OpenBox governance: Session is no longer active`; the session stops, and every prompt after it is refused | Not your org's policy; a policy verdict names its policy in a `(policy: …)` suffix, and this one has none. The control plane's record of this session went terminal (e.g. a `SessionEnded` was recorded while the session was live) and it answers the next event with a HALT; since a HALT ends the session; the turn stops and a local latch refuses every later prompt/tool call in it. This is a genuine server verdict, not a delivery failure -- fail-closed does not distinguish them, both deny. **Start a new session**; the latch is per-session and a fresh session restores the server-side record. Known core defect, fix in flight. |
-| A session refuses everything with `session halted by a governance HALT verdict`, or `OpenBox could not record … for this session` | The first is your org's policy (or the defect above) HALTing the session; the second is OpenBox itself failing to deliver one event -- either way the latch under `~/Library/Application Support/openbox/halted-sessions/` (Linux: `~/.config/openbox/`) is replaying it, by design. Start a new session (Codex `resume` continues the same run and stays halted). The halting cause and every refusal are in `enforcements.jsonl` (`source:"evaluate"` for a verdict, `source:"session-halt"` for the replays); `openbox doctor` names the event a delivery-failure latch could not record. |
-| A session hangs on a tool call | An approval is filed and undecided. It is in the dashboard's queue; deciding it releases the session. |
-| Every tool call appears twice; success rates and latencies look wrong | The directory has an OpenBox hook registered twice; usually a second engine left by an `init` once run with a different `HOME`. `openbox doctor` reports both that and a repeat at one path; re-running `openbox init` there removes the extra registration. Events already stored stay duplicated. |
-| Every model call fails after an install | The elected lane is not listening and a dead loopback port fails closed. `openbox doctor` says whether it is alive; `~/.openbox/transport.log` and `telemetry.log` say why it exited; `openbox transport` in the foreground shows the same in real time. `openbox uninstall` gets you working again immediately. |
-| `Model-call lanes: hooks only for codex` | The lanes read the Anthropic Messages API through Claude Code's own settings, so there is nothing for them to observe on Codex. Tool calls are still governed. |
-| `… is already in use; refusing to continue` | Something other than an OpenBox lane holds that port. A lane *we* installed at that address is replaced instead, and the command says so. Stop the other process. |
-| The gateway runs but nothing is recorded | Two causes, both in `~/.openbox/gateway.log`: no agent identity configured for claude-code (run `openbox init --provider claude-code`), or relayed calls carry no session header; the gateway will not invent a session, so those calls are recorded nowhere. |
-| `openbox doctor` flags a bypass even though the gateway is healthy | By design. The exposure is reported at every state including the healthy one, because a check that goes quiet trains you to read silence as prevention. |
-
-`openbox doctor` is the first thing to run for anything posture-related: it
-prints every flag, its value, and whether it came from a default, your config,
-the environment, or an org mandate. It also names the OpenBox engine(s)
-registered in the directory you run it from, and warns when there is more than
-one.
+| `no agent identity for this tool, and no organization credential` | Run `openbox auth` or export `OPENBOX_CONTROL_TOKEN`, then re-run `init`. Or adopt an existing agent at the prompt. |
+| `your org's identity provider is not initialized` | Ask your OpenBox admin to initialize it, then re-run `init`. |
+| `your org issues agent identities from an external provider (Okta/Entra)` | Not supported: `openbox` registers only OpenBox-generated identities. |
+| `looks like an AGENT RUNTIME key` | You pasted an agent key where the organization key goes. See [step 2](#2-get-the-right-credential). |
+| `openbox auth needs a terminal` | Use [Automation and CI](#automation-and-ci). |
+| Everything is denied after an upgrade | Old identities are not read. See [Upgrading](#upgrading-an-older-install). |
+| `doctor` shows `401 identity rejected` | Usually a self-hosted core URL not set (re-run `auth` with both URLs, then `init` per tool). Otherwise the agent's key was revoked. |
+| Token exchange returns 400 about the assertion or expiry | Your clock is off. The signed assertion is valid for 60 seconds; check NTP. |
+| `OPENBOX_WORKLOAD_PRIVATE_KEY: not a PEM block…` | The key is truncated or in PKCS#1 format. Convert it: `openssl pkcs8 -topk8 -nocrypt -in key.pem -out key8.pem`. |
+| Hooks never fire | On Codex, trust them with `/hooks`. On a managed machine, check `doctor`'s "can they run" line: managed policy may block user hooks. |
+| Every prompt and tool call is refused | The session is halted: a delivery failed or a policy returned HALT. `doctor` shows why. Fix connectivity and start a new session. |
+| `Session is no longer active` with no `(policy: …)` suffix | The platform's record of this session ended early (a known platform issue). Start a new session. |
+| A tool call hangs | An approval is pending in the dashboard. |
+| Every tool call appears twice | An OpenBox hook is registered twice. `doctor` reports it; re-running `init` fixes it. |
+| Every model call fails after install | The lane is not running. Check `doctor` and `~/.openbox/transport.log`. `openbox uninstall` restores a working state immediately. |
+| `… is already in use; refusing to continue` | Another program holds the lane's port. Stop it and re-run `init`. |

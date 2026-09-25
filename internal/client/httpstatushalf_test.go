@@ -5,7 +5,7 @@ import "testing"
 // `metadata.http_status` shipped on BOTH halves, and 116 of 116 live
 // `ActivityStarted` rows asserted `200`. A Started row represents a request that
 // has not been answered yet; a status code on it is a claim about a response that
-// did not exist when the row was made. `docs/mapping.md:464,477` already said
+// did not exist when the row was made. `docs/mapping.md` §3 already said
 // completed-only, so the code and the docs disagreed and NO test pinned either
 // direction, which is why the disagreement survived.
 //

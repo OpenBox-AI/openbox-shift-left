@@ -31,9 +31,9 @@ func TestPostureMetadata_BooleansAlwaysPresent(t *testing.T) {
 }
 
 // TestPostureMetadataOmitsTheInertTier2Key tier2 is parsed but deliberately
-// not honoured (docs/upgrading-to-inline-evaluation.md:67: "there are no
-// tiers; every gated call is evaluated. Deliberately not honoured"), so
-// publishing it beside the flags that ARE honoured lets a control-plane
+// not honoured (docs/getting-started.md § Settings: retired keys "still
+// parse ... but they do nothing"), so publishing it beside the flags that
+// ARE honoured lets a control-plane
 // reader mistake a dead key for live governance. It must not appear in
 // Metadata() or config_source, even when the config sets it explicitly.
 func TestPostureMetadataOmitsTheInertTier2Key(t *testing.T) {
@@ -47,13 +47,13 @@ func TestPostureMetadataOmitsTheInertTier2Key(t *testing.T) {
 	m := EffectivePosture().Metadata()
 	if _, present := m["tier2"]; present {
 		t.Errorf("tier2 present in posture metadata with DevConfig.Tier2=true; "+
-			"docs/upgrading-to-inline-evaluation.md:67 says it is deliberately not honoured, "+
+			"docs/getting-started.md § Settings says it is deliberately not honoured, "+
 			"so it must not be published beside the flags that are: %v", m)
 	}
 	if src, ok := m["config_source"].(map[string]any); ok {
 		if _, present := src["tier2"]; present {
 			t.Errorf("config_source.tier2 present with DevConfig.Tier2=true; "+
-				"docs/upgrading-to-inline-evaluation.md:67 says tier2 is deliberately not honoured: %v", src)
+				"docs/getting-started.md § Settings says tier2 is deliberately not honoured: %v", src)
 		}
 	}
 }
@@ -67,7 +67,7 @@ func TestPostureFields_CoverEveryConfigControl(t *testing.T) {
 		"install_git_hook":        true,
 		"require_verified_bundle": true,
 		// tier2 is deprecated and deliberately not honoured
-		// (docs/upgrading-to-inline-evaluation.md:67); reporting it would let a
+		// (docs/getting-started.md § Settings); reporting it would let a
 		// control-plane reader mistake a dead key for live governance.
 		"tier2": true,
 	}

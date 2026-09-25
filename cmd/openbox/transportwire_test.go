@@ -37,7 +37,7 @@ import (
 // call still spools no body.
 //
 // So the production predicate in cmd/openbox/transport.go stays unexercised,
-// and docs/coverage.md says so rather than letting this test imply otherwise.
+// and this test does not claim otherwise.
 func TestSpooledTransportEventReachesTheWire(t *testing.T) {
 	const requestMarker = "MARKER-request-body-through-the-proxy-lane"
 	const responseMarker = "MARKER-response-body-through-the-proxy-lane"
