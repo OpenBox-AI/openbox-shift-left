@@ -33,11 +33,12 @@ func RunHook(args []string, installArgs []string, logf func(string, ...any)) {
 			logf("%v", err) // logged only; the caller still exits 0
 		}
 	case "post-commit":
-		sessions := g.ResolveSessions(resolver)
+		resolved := g.ResolveSessionsDetailed(resolver)
+		sessions := sessionIDs(resolved)
 		if err := g.WriteNoteMirror("HEAD", sessions); err != nil {
 			logf("note mirror skipped: %v", err)
 		}
-		writeAttestation(g, sessions, logf)
+		runCommitSink(g, resolved, logf)
 	case "install":
 		runInstall(g, installArgs, logf)
 	default:

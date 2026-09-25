@@ -24,6 +24,7 @@ through managed config.
 | Your Claude account email and organization UUID, once per session | if signed in | none (see [Account attribution](#account-attribution)) |
 | A one-way fingerprint of the provider credential used for a model call | transport lane only | none |
 | Git commit trailer: commit sha, tree sha, session id | always | `OPENBOX_INSTALL_GIT_HOOK=false` |
+| `CommitCreated` event metadata (commit/tree/parent shas, repo, branch, patch id, session id): first producer is the `git post-commit` hook, only where the hook is installed, agent commits only | always (structural, not content) | `OPENBOX_INSTALL_GIT_HOOK=false` |
 | Your credentials, HTTP headers of model calls, slash-command expansions, displayed message text | **never** | |
 
 Structural identifiers (paths, tool names, ids) are metadata and always flow.

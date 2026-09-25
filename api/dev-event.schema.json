@@ -37,7 +37,7 @@
       "minLength": 1
     },
     "event_type": {
-      "description": "Developer-runtime LIFECYCLE type (adapter-facing). NOTE: CommitCreated is RESERVED — the schema branch and wire mapping exist but no adapter produces it; commit lineage flows through the git trailer and notes into the Deploy event's metadata instead. The client re-maps each onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy/SubagentStarted/PermissionDenied/APIError and the 21 v1.8 lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult)->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted/ActivityCompleted (paired by a shared activity_id; that decision retired the span layer), TurnStarted/TurnCompleted->ActivityStarted/ActivityCompleted with activity_type llm_completion (paired by activity_id <session>:turn:<index>). NOT a verbatim core event_type; the EXT-core accept-list is retired (E7-S2). See mapping.md §2.",
+      "description": "Developer-runtime LIFECYCLE type (adapter-facing). NOTE: CommitCreated's first producer is the `git post-commit` hook (ALSO IN 1.9): one event per resolved session, only where the git hook is installed AND only for an agent commit (the tool's own env marker must agree with the resolving session's recorded tool -- a hand commit in a governed worktree keeps its trailer but never produces this event). The client re-maps each onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy/SubagentStarted/PermissionDenied/APIError and the 21 v1.8 lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult)->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted/ActivityCompleted (paired by a shared activity_id; that decision retired the span layer), TurnStarted/TurnCompleted->ActivityStarted/ActivityCompleted with activity_type llm_completion (paired by activity_id <session>:turn:<index>). NOT a verbatim core event_type; the EXT-core accept-list is retired (E7-S2). See mapping.md §2.",
       "enum": [
         "SessionStarted",
         "PromptSubmitted",
@@ -674,6 +674,22 @@
         "branch": {
           "type": "string"
         },
+        "tree_sha": {
+          "type": "string",
+          "description": "ALSO IN 1.9. CommitCreated's own commit tree object id."
+        },
+        "parent_shas": {
+          "type": "array",
+          "description": "ALSO IN 1.9. CommitCreated's own parent commit shas, in git's own order. Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet."
+        },
+        "patch_id": {
+          "type": "string",
+          "description": "ALSO IN 1.9. CommitCreated's own best-effort `git patch-id --stable`, diagnostic only."
+        },
+        "openbox_session_id": {
+          "type": "string",
+          "description": "ALSO IN 1.9. CommitCreated's own copy of the trailer's session id, so core can bind a resumed run's claim (the wire `run_id` is a minted UUID that never appears in the trailer)."
+        },
         "deploy_id": {
           "type": "string"
         },
@@ -812,6 +828,23 @@
             },
             "branch": {
               "type": "string"
+            },
+            "tree_sha": {
+              "description": "ALSO IN 1.9. The commit's tree object id (git rev-parse of the commit's ^{tree}). Optional: omitted only if the git read itself failed, which already aborts the whole event.",
+              "type": "string"
+            },
+            "parent_shas": {
+              "description": "ALSO IN 1.9. The commit's parent commit shas, in git's own order; empty array for a root commit, two or more for a merge. Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet.",
+              "type": "array"
+            },
+            "patch_id": {
+              "description": "ALSO IN 1.9. `git patch-id --stable` over the commit's own diff; best-effort and diagnostic only (never a security boundary). Omitted on a merge commit (more than one parent, so there is no single-parent diff to identify), a git error, or the hook's own timeout bound.",
+              "type": "string"
+            },
+            "openbox_session_id": {
+              "description": "ALSO IN 1.9. The trailer's own session id, copied into metadata so core can bind this leaf to a resumed run's claim: a resumed run's wire `run_id` is a minted UUID that never appears in the trailer, so without this copy core cannot join the two.",
+              "type": "string",
+              "minLength": 1
             }
           }
         }

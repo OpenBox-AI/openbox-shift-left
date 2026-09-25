@@ -15,7 +15,7 @@ func at(t0 time.Time) func() time.Time { return func() time.Time { return t0 } }
 func TestRegistry_WriteReadRemove(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
-	if err := WriteSessionRecord(dir, "sess-A", "/repo/a", now); err != nil {
+	if err := WriteSessionRecord(dir, "sess-A", "/repo/a", "", now); err != nil {
 		t.Fatal(err)
 	}
 	r := SessionResolver{SessionDir: dir, Now: at(now)}
@@ -39,8 +39,8 @@ func TestRegistry_WriteReadRemove(t *testing.T) {
 func TestRegistry_ParallelSessionsDifferentWorktrees(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-A", "/work/repoA/sub", now)
-	WriteSessionRecord(dir, "sess-B", "/work/repoB", now)
+	WriteSessionRecord(dir, "sess-A", "/work/repoA/sub", "", now)
+	WriteSessionRecord(dir, "sess-B", "/work/repoB", "", now)
 	r := SessionResolver{SessionDir: dir, Now: at(now)}
 
 	if diff := cmp.Diff([]string{"sess-A"}, r.Resolve("/work/repoA")); diff != "" {
@@ -60,8 +60,8 @@ func TestRegistry_ParallelSessionsDifferentWorktrees(t *testing.T) {
 func TestRegistry_SameWorktreeMostRecentWins(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-old", "/repo", base)
-	WriteSessionRecord(dir, "sess-fresh", "/repo", base.Add(30*time.Second))
+	WriteSessionRecord(dir, "sess-old", "/repo", "", base)
+	WriteSessionRecord(dir, "sess-fresh", "/repo", "", base.Add(30*time.Second))
 	r := SessionResolver{SessionDir: dir, Now: at(base.Add(time.Minute))}
 	if diff := cmp.Diff([]string{"sess-fresh"}, r.Resolve("/repo")); diff != "" {
 		t.Fatalf("same-worktree (-want +got):\n%s", diff)
@@ -74,7 +74,7 @@ func TestRegistry_SameWorktreeMostRecentWins(t *testing.T) {
 func TestRegistry_StaleRecordIgnored(t *testing.T) {
 	dir := t.TempDir()
 	old := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-crashed", "/repo", old)
+	WriteSessionRecord(dir, "sess-crashed", "/repo", "", old)
 	r := SessionResolver{
 		SessionDir: dir,
 		Now:        at(old.Add(24 * time.Hour)), // well past the 8h default TTL
@@ -89,7 +89,7 @@ func TestRegistry_StaleRecordIgnored(t *testing.T) {
 func TestRegistry_EnvOverrideWins(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-registry", "/repo", now)
+	WriteSessionRecord(dir, "sess-registry", "/repo", "", now)
 	r := SessionResolver{
 		SessionDir: dir,
 		Now:        at(now),
@@ -108,7 +108,7 @@ func TestRegistry_EnvOverrideWins(t *testing.T) {
 func TestRegistry_TTLFromEnv(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-A", "/repo", base)
+	WriteSessionRecord(dir, "sess-A", "/repo", "", base)
 	r := SessionResolver{
 		SessionDir: dir,
 		Now:        at(base.Add(2 * time.Minute)),
@@ -131,7 +131,7 @@ func TestRegistry_WriteRejectsInvalidID(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
 	for _, bad := range []string{"", "obx_secret", "has space", "a\nb"} {
-		if err := WriteSessionRecord(dir, bad, "/repo", now); err != nil {
+		if err := WriteSessionRecord(dir, bad, "/repo", "", now); err != nil {
 			t.Fatalf("WriteSessionRecord(%q) err=%v (should skip silently)", bad, err)
 		}
 	}
@@ -156,7 +156,7 @@ func TestRegistry_SymlinkedCwd(t *testing.T) {
 	}
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-A", link, now) // recorded via the symlink
+	WriteSessionRecord(dir, "sess-A", link, "", now) // recorded via the symlink
 	r := SessionResolver{SessionDir: dir, Now: at(now)}
 	if diff := cmp.Diff([]string{"sess-A"}, r.Resolve(real)); diff != "" { // resolved via the real path
 		t.Fatalf("symlinked cwd not matched (-want +got):\n%s", diff)
@@ -169,11 +169,42 @@ func TestRegistry_SymlinkedCwd(t *testing.T) {
 func TestRegistry_SubSecondRecency(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Unix(1_700_000_000, 0)
-	WriteSessionRecord(dir, "sess-old", "/repo", base)
-	WriteSessionRecord(dir, "sess-new", "/repo", base.Add(5*time.Millisecond))
+	WriteSessionRecord(dir, "sess-old", "/repo", "", base)
+	WriteSessionRecord(dir, "sess-new", "/repo", "", base.Add(5*time.Millisecond))
 	r := SessionResolver{SessionDir: dir, Now: at(base.Add(time.Second))}
 	if diff := cmp.Diff([]string{"sess-new"}, r.Resolve("/repo")); diff != "" {
 		t.Fatalf("sub-second recency (-want +got):\n%s", diff)
+	}
+}
+
+// TestRegistry_ToolRoundTrips a record written with a tool resolves it back
+// through ResolveDetailed, and an old record with no tool at all (written
+// before this field existed) still parses, with Tool reading as "" rather than
+// failing to unmarshal.
+func TestRegistry_ToolRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Unix(1_700_000_000, 0)
+	if err := WriteSessionRecord(dir, "sess-cc", "/repo", "claude-code", now); err != nil {
+		t.Fatal(err)
+	}
+	r := SessionResolver{SessionDir: dir, Now: at(now)}
+	got := r.ResolveDetailed("/repo")
+	if len(got) != 1 || got[0].ID != "sess-cc" || got[0].Tool != "claude-code" || got[0].Tier != TierRegistry {
+		t.Fatalf("ResolveDetailed = %+v, want one registry-tier record with tool claude-code", got)
+	}
+
+	// An old record predates the Tool field: write the JSON directly, with no
+	// "tool" key at all, in its OWN worktree/directory so it is the sole
+	// (and so the winning) record, and confirm it still parses (Tool == "").
+	oldDir := t.TempDir()
+	oldPath := filepath.Join(oldDir, "sess-old.json")
+	if err := os.WriteFile(oldPath, []byte(`{"session_id":"sess-old","cwd":"/repo-old","updated_at":1700000000000000000}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r2 := SessionResolver{SessionDir: oldDir, Now: at(now)}
+	got2 := r2.ResolveDetailed("/repo-old")
+	if len(got2) != 1 || got2[0].ID != "sess-old" || got2[0].Tool != "" || got2[0].Tier != TierRegistry {
+		t.Fatalf("ResolveDetailed = %+v, want the old tool-less record to still parse with Tool empty", got2)
 	}
 }
 

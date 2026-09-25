@@ -22,8 +22,9 @@ const (
 	EventToolCall        EventType = "ToolCall"
 	EventToolResult      EventType = "ToolResult"
 	EventSessionEnded    EventType = "SessionEnded"
-	// EventCommitCreated is reserved: the wire mapping exists but no adapter
-	// produces it.
+	// EventCommitCreated's first producer is the git post-commit hook: one
+	// event per resolved session, only where the git hook is installed, and
+	// only for an agent commit (never a hand commit).
 	EventCommitCreated EventType = "CommitCreated"
 	EventDeploy        EventType = "Deploy"
 

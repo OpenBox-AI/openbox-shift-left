@@ -307,12 +307,13 @@ func TestAttestProviderMarkerRule(t *testing.T) {
 	}
 }
 
-// TestAttestContextSkipsWithoutSeed a v3 keycloak_workload store carries no
-// Ed25519 attestation seed, so attestContext
-// always reports ok=false now, whatever tool marker is set: the commit still
-// proceeds, the trailer alone attributes it, exit stays 0, and the skip is
-// explained on stderr rather than silent.
-func TestAttestContextSkipsWithoutSeed(t *testing.T) {
+// TestPostCommitWritesNoAttestationNote replaces the deleted Ed25519 signing
+// path (formerly TestAttestContextSkipsWithoutSeed): the client no longer
+// signs anything, so post-commit must leave no refs/notes/openbox-attest
+// note and log no "attestation" line, whatever tool marker is set -- the
+// commit is still attributed by its trailer (and, for an agent marker, by the
+// commit-event sink), and exit stays 0 either way.
+func TestPostCommitWritesNoAttestationNote(t *testing.T) {
 	if testing.Short() {
 		t.Skip("drives a real git repo; skipped in -short")
 	}
@@ -325,8 +326,9 @@ func TestAttestContextSkipsWithoutSeed(t *testing.T) {
 		{"no marker", map[string]string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			isolateHomeOnly(t)
+			home := isolateHomeOnly(t)
 			perToolHookEnv(t)
+			t.Setenv(devconfig.EnvHaltDir, filepath.Join(home, "halted-sessions"))
 			seedCredentials(t, "claude-code", "codex")
 			repo := gitRepoWithACommit(t)
 
@@ -336,13 +338,10 @@ func TestAttestContextSkipsWithoutSeed(t *testing.T) {
 			}
 
 			if note := attestationNote(t, repo); note != "" {
-				t.Fatalf("a v3 store attested anyway (no seed to sign with):\n%s", note)
+				t.Fatalf("post-commit wrote an attestation note; the client no longer signs commits:\n%s", note)
 			}
-			if !strings.Contains(errb.String(), "attestation skipped") {
-				t.Errorf("no attestation and no explanation; stderr was:\n%s", errb.String())
-			}
-			if !strings.Contains(errb.String(), "no attestation signing key") {
-				t.Errorf("the skip reason does not name a missing signing key (commit is still attributed by its trailer); stderr was:\n%s", errb.String())
+			if strings.Contains(strings.ToLower(errb.String()), "attestation") {
+				t.Errorf("stderr mentions attestation; the client no longer has an attestation path: %s", errb.String())
 			}
 		})
 	}

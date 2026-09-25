@@ -37,7 +37,7 @@ func TestResolve_AbsentCodexThreadIDLeavesExistingTiersUntouched(t *testing.T) {
 
 	dir := t.TempDir()
 	now := time.Now()
-	if err := WriteSessionRecord(dir, "cc-live-session", "/wt/sub", now); err != nil {
+	if err := WriteSessionRecord(dir, "cc-live-session", "/wt/sub", "", now); err != nil {
 		t.Fatal(err)
 	}
 	r2 := SessionResolver{

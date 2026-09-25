@@ -23,6 +23,27 @@ const (
 	EnvCodexThreadID = "CODEX_THREAD_ID"
 )
 
+// Tier names identify which of SessionResolver's three lookup tiers produced
+// a ResolvedSession.
+const (
+	TierCodexEnv   = "codex-env"   // CODEX_THREAD_ID
+	TierSessionEnv = "session-env" // OPENBOX_SESSION / OPENBOX_SESSION_FILE
+	TierRegistry   = "registry"    // the worktree-scoped liveness registry
+)
+
+// ResolvedSession is one session id in scope for a commit, with enough about
+// where it came from for a commit event's routing (R2) to decide whether an
+// agent tool actually produced this commit.
+type ResolvedSession struct {
+	ID   string
+	Tier string
+	// Tool is "codex" for a TierCodexEnv hit, the registry record's own Tool
+	// for a TierRegistry hit, and "" for a TierSessionEnv hit: a manual
+	// OPENBOX_SESSION override is not attributable to any one tool (it exists
+	// for CI / non-Claude-Code providers), so routing must never guess one.
+	Tool string
+}
+
 // SessionResolver reads the session id(s) in scope for a commit.
 type SessionResolver struct {
 	Getenv     func(string) string
@@ -84,6 +105,21 @@ func (r SessionResolver) ttl() time.Duration {
 // Worktree is the commit's git top-level ("" if it could not be determined;
 // then only the env-based tiers apply).
 func (r SessionResolver) Resolve(worktree string) []string {
+	resolved := r.ResolveDetailed(worktree)
+	if len(resolved) == 0 {
+		return nil
+	}
+	ids := make([]string, len(resolved))
+	for i, rs := range resolved {
+		ids[i] = rs.ID
+	}
+	return ids
+}
+
+// ResolveDetailed is Resolve with the tier and tool each id resolved from, for
+// a caller (the commit-event sink) that must not attribute an event to a
+// session unless an agent tool actually produced the commit (R2).
+func (r SessionResolver) ResolveDetailed(worktree string) []ResolvedSession {
 	//   - Inheritance: any process launched from within a Codex exec (a nested
 	//     agent session, a long-lived shell) inherits the var, so its commits
 	//     attribute to the enclosing Codex thread rather than to the inner
@@ -95,16 +131,20 @@ func (r SessionResolver) Resolve(worktree string) []string {
 	//     (INV-6-safe, but an env-writing process can exploit it to suppress
 	//     attribution).
 	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
-		return []string{id}
+		return []ResolvedSession{{ID: id, Tier: TierCodexEnv, Tool: "codex"}}
 	}
 	if env := r.envSessions(); len(env) > 0 {
-		return env
+		out := make([]ResolvedSession, len(env))
+		for i, id := range env {
+			out[i] = ResolvedSession{ID: id, Tier: TierSessionEnv}
+		}
+		return out
 	}
 	if worktree == "" {
 		return nil
 	}
-	if id := r.resolveFromRegistry(worktree); id != "" {
-		return []string{id}
+	if rec, ok := r.resolveFromRegistry(worktree); ok {
+		return []ResolvedSession{{ID: rec.SessionID, Tier: TierRegistry, Tool: rec.Tool}}
 	}
 	return nil
 }
@@ -125,10 +165,10 @@ func (r SessionResolver) envSessions() []string {
 // resolveFromRegistry records older than the TTL (crashed sessions that never
 // wrote SessionEnd) are ignored so a later human commit is not falsely
 // attributed.
-func (r SessionResolver) resolveFromRegistry(worktree string) string {
+func (r SessionResolver) resolveFromRegistry(worktree string) (SessionRecord, bool) {
 	entries, err := r.readDir(r.sessionDir())
 	if err != nil {
-		return ""
+		return SessionRecord{}, false
 	}
 	top := resolvePath(worktree)
 	cutoff := r.now().Add(-r.ttl()).UnixNano()
@@ -154,10 +194,7 @@ func (r SessionResolver) resolveFromRegistry(worktree string) string {
 			best, found = rec, true
 		}
 	}
-	if found {
-		return best.SessionID
-	}
-	return ""
+	return best, found
 }
 
 func resolvePath(p string) string {

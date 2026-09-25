@@ -48,7 +48,7 @@ in two stores, and a stale copy kept silently overwriting a corrected one.
 - **Never commit them.** They live in your home directory, away from repos,
   for that reason.
 
-So a signed event or commit proves that *a machine holding this agent's key*
+So a signed event proves that *a machine holding this agent's key*
 produced it. It does not prove the developer, or the agent they run, could not
 have tampered with it.
 

@@ -35,7 +35,7 @@ local working records, git-ignored. Inside `internal/`:
 | Path | What |
 |---|---|
 | `provider/`, `adapters/common/hookflow/` | the SPI, and the engine every adapter runs on |
-| `adapters/common/devconfig/`, `adapters/common/git/`, `adapters/claude-code/`, `adapters/codex/` | shared config and posture; trailer, notes, attestation; one thin adapter each |
+| `adapters/common/devconfig/`, `adapters/common/git/`, `adapters/claude-code/`, `adapters/codex/` | shared config and posture; trailer, notes mirror, commit event; one thin adapter each |
 | `client/`, `decision/` | core client (workload auth: Keycloak client assertion -> token; wire payload; verdict parsing); local secret detection |
 | `gateway/`, `telemetry/`, `transport/` | the three model-call lanes. `gateway/internal/dialhook` keeps a nested `internal/` on purpose |
 | `cli/` | behind the `openbox` commands: `activation`, `laneservice`, `atomicfile`. The command layer itself is `cmd/openbox/` |

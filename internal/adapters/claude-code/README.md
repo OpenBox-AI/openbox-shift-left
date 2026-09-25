@@ -164,8 +164,8 @@ so attestation proves the origin of config rather than tamper resistance. An
 earlier build kept these in the OS keychain; those entries are not migrated.
 
 The hook reads the **DID only** on the hot path (no secret I/O). The obx_ key +
-Ed25519 seed are read at flush (from `.env`, or `OPENBOX_API_KEY` /
-`OPENBOX_ED25519_SEED` for CI) and go straight into the client, never
+workload private key are read at flush (from `.env`, or `OPENBOX_API_KEY` /
+`OPENBOX_WORKLOAD_PRIVATE_KEY` for CI) and go straight into the client, never
 logged/printed/argv'd. Non-secret coordinates live in `~/.openbox/dev.json`
 (`OPENBOX_CONFIG` overrides the path, `OPENBOX_HOME` the directory) — one store
 per field, so a coordinate never has a second copy in `.env` to go stale.

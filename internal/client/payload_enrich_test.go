@@ -193,33 +193,68 @@ func TestSignalArgs_Prompt_ContentGated(t *testing.T) {
 //
 // The commit message is content, so it rides only when capture is on — that is
 // the gate doing its job, not a leak. With capture off it must be gone from
-// BOTH destinations.
+// BOTH destinations. tree_sha/parent_shas/patch_id/openbox_session_id are the
+// four keys phase-02's git post-commit hook (R6) adds on top of the three
+// already covered here; none of them is in contentMetadataKeys, so all seven
+// structural keys must survive content_capture off on BOTH the wire `metadata`
+// object and `signal_args`.
 func TestSignalArgs_Commit_RidesTheUniformProjection(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventCommitCreated, SessionID: "s", DeveloperDID: "did:aip:x",
 		Timestamp: "2026-07-15T00:00:00Z", Tool: Tool{Name: "git", Kind: ToolShell},
-		Metadata: map[string]any{"commit_sha": "abc123", "repo": "acme/app", "branch": "main", "message": "SECRET commit message body"},
+		Metadata: map[string]any{
+			"commit_sha": "abc123", "tree_sha": "tree1", "parent_shas": []string{"p1"},
+			"repo": "acme/app", "branch": "main", "patch_id": "patch1",
+			"openbox_session_id": "s", "message": "SECRET commit message body",
+		},
 	}
+	structuralKeys := []string{"commit_sha", "tree_sha", "parent_shas", "repo", "branch", "patch_id", "openbox_session_id"}
+
 	args := signalArgs(t, ev)
-	if args["commit_sha"] != "abc123" || args["repo"] != "acme/app" || args["branch"] != "main" {
-		t.Fatalf("commit signal_args should carry lineage: %v", args)
+	for _, k := range structuralKeys {
+		if args[k] == nil {
+			t.Fatalf("commit signal_args should carry %s: %v", k, args)
+		}
 	}
 	if args["message"] != "SECRET commit message body" {
 		t.Fatalf("with capture on the projection is uniform; message should ride: %v", args)
+	}
+
+	wireMeta, _ := decodeRaw(t, ev)["metadata"].(map[string]any)
+	for _, k := range structuralKeys {
+		if wireMeta[k] == nil {
+			t.Fatalf("wire metadata should carry %s: %v", k, wireMeta)
+		}
+	}
+	if wireMeta["message"] != "SECRET commit message body" {
+		t.Fatalf("with capture on wire metadata should carry message too: %v", wireMeta)
 	}
 
 	off := signalArgs(t, stripContent(ev))
 	if _, leaked := off["message"]; leaked {
 		t.Fatalf("INV-2: commit message content survived the gate in signal_args: %v", off)
 	}
-	if off["commit_sha"] != "abc123" {
-		t.Fatalf("the gate took the structural lineage with it: %v", off)
+	for _, k := range structuralKeys {
+		if off[k] == nil {
+			t.Fatalf("the gate took %s with it out of signal_args: %v", k, off)
+		}
+	}
+
+	offWireMeta, _ := decodeRaw(t, stripContent(ev))["metadata"].(map[string]any)
+	if _, leaked := offWireMeta["message"]; leaked {
+		t.Fatalf("INV-2: commit message content survived the gate in wire metadata: %v", offWireMeta)
+	}
+	for _, k := range structuralKeys {
+		if offWireMeta[k] == nil {
+			t.Fatalf("the gate took %s with it out of wire metadata: %v", k, offWireMeta)
+		}
 	}
 }
 
-// TestSignalArgs_DeployLineageProjects is the one live producer of a lineage
-// signal (internal/actions/openbox-git-action/deploy.go). commit_created has no
-// producer at all, so this is the case that actually ships.
+// TestSignalArgs_DeployLineageProjects is a second live producer of a lineage
+// signal (internal/actions/openbox-git-action/deploy.go), alongside the git
+// post-commit hook's CommitCreated (only where the hook is installed, agent
+// commits only).
 func TestSignalArgs_DeployLineageProjects(t *testing.T) {
 	ev := DevEvent{
 		EventID: "e1", EventType: EventDeploy, SessionID: "s", DeveloperDID: "did:aip:x",

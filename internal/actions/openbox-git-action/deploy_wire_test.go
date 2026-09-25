@@ -13,8 +13,7 @@ import (
 
 // richResolution is what BuildDeployEvent actually produces in the field, as
 // opposed to the three-key fixture the wire golden uses: an attributed deploy
-// with a verified session claim, so the nested attestation object and the
-// derived note are both present.
+// with a verified session claim, so the derived note is present.
 func richResolution() Resolution {
 	return Resolution{
 		CommitSHA: "37ec0a3f1c9b2e0000000000000000000000abcd",
@@ -37,9 +36,9 @@ func richResolution() Resolution {
 // projection.
 //
 // The real producer emits far more — status, counts, the derived note, and
-// nested per-session objects carrying attestation material. All of it is now
-// signal_args, which is what OPA and Guardrails read, so this asserts on the
-// bytes that actually reach /evaluate rather than on the struct.
+// nested per-session objects. All of it is now signal_args, which is what OPA
+// and Guardrails read, so this asserts on the bytes that actually reach
+// /evaluate rather than on the struct.
 func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
 	fc := fakecore.New(t, fakecore.Script{})
 
@@ -113,6 +112,18 @@ func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
 	first, ok := sessions[0].(map[string]any)
 	if !ok || first["session_id"] != "sess-A" {
 		t.Errorf("nested session claim did not survive the projection: %v", sessions[0])
+	}
+
+	// R3: the client signs nothing, so no sessions[] entry carries an
+	// attestation key, verified or not.
+	for _, raw := range sessions {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if _, has := entry["attestation"]; has {
+			t.Errorf("sessions[] entry carries an attestation key, which the client no longer produces: %v", entry)
+		}
 	}
 }
 

@@ -178,8 +178,10 @@ egress control, which is the organization's job
 
 ## Lineage
 
-A git hook stamps each commit with the session that made it, and a CI action
-links the deploy to those commits. See [Lineage](lineage.md).
+A git hook stamps each commit with the session that made it and, for a commit
+the agent made, sends a commit event into that session; a CI action links the
+deploy to those commits, and the server grades each link against that event.
+See [Lineage](lineage.md).
 
 ## Layout
 
@@ -209,7 +211,7 @@ fails if a top-level directory has no row here.
 | `adapters/common/hookflow/` | **the engine**: queue, delivery, enforcement, inline evaluation, approval hold, halts |
 | `adapters/claude-code/`, `adapters/codex/` | one thin adapter each |
 | `adapters/common/devconfig/` | config and settings resolution |
-| `adapters/common/git/` | commit trailer, notes and attestation |
+| `adapters/common/git/` | commit trailer, notes mirror, commit event |
 | `client/` | the core client: auth, wire payload, verdict parsing |
 | `decision/` | local secret detection and redaction |
 | `telemetry/` | the local OTLP receiver (`:otel:` lane) |

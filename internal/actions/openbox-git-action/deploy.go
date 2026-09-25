@@ -46,11 +46,6 @@ func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.Dev
 		if s.Reason != "" {
 			m["reason"] = s.Reason
 		}
-		// Dropping it here silently pins every link to verified:false, so it must
-		// ride along whenever the resolver managed to attach one.
-		if s.Attestation != nil {
-			m["attestation"] = s.Attestation
-		}
 		sessions = append(sessions, m)
 		if s.Verified {
 			verifiedIDs = append(verifiedIDs, s.SessionID)

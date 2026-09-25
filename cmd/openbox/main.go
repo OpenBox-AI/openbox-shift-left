@@ -151,21 +151,11 @@ func (a *app) runHook(args []string) (code int) {
 	}
 	if args[0] == "git" {
 		// A commit hook has no provider on argv, so the tool is read from the
-		// markers it leaves in the environment. Getting this wrong signs a
-		// commit with the wrong agent's key, so no marker means no bind and no
-		// attestation rather than a guess -- attestContext already reports
-		// ok=false when nothing resolves, and writeAttestation already logs the
-		// skip.
-		if p := attestProvider(a.getenv); p != "" {
-			release, err := devconfig.BindProvider(p)
-			if err != nil {
-				// Never abort a commit: the git engine is fail-open by contract.
-				logger.Printf("attestation identity unavailable: %v", err)
-			} else {
-				defer release()
-			}
-		}
-		obgit.SetAttestContext(attestContext)
+		// markers it leaves in the environment. newCommitSink resolves and binds
+		// that identity per resolved session (routeCommitTool, commitevent.go), so
+		// there is no ambient bind here: a hand commit (no marker) never binds any
+		// identity at all.
+		obgit.SetCommitSink(newCommitSink(a.getenv, logger))
 		obgit.RunHook(args[1:], []string{"hook", "git", "prepare-commit-msg"}, logger.Printf)
 		return exitOK
 	}

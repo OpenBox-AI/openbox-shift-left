@@ -38,6 +38,15 @@ func (g Git) ResolveSessions(r SessionResolver) []string {
 	return r.Resolve(worktree)
 }
 
+// ResolveSessionsDetailed is ResolveSessions with the tier/tool each session
+// resolved from, for the commit-event sink's routing (R2): unlike the
+// trailer, which attributes any resolved session, an event may only be
+// emitted for a session an agent tool's own marker confirms.
+func (g Git) ResolveSessionsDetailed(r SessionResolver) []ResolvedSession {
+	worktree, _ := g.Worktree() // "" on error → resolver uses the override tier only
+	return r.ResolveDetailed(worktree)
+}
+
 // Worktree returns the absolute top-level of the working tree for g.Dir.
 func (g Git) Worktree() (string, error) {
 	out, err := g.run("rev-parse", "--show-toplevel")

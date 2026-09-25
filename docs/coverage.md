@@ -30,7 +30,7 @@ implemented.
 | `PermissionDenied` | `PermissionDenied` hook; only auto-mode classifier denials — a static deny rule or a manual denial never fires it | none |
 | `APIError` | `StopFailure` hook | none |
 | `PreCompact` / `PostCompact` | wired; content-gated (the `/compact` instructions and the summary) | wired; content-gated |
-| `CommitCreated` | resolved server-side at push, not from a hook — see [mapping.md](mapping.md) | same |
+| `CommitCreated` | `git post-commit` hook, only where the hook is installed, agent commits only — see [mapping.md](mapping.md) | same |
 | `Deploy` | git-action level, not a hook | same |
 
 Claude Code also wires about twenty more hooks with no Codex counterpart

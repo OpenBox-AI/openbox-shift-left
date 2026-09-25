@@ -2,9 +2,7 @@ package gitaction
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"slices"
 	"strings"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
@@ -67,11 +65,6 @@ type SessionClaim struct {
 	Commit    string `json:"commit"`           // the commit the id was resolved from
 	Verified  bool   `json:"verified"`         // owned by the authenticated pusher
 	Reason    string `json:"reason,omitempty"` // verification note when not Verified
-	// Attestation, when present, is the signed statement read from the commit's
-	// git note (E8-S10): the session keyholder asserting that this exact commit
-	// came from this session, together with the policy that was in force. It is
-	// carried verbatim and is deliberately not verified here.
-	Attestation *obgit.Attestation `json:"attestation,omitempty"`
 }
 
 // Resolution is the full server-side attribution of a pushed commit (INV-6).
@@ -179,7 +172,6 @@ func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution
 	}
 
 	r.verify(ctx, claims)
-	r.attachAttestations(claims)
 	res.Sessions = claims
 
 	r.classify(&res)
@@ -379,46 +371,4 @@ func short(sha string) string {
 		return sha[:7]
 	}
 	return sha
-}
-
-// attachAttestations best-effort throughout: a missing note is the common
-// case, and a malformed one is skipped rather than failing the deploy;
-// telemetry and lineage must never break a release.
-func (r *Resolver) attachAttestations(claims []SessionClaim) {
-	seen := map[string]*obgit.Attestation{}
-	for i := range claims {
-		commit := claims[i].Commit
-		if commit == "" {
-			continue
-		}
-		att, cached := seen[commit]
-		if !cached {
-			att, _ = r.notes.ReadAttestation(commit) // nil on absent/malformed
-			if !withinAttestationSizeLimit(att) {
-				att = nil // oversized reads as absent (see maxAttestationBytes)
-			}
-			seen[commit] = att
-		}
-		if att == nil {
-			continue
-		}
-		payload, err := att.Payload()
-		if err != nil || payload.CommitSHA != commit {
-			continue
-		}
-		if !slices.Contains(payload.SessionIDs, claims[i].SessionID) {
-			continue
-		}
-		claims[i].Attestation = att
-	}
-}
-
-const maxAttestationBytes = 32 << 10
-
-func withinAttestationSizeLimit(a *obgit.Attestation) bool {
-	if a == nil {
-		return false
-	}
-	b, err := json.Marshal(a)
-	return err == nil && len(b) <= maxAttestationBytes
 }

@@ -149,8 +149,8 @@ Identity comes from the same `openbox auth` / `openbox init` flow and the same
 stores as every provider, via shared `internal/adapters/common/devconfig`:
 secrets in `~/.openbox/.env` (plaintext, `0600` where the OS allows it),
 non-secret coordinates in `~/.openbox/dev.json`.
-The hook reads the **DID only** on the hot path; the obx_ key + Ed25519 seed are
-read only at flush, straight into the client. `hooks.json` carries the engine
+The hook reads the **DID only** on the hot path; the obx_ key + workload private key
+are read only at flush, straight into the client. `hooks.json` carries the engine
 path + event names only; no key, DID, or URL.
 
 ## Packaging & install

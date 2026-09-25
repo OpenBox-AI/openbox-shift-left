@@ -82,7 +82,7 @@ Built by `wireTypeFor` in `internal/client/payload.go`.
 | `SessionStarted` | `WorkflowStarted` | — | creates the session `(workflow_id, run_id, workflow_type)` |
 | `SessionEnded` | `WorkflowCompleted` | — | closes it; `metadata.total_tokens`/`.total_cost`/`.duration_ms` |
 | `PromptSubmitted` | `SignalReceived` | `prompt_submitted` | its `signal_args` **is** the session's goal — see "Signal payload" below |
-| `CommitCreated` | `SignalReceived` | `commit_created` | reserved: no adapter emits it today; commit lineage rides `Deploy`'s metadata instead |
+| `CommitCreated` | `SignalReceived` | `commit_created` | first producer is the `git post-commit` hook, only where the git hook is installed, agent commits only; `metadata.commit_sha`/`.tree_sha`/`.parent_shas`/`.repo`/`.branch`/`.patch_id`/`.openbox_session_id` |
 | `Deploy` | `SignalReceived` | `deploy` | `metadata.deploy_id`/`.commit_sha`/`.repo`/`.environment`/`.deploy_did` |
 | `ToolCall` | `ActivityStarted` | — | opens a tool call; a pre-execution decision |
 | `ToolResult` | `ActivityCompleted` | — | closes it, sharing `activity_id`; independently evaluated; `status` drives the tool's success metric |

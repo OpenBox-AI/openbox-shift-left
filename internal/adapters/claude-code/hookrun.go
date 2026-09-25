@@ -94,7 +94,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			if err := obgit.RemoveSessionRecord(regDir, ev.SessionID); err != nil {
 				logger.Printf("session registry cleanup: %v", err)
 			}
-		} else if err := obgit.WriteSessionRecord(regDir, ev.SessionID, ev.Cwd, time.Now()); err != nil {
+		} else if err := obgit.WriteSessionRecord(regDir, ev.SessionID, ev.Cwd, provider, time.Now()); err != nil {
 			logger.Printf("session registry touch: %v", err)
 		}
 	}

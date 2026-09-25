@@ -216,7 +216,7 @@ func TestE2E_RegistryAttributesCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteSessionRecord(regDir, "sess-reg", top, time.Now()); err != nil {
+	if err := WriteSessionRecord(regDir, "sess-reg", top, "", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	r.git([]string{"OPENBOX_SESSION_DIR=" + regDir}, "commit", "--allow-empty", "-m", "agent work")
@@ -235,8 +235,8 @@ func TestE2E_RegistryParallelTwoRepos(t *testing.T) {
 	topA, _ := rA.g.Worktree()
 	topB, _ := rB.g.Worktree()
 	now := time.Now()
-	WriteSessionRecord(regDir, "sess-A", topA, now)
-	WriteSessionRecord(regDir, "sess-B", topB, now)
+	WriteSessionRecord(regDir, "sess-A", topA, "", now)
+	WriteSessionRecord(regDir, "sess-B", topB, "", now)
 
 	env := []string{"OPENBOX_SESSION_DIR=" + regDir}
 	rA.git(env, "commit", "--allow-empty", "-m", "work in A")

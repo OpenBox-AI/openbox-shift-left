@@ -5,10 +5,13 @@ import (
 )
 
 // attestProvider names the tool a commit hook is running under, from the
-// markers the tool leaves in the environment. It decides which private key
-// signs the attestation, so the absence of a marker returns "" rather than a
-// default: with an "otherwise claude-code" arm, a commit a human made in a
-// plain shell would sign as the tool.
+// markers the tool leaves in the environment. The marker routes commit
+// events; it never signs anything -- the absence of a marker returns ""
+// rather than a default, so a commit a human made in a plain shell is never
+// attributed to a tool. It decides commit-event routing (newCommitSink, R2,
+// "agent commits only"): the same marker, checked against the resolved
+// session's own tool, is what lets a hand commit in a governed worktree keep
+// its trailer without ever producing a CommitCreated event.
 //
 // CODEX_THREAD_ID is Codex's own documented tier-0 signal and is already read
 // on the session path. CLAUDECODE and CLAUDE_CODE_ENTRYPOINT are observed
@@ -30,11 +33,4 @@ func attestProvider(getenv func(string) string) string {
 		}
 	}
 	return ""
-}
-
-// attestContext always reports ok=false: a v3 keycloak_workload store carries
-// no attestation signing key. The commit still proceeds and is attributed by
-// its trailer; attesthook.go's writeAttestation logs why signing was skipped.
-func attestContext() (obgit.AttestContext, bool) {
-	return obgit.AttestContext{}, false
 }

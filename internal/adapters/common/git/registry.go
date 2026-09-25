@@ -30,6 +30,12 @@ type SessionRecord struct {
 	SessionID string `json:"session_id"`
 	Cwd       string `json:"cwd"`
 	UpdatedAt int64  `json:"updated_at"` // unix nanoseconds (sub-second recency tiebreak)
+	// Tool names the adapter that touched this session ("claude-code",
+	// "codex", ...). Empty on a record written before this field existed, or
+	// on a store this package does not know how to attribute -- a commit
+	// event's routing (R2, "agent commits only") treats that the same as any
+	// other tool it cannot confirm: no event, never a guess.
+	Tool string `json:"tool,omitempty"`
 }
 
 // DefaultSessionDir is the shared registry location used by both the adapter
@@ -43,14 +49,16 @@ func DefaultSessionDir() string {
 
 // WriteSessionRecord creates or refreshes a session's liveness record (a
 // "touch"). The write is atomic (temp + rename) so a concurrent resolver never
-// reads a partial file.
-func WriteSessionRecord(dir, sessionID, cwd string, now time.Time) error {
+// reads a partial file. tool is the adapter doing the writing ("claude-code",
+// "codex", ...); it is what a commit event's routing (R2) checks a marker
+// against, so a caller must pass its own name rather than "".
+func WriteSessionRecord(dir, sessionID, cwd, tool string, now time.Time) error {
 	// Invalid → skip silently (best-effort; never blocks a hook).
 	if err := ValidateSessionID(sessionID); err != nil {
 		return nil
 	}
 	return writeRecordFile(dir, sessionRecordPath(dir, sessionID),
-		SessionRecord{SessionID: sessionID, Cwd: cwd, UpdatedAt: now.UnixNano()})
+		SessionRecord{SessionID: sessionID, Cwd: cwd, UpdatedAt: now.UnixNano(), Tool: tool})
 }
 
 // RemoveSessionRecord deletes a session's record (the adapter's SessionEnd).
