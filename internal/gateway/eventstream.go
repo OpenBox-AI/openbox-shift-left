@@ -114,7 +114,11 @@ func assembleEventStream(body string, h http.Header) string {
 				blocks[f.Index] = block
 			}
 		case "content_block_delta":
-			applyDelta(blocks, toolJSON, f.Index, f.Delta)
+			if t, ok := applyDelta(blocks, toolJSON, f.Index, f.Delta); !ok {
+				// Named by delta type, so an unhandled delta is visible in the note
+				// rather than silently missing from the block it belonged to.
+				skipped["content_block_delta:"+t] = true
+			}
 		case "content_block_stop":
 			finishToolInput(blocks, toolJSON, f.Index)
 		case "message_delta":
@@ -173,11 +177,16 @@ func assembleEventStream(body string, h http.Header) string {
 	return string(out)
 }
 
-// applyDelta folds one content_block_delta into its block. Text and thinking
-// append to the block's own field; tool input arrives as partial JSON and is
-// parsed once the block stops. A signature is opaque verification material with
-// no reading value, so it is not accumulated.
-func applyDelta(blocks map[int]map[string]any, toolJSON map[int]*strings.Builder, index int, raw json.RawMessage) {
+// applyDelta folds one content_block_delta into its block, and reports the
+// delta's type and whether it was folded. Text and thinking append to the
+// block's own field; tool input arrives as partial JSON and is parsed once the
+// block stops. A signature is opaque verification material with no reading
+// value, and a citation's end marker only closes a range the start already
+// named, so both are handled by being left out.
+//
+// Citations arrive two ways: the Messages API's citations_delta, and claude.ai's
+// citation_start_delta. Both carry the source (title, URL) under `citation`.
+func applyDelta(blocks map[int]map[string]any, toolJSON map[int]*strings.Builder, index int, raw json.RawMessage) (string, bool) {
 	var d struct {
 		Type        string          `json:"type"`
 		Text        string          `json:"text"`
@@ -186,7 +195,7 @@ func applyDelta(blocks map[int]map[string]any, toolJSON map[int]*strings.Builder
 		Citation    json.RawMessage `json:"citation"`
 	}
 	if json.Unmarshal(raw, &d) != nil {
-		return
+		return "unparsed", false
 	}
 	block := blocks[index]
 	if block == nil {
@@ -206,12 +215,16 @@ func applyDelta(blocks map[int]map[string]any, toolJSON map[int]*strings.Builder
 			toolJSON[index] = b
 		}
 		b.WriteString(d.PartialJSON)
-	case "citations_delta":
+	case "citations_delta", "citation_start_delta":
 		if len(d.Citation) > 0 {
 			list, _ := block["citations"].([]any)
 			block["citations"] = append(list, d.Citation)
 		}
+	case "signature_delta", "citation_end_delta":
+	default:
+		return d.Type, false
 	}
+	return d.Type, true
 }
 
 // finishToolInput parses a block's accumulated tool input. Input that does not

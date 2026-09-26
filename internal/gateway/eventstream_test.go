@@ -34,6 +34,9 @@ func claudeAIStream() string {
 		b.WriteString(frame("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":%q}}`, tok)))
 		b.WriteString(frame("ping", `{"type":"ping"}`))
 	}
+	b.WriteString(frame("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"citation_start_delta","citation":{"uuid":"c1","title":"Ha Noi - Wikipedia","url":"https://en.wikipedia.org/wiki/Hanoi"}}}`))
+	b.WriteString(frame("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"citation_end_delta","citation_uuid":"c1"}}`))
+	b.WriteString(frame("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"future_delta","x":1}}`))
 	b.WriteString(frame("content_block_stop", `{"type":"content_block_stop","index":0}`))
 	b.WriteString(frame("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"places_search","input":{}}}`))
 	b.WriteString(frame("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":"}}`))
@@ -51,8 +54,11 @@ type assembledForTest struct {
 	Usage      map[string]any `json:"usage"`
 	Assembly   assemblyNote   `json:"openbox_assembly"`
 	Content    []struct {
-		Type  string          `json:"type"`
-		Text  string          `json:"text"`
+		Type      string `json:"type"`
+		Text      string `json:"text"`
+		Citations []struct {
+			URL string `json:"url"`
+		} `json:"citations"`
 		Name  string          `json:"name"`
 		Input json.RawMessage `json:"input"`
 	} `json:"content"`
@@ -85,7 +91,12 @@ func TestAStreamedReplyIsReassembledIntoOneMessage(t *testing.T) {
 	if m.Assembly.Incomplete {
 		t.Error("a stream that reached message_stop must not be marked incomplete")
 	}
-	if strings.Join(m.Assembly.SkippedEventTypes, ",") != "conversation_ready,ping" {
+	// claude.ai names a citation's source on citation_start_delta; dropping it
+	// stored every cited reply with an empty citations list.
+	if len(m.Content[0].Citations) != 1 || m.Content[0].Citations[0].URL != "https://en.wikipedia.org/wiki/Hanoi" {
+		t.Errorf("citations = %+v, want the one source citation_start_delta named", m.Content[0].Citations)
+	}
+	if strings.Join(m.Assembly.SkippedEventTypes, ",") != "content_block_delta:future_delta,conversation_ready,ping" {
 		t.Errorf("skipped_event_types = %v, want the surface's own frames named", m.Assembly.SkippedEventTypes)
 	}
 	if strings.Contains(got, "text_delta") {
