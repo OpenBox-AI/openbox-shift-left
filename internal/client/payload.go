@@ -327,7 +327,9 @@ func turnActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 	// What the model said; the two sources are mutually exclusive.
 	switch {
 	case ev.Span != nil && ev.Span.ResponseBody != "":
-		// Verbatim, SSE frames and all: reassembly belongs with the consumer.
+		// As the gateway stored it: an Anthropic-format stream arrives already
+		// reassembled into one message document (gateway/eventstream.go), any
+		// other body verbatim. Never reply_text -- see modelCallReplyKey.
 		body := ev.Span.ResponseBody
 		// capModelCallBody's own cut used to bypass cutLog entirely, so
 		// truncated_paths stayed silent about the single largest thing a

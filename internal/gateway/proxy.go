@@ -267,8 +267,13 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if g.emitter != nil {
 		respBody := ""
+		decodeCut := false
 		if keepBodies {
 			respBody = capturableBody(sink.Bytes(), resp.Header)
+			// Read before reassembly, which drops the note along with the frames:
+			// the cut still happened, and responseTruncated must still say so.
+			decodeCut = strings.HasSuffix(respBody, bodyCutNote)
+			respBody = assembleEventStream(respBody, resp.Header)
 		}
 		captured := reqCapture.Complete(resp.StatusCode, resp.Header, respBody, end)
 		// Set on the returned value rather than threaded through Complete's own
@@ -278,7 +283,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// touch a file this phase does not own for a fact this call site is
 		// the only place that has.
 		captured.ResponseBytesSeen = sink.Seen()
-		captured.ResponseTruncated = responseTruncated(sink, captured.ResponseBody, streamErr)
+		captured.ResponseTruncated = decodeCut || responseTruncated(sink, captured.ResponseBody, streamErr)
 		g.emitter.Emit(r.Context(), captured)
 	}
 
@@ -317,11 +322,10 @@ func capturableBody(body []byte, h http.Header) string {
 // than this one.
 func capturableRequestBody(body []byte, h http.Header) string {
 	if enc := contentEncoding(h); enc != "" {
-		// A compressed request is unobserved in the corpus, and decodeCapturable's
-		// bound applies before selection can see the plaintext -- so a large
-		// compressed body arrives already head-cut and falls back to a marked
-		// window, which is the honest outcome rather than a silent one.
-		return selectModelCallRequest(decodeCapturable(body, enc))
+		// Decoded whole, up to the same limit an uncompressed request gets, so the
+		// selector parses the complete document. Claude Desktop's claude.ai calls
+		// arrive this way; see decodeCapturableRequest.
+		return selectModelCallRequest(decodeCapturableRequest(body, enc))
 	}
 	return selectModelCallRequest(string(body))
 }
@@ -575,5 +579,11 @@ func connectionNamedHeaders(src http.Header) map[string]bool {
 // mark rides inside the same bound the cut enforced. noteCut is the
 // rune-budget twin.
 func noteByteCut(b []byte) string {
-	return trimPartialRune(string(b[:maxCaptureInputBytes-len(bodyCutNote)])) + bodyCutNote
+	return noteByteCutAt(b, maxCaptureInputBytes)
+}
+
+// noteByteCutAt is noteByteCut at an explicit bound, for the request path's
+// decode, which is bounded by maxRequestBody instead.
+func noteByteCutAt(b []byte, limit int) string {
+	return trimPartialRune(string(b[:limit-len(bodyCutNote)])) + bodyCutNote
 }

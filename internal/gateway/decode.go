@@ -74,6 +74,25 @@ func isToken(encoding, want string) bool {
 // decodeCapturable decompresses the teed copy, capture path only, bounding the
 // DECOMPRESSED stream and stopping AT the bound.
 func decodeCapturable(body []byte, encoding string) string {
+	return decodeCapturableWithin(body, encoding, maxCaptureInputBytes)
+}
+
+// decodeCapturableRequest is the REQUEST path's decode, bounded by the relay's
+// own request limit instead of the response path's 256 KiB.
+//
+// The response bound is a head cut, which is right for a reply and wrong for a
+// request: the selector has to parse the whole JSON document to find the newest
+// turn, and a head-cut document does not parse. Measured on Claude Desktop, whose
+// claude.ai completion request arrives content-encoded and decodes past 256 KiB
+// (its tool list alone is most of that): every such call stored a marked tail
+// window of tool schemas and no conversation. The uncompressed request path
+// already hands the selector the whole body up to maxRequestBody, so this makes
+// the two paths agree, and the selector's own budget is what bounds storage.
+func decodeCapturableRequest(body []byte, encoding string) string {
+	return decodeCapturableWithin(body, encoding, maxRequestBody)
+}
+
+func decodeCapturableWithin(body []byte, encoding string, limit int) string {
 	newReader := newDecompressor(encoding)
 	if newReader == nil {
 		return fmt.Sprintf("[openbox: not captured; the body used Content-Encoding %q, which this "+
@@ -94,14 +113,14 @@ func decodeCapturable(body []byte, encoding string) string {
 	// One byte past the bound, so hitting it is DETECTABLE: reading exactly the
 	// bound cannot tell a full body from a cut one, and a body of few wide runes
 	// reaches this cut before capRunes gets to mark it.
-	plain, err := io.ReadAll(io.LimitReader(zr, maxCaptureInputBytes+1))
+	plain, err := io.ReadAll(io.LimitReader(zr, int64(limit)+1))
 	if len(plain) == 0 && err != nil {
 		return undecodableMarker(encoding)
 	}
-	if len(plain) > maxCaptureInputBytes {
+	if len(plain) > limit {
 		// Room for the note inside the SAME bound, because clampAndRedact re-cuts at
 		// it downstream and would take the note off again.
-		return noteByteCut(plain)
+		return noteByteCutAt(plain, limit)
 	}
 	// A short read is not a fault: an aborted turn ends mid-frame, and the prefix
 	// that decoded is the evidence.

@@ -123,6 +123,9 @@ func selectModelCallRequest(body string) string {
 	}
 	rawMessages, ok := fields["messages"]
 	if !ok {
+		if rawPrompt, ok := fields["prompt"]; ok {
+			return selectPromptRequest(body, fields, rawPrompt)
+		}
 		return fallbackWindow(body, "no messages array in what reached the selector")
 	}
 	var messages []json.RawMessage
@@ -134,7 +137,7 @@ func selectModelCallRequest(body string) string {
 		Model:  cappedField(fields["model"], modelBudget, "model id"),
 		System: cappedField(fields["system"], systemBudget, "system prompt"),
 	}
-	dropped := droppedKeys(fields)
+	dropped := droppedKeys(fields, "messages")
 	// Before the fill and not after: dropping a trailing non-turn here returns its
 	// bytes to `room`, so one more real turn can fit.
 	messages, skipped := trimTrailingNonTurns(messages)
@@ -176,6 +179,70 @@ func selectModelCallRequest(body string) string {
 		// which is `tools` in 65.5% of corpus bodies -- the one thing selection
 		// exists to discard. Measured: this path stored zero conversation on 26.5%
 		// of model calls.
+		return fallbackWindow(string(out), documentSourcedFallback)
+	}
+	return string(out)
+}
+
+// selectedPrompt is the document for a request that carries its turn as one
+// top-level `prompt` string instead of a `messages` array -- the shape claude.ai's
+// chat completion endpoint sends, where the conversation history lives server
+// side and the body is the new turn plus a tool list that dwarfs it.
+//
+// A struct and not a map for the same reason as selectedRequest: Prompt is
+// declared LAST so the turn lands in the tail the alignment judge keeps.
+type selectedPrompt struct {
+	Model     json.RawMessage `json:"model,omitempty"`
+	Selection *selectionNote  `json:"openbox_selection,omitempty"`
+	Prompt    json.RawMessage `json:"prompt"`
+}
+
+// selectPromptRequest keeps the prompt and drops everything else, reporting the
+// dropped keys exactly as the messages path does.
+//
+// Without it, a claude.ai body had no `messages` key, fell back to a tail window,
+// and the tail of that body is its tool list: measured on live browser and
+// desktop chats, every stored request was ~49 KB of MCP tool schemas and none of
+// them held a word of what the user typed.
+//
+// Still one key name on a top-level object, never a schema: a `prompt` that is
+// not a string degrades to the same marked window as any other unrecognised
+// shape.
+func selectPromptRequest(body string, fields map[string]json.RawMessage, rawPrompt json.RawMessage) string {
+	var prompt string
+	if err := json.Unmarshal(rawPrompt, &prompt); err != nil {
+		return fallbackWindow(body, "prompt is not a string")
+	}
+	doc := selectedPrompt{Model: cappedField(fields["model"], modelBudget, "model id")}
+	note := mergeNote(priorNote(fields["openbox_selection"]), selectionNote{
+		DroppedKeys:   droppedKeys(fields, "prompt"),
+		OriginalBytes: len(body),
+	})
+	if len(note.DroppedKeys) > 0 || note.DroppedMessages > 0 || note.SkippedTrailingNonTurns > 0 {
+		doc.Selection = note
+	}
+
+	// Measure the skeleton, then fit the prompt into what is left: the same
+	// overhead-first budgeting keepNewestMessages uses.
+	doc.Prompt = json.RawMessage(`""`)
+	skeleton, err := marshalNoHTMLEscape(doc)
+	if err != nil {
+		return fallbackWindow(body, "the selection budget could not be established")
+	}
+	room := selectionBudget - len(skeleton) + len(doc.Prompt)
+	if len(rawPrompt) <= room {
+		doc.Prompt = rawPrompt
+	} else {
+		// A pasted document can outgrow the budget on its own; keep its tail,
+		// marked, like an over-budget message.
+		doc.Prompt = tailAsJSONString(json.RawMessage(prompt), room+1)
+	}
+
+	out, err := marshalNoHTMLEscape(doc)
+	if err != nil {
+		return fallbackWindow(body, "the selected document could not be encoded")
+	}
+	if len(out) > selectionBudget {
 		return fallbackWindow(string(out), documentSourcedFallback)
 	}
 	return string(out)
@@ -483,11 +550,17 @@ const (
 // value is deterministic for the same input. `tools` is the big one: it is
 // near-constant boilerplate, it was being stored on every call, and dropping it
 // is the one change in this phase that REDUCES egress.
-func droppedKeys(fields map[string]json.RawMessage) []string {
+func droppedKeys(fields map[string]json.RawMessage, turnKey string) []string {
 	var out []string
 	for k := range fields {
 		switch k {
-		case "model", "system", "messages", "openbox_selection":
+		case "model", "openbox_selection", turnKey:
+		case "system":
+			// Kept by the messages path only; the prompt path has no system field
+			// to keep, so there it is a loss like any other key.
+			if turnKey != "messages" {
+				out = append(out, k)
+			}
 		default:
 			out = append(out, k)
 		}
