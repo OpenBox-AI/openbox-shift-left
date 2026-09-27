@@ -2,6 +2,7 @@ package trace
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -108,19 +109,22 @@ func Emit(r Record) {
 // at all, since that's the "nobody called SetDir yet" case rather than a
 // failure.
 func (w *Writer) Emit(r Record) {
-	if w == nil {
+	if w == nil || w.Dir == "" {
 		return
 	}
+	if w.write(r) != nil {
+		atomic.AddUint64(&w.dropped, 1)
+	}
+}
+
+// write stamps r and appends it as one line; a panic comes back as an error
+// so Emit counts it like any other failure.
+func (w *Writer) write(r Record) (err error) {
 	defer func() {
-		if recover() != nil {
-			atomic.AddUint64(&w.dropped, 1)
+		if p := recover(); p != nil {
+			err = fmt.Errorf("trace: emit panicked: %v", p)
 		}
 	}()
-
-	dir := w.Dir
-	if dir == "" {
-		return
-	}
 
 	now := time.Now
 	if w.Now != nil {
@@ -134,25 +138,21 @@ func (w *Writer) Emit(r Record) {
 
 	line, err := json.Marshal(r)
 	if err != nil {
-		atomic.AddUint64(&w.dropped, 1)
-		return
+		return err
 	}
 	line = append(line, '\n')
 
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		atomic.AddUint64(&w.dropped, 1)
-		return
+	if err := os.MkdirAll(w.Dir, 0o700); err != nil {
+		return err
 	}
 
 	name := "trace-" + ts.Format("2006-01-02") + ".jsonl"
-	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(w.Dir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		atomic.AddUint64(&w.dropped, 1)
-		return
+		return err
 	}
 	defer f.Close()
 
-	if _, err := f.Write(line); err != nil {
-		atomic.AddUint64(&w.dropped, 1)
-	}
+	_, err = f.Write(line)
+	return err
 }
