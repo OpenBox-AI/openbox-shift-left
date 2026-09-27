@@ -279,7 +279,7 @@ func TestRunHook_ConfigChange_PolicySettingsNeverGated(t *testing.T) {
 }
 
 // TestRunHook_ConfigChange_RawCompare_UnknownSourceStillGates guards the raw-
-// vs-enumOr distinction (insight 3): an unrecognized future `source` must
+// vs-EnumOr distinction (insight 3): an unrecognized future `source` must
 // still be gated, not silently exempted by an allowlist round-trip.
 func TestRunHook_ConfigChange_RawCompare_UnknownSourceStillGates(t *testing.T) {
 	setupConfigChangeEnv(t)
@@ -351,7 +351,7 @@ func TestRunHook_ConfigChange_RegistryNotTouched(t *testing.T) {
 //
 // ConfigChange's own source is pinned to policy_settings, which is the one
 // ConfigChange source that is never gated at all (raw compare, not through
-// enumOr) -- so it, like the other three hooks below, takes the observe path
+// EnumOr) -- so it, like the other three hooks below, takes the observe path
 // unconditionally and this proves SurfaceFindings is unreachable there, not
 // merely that the (now-always-on) gate happened to deny first.
 func TestSurfaceFindings_UnreachableForConfigChange(t *testing.T) {

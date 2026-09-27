@@ -23,10 +23,10 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 	}
 
 	attrs := map[string]any{
-		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 	}
 	switch {
-	case isFileSemantic(sem):
+	case hookflow.IsFileSemantic(sem):
 		attrs["file_operation"] = fileOp
 	case kind == client.ToolMCP:
 		attrs["mcp_function"] = capStr(function)
@@ -44,20 +44,12 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 		Attributes:   hookflow.CompactAny(attrs),
 	}
 
-	if localRedaction && isFileSemantic(sem) {
+	if localRedaction && hookflow.IsFileSemantic(sem) {
 		if body := e.fileText(); body != "" && len(body) <= hookflow.MaxRedactBody {
 			req.Content = &client.Content{FileText: body}
 		}
 	}
 	return req
-}
-
-func isFileSemantic(sem string) bool {
-	switch sem {
-	case "file_read", "file_write", "file_open", "file_delete":
-		return true
-	}
-	return false
 }
 
 type preToolUseOutput struct {

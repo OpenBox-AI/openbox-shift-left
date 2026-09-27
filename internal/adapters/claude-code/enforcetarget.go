@@ -98,7 +98,7 @@ func (t enforceTarget) overrideContent(kind client.ToolKind, sem string, redacte
 	case kind == client.ToolMCP:
 		// Verbatim by decision (same rationale, same doc).
 		return bounded(string(t.ev.ToolInput))
-	case isFileSemantic(sem) && redacted != nil && redacted.FileText != "":
+	case hookflow.IsFileSemantic(sem) && redacted != nil && redacted.FileText != "":
 		// E8: the enforce copy is the same bytes the rewrite put on disk.
 		// The rebuild swaps only the content field, so every other field is
 		// still the original -- an Edit's old_string among them, a full copy

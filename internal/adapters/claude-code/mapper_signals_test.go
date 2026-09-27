@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
@@ -315,7 +316,7 @@ func TestMap_ContentGatingForSignalClasses(t *testing.T) {
 	}
 }
 
-// TestMap_PerHookEnumAllowlistsAreDistinct proves enumOr is applied per hook
+// TestMap_PerHookEnumAllowlistsAreDistinct proves EnumOr is applied per hook
 // (insight 2): reusing another hook's allowlist would silently drop a value
 // that hook's own table accepts, and would accept a value another hook's
 // table rejects.
@@ -372,7 +373,7 @@ func TestMap_PerHookEnumAllowlistsAreDistinct(t *testing.T) {
 }
 
 // TestMap_ConfigChangeInvalidSourceOmitsKey: an out-of-enum source must not
-// egress the raw value; enumOr drops it and compact() deletes the key.
+// egress the raw value; EnumOr drops it and Compact() deletes the key.
 func TestMap_ConfigChangeInvalidSourceOmitsKey(t *testing.T) {
 	m := testMapper()
 	got, ok := m.Map(HookConfigChange, &HookEvent{SessionID: "s", Source: "evil-injected-source"})
@@ -385,7 +386,7 @@ func TestMap_ConfigChangeInvalidSourceOmitsKey(t *testing.T) {
 }
 
 // TestMap_CommandSourceIsFreeform: command_source binds through capStr, not
-// enumOr (R1) — there is only one documented value and no confirmed table, so
+// EnumOr (R1) — there is only one documented value and no confirmed table, so
 // an unconfirmed allowlist must not silently discard real data.
 func TestMap_CommandSourceIsFreeform(t *testing.T) {
 	m := testMapper()
@@ -396,7 +397,7 @@ func TestMap_CommandSourceIsFreeform(t *testing.T) {
 		t.Fatal("Map ok=false")
 	}
 	if got.Metadata["command_source"] != "some-brand-new-source" {
-		t.Errorf("command_source = %v, want verbatim pass-through (capStr, not enumOr)", got.Metadata["command_source"])
+		t.Errorf("command_source = %v, want verbatim pass-through (capStr, not EnumOr)", got.Metadata["command_source"])
 	}
 }
 
@@ -449,7 +450,7 @@ func TestMap_ModelSwitchNeverSetsEvModel(t *testing.T) {
 
 // TestMap_PromptIDThreadedOnEveryEvent: prompt_id is merged once in Map,
 // regardless of hook, and does not change bytes for a payload that never
-// carries one (compact() drops the empty string).
+// carries one (Compact() drops the empty string).
 func TestMap_PromptIDThreadedOnEveryEvent(t *testing.T) {
 	m := testMapper()
 
@@ -514,8 +515,8 @@ func TestMap_HookSessionEndAllReasonsSealTheRun(t *testing.T) {
 // continues (clear/resume bump; startup/compact/fork do not) — a missing
 // value there is a wrong run identity, not a cosmetic metadata gap.
 func TestSourceValues_GainsFork(t *testing.T) {
-	if got := enumOr("fork", sourceValues); got != "fork" {
-		t.Fatalf("enumOr(fork, sourceValues) = %q, want %q", got, "fork")
+	if got := hookflow.EnumOr("fork", sourceValues); got != "fork" {
+		t.Fatalf("hookflow.EnumOr(fork, sourceValues) = %q, want %q", got, "fork")
 	}
 	m := testMapper()
 	got, ok := m.Map(HookSessionStart, &HookEvent{SessionID: "s", Source: "fork"})

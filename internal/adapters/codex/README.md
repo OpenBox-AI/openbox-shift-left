@@ -389,7 +389,7 @@ via `Op::ExecApproval`/`PatchApproval`, and a hook `allow` is not an approval
 verb. So no live interactive probe is required to close this; the earlier
 "harness-unproven" caveat is retired. **Blast radius is still bounded in code to
 `apply_patch` writes only:** `buildDecisionRequest` populates `Content` (hence
-any `RedactedContent`, hence any `allow`) only when `isFileSemantic(sem)`; Bash
+any `RedactedContent`, hence any `allow`) only when `IsFileSemantic(sem)`; Bash
 and `mcp__*` are non-file, carry no `Content`, and can only ever receive `deny`
 or a silent proceed; they are **never** auto-allowed.
 

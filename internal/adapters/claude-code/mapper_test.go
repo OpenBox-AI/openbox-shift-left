@@ -342,21 +342,6 @@ func TestClassifyTool_MalformedMCPFallsBack(t *testing.T) {
 	}
 }
 
-func TestSplitMCPName(t *testing.T) {
-	tests := []struct{ in, server, fn string }{
-		{"mcp__github__create_issue", "github", "create_issue"},
-		{"mcp__memory__create_entities", "memory", "create_entities"},
-		{"mcp__srv__ns__deep_tool", "srv", "ns__deep_tool"},
-		{"mcp__lonely", "lonely", ""},
-	}
-	for _, tt := range tests {
-		s, f := splitMCPName(tt.in)
-		if s != tt.server || f != tt.fn {
-			t.Errorf("splitMCPName(%q) = (%q,%q), want (%q,%q)", tt.in, s, f, tt.server, tt.fn)
-		}
-	}
-}
-
 // TestMapTurn_AssistantTextIsGatedOnContentCapture the assistant-turn content
 // attach.
 func TestMapTurn_AssistantTextIsGatedOnContentCapture(t *testing.T) {

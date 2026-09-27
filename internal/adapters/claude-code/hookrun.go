@@ -204,7 +204,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// running the gate would drop the event.
 	//
 	// ConfigChange's policy_settings source is never gated (raw compare, not
-	// through enumOr): the vendor documents blocking decisions on it as
+	// through EnumOr): the vendor documents blocking decisions on it as
 	// ignored, and gating it anyway would file an enforcement audit line
 	// claiming a block that never happened.
 	//
@@ -404,10 +404,10 @@ func forceFlusher(logger *log.Logger, sessionID string) {
 // SessionEnd that sealed the old one, so the SessionStart it fires next has
 // no prior run under ITS id to continue; `--resume` is the one source that
 // reuses the id, which is the only case where "continue the run this id
-// already has" is a coherent question. enumOr guards against an
+// already has" is a coherent question. EnumOr guards against an
 // unrecognized value reading as a bump.
 func isBumpSource(source string) bool {
-	return enumOr(source, sourceValues) == "resume"
+	return hookflow.EnumOr(source, sourceValues) == "resume"
 }
 
 // anchorsTurnCursor reports whether a SessionStart opens onto a transcript that
@@ -417,7 +417,7 @@ func isBumpSource(source string) bool {
 // cursor is old news. `startup` has no history, `compact` keeps its cursor, and
 // `clear` mints a fresh id whose transcript is empty.
 func anchorsTurnCursor(source string) bool {
-	switch enumOr(source, sourceValues) {
+	switch hookflow.EnumOr(source, sourceValues) {
 	case "resume", "fork":
 		return true
 	}

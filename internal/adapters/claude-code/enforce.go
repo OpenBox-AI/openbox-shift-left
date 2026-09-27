@@ -20,10 +20,10 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 	}
 
 	attrs := map[string]any{
-		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 	}
 	switch {
-	case isFileSemantic(sem):
+	case hookflow.IsFileSemantic(sem):
 		attrs["file_path"] = capStr(e.filePath()) // structural locator (INV-2)
 		attrs["file_operation"] = fileOp
 	case kind == client.ToolMCP:
@@ -42,7 +42,7 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 		Attributes:   hookflow.CompactAny(attrs),
 	}
 
-	if localRedaction && isFileSemantic(sem) {
+	if localRedaction && hookflow.IsFileSemantic(sem) {
 		if body := e.fileText(); body != "" && len(body) <= hookflow.MaxRedactBody {
 			req.Content = &client.Content{FileText: body}
 		}

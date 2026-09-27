@@ -60,7 +60,7 @@ func runWithTimeout(d time.Duration, name string, args ...string) ([]byte, error
 }
 
 // providerManaged reports whether this provider's own managed configuration is
-// deployed and actually constrains the session (E8-S8).
+// deployed and actually constrains the session.
 func providerManaged() string {
 	paths := []string{"/etc/codex/requirements.toml"}
 	sawPath := false

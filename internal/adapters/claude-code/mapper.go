@@ -43,11 +43,11 @@ type Mapper struct {
 	// case: the text egresses unredacted (that decision says so rather than
 	// hiding it).
 	RedactContent func(string) string
-	// Posture, when non-nil, is the session's effective posture (E8-S5), attached
+	// Posture, when non-nil, is the session's effective posture, attached
 	// to the SessionStarted event's metadata only.
 	Posture *devconfig.Posture
 	// Evidence, when non-nil, records how much of this session's telemetry is
-	// known to be undelivered at session end (E8-S7).
+	// known to be undelivered at session end.
 	Evidence *EvidenceState
 	// Run, when non-nil, is this hook invocation's resolved continue-as-new
 	// identity (phase 08): hookrun.go resolves it once, from the run record,
@@ -135,10 +135,10 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventPromptSubmitted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		injected, fromVendor := machineInjectedPrompt(e.Source, e.Prompt)
-		meta := compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		meta := hookflow.Compact(map[string]any{"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes)})
 		switch {
 		case fromVendor:
-			meta["prompt_source"] = enumOr(e.Source, promptSources)
+			meta["prompt_source"] = hookflow.EnumOr(e.Source, promptSources)
 		case injected:
 			meta["prompt_source"] = "task_notification"
 			meta["prompt_source_inferred"] = true
@@ -207,7 +207,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventAPIError
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
 		ev.Metadata = mergeMetadata(
-			compact(map[string]any{"error_type": enumOr(e.ErrorType, apiErrorTypes)}),
+			hookflow.Compact(map[string]any{"error_type": hookflow.EnumOr(e.ErrorType, apiErrorTypes)}),
 			subagentMetadata(e))
 		ev.Content = m.gatedSignalDetail(e.ErrorDetails)
 
@@ -215,7 +215,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventSessionEnded
 		ev.EndedAt = ts
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
+		ev.Metadata = hookflow.Compact(map[string]any{"reason": hookflow.EnumOr(e.Reason, reasonValues)})
 		if m.Finops != nil {
 			ev.Tokens = m.Finops.Tokens
 			ev.Cost = m.Finops.Cost
@@ -224,22 +224,21 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.Metadata())
 		}
 
-	// v1.8 observe-only lifecycle signals (21 classes, phase-04 table B
-	// order). Every case below goes through signalEvent: the agent as the
+	// v1.8 observe-only lifecycle signals (21 classes). Every case below goes through signalEvent: the agent as the
 	// tool, structural metadata, and no activity fields at all (insight 1) —
 	// no new case may set ev.Span, ev.StartedAt, ev.EndedAt, ev.TurnIndex,
 	// ev.Status, ev.ActivityType or ev.Tokens.
 
 	case HookSetup:
-		m.signalEvent(&ev, client.EventSetup, compact(map[string]any{
-			"trigger": enumOr(e.Trigger, setupTriggers),
+		m.signalEvent(&ev, client.EventSetup, hookflow.Compact(map[string]any{
+			"trigger": hookflow.EnumOr(e.Trigger, setupTriggers),
 		}))
 
 	case HookInstructionsLoaded:
-		meta := compact(map[string]any{
+		meta := hookflow.Compact(map[string]any{
 			"file_path":         capStr(e.FilePath),
-			"memory_type":       enumOr(e.MemoryType, memoryTypes),
-			"load_reason":       enumOr(e.LoadReason, loadReasons),
+			"memory_type":       hookflow.EnumOr(e.MemoryType, memoryTypes),
+			"load_reason":       hookflow.EnumOr(e.LoadReason, loadReasons),
 			"trigger_file_path": capStr(e.TriggerFilePath),
 			"parent_file_path":  capStr(e.ParentFilePath),
 		})
@@ -261,10 +260,10 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// and the pre-expansion `prompt` is unbound because it duplicates
 		// prompt_submitted under a second key — the reason matters, or
 		// someone re-adds it.
-		m.signalEvent(&ev, client.EventUserPromptExpansion, compact(map[string]any{
-			"expansion_type": enumOr(e.ExpansionType, expansionTypes),
+		m.signalEvent(&ev, client.EventUserPromptExpansion, hookflow.Compact(map[string]any{
+			"expansion_type": hookflow.EnumOr(e.ExpansionType, expansionTypes),
 			"command_name":   capStr(e.CommandName),
-			// command_source: capStr, NOT enumOr (R1) — only one documented
+			// command_source: capStr, NOT EnumOr (R1) — only one documented
 			// value and no confirmed table; an unconfirmed allowlist would
 			// silently discard real data.
 			"command_source": capStr(e.CommandSource),
@@ -273,7 +272,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookMessageDisplay:
 		// D1: no content line. delta and displayContent are never bound, and
 		// message_id is not the API msg_… id, so no transcript join exists.
-		meta := compact(map[string]any{
+		meta := hookflow.Compact(map[string]any{
 			"turn_id":    capStr(e.TurnID),
 			"message_id": capStr(e.MessageID),
 		})
@@ -289,9 +288,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// No tool_use_id exists, so this cannot pair with any tool activity;
 		// permission_suggestions not bound (R3). C7: after phase 07 this key
 		// carries the whole subagent prompt for an Agent request.
-		m.signalEvent(&ev, client.EventPermissionRequest, compact(map[string]any{
+		m.signalEvent(&ev, client.EventPermissionRequest, hookflow.Compact(map[string]any{
 			"tool_name":       capStr(e.ToolName),
-			"permission_mode": enumOr(e.PermissionMode, permissionModes),
+			"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 		}))
 		ev.Content = m.gatedSignalDetail(toolInputExtract(e))
 
@@ -306,8 +305,8 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		m.signalEvent(&ev, client.EventPostToolBatch, meta)
 
 	case HookNotification:
-		notif := compact(map[string]any{
-			"notification_type": enumOr(e.NotificationType, notificationTypes),
+		notif := hookflow.Compact(map[string]any{
+			"notification_type": hookflow.EnumOr(e.NotificationType, notificationTypes),
 		})
 		m.gatedContentMeta(notif, "notification_title", e.Title)
 		m.signalEvent(&ev, client.EventNotification, notif)
@@ -323,7 +322,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		if hook == HookTaskCompleted {
 			et = client.EventTaskCompleted
 		}
-		task := compact(map[string]any{
+		task := hookflow.Compact(map[string]any{
 			"task_id":       capStr(e.TaskID),
 			"teammate_name": capStr(e.TeammateName),
 			"team_name":     capStr(e.TeamName),
@@ -333,7 +332,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Content = m.gatedSignalDetail(e.TaskSubject)
 
 	case HookTeammateIdle:
-		m.signalEvent(&ev, client.EventTeammateIdle, compact(map[string]any{
+		m.signalEvent(&ev, client.EventTeammateIdle, hookflow.Compact(map[string]any{
 			"teammate_name": capStr(e.TeammateName),
 			"team_name":     capStr(e.TeamName),
 		}))
@@ -341,45 +340,45 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookConfigChange:
 		// No content: `reason` is an output field the gate renders locally
 		// (phase 09) and never egresses.
-		m.signalEvent(&ev, client.EventConfigChange, compact(map[string]any{
-			"source":    enumOr(e.Source, configSources),
+		m.signalEvent(&ev, client.EventConfigChange, hookflow.Compact(map[string]any{
+			"source":    hookflow.EnumOr(e.Source, configSources),
 			"file_path": capStr(e.FilePath),
 		}))
 
 	case HookCwdChanged:
-		m.signalEvent(&ev, client.EventCwdChanged, compact(map[string]any{
+		m.signalEvent(&ev, client.EventCwdChanged, hookflow.Compact(map[string]any{
 			"old_cwd": capStr(e.OldCwd),
 			"new_cwd": capStr(e.NewCwd),
 		}))
 
 	case HookDirectoryAdded:
-		m.signalEvent(&ev, client.EventDirectoryAdded, compact(map[string]any{
+		m.signalEvent(&ev, client.EventDirectoryAdded, hookflow.Compact(map[string]any{
 			"directory": capStr(e.Directory),
-			"source":    enumOr(e.Source, directoryAddedSources),
+			"source":    hookflow.EnumOr(e.Source, directoryAddedSources),
 		}))
 
 	case HookFileChanged:
-		m.signalEvent(&ev, client.EventFileChanged, compact(map[string]any{
+		m.signalEvent(&ev, client.EventFileChanged, hookflow.Compact(map[string]any{
 			"file_path": capStr(e.FilePath),
-			"event":     enumOr(e.FileChangeEvent, fileChangeEvents),
+			"event":     hookflow.EnumOr(e.FileChangeEvent, fileChangeEvents),
 		}))
 
 	case HookWorktreeRemove:
 		// Unpaired by construction: it correlates to WorktreeCreate, which
 		// this adapter refuses to register.
-		m.signalEvent(&ev, client.EventWorktreeRemove, compact(map[string]any{
+		m.signalEvent(&ev, client.EventWorktreeRemove, hookflow.Compact(map[string]any{
 			"worktree_path": capStr(e.WorktreePath),
 		}))
 
 	case HookPreCompact:
-		m.signalEvent(&ev, client.EventPreCompact, compact(map[string]any{
-			"trigger": enumOr(e.Trigger, compactTriggers),
+		m.signalEvent(&ev, client.EventPreCompact, hookflow.Compact(map[string]any{
+			"trigger": hookflow.EnumOr(e.Trigger, compactTriggers),
 		}))
 		ev.Content = m.gatedSignalDetail(e.CustomInstructions)
 
 	case HookPostCompact:
-		m.signalEvent(&ev, client.EventPostCompact, compact(map[string]any{
-			"trigger": enumOr(e.Trigger, compactTriggers),
+		m.signalEvent(&ev, client.EventPostCompact, hookflow.Compact(map[string]any{
+			"trigger": hookflow.EnumOr(e.Trigger, compactTriggers),
 		}))
 		ev.Content = m.gatedSignalDetail(e.CompactSummary)
 
@@ -399,9 +398,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	case HookElicitation:
 		// requested_schema not bound (R3).
-		m.signalEvent(&ev, client.EventElicitation, compact(map[string]any{
+		m.signalEvent(&ev, client.EventElicitation, hookflow.Compact(map[string]any{
 			"mcp_server_name": capStr(e.MCPServerName),
-			"mode":            enumOr(e.Mode, elicitationModes),
+			"mode":            hookflow.EnumOr(e.Mode, elicitationModes),
 			"url":             capStr(e.URL),
 			"elicitation_id":  capStr(e.ElicitationID),
 		}))
@@ -410,10 +409,10 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookElicitationResult:
 		// D2: form values are ordinary gated content; the residual risk
 		// lives in docs/data-and-privacy.md.
-		m.signalEvent(&ev, client.EventElicitationResult, compact(map[string]any{
+		m.signalEvent(&ev, client.EventElicitationResult, hookflow.Compact(map[string]any{
 			"mcp_server_name": capStr(e.MCPServerName),
-			"action":          enumOr(e.Action, elicitationActions),
-			"mode":            enumOr(e.Mode, elicitationModes),
+			"action":          hookflow.EnumOr(e.Action, elicitationActions),
+			"mode":            hookflow.EnumOr(e.Mode, elicitationModes),
 			"elicitation_id":  capStr(e.ElicitationID),
 		}))
 		ev.Content = m.gatedSignalDetail(e.elicitationContentText())
@@ -444,9 +443,9 @@ func (m Mapper) signalEvent(ev *client.DevEvent, t client.EventType, meta map[st
 
 // commonMetadata is what every payload carries regardless of event. prompt_id
 // is absent until the first user input and on any pre-prompt event, so
-// compact() drops it and those events serialize exactly as they did.
+// Compact() drops it and those events serialize exactly as they did.
 func commonMetadata(e *HookEvent) map[string]any {
-	return compact(map[string]any{"prompt_id": capStr(e.PromptID)})
+	return hookflow.Compact(map[string]any{"prompt_id": capStr(e.PromptID)})
 }
 
 // MapTurn builds one model turn's ActivityStarted/ActivityCompleted pair from
@@ -522,7 +521,7 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 
 // turnMetadata identifiers and one integer, never content (INV-2).
 func turnMetadata(e *HookEvent, index int) map[string]any {
-	m := compact(map[string]any{
+	m := hookflow.Compact(map[string]any{
 		"agent_id":   capStr(e.AgentID),
 		"agent_type": capStr(e.AgentType),
 	})
@@ -544,7 +543,7 @@ func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
 
 	span := &client.Span{SemanticType: sem, Stage: stage}
 	switch {
-	case isFileSemantic(sem):
+	case hookflow.IsFileSemantic(sem):
 		span.FilePath = capStr(e.filePath()) // structural locator only (INV-2)
 		span.FileOp = fileOp
 	case kind == client.ToolMCP:
@@ -573,8 +572,8 @@ func operationID(kind client.ToolKind, e *HookEvent) string {
 // toolMetadata identifiers only, never content (INV-2); tool_input and
 // tool_response are not represented.
 func toolMetadata(e *HookEvent) map[string]any {
-	return compact(map[string]any{
-		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+	return hookflow.Compact(map[string]any{
+		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 		"tool_use_id":     capStr(e.ToolUseID),
 		"agent_id":        capStr(e.AgentID),
 		"agent_type":      capStr(e.AgentType),
@@ -583,7 +582,7 @@ func toolMetadata(e *HookEvent) map[string]any {
 }
 
 func subagentMetadata(e *HookEvent) map[string]any {
-	return compact(map[string]any{
+	return hookflow.Compact(map[string]any{
 		"agent_id":   capStr(e.AgentID),
 		"agent_type": capStr(e.AgentType),
 	})
@@ -600,7 +599,7 @@ func mergeMetadata(dst, src map[string]any) map[string]any {
 
 func classifyTool(name string) (kind client.ToolKind, sem, fileOp, mcpServer, function string) {
 	if strings.HasPrefix(name, "mcp__") {
-		server, fn := splitMCPName(name)
+		server, fn := hookflow.SplitMCPName(name)
 		if server == "" {
 			// Claude Code never emits this.
 			return client.ToolShell, "internal", "", "", ""
@@ -651,30 +650,13 @@ var builtinTools = map[string]toolClass{
 	"ToolSearch": {client.ToolShell, "llm_tool_call", ""},
 }
 
-func isFileSemantic(sem string) bool {
-	switch sem {
-	case "file_read", "file_write", "file_open", "file_delete":
-		return true
-	}
-	return false
-}
-
-func splitMCPName(name string) (server, function string) {
-	rest := strings.TrimPrefix(name, "mcp__")
-	parts := strings.SplitN(rest, "__", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return parts[0], ""
-}
-
 func sessionStartMetadata(e *HookEvent) map[string]any {
-	return compact(map[string]any{
+	return hookflow.Compact(map[string]any{
 		"provider":        provider,
-		"source":          enumOr(e.Source, sourceValues), // startup|resume|clear|compact|fork
-		"model":           capStr(e.Model),                // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                  // structural (blessed by SL-1 testdata); not content
-		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+		"source":          hookflow.EnumOr(e.Source, sourceValues), // startup|resume|clear|compact|fork
+		"model":           capStr(e.Model),                         // free-form model id → bounded
+		"cwd":             capStr(e.Cwd),                           // structural (blessed by SL-1 testdata); not content
+		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 	})
 }
 
@@ -702,9 +684,9 @@ var apiErrorTypes = map[string]bool{
 }
 
 var (
-	// sourceValues is SessionStart's `source` enum only (insight 2: enumOr
+	// sourceValues is SessionStart's `source` enum only (insight 2: EnumOr
 	// must be per hook, never reused across the four events that carry a
-	// `source` field). Phase 08's isBumpSource reads this list to decide
+	// `source` field). isBumpSource reads this list to decide
 	// whether a run continues: ONLY resume bumps the run generation (resume-
 	// only re-scope, live-measured against Claude Code 2.1.263 -- a `/clear`
 	// mints a brand-new session id, so there is no prior run under it to
@@ -713,7 +695,7 @@ var (
 	// "fork").
 	sourceValues = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true, "fork": true}
 	// reasonValues keeps bypass_permissions_disabled even though it is absent
-	// from the vendor docs and the 2.1.260 binary: enumOr would otherwise
+	// from the vendor docs and the 2.1.260 binary: EnumOr would otherwise
 	// silently drop a real future value, so keeping it is the
 	// forward-compatible choice (B-06 R6).
 	reasonValues    = map[string]bool{"clear": true, "resume": true, "logout": true, "prompt_input_exit": true, "bypass_permissions_disabled": true, "other": true}
@@ -760,7 +742,7 @@ var (
 	preModelSwitchSources = map[string]bool{"command": true, "picker": true, "sdk": true}
 	// postModelSwitchSources is declared in full rather than derived from
 	// preModelSwitchSources: the repo's precedent for two constants that
-	// agree today is to keep the coincidence visible. Phase 09 asserts
+	// agree today is to keep the coincidence visible. A test asserts
 	// pre ⊆ post so a doc change that diverges them is caught.
 	postModelSwitchSources = map[string]bool{
 		"command": true, "picker": true, "sdk": true, "auto": true, "resume": true,
@@ -806,25 +788,9 @@ func machineInjectedPrompt(source, prompt string) (injected, fromVendor bool) {
 	return false, false
 }
 
-func enumOr(v string, allowed map[string]bool) string {
-	if allowed[v] {
-		return v
-	}
-	return ""
-}
-
 // capStr delegates so the adapters and the engine cap an identifier the same
 // way; maxIdentLen stays declared here because tests read it.
 func capStr(s string) string { return hookflow.CapIdent(s) }
-
-func compact(m map[string]any) map[string]any {
-	for k, v := range m {
-		if s, ok := v.(string); ok && s == "" {
-			delete(m, k)
-		}
-	}
-	return m
-}
 
 func (m Mapper) clock() time.Time {
 	if m.Now != nil {
@@ -935,13 +901,13 @@ func deriveID(ev client.DevEvent) string {
 // accepted source allowlist differs, and those two tables stay separately
 // declared on purpose.
 func modelSwitchMetadata(e *HookEvent, sources map[string]bool) map[string]any {
-	meta := compact(map[string]any{
+	meta := hookflow.Compact(map[string]any{
 		"from_model":      capStr(e.FromModel),
 		"to_model":        capStr(e.ToModel),
 		"requested_model": capStr(e.RequestedModel),
-		"source":          enumOr(e.Source, sources),
-		"cache_ttl":       enumOr(e.CacheTTL, cacheTTLValues),
-		"pricing":         enumOr(e.Pricing, pricingValues),
+		"source":          hookflow.EnumOr(e.Source, sources),
+		"cache_ttl":       hookflow.EnumOr(e.CacheTTL, cacheTTLValues),
+		"pricing":         hookflow.EnumOr(e.Pricing, pricingValues),
 	})
 	if e.ContextTokens != nil {
 		meta["context_tokens"] = *e.ContextTokens

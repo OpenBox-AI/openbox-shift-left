@@ -142,5 +142,5 @@ func ResolveBackendURL() string { return devconfig.ResolveBackendURL() }
 func ResolveControlToken() string { return devconfig.ResolveControlToken() }
 
 // ResolveOrgSigningKey returns the org's pinned policy-bundle signing key
-// (base64 raw Ed25519) and its id, from the shared dev config (E8-S6).
+// (base64 raw Ed25519) and its id, from the shared dev config.
 func ResolveOrgSigningKey() (pubKeyB64, keyID string) { return devconfig.ResolveOrgSigningKey() }

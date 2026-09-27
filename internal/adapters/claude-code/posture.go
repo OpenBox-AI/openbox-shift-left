@@ -60,7 +60,7 @@ func runWithTimeout(d time.Duration, name string, args ...string) ([]byte, error
 }
 
 // providerManaged reports whether this provider's own managed configuration is
-// deployed and names the OpenBox hook (E8-S8).
+// deployed and names the OpenBox hook.
 func providerManaged() string {
 	paths := []string{"/etc/claude-code/managed-settings.json", "/Library/Application Support/ClaudeCode/managed-settings.json"}
 	sawPath := false

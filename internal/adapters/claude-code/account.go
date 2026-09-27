@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 const accountStateFile = ".claude.json"
@@ -52,7 +54,7 @@ func localAccount(homeDir string) accountEvidence {
 
 // accountMetadata metadata, never signal_args.
 func accountMetadata(a accountEvidence) map[string]any {
-	return compact(map[string]any{
+	return hookflow.Compact(map[string]any{
 		"account_email":    a.Email,
 		"account_org_uuid": a.OrgUUID,
 	})

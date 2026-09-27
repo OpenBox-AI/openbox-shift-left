@@ -48,11 +48,11 @@ type Mapper struct {
 	// (see HookEvent's doc comment). Structural identifiers, never content
 	// (INV-2).
 	ThreadID string
-	// Posture, when non-nil, is the session's effective posture (E8-S5), attached
+	// Posture, when non-nil, is the session's effective posture, attached
 	// to the SessionStarted event's metadata only.
 	Posture *devconfig.Posture
 	// Evidence, when non-nil, records how much of this session's telemetry is
-	// known to be undelivered at session end (E8-S7).
+	// known to be undelivered at session end.
 	Evidence *EvidenceState
 }
 
@@ -93,7 +93,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	ev := client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
-		SessionID:     e.SessionID, // the root/continuity id; correct under forks too (E8-S4)
+		SessionID:     e.SessionID, // the root/continuity id; correct under forks too
 		DeveloperDID:  m.Identity.DeveloperDID,
 		Timestamp:     ts,
 	}
@@ -110,7 +110,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	case HookUserPromptSubmit:
 		ev.EventType = client.EventPromptSubmitted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = compact(map[string]any{"permission_mode": enumOr(e.PermissionMode, permissionModes)})
+		ev.Metadata = hookflow.Compact(map[string]any{"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes)})
 		// Off ⇒ Content stays nil and the prompt never egresses (Emit would strip it
 		// anyway). The capture gate is checked first, so capture-off never builds a
 		// redactor; redaction happens before attachment, which is the only
@@ -135,15 +135,15 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		if kind == client.ToolMCP {
 			ev.Tool.MCPServer = capStr(mcpServer)
 		}
-		ev.Metadata = compact(map[string]any{
-			"permission_mode": enumOr(e.PermissionMode, permissionModes),
+		ev.Metadata = hookflow.Compact(map[string]any{
+			"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 			"tool_name":       capStr(e.ToolName),
 		})
 
 	case HookSubagentStart:
 		ev.EventType = client.EventSubagentStarted
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = compact(map[string]any{
+		ev.Metadata = hookflow.Compact(map[string]any{
 			"agent_id":   capStr(e.AgentID),
 			"agent_type": capStr(e.AgentType),
 		})
@@ -155,7 +155,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			ev.EventType = client.EventPostCompact
 		}
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = compact(map[string]any{"trigger": enumOr(e.Trigger, compactTriggers)})
+		ev.Metadata = hookflow.Compact(map[string]any{"trigger": hookflow.EnumOr(e.Trigger, compactTriggers)})
 
 	case HookStop, HookSubagentStop:
 		// Deliberately (zero, false): a turn end is not a signal. It is emitted as
@@ -174,7 +174,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EventType = client.EventSessionEnded
 		ev.EndedAt = ts
 		ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
-		ev.Metadata = compact(map[string]any{"reason": enumOr(e.Reason, reasonValues)})
+		ev.Metadata = hookflow.Compact(map[string]any{"reason": hookflow.EnumOr(e.Reason, reasonValues)})
 		// Nil ⇒ nothing attached (finops off, or a session with no recorded token
 		// counts).
 		if m.Finops != nil {
@@ -218,7 +218,7 @@ func (m Mapper) MapUsageRollup(e *HookEvent) (started, completed client.DevEvent
 	started = base
 	started.EventType = client.EventTurnStarted
 	started.Timestamp = ts
-	started.Metadata = compact(map[string]any{"usage_scope": "session"})
+	started.Metadata = hookflow.Compact(map[string]any{"usage_scope": "session"})
 	started.EventID = m.eventID(started)
 
 	completed = base
@@ -227,7 +227,7 @@ func (m Mapper) MapUsageRollup(e *HookEvent) (started, completed client.DevEvent
 	completed.EndedAt = ts
 	completed.Tokens = m.Finops.Tokens
 	completed.Model = capStr(m.Finops.Model)
-	completed.Metadata = compact(map[string]any{"usage_scope": "session"})
+	completed.Metadata = hookflow.Compact(map[string]any{"usage_scope": "session"})
 	completed.EventID = m.eventID(completed)
 
 	return started, completed, true
@@ -261,8 +261,8 @@ func mergeMetadata(dst, src map[string]any) map[string]any {
 // toolMetadata identifiers only, never content (INV-2);
 // tool_input/tool_response are not represented.
 func toolMetadata(e *HookEvent) map[string]any {
-	return compact(map[string]any{
-		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+	return hookflow.Compact(map[string]any{
+		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 		"tool_use_id":     capStr(e.ToolUseID),
 		"turn_id":         capStr(e.TurnID),
 	})
@@ -309,7 +309,7 @@ func operationID(kind client.ToolKind, e *HookEvent) string {
 
 func classifyTool(name string) (kind client.ToolKind, sem, fileOp, mcpServer, function string) {
 	if strings.HasPrefix(name, "mcp__") {
-		server, fn := splitMCPName(name)
+		server, fn := hookflow.SplitMCPName(name)
 		if server == "" {
 			return client.ToolShell, "internal", "", "", ""
 		}
@@ -332,22 +332,13 @@ var builtinTools = map[string]toolClass{
 	"apply_patch": {client.ToolFile, "file_write", "edit"},
 }
 
-func splitMCPName(name string) (server, function string) {
-	rest := strings.TrimPrefix(name, "mcp__")
-	parts := strings.SplitN(rest, "__", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return parts[0], ""
-}
-
 func sessionStartMetadata(e *HookEvent) map[string]any {
-	return compact(map[string]any{
+	return hookflow.Compact(map[string]any{
 		"provider":        provider,
-		"source":          enumOr(e.Source, sourceValues), // startup|resume|clear|compact
-		"model":           capStr(e.Model),                // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                  // structural (blessed by conformance testdata); not content
-		"permission_mode": enumOr(e.PermissionMode, permissionModes),
+		"source":          hookflow.EnumOr(e.Source, sourceValues), // startup|resume|clear|compact
+		"model":           capStr(e.Model),                         // free-form model id → bounded
+		"cwd":             capStr(e.Cwd),                           // structural (blessed by conformance testdata); not content
+		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 	})
 }
 
@@ -363,25 +354,9 @@ var (
 	compactTriggers = map[string]bool{"manual": true, "auto": true}
 )
 
-func enumOr(v string, allowed map[string]bool) string {
-	if allowed[v] {
-		return v
-	}
-	return ""
-}
-
 // capStr delegates so the adapters and the engine cap an identifier the same
 // way; maxIdentLen stays declared here because tests read it.
 func capStr(s string) string { return hookflow.CapIdent(s) }
-
-func compact(m map[string]any) map[string]any {
-	for k, v := range m {
-		if s, ok := v.(string); ok && s == "" {
-			delete(m, k)
-		}
-	}
-	return m
-}
 
 func (m Mapper) clock() time.Time {
 	if m.Now != nil {
@@ -465,7 +440,7 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	started.Timestamp = ts
 	started.StartedAt = ts
 	started.Metadata = mergeMetadata(
-		compact(map[string]any{"turn_index": turnIndex}),
+		hookflow.Compact(map[string]any{"turn_index": turnIndex}),
 		m.sessionTreeMetadata(e))
 	started.EventID = m.eventID(started)
 
@@ -476,7 +451,7 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	completed.Tokens = w.tokens()
 	completed.Model = capStr(w.Model)
 	completed.Metadata = mergeMetadata(
-		compact(map[string]any{"turn_index": turnIndex}),
+		hookflow.Compact(map[string]any{"turn_index": turnIndex}),
 		m.sessionTreeMetadata(e))
 	// Content rides the COMPLETED half only: a turn's input is the prompt, which
 	// already ships on PromptSubmitted under the same gate. Redaction happens here

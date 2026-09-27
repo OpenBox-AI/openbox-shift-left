@@ -157,7 +157,7 @@ type HookEvent struct {
 	AgentType string `json:"agent_type"`
 
 	// Reason is SessionEnd's close reason; a closed enum (reasonValues),
-	// allowlisted through enumOr.
+	// allowlisted through EnumOr.
 	Reason string `json:"reason"`
 
 	// ErrorDetails is StopFailure's free-text elaboration of ErrorType; what the

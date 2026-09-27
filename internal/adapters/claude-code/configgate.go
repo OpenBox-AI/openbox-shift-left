@@ -15,7 +15,7 @@ const configToolKind = "config"
 // unblockable: "policy_settings changes can't be blocked... any blocking
 // decision is ignored". Gating it would file an enforcement audit line
 // claiming a block that never happened, so hookrun.go's `gated` compares
-// ev.Source to this literal RAW -- never through enumOr, which would map an
+// ev.Source to this literal RAW -- never through EnumOr, which would map an
 // unrecognized future source to "" and could accidentally exempt it too.
 const policySettingsSource = "policy_settings"
 

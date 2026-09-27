@@ -62,7 +62,7 @@ func TestPromptIDBinding_CommonField(t *testing.T) {
 		t.Errorf("PromptID = %q, want pr_123", ev.PromptID)
 	}
 
-	// Absent pre-first-prompt (e.g. SessionStart): decodes to "", and compact()
+	// Absent pre-first-prompt (e.g. SessionStart): decodes to "", and Compact()
 	// drops empty strings, so it never egresses as a false claim.
 	absent := `{"hook_event_name":"SessionStart","session_id":"s1","cwd":"/r"}`
 	ev2, err := ParseHookEvent(strings.NewReader(absent))
@@ -74,7 +74,7 @@ func TestPromptIDBinding_CommonField(t *testing.T) {
 	}
 }
 
-// TestNumericAndBoolFieldsAbsentStayNil. compact() drops empty strings only; a
+// TestNumericAndBoolFieldsAbsentStayNil. Compact() drops empty strings only; a
 // plain int/bool binds to 0/false when the key is absent and egresses as a
 // claim. Every new numeric or boolean field must be a pointer so "absent"
 // stays absent.
