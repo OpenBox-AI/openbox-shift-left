@@ -3,7 +3,7 @@
 Working context for agents and contributors; user-facing documentation is
 `README.md` and `docs/`. The repo is the developer-runtime half of OpenBox
 governance: one static Go binary governing the agentic coding tools (Claude Code,
-Codex) developers use, feeding the pipeline the agent runtime already uses.
+Codex) developers use, feeding the same pipeline the agent runtime already uses.
 
 ## Core principle: reuse, don't rebuild
 
@@ -11,26 +11,24 @@ Shift-left onboards the developer runtime onto OpenBox's existing pipeline rathe
 than a parallel one: a tool install registers as an agent (`kind=developer`) with
 the session as a child record, events go through the same
 `/api/v3/governance/evaluate` with the same auth, storage is the same tables.
-Prefer reusing an existing table, endpoint or service over adding one. Dev
-sessions write no `spans` rows at all, and send no `spans[]`: see the invariant.
+Prefer reusing an existing endpoint or service over adding one. Dev sessions send
+no `spans[]`: see the invariant below.
 
 The shape is a provider-agnostic engine plus one thin adapter per tool behind a
 normalized event contract, so adding a provider is an adapter rather than an
-engine change. Identity is per tool and fully data-driven off
-`provider.Supported()` -- the store, the agent, `doctor`'s rows,
-`uninstall`'s sweep -- but do not overread that into the rest: `laneCapable`
-(`cmd/openbox/initlanes.go`), `printGovernedScope` (`scope.go`), the two
-provider switches in `cmd/openbox/main.go`, `doctor.go`'s managed-config loop
-and `uninstall.go`'s hook-surface list still name their providers, deliberately,
-and a third tool needs each of them read. An adapter is four things: its native hook shape, its mapper, an
-`OutputContract`, its installer; everything else is the engine's, which was once
-copy-pasted per adapter and drifted on the enforcement path.
+engine change. Identity is per tool and data-driven off `provider.Supported()`
+-- the store, the agent, `doctor`'s rows, `uninstall`'s sweep -- but do not
+overread that into the rest: `laneCapable` (`cmd/openbox/initlanes.go`),
+`printGovernedScope` (`scope.go`), the two provider switches in
+`cmd/openbox/main.go`, `doctor.go`'s managed-config loop and `uninstall.go`'s
+hook-surface list still name their providers, deliberately, and a third tool
+needs each of them read. An adapter is four things: its native hook shape, its
+mapper, an `OutputContract`, its installer; everything else is the engine's.
 
 ## Where things live
 
 `docs/architecture.md` §Layout is the authority and one CI step enforces it; do
-not make this file a second one. `.claude`, `.fab7` and the plan directory are
-local working records, git-ignored. Inside `internal/`:
+not make this file a second one. Inside `internal/`:
 
 | Path | What |
 |---|---|
@@ -49,12 +47,12 @@ toolchain reads (`_test.go`, `_unix.go`, `_GOARCH.go`), where renaming changes
 what builds. Test files may separate words to name their subject
 (`localhooks_quote_test.go`), and non-Go assets are kebab-case.
 `managed_config.toml` and `requirements.toml` keep underscores because Codex
-reads those exact names. This diverges from generic Go guidance on purpose.
+reads those exact names.
 
 **Dependencies.** One `go.mod`, so a new dependency is one `go mod tidy`; the
 `internal/depguard` allowlists are scoped by package subtree and adding to one is
-a decision, though only four subtrees are guarded. `renameio` is `!windows`,
-hence **two** `atomicWriteFile` copies: grep the pattern, not the importer.
+a decision. `renameio` is `!windows`, hence **two** `atomicWriteFile` copies:
+grep the pattern, not the importer.
 
 **Credentials are plaintext, on purpose.** `~/.openbox/.env` is `0600` on macOS
 and Linux and unprotected on Windows, and anything running as the developer,
@@ -62,11 +60,10 @@ including the governed agent, can read the key, so attestation proves origin
 of config rather than tamper resistance. No document may imply otherwise. The
 RSA workload private key and the `workload-token.json` bearer cache are
 plaintext the same way, under the same boundary. So is the local trace
-(`internal/trace`, `<ConfigDir>/trace/`): owner ruling 2026-09-27, it keeps
-every body both before and after redaction, whatever `content_capture` says,
-for 7 days, and never egresses; only API keys, bearer tokens and private keys
-stay out of it. `content_capture` and the redactor govern egress, not that
-file.
+(`internal/trace`, `<ConfigDir>/trace/`): it keeps every body both before and
+after redaction, whatever `content_capture` says, for 7 days, and never
+egresses; only API keys, bearer tokens and private keys stay out of it.
+`content_capture` and the redactor govern egress, not that file.
 
 **Privacy posture.** A decision only a human can make (scope, privacy posture,
 priority) is surfaced, never inferred. Content, usage and thinking capture are on
@@ -76,98 +73,73 @@ output, thinking and a relayed call's bodies all egress under the one
 attached, and that ordering is the only in-transit control there is; detection is
 keyword-driven, so an unlabelled high-entropy value below the floor is invisible
 to it, and `docs/credentials-and-secrets.md` must stay true. The redactor also
-rewrites developer files: check what this repo writes for `${OPENBOX_REDACTED_*}`, and
-derive a base64 test fixture in code.
+rewrites developer files: check what this repo writes for `${OPENBOX_REDACTED_*}`,
+and derive a base64 test fixture in code.
 
 ## Invariants a contributor would otherwise break
 
 **`/evaluate` is the only decider.** Every gated class goes to the server; risk
 is a property of the policy. `ApplyFailurePolicy` must run *after* the
 evaluation: before it, it would synthesize a fail-closed deny that reads as
-"already tightened" and suppress the round trip -- skipping the one delivery
-attempt entirely, so core never gets a chance to accept the event and the
-attempt/unanswered/explicit-failure classification the halt path depends on
-never happens either. Deprecated keys (`tier2`,
+"already tightened" and suppress the round trip, so core never gets a chance to
+accept the event and the attempt/unanswered/explicit-failure classification the
+halt path depends on never happens. Deprecated keys (`tier2`,
 `tier2_timeout_ms`, `require_verified_bundle`, `fail_closed`, `enforce`) stay
-parseable so they can warn; none of them is honoured. **One store per
-field**: `.env` holds only secrets and `dev.json` only coordinates (now
-`agent_id`, not a DID); relaxing `TestEnvFileIsNotACoordinateSource` reopens
-the two-store bug this split exists to prevent -- historically, a stale DID
-silently reverting a corrected one on every install.
+parseable so `openbox doctor` can warn; none of them is honoured.
+**One store per field**: `.env` holds only secrets and `dev.json` only
+coordinates (`agent_id`); relaxing `TestEnvFileIsNotACoordinateSource` reopens
+the two-store bug where a stale value in one file silently reverts a corrected
+one in the other on every install.
 
-**A flag defaulting to true cannot express "said nothing".** `Enforce` used
-to be exactly this trap and no longer needs the guard: there is no write path
-for it left at all (`Update.Enforce`, `flagPassed` and every dead-write
-plumbing that threaded it are gone; `ResolveEnforce()` is hardcoded `true`).
-The rule they existed for still binds every *bool* posture field `Update`
-does still carry (`ContentCapture`, `Tier2`, `Findings`, `InstallGitHook`):
-each must stay nil when a run says nothing about it, distinct from an
-explicit `false`, or a written default becomes indistinguishable from a
+**A flag defaulting to true cannot express "said nothing".** Every *bool*
+posture field `Update` carries (`ContentCapture`, `Tier2`, `Findings`,
+`InstallGitHook`) must stay nil when a run says nothing about it, distinct from
+an explicit `false`, or a written default becomes indistinguishable from a
 choice. Check reads and writes separately and test the *second* invocation --
 `initenforce_test.go`'s `TestInitWritesNoEnforceKeyEverAgain` is the shape to
-copy (loop over two `init` runs, assert no stray key on either), even though
-the field it now regression-tests no longer exists to have the trap at all.
-Fifteen green tests once missed this because each ran `init` only once; like
-`usage.go`'s INV-2 allowlist, a change making that test pass trivially is a
-defect.
+copy (loop over two `init` runs, assert no stray key on either). A test that
+runs `init` only once cannot catch this; like `usage.go`'s INV-2 allowlist, a
+change making that test pass trivially is a defect.
 
 **No event carries `spans[]`, and re-adding one is a regression.** The control
-plane *parses* it and then **discards** it (persistence is gated on
-`hook_trigger`, which this client never sets, because that routes a model turn
-onto the approval-bypass path), and alignment feeds from `activity_input` on the
-`ActivityStarted` half instead. So a span is neither stored nor needed, and for a
-model call `llm_completion` *is* the activity. **`prompt_submitted`'s
-`signal_args` is the goal; every other signal's `signal_args` is its payload**,
-and core's source-and-name gate is the only thing keeping the two apart -- so a
-build carrying the projection must not reach a developer before that gate is
-running. And **thinking keeps its own `activity_output` key**.
-And **every activity that *ran* carries exactly two rows** (`Workflow*` one
-each; `SignalReceived` alone is unpaired): every in-path row was single-sided
-for the life of the feature, because the live pairing check filters to *tool*
-types. A tool blocked before it ran -- a `PreToolUse` hook erroring, so nothing
-executed and no `PostToolUse*` could fire -- produces the started row only, and
-so does ANY producer's own record whose Completed half was never accepted
-(core outage, timeout, 401, any explicit non-acceptance): delivery rules are
-the same everywhere, never only the lane daemons' `hookflow.DeliverPool`
-(chat's own delivery path, which sends one conversation's records one at a
-time in submit order and stops that conversation at its first unaccepted
-record: core files an activity that beats its `WorkflowStarted` with a NULL
-session). Fabricating a
-completion would be worse than either asymmetry. Check per `activity_id`,
-never by parity.
+plane parses it and then discards it (persistence is gated on `hook_trigger`,
+which this client never sets, because that routes a model turn onto the
+approval-bypass path), and alignment feeds from `activity_input` on the
+`ActivityStarted` half instead. For a model call `llm_completion` *is* the
+activity. **`prompt_submitted`'s `signal_args` is the goal; every other
+signal's `signal_args` is its payload**, and core's source-and-name gate is the
+only thing keeping the two apart. **Thinking keeps its own `activity_output`
+key.** **Every activity that *ran* carries exactly two rows** (`Workflow*` one
+each; `SignalReceived` alone is unpaired). A tool blocked before it ran -- a
+`PreToolUse` hook erroring, so nothing executed and no `PostToolUse*` could
+fire -- produces the started row only, and so does any producer's record whose
+Completed half was never accepted (core outage, timeout, 401, any explicit
+non-acceptance): delivery rules are the same for every producer. Fabricating a
+completion would be worse than either asymmetry. Check per `activity_id`, never
+by parity.
 
 **Delivery is all-or-nothing; ordering beyond `WorkflowStarted`-first is
-best-effort, not guaranteed.** One drainer per session, append order ==
-delivery order, one attempt per event plus exactly one retry for a transient
-failure (`client.RetryableDelivery`: timeout, network, 5xx; never 401, 429
-or other 4xx), made only if the pass has a full attempt left, else the event
-stays queued unscored and the next pass starts it over (so a short pass can
-send one event more than twice); a gate's own transient escalation failure requeues the observe
-copy instead of latching. An event still unaccepted ledgers and latches its
-run (write-if-absent: whichever cause reaches a run's first
-failure wins); appenders never wait on the drain lock. A gate drains its own
-session's backlog within the slack its escalation budget leaves, waiting at
-most `MaxStripeWait` (5s) for the session's stripe if another drainer already
-holds it; once it holds the stripe, the drain gets the FULL remaining slack,
-not a smaller cap -- the cap bounds the wait for contention, not an
-uncontended drain. An event the drain could not even start (the stripe stayed
-busy past that 5s wait, or the slack ran out first) stays queued, and this
-call's own escalation may still reach core before it: **`WorkflowStarted`
-reaching core before anything else of the run is the one guaranteed
-invariant; the rest of a run's order is best-effort within these bounds.** An
-event the drain DID send but never heard back from within its own budget is
-requeued for the 30s drainers; core dedupes that resend on its idempotency
-key **only if core finished processing the first attempt before the resend
-arrives** (lookup-then-remember happens after the pipeline runs, not before
--- `openbox-core internal/api/governance.go` ~113-115 looks up, ~246-248
-remembers only once the response is built) -- a resend racing a
-still-in-flight first attempt can produce two rows, not a guaranteed dedupe.
-`enforce`/`fail_closed` are deprecated the same way `tier2` is: parsed so
-`openbox doctor` can warn, not honoured
-(`devconfig.ResolveEnforce()`/`ResolveFailurePolicy()` are both hardcoded
-now). See
-`plans/260924-1911-ordered-session-event-queue/reports/decision-260925-0511-all-or-nothing-ordered-delivery.md`
-for the ruling and its shape.
+best-effort.** One drainer per session, append order == delivery order, one
+attempt per event plus exactly one retry for a transient failure
+(`client.RetryableDelivery`: timeout, network, 5xx; never 401, 429 or other
+4xx), made only if the pass has a full attempt left, else the event stays
+queued unscored and the next pass starts it over. A gate's own transient
+escalation failure requeues the observe copy instead of latching. An event
+still unaccepted ledgers and latches its run (write-if-absent: whichever cause
+reaches a run's first failure wins); appenders never wait on the drain lock. A
+gate drains its own session's backlog within the slack its escalation budget
+leaves, waiting at most `MaxStripeWait` (5s) for the session's stripe if
+another drainer holds it; once it holds the stripe, the drain gets the FULL
+remaining slack -- the cap bounds the wait for contention, not an uncontended
+drain. An event the drain could not start stays queued, and this call's own
+escalation may still reach core before it: **`WorkflowStarted` reaching core
+before anything else of the run is the one guaranteed invariant.** An event the
+drain sent but never heard back from within its budget is requeued for the 30s
+drainers; core dedupes that resend on its idempotency key only if it finished
+processing the first attempt before the resend arrives, so a resend racing a
+still-in-flight first attempt can produce two rows. `enforce`/`fail_closed` are
+parsed so `openbox doctor` can warn, not honoured
+(`devconfig.ResolveEnforce()`/`ResolveFailurePolicy()` are hardcoded).
 
 **Bounds have owners.** `MaxCommandLen` bounds a local decision request, never
 egress; egress is `MaxRedactBody` then `capBody`, and `maxThinkingBytes` must stay
@@ -197,29 +169,27 @@ variables *in the constructor*, because `net/http` caches the environment behind
 `sync.Once`. `ConnState` must close the one-shot listener or `Serve` blocks in its
 second `Accept`, leaking a goroutine and fd per tunnel. Host matching folds ASCII
 only (Unicode makes U+212A equal `k`); ALPN http/1.1. The CA is generated
-unconstrained (owner ruling 2026-09-22, reversing the earlier name-constraint
-bound): containment is the per-provider intercept allowlist
-(`internal/transport/hosttable.go`), not the certificate. `CA.CanIssueFor` is
-what keeps a machine still holding an older constrained CA blind-tunnelling a
-host outside that constraint instead of failing the handshake; `openbox init`
-now re-issues that legacy CA itself (`internal/transport/careissue.go`,
-before the transport unit reinstalls), idempotent, and `doctor` still names
-the finding until it runs. On macOS, `openbox init` also activates a
-system-wide PAC and trusts this CA in the System keychain
-(`cmd/openbox/systempac.go`, `internal/cli/activation/sysmacos.go`): **trust
-the CA and read it back before writing the PAC** (a distrusted leaf makes `;
-DIRECT` meaningless), and **record every prior value before the first
-privileged write**, with a `Pending` marker, so a killed run leaves something
-the next `init` can reconcile rather than stranding a half-applied trust/PAC
-pair. Both orderings are invariants, not preferences. The relay's cross-lane
-HALT latch resolves a session off
+without name constraints: containment is the per-provider intercept allowlist
+(`internal/transport/hosttable.go`), not the certificate. `CA.CanIssueFor` keeps
+a machine still holding an older name-constrained CA blind-tunnelling a host
+outside that constraint instead of failing the handshake; `openbox init`
+re-issues that legacy CA itself (`internal/transport/careissue.go`, before the
+transport unit reinstalls), idempotent, and `doctor` names the finding until it
+runs. On macOS, `openbox init` also activates a system-wide PAC and trusts this
+CA in the System keychain (`cmd/openbox/systempac.go`,
+`internal/cli/activation/sysmacos.go`): **trust the CA and read it back before
+writing the PAC** (a distrusted leaf makes `; DIRECT` meaningless), and **record
+every prior value before the first privileged write**, with a `Pending` marker,
+so a killed run leaves something the next `init` can reconcile rather than
+stranding a half-applied trust/PAC pair. Both orderings are invariants, not
+preferences. The relay's cross-lane HALT latch resolves a session off
 `sessionkey.ResolveProxy`'s carrier header (Claude Code's
-`X-Claude-Code-Session-Id`; Codex's thread id off `x-client-request-id`,
-never its `session-id` header, which is a prompt-cache key), so that header
-must stay out of `credentialHeaders`' redaction list or the latch can never
-resolve a session. The latch is keyed on the session's *current run*
-(`git.RunStore`), not the session id itself, so a `/clear` or `--resume`
-starts unlatched even though the carrier header is unchanged.
+`X-Claude-Code-Session-Id`; Codex's thread id off `x-client-request-id`, never
+its `session-id` header, which is a prompt-cache key), so that header must stay
+out of `credentialHeaders`' redaction list or the latch can never resolve a
+session. The latch is keyed on the session's *current run* (`git.RunStore`), not
+the session id itself, so a `/clear` or `--resume` starts unlatched even though
+the carrier header is unchanged.
 
 **Three shapes are pinned by tests.** `message.content` is bound as
 `json.RawMessage` because it is a string on user lines and an array on assistant

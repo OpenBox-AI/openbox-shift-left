@@ -88,7 +88,7 @@ func BuildDeployEvent(res Resolution, meta DeployMeta, now time.Time) client.Dev
 
 	return client.DevEvent{
 		SchemaVersion: client.SchemaVersion,
-		EventID:       deployID, // INV-5 idempotency key
+		EventID:       deployID, // idempotency key
 		EventType:     client.EventDeploy,
 		SessionID:     deployID,
 		DeveloperDID:  meta.DeveloperDID,

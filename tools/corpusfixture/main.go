@@ -1,4 +1,4 @@
-// Command corpusfixture turns a recorded openbox-logger run into the sanitized
+// Command corpusfixture turns a recorded traffic-capture run into the sanitized
 // test fixtures this repository commits. The write is gated on
 // corpusfixture.Scan reporting nothing, so an unsanitized fixture cannot reach
 // the working tree, let alone git history.
@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	corpus := flag.String("corpus", "", "path to an openbox-logger run directory (required)")
+	corpus := flag.String("corpus", "", "path to a recorded traffic-capture run directory (required)")
 	out := flag.String("out", ".", "repository root to write fixtures into")
 	flag.Parse()
 

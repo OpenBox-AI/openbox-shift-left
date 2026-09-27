@@ -21,8 +21,7 @@ const RewakeExitCode = 2
 // mid-wait and the decision would land unannounced.
 const rewakeHookTimeoutSec = 2700
 
-// RunRewake is the background half of the PreToolUse registration (E9 §2.2 the
-// background half). It never writes to stdout: a background handler's stdout
+// RunRewake is the background half of the PreToolUse registration. It never writes to stdout: a background handler's stdout
 // is not the hook response, and the only channel that reaches the model here
 // is stderr on exit 2.
 func RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {

@@ -31,7 +31,7 @@ type OutputContract interface {
 	// ApprovalDecision is what a REQUIRE_APPROVAL verdict becomes. Codex rejects
 	// `ask` outright, and its no-decision fallthrough auto-runs the tool under
 	// approval_policy=never, so it maps to `deny`; strictly tighter, never a
-	// silent proceed (OD-SL7-ASK).
+	// silent proceed.
 	ApprovalDecision() string
 
 	// ContentFieldKeys names the tool_input fields that may hold a redactable
@@ -384,7 +384,7 @@ func RecordEnforcement(logger *log.Logger, sessionID, toolKind string, dec decis
 		PolicyID:        dec.Evaluation.PolicyID,
 		ApprovalRef:     dec.Evaluation.ApprovalRef(), // correlates an ask to the governance approval; id only, no content
 		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
-		Reason:          dec.Evaluation.Reason, // verbatim policy-authored reason (R2); never the GovReason stdout framing
+		Reason:          dec.Evaluation.Reason, // verbatim policy-authored reason; never the GovReason stdout framing
 		Constraints:     dec.Evaluation.Constraints,
 	}
 	if g := dec.Evaluation.Guardrail; g != nil {

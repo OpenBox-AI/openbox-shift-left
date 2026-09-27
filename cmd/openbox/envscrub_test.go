@@ -26,7 +26,7 @@ func TestHarness_NoAmbientSessionEnv(t *testing.T) {
 	for _, k := range ambientSessionEnv {
 		if v := os.Getenv(k); v != "" {
 			t.Errorf("%s=%q leaked into the test process: TestMain must unset it or ambient "+
-				"agent context contaminates session resolution (E8-S1 / report SL-11)", k, v)
+				"agent context contaminates session resolution", k, v)
 		}
 	}
 }

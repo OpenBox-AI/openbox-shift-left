@@ -19,7 +19,7 @@ func writeEnforcementLines(t *testing.T, path string, lines ...string) {
 	}
 }
 
-// TestLastDecisionSummary_NoneRecorded (V6): absent file -> "(none
+// TestLastDecisionSummary_NoneRecorded: absent file -> "(none
 // recorded)", the same fallback the pre-switch os.ReadFile reader used.
 func TestLastDecisionSummary_NoneRecorded(t *testing.T) {
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "does-not-exist.jsonl"))
@@ -29,7 +29,7 @@ func TestLastDecisionSummary_NoneRecorded(t *testing.T) {
 }
 
 // TestLastDecisionSummary_Unreadable: a present but unparseable last line ->
-// "(unreadable)", unchanged from before the V6 switch.
+// "(unreadable)", unchanged from before the switch to the tail reader.
 func TestLastDecisionSummary_Unreadable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enf.jsonl")
 	t.Setenv(devconfig.EnvEnforcementFile, path)
@@ -39,7 +39,7 @@ func TestLastDecisionSummary_Unreadable(t *testing.T) {
 	}
 }
 
-// TestLastDecisionSummary_GoldenUnderCap (V6, case d): for a file under the
+// TestLastDecisionSummary_GoldenUnderCap: for a file under the
 // cap, the switch onto tailLines must not change the printed line -- pinned
 // against a golden string captured from the pre-switch shape (policy_id
 // present / absent, both formats).
@@ -88,7 +88,7 @@ func TestLastDecisionSummary_SwitchedOntoTailLines(t *testing.T) {
 	}
 }
 
-// TestRecentConfigDenials_FiltersToolKind (D6): only tool_kind=="config"
+// TestRecentConfigDenials_FiltersToolKind: only tool_kind=="config"
 // lines are reported, most-recent policy/reason/timestamp surfaced, and a
 // non-config sink (no config lines at all) reports none.
 func TestRecentConfigDenials_FiltersToolKind(t *testing.T) {
@@ -175,7 +175,7 @@ func TestRecentConfigDenials_StopsAtN(t *testing.T) {
 }
 
 // TestRecentConfigDenials_NoneRecorded: an absent sink and a sink with no
-// config lines both report zero denials, unreadable=false (D6's "(none
+// config lines both report zero denials, unreadable=false (the "(none
 // recorded)" case, distinct from a corrupt sink).
 func TestRecentConfigDenials_NoneRecorded(t *testing.T) {
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "absent.jsonl"))
@@ -194,7 +194,7 @@ func TestRecentConfigDenials_NoneRecorded(t *testing.T) {
 }
 
 // TestRecentConfigDenials_Unreadable: a sink whose every line is corrupt
-// (not just devoid of config-kind lines) reports unreadable=true, the D6
+// (not just devoid of config-kind lines) reports unreadable=true, the
 // "(unreadable)" case.
 func TestRecentConfigDenials_Unreadable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enf.jsonl")
@@ -206,7 +206,7 @@ func TestRecentConfigDenials_Unreadable(t *testing.T) {
 	}
 }
 
-// TestDoctorReaders_AgreeOnSameSink (V6, case d): both doctor readers see the
+// TestDoctorReaders_AgreeOnSameSink: both doctor readers see the
 // SAME underlying record for a file under the cap.
 func TestDoctorReaders_AgreeOnSameSink(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enf.jsonl")

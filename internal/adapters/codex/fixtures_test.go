@@ -8,7 +8,7 @@ import (
 )
 
 // TestFixtures_AllFiveEventsObserveOnly drives every testdata fixture (the
-// v0.145.0-shaped payloads the story's manual validation pipes into the real
+// v0.145.0-shaped payloads a manual validation pipes into the real
 // binary) through the engine and asserts the observe contract for each:
 // SessionStart/PostToolUse/SessionEnd write nothing, and every fixture spools
 // without leaking its payload content. UserPromptSubmit/PreToolUse are gated

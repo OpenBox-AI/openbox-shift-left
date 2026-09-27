@@ -35,8 +35,8 @@ const (
 	// an assistant message; rate limits, billing, auth, overload.
 	HookStopFailure HookName = "StopFailure"
 
-	// The 21 constants below round out full Claude Code hook coverage (phase
-	// 04's 33-row contract table, rows 12-32), in that table's order.
+	// The 21 constants below round out full Claude Code hook coverage (the
+	// v1.8 lifecycle classes of api/dev-event.schema.json).
 	// HookWorktreeCreate is deliberately absent: registering it would make this
 	// hook responsible for printing the created worktree path back to Claude
 	// Code, breaking `claude --worktree`, isolation:"worktree" subagents and
@@ -130,7 +130,7 @@ type HookEvent struct {
 	TranscriptPath string `json:"transcript_path"`
 
 	// Source is shared by four events with four different enums, resolved
-	// per-hook in the mapper (phase 06), never here: SessionStart
+	// per-hook in the mapper, never here: SessionStart
 	// (startup|resume|clear|compact|fork), DirectoryAdded
 	// (slash_command|register_repo_root), ConfigChange
 	// (user_settings|project_settings|local_settings|policy_settings|skills)
@@ -147,8 +147,8 @@ type HookEvent struct {
 	ToolUseID string `json:"tool_use_id"`
 
 	// ToolResponse is what the tool produced, on PostToolUse. It is content, and
-	// it is bound here by that decision; the change that retires SL3-SEC-3's
-	// "tool output never egresses" for the observe path.
+	// it is bound here deliberately: tool output egresses on the observe path
+	// under the content_capture gate.
 	ToolResponse json.RawMessage `json:"tool_response"`
 
 	// AgentID / AgentType identify the subagent an event occurred inside.
@@ -166,7 +166,8 @@ type HookEvent struct {
 
 	// IsInterrupt separates "the user cancelled this" from "the tool failed" on
 	// PostToolUseFailure. PostToolUseFailure's other field, `error`, is free text
-	// a tool wrote and is deliberately unbound here; that decision owns it.
+	// a tool wrote and is deliberately unbound here; the mapper carries it as
+	// gated content instead.
 	IsInterrupt *bool `json:"is_interrupt"`
 
 	// ErrorType is StopFailure's error class; a closed provider enum, verified
@@ -195,7 +196,7 @@ type HookEvent struct {
 	PromptID string `json:"prompt_id"`
 
 	// Trigger is reused by three hooks under two different enums, resolved
-	// per-hook in the mapper (phase 06): Setup ∈ {init,maintenance};
+	// per-hook in the mapper: Setup ∈ {init,maintenance};
 	// PreCompact/PostCompact ∈ {manual,auto}.
 	Trigger string `json:"trigger"`
 
@@ -213,14 +214,14 @@ type HookEvent struct {
 
 	// UserPromptExpansion. command_args and the pre-expansion `prompt` are
 	// deliberately unbound: prompt duplicates prompt_submitted under a second
-	// key. command_source is free-form and is capped by capStr in the mapper
-	// (R1), not here.
+	// key. command_source is free-form and is capped by capStr in the mapper,
+	// not here.
 	ExpansionType string `json:"expansion_type"` // slash_command|mcp_prompt
 	CommandName   string `json:"command_name"`
 	CommandArgs   string `json:"command_args"`
 	CommandSource string `json:"command_source"`
 
-	// MessageDisplay. Structural-only (D1): delta/displayContent never bound.
+	// MessageDisplay. Structural-only: delta/displayContent never bound.
 	TurnID    string `json:"turn_id"`
 	MessageID string `json:"message_id"`
 	Index     *int   `json:"index"`
@@ -243,7 +244,7 @@ type HookEvent struct {
 	// Activity pair. TaskDescription is bound as of v1.9, as gated content in
 	// metadata.task_description -- TaskSubject already spends this class's
 	// content.signal_detail. teammate_name and team_name are free-form and are
-	// capped by capStr in the mapper (R2), not here; team_name is deprecated.
+	// capped by capStr in the mapper, not here; team_name is deprecated.
 	TaskID          string `json:"task_id"`
 	TaskSubject     string `json:"task_subject"`
 	TaskDescription string `json:"task_description"`
@@ -286,7 +287,7 @@ type HookEvent struct {
 	EstimatedCacheWriteUSD *float64 `json:"estimated_cache_write_usd"`
 
 	// Elicitation / ElicitationResult. requested_schema is deliberately
-	// unbound (R3): it can embed a caller-supplied schema shape.
+	// unbound: it can embed a caller-supplied schema shape.
 	MCPServerName string `json:"mcp_server_name"`
 	Mode          string `json:"mode"` // form|url
 	URL           string `json:"url"`

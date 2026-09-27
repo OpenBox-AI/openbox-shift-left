@@ -131,9 +131,8 @@ func TestInitKeepsForeignEntriesInTheUserFile(t *testing.T) {
 	}
 }
 
-// TestInitIsIdempotentAcrossBothFiles. CLAUDE.md's discipline: a one-shot test
-// passes on state a re-run corrupts, and this exact class of defect shipped
-// once already because every test ran init only once.
+// TestInitIsIdempotentAcrossBothFiles: a one-shot test passes on state a
+// re-run corrupts, so init is run twice and the second result asserted.
 func TestInitIsIdempotentAcrossBothFiles(t *testing.T) {
 	_, userHooks, projectHooks := initInIsolatedProject(t)
 	first, err := os.ReadFile(userHooks)
@@ -160,7 +159,7 @@ func TestInitIsIdempotentAcrossBothFiles(t *testing.T) {
 }
 
 // TestInitSaysNothingIsGovernedWhenTheMachineBlocksHooks is the failure this
-// phase exists to make visible. On an org-managed machine the hooks can be
+// check exists to make visible. On an org-managed machine the hooks can be
 // installed, correct, and never run: the install prints success, and the first
 // evidence of the gap is an empty dashboard, which reads as a broken product
 // rather than a locked machine.

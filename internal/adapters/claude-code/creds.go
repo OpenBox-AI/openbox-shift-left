@@ -81,7 +81,7 @@ func (c Credentials) NewClient(logger client.Logger) (*client.Client, error) {
 var zeroRetries = 0
 
 // ResolveIdentity resolves only the developer DID (env, then config file); no
-// secret-store access (INV-1 + NFR-2: zero secret I/O on the hot path).
+// secret-store access (INV-1, and zero secret I/O on the hot path).
 func ResolveIdentity() (Identity, error) {
 	did, err := devconfig.ResolveDID()
 	if err != nil {

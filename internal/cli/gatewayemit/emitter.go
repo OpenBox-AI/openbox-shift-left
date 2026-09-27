@@ -46,8 +46,7 @@ type Emitter struct {
 	// write. Required; nil is a wiring
 	// defect reported the same way a missing Lane or Elected is. It returns
 	// false when the record was NOT accepted (a saturated pool), which stops
-	// the pair's loop the same way a spool-write failure used to: Completed
-	// is never sent after a dropped Started.
+	// the pair's loop: Completed is never sent after a dropped Started.
 	Deliver func(ctx context.Context, ev client.DevEvent) bool
 
 	// Flush fires ONCE per successfully delivered call, after every one of its
@@ -81,10 +80,10 @@ type Emitter struct {
 	ElectionProblem func() string
 
 	// RunStore resolves this session's run identity (RunID/RunGeneration on
-	// Identity), so this lane names the same run a hook event would (R7). The
+	// Identity), so this lane names the same run a hook event would. The
 	// zero value resolves to runs/ under the resolved DefaultSessionDir() --
 	// what a production daemon gets from its unit's OPENBOX_SESSION_DIR
-	// (insight 7, a daemon has no $HOME) -- and a test points Dir at a temp
+	// (a daemon has no $HOME) -- and a test points Dir at a temp
 	// directory so it never touches the developer's real registry.
 	RunStore obgit.RunStore
 
@@ -400,10 +399,10 @@ func isModelCall(c gateway.Captured) bool {
 }
 
 // resolveRun reads the shared run record ONCE per captured pair and applies
-// R12: a call whose observed start precedes the record's own bump timestamp
+// the straddle rule: a call whose observed start precedes the record's own bump timestamp
 // belongs to the run the bump sealed, not the one it opened. Read failure
 // (absent/unreadable/corrupt/inconsistent record) fails open to generation 0
-// (INV-3) -- this lane never blocks or drops a captured call over it.
+// -- this lane never blocks or drops a captured call over it.
 func (e *Emitter) resolveRun(sessionID string, c gateway.Captured) (runID string, runGen int) {
 	rec, err := e.RunStore.Read(sessionID)
 	if err != nil || rec.Generation == 0 {

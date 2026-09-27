@@ -6,9 +6,8 @@ import (
 )
 
 // Verdict is the canonical governance verdict, priority-ordered HALT > BLOCK >
-// REQUIRE_APPROVAL > constrain > ALLOW (contract $defs.verdict). Observe mode
-// (INV-3) treats every verdict as allow and never blocks the caller; callers
-// parse it only for finops/audit and enforcement readiness.
+// REQUIRE_APPROVAL > constrain > ALLOW (contract $defs.verdict). A caller on the enforcement path acts on it
+// (INV-3); a caller that only reports telemetry parses it for finops/audit.
 type Verdict string
 
 const (
@@ -40,7 +39,7 @@ var legacyActionToVerdict = map[string]Verdict{
 // worth recording even when the verdict is ALLOW and no guardrail/constraint
 // fired (the "non-trivial risk" clause of the Advisory-tier recording rule).
 // Risk_score is a 0..1 float; 0.5 is a tunable mid-band heuristic, not an
-// enforcement threshold (Advisory records, never blocks; INV-3).
+// enforcement threshold (Advisory records, never blocks).
 const AdvisoryRiskThreshold = 0.5
 
 // GuardrailReason is one structured guardrail finding; a category, never

@@ -52,7 +52,7 @@ func TestResolve_HumanCommitUnattributed(t *testing.T) {
 		t.Fatalf("reason = %s, want no-trailer", res.Reason)
 	}
 	if len(res.Sessions) != 0 {
-		t.Fatalf("sessions = %v, want none (never a wrong guess, INV-6)", res.SessionIDs())
+		t.Fatalf("sessions = %v, want none (never a wrong guess)", res.SessionIDs())
 	}
 }
 
@@ -95,7 +95,7 @@ func TestResolve_PreInstallSquashRecoveredByBodyScan(t *testing.T) {
 		t.Fatalf("body-scan recovery (-want +got):\n%s", diff)
 	}
 	if res.Sessions[0].Source != SourceBodyScan {
-		t.Fatalf("source = %s, want body-scan (SL6-SCAN)", res.Sessions[0].Source)
+		t.Fatalf("source = %s, want body-scan", res.Sessions[0].Source)
 	}
 	if res.Status != StatusInferred {
 		t.Fatalf("status = %s, want inferred", res.Status)

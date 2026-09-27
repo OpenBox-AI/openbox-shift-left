@@ -289,7 +289,7 @@ func TestResolveInstallGitHook(t *testing.T) {
 	}
 }
 
-// TestResolveFailClosed guards E6-S3 AC-1: fail-open is the default (an org
+// TestResolveFailClosed guards that fail-open is the default (an org
 // never becomes fail-closed by accident); config enables it; the env overrides
 // either way.
 func TestResolveFailClosed(t *testing.T) {

@@ -138,8 +138,8 @@ func TestMapUsageRollup_EmitsOnePinnedPair(t *testing.T) {
 	}
 }
 
-// TestFinops_NoContentOnWire is the load-bearing INV-2 test (SL7-C / SL-16
-// acceptance): a rollout seeded with sentinel content must yield usage numbers
+// TestFinops_NoContentOnWire is the load-bearing INV-2 test for the usage
+// leg: a rollout seeded with sentinel content must yield usage numbers
 // with none of the sentinels reaching the emitted event, its metadata, or the
 // actual signed wire body.
 func TestFinops_NoContentOnWire(t *testing.T) {
@@ -195,8 +195,8 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 }
 
 // TestFinops_OffByteIdentical: with no finops usage attached (flag off), the
-// SessionEnded event carries no tokens/cost; byte-identical to pre-SL7-C
-// output.
+// SessionEnded event carries no tokens/cost; byte-identical to the output
+// without the usage leg.
 func TestFinops_OffByteIdentical(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.NewID = func() string { return "evt-1" }
@@ -290,7 +290,7 @@ func TestCodexUsage_CostIsNeverCarried(t *testing.T) {
 }
 
 // TestAggregateRolloutUsage_NegativeClamped: a malformed/negative source value
-// must not produce a number violating the SL-1 schema `minimum: 0`.
+// must not produce a number violating the dev-event schema's `minimum: 0`.
 func TestAggregateRolloutUsage_NegativeClamped(t *testing.T) {
 	tokens, _ := aggregateRolloutUsage([]byte(tokenLine(-5, 4, -1) + "\n"))
 	if *tokens.Input != 0 || *tokens.Output != 4 || *tokens.Total != 4 {
@@ -473,8 +473,8 @@ func TestFinops_MissingTranscriptPathSkipped(t *testing.T) {
 }
 
 // TestFinops_ConformanceWithTokens: the SessionEnded event with a token rollup
-// still validates against the SL-1 contract and passes the E7 hook-wire shape
-// through the real client (AC-5 parity; tokens ride metadata, never break the
+// still validates against the dev-event contract and passes the hook-wire shape
+// through the real client (tokens ride metadata, never break the
 // lifecycle wire type).
 func TestFinops_ConformanceWithTokens(t *testing.T) {
 	tokens, model, err := readRolloutUsage(poisonedRolloutPath)

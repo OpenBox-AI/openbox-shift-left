@@ -134,8 +134,7 @@ func TestE2E_PlainRebasePreservesTrailer(t *testing.T) {
 	}
 }
 
-// TestE2E_SquashFansInAllSessions squash = the multi-session fan-in good path
-// (S3 §2).
+// TestE2E_SquashFansInAllSessions squash = the multi-session fan-in good path.
 func TestE2E_SquashFansInAllSessions(t *testing.T) {
 	r := newRepo(t)
 	r.git(sess("sess-base"), "commit", "--allow-empty", "-m", "base")
@@ -155,7 +154,7 @@ func TestE2E_SquashFansInAllSessions(t *testing.T) {
 	}
 }
 
-// TestE2E_FixupDropsItsSession fixup is the known loss mode (S3 §2): the fixup
+// TestE2E_FixupDropsItsSession fixup is the known loss mode: the fixup
 // commit's message; and thus its session; is discarded.
 func TestE2E_FixupDropsItsSession(t *testing.T) {
 	r := newRepo(t)

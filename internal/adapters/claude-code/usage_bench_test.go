@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// largeTranscript is the shape the phase is about: Claude Code's transcript
+// largeTranscript is the shape this benchmark is about: Claude Code's transcript
 // JSONL is unbounded, a long session is megabytes of it, and this runs on the
 // hook path at SessionEnd.
 func largeTranscript(lines int) []byte {

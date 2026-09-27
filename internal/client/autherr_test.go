@@ -122,7 +122,7 @@ func fixedRespServer(t *testing.T, status int, body string) *memhttptest.Server 
 // TestEmit_MapsRejection_FailOpenAndLogSafe drives the full client path: a
 // rejection must (a) still fail-open on the verdict (VerdictUnknown, which no
 // caller reads as a block) while reporting the advisory ErrDelivery so a
-// durable caller can retry (E8-S7), (b) produce exactly one log line carrying
+// durable caller can retry, (b) produce exactly one log line carrying
 // the mapped guidance + event id, and (c) never leak the obx_ key or workload
 // bearer (INV-1).
 func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
@@ -133,7 +133,7 @@ func TestEmit_MapsRejection_FailOpenAndLogSafe(t *testing.T) {
 		want   string
 	}{
 		{"stock 401, flat", 401, `{"code":401,"message":"invalid token or agent identity"}`, "run `openbox doctor`"},
-		{"400 event_type (pre-EXT-core)", 400, `{"code":400,"message":"invalid event_type: ToolCall"}`, "accept-listed the dev event types"},
+		{"400 event_type (stock core rejects the type)", 400, `{"code":400,"message":"invalid event_type: ToolCall"}`, "accept-listed the dev event types"},
 		{"forward-compat bootstrap reason", 403, `{"reason_code":"verifier_unavailable"}`, "token verifier is unavailable"},
 	}
 	for _, tc := range cases {

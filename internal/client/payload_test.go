@@ -60,7 +60,7 @@ func rawMeta(t *testing.T, p governanceEventPayload) map[string]any {
 }
 
 // TestBuildPayload_ActivityType asserts the pass-through activity_type the
-// openbox-fe dashboard's "Activity" column reads.
+// OpenBox dashboard's "Activity" column reads.
 func TestBuildPayload_ActivityType(t *testing.T) {
 	for _, et := range []EventType{EventToolCall, EventToolResult} {
 		p := decodePayload(t, DevEvent{

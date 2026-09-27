@@ -8,8 +8,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-// INV-3b (the carve-out to "observe never blocks"): an enforce PreToolUse hook
-// may block, but only pre-execution, hard-bounded, and fail-open by default.
+// An enforce PreToolUse hook may block, but only pre-execution and within a
+// hard latency bound.
 
 // buildDecisionRequest assembles the local decision request from a PreToolUse
 // payload, reusing the mapper's tool classification (classifyTool) so the

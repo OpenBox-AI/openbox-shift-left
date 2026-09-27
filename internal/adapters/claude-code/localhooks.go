@@ -43,7 +43,7 @@ var localHookEvents = []struct {
 	{Event: "StopFailure", Timeout: otherHookTimeoutSec},
 	{Event: "SessionEnd", Timeout: 15},
 
-	// The 21 new hook classes below, with their sync/async split. ConfigChange is the one armed hook (D4): it stays sync so a
+	// The 21 new hook classes below, with their sync/async split. ConfigChange is the one armed hook: it stays sync so a
 	// headless run cannot silently lose a settings-edit decision, and it is
 	// the only new row that carries a StatusMessage.
 	{Event: "Setup", Timeout: otherHookTimeoutSec, Async: true},

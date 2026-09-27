@@ -17,7 +17,7 @@ func devEventFor(sessionID string, eventType client.EventType) client.DevEvent {
 	return client.DevEvent{EventID: "e-" + sessionID, EventType: eventType, SessionID: sessionID}
 }
 
-// TestHaltOnDeliveryFailure_LatchesAndNamesTheClass is R1/R2: a single
+// TestHaltOnDeliveryFailure_LatchesAndNamesTheClass: a single
 // explicit failure both latches the run (write-if-absent) and names the
 // event and the failure class in the preserved reason, content-free.
 func TestHaltOnDeliveryFailure_LatchesAndNamesTheClass(t *testing.T) {
@@ -83,7 +83,7 @@ func TestHaltOnDeliveryFailure_RunIDPreferredOverSessionID(t *testing.T) {
 	}
 }
 
-// TestHaltOnDeliveryFailure_NeverOverwritesAnExistingLatch is R1's write-if-
+// TestHaltOnDeliveryFailure_NeverOverwritesAnExistingLatch is the write-if-
 // absent guarantee from the OTHER direction: a live HALT verdict (an
 // entirely different origin, WriteSessionHalt) already latched this run;
 // a LATER delivery failure for the same run must leave it exactly as it
@@ -108,7 +108,7 @@ func TestHaltOnDeliveryFailure_NeverOverwritesAnExistingLatch(t *testing.T) {
 	}
 }
 
-// TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch is R1's
+// TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch is the
 // write-if-absent guarantee under real concurrency (run with -race): many
 // goroutines racing to latch the SAME run, each with a DIFFERENT failure
 // class, must leave exactly one latch, whichever cause got there first.
@@ -147,7 +147,7 @@ func TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch(t *testing
 	}
 }
 
-// TestNewEngine_OnFailureLedgersAndLatches is R3's wiring: Engine's default
+// TestNewEngine_OnFailureLedgersAndLatches is the wiring: Engine's default
 // Spool.OnFailure (set once in NewEngine) both records the ledger line a
 // drain has always written and, additively, the halt latch -- for any
 // caller that never overrides Spool.OnFailure itself.

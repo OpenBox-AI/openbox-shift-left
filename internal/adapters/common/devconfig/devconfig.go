@@ -1,7 +1,7 @@
 // Package devconfig is the provider-neutral developer-runtime configuration
 // and credential resolution shared by every tool adapter (Claude Code, Codex,
 // Cursor). One store per field: the credential file is never read for a
-// coordinate and dev.json never holds a secret. Before that decision the DID
+// coordinate and dev.json never holds a secret. Without that split the DID
 // lived in both dev.json and the OS keychain, and a stale keychain entry
 // silently reverted a corrected DID on the next install; this split is what
 // makes that impossible rather than merely fixed.
@@ -99,12 +99,12 @@ type DevConfig struct {
 	// ContentCapture is the org content posture.
 	ContentCapture *bool `json:"content_capture,omitempty"`
 	// Finops gates per-turn usage capture: token counts AND the model id that
-	// spent them (that decision; the name predates the model binding and is kept
+	// spent them (the name predates the model binding and is kept
 	// because renaming a config key is a user-visible break; read it as "usage
 	// and model capture", not "token counts only").
 	Finops *bool `json:"finops,omitempty"`
 
-	// Telemetry enables the local OTLP receiver lane (that decision's `:otel:`).
+	// Telemetry enables the local OTLP receiver lane (the `:otel:` lane).
 	Telemetry *bool `json:"telemetry,omitempty"`
 	// InstallGitHook enables ambient install of the prepare-commit-msg hook on
 	// SessionStart.
@@ -130,10 +130,10 @@ type DevConfig struct {
 	// Tier2TimeoutMS is deprecated and inert.
 	Tier2TimeoutMS int `json:"tier2_timeout_ms,omitempty"`
 	// ApprovalHoldMS bounds how long the gate holds a tool call while a filed
-	// approval is decided (ms, OD-E9-1). Clamping is adapter-owned: the hold can
+	// approval is decided (ms); undecided past it, the call is denied. Clamping is adapter-owned: the hold can
 	// never outlive the provider's hook timeout.
 	ApprovalHoldMS int `json:"approval_hold_ms,omitempty"`
-	// SecretDetection enables Tier-1 local secret/entropy detection.
+	// SecretDetection enables local secret/entropy detection.
 	SecretDetection *bool `json:"secret_detection,omitempty"`
 	// RequireVerifiedBundle is deprecated and inert. Parsed so an existing
 	// dev.json does not become an error, and deliberately absent from the

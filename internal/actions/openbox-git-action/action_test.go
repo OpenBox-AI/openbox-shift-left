@@ -53,9 +53,9 @@ func TestAction_EmitsResolvedDeploy(t *testing.T) {
 }
 
 // TestAction_RecordsAdvisoryNeverGatesDeploy proves the Advisory tier on the
-// deploy path (story-SL-9): a BLOCK verdict + guardrail hit writes an advisory
+// deploy path: a BLOCK verdict + guardrail hit writes an advisory
 // record (would_block=true, category present) yet the deploy still emits and
-// Run returns no error (INV-3).
+// Run returns no error.
 func TestAction_RecordsAdvisoryNeverGatesDeploy(t *testing.T) {
 	dir := t.TempDir()
 	advPath := filepath.Join(dir, "advisories.jsonl")
@@ -80,7 +80,7 @@ func TestAction_RecordsAdvisoryNeverGatesDeploy(t *testing.T) {
 	}
 	res, err := act.Run(ctx, sha, "")
 	if err != nil {
-		t.Fatalf("Run must not error on a BLOCK verdict (INV-3): %v", err)
+		t.Fatalf("Run must not error on a BLOCK verdict: %v", err)
 	}
 	if !res.Emitted {
 		t.Fatal("deploy must still emit despite the BLOCK verdict")

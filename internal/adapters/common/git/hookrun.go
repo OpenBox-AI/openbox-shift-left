@@ -4,7 +4,7 @@ import (
 	"os"
 )
 
-// RunHook is the shared fail-open git-hook engine (od17): the single
+// RunHook is the shared fail-open git-hook engine: the single
 // implementation behind both `openbox hook git <sub>` (the unified engine) and
 // the legacy standalone `openbox-git-hook` alias. Safety (the git analog of
 // the adapters' INV-3): it never aborts a commit.

@@ -33,7 +33,7 @@ func TestStamp_AddsTrailer(t *testing.T) {
 	}
 }
 
-// TestStamp_IdempotentOnReStamp re-firing the hook (the `--amend` case, S3 R2)
+// TestStamp_IdempotentOnReStamp re-firing the hook (the `--amend` case)
 // must NOT duplicate an id.
 func TestStamp_IdempotentOnReStamp(t *testing.T) {
 	g := Git{}
@@ -49,8 +49,8 @@ func TestStamp_IdempotentOnReStamp(t *testing.T) {
 	}
 }
 
-// TestStamp_MultiSessionFanIn distinct sessions => multiple lines (fan-in, S3
-// R3), order preserved.
+// TestStamp_MultiSessionFanIn distinct sessions => multiple lines (fan-in),
+// order preserved.
 func TestStamp_MultiSessionFanIn(t *testing.T) {
 	g := Git{}
 	msg := writeMsg(t, "shared work\n")
@@ -152,7 +152,7 @@ func TestValidateSessionID(t *testing.T) {
 		{"newline_injection", "sess-A\nOpenBox-Session: sess-evil", false},
 		{"carriage_return", "sess\rA", false},
 		{"nul", "sess\x00A", false},
-		{"internal_space", "my great feature", false}, // F5: prose is not an id
+		{"internal_space", "my great feature", false}, // prose is not an id
 		{"tab", "a\tb", false},
 		{"secret_shaped", "obx_livekey_deadbeef", false}, // INV-1: never a credential
 		{"too_long", string(make([]byte, MaxSessionIDLen+1)), false},

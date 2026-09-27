@@ -80,9 +80,10 @@ func TestEveryLaneUnitArgvIsAcceptedByItsOwnCommand(t *testing.T) {
 				t.Errorf("`openbox %s` exited %d for its own unit's argv; stderr: %s",
 					name, code, errb.String())
 			}
-			// The flag the whole of phase 06 rests on has to be one the command reads,
-			// not merely one it tolerates: an unreadable path is reported loudly, and a
-			// path it never looked at would report nothing.
+			// The --settings flag the daemon's election rests on has to be one
+			// the command reads, not merely one it tolerates: an unreadable path
+			// is reported loudly, and a path it never looked at would report
+			// nothing.
 			if !strings.Contains(errb.String(), "CANNOT DECIDE") {
 				t.Errorf("%s did not report the unreadable settings path it was handed, so it is "+
 					"not reading --settings at all; stderr: %s", name, errb.String())

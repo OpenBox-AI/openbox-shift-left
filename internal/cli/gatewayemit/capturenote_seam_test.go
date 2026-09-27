@@ -7,13 +7,12 @@ import "testing"
 //
 // Why this exists: the gateway computes ResponseBytesSeen/ResponseTruncated and
 // payload.go turns them into activity_output.openbox_capture, but the two ends
-// are joined only by this span() copy. Both ends were covered by their own
-// package's tests while the JOIN was not, and deleting the two assignments left
-// the entire repo suite green -- the note would silently vanish from every
-// in-path row with nothing red. CLAUDE.md states the rule this broke: asserting
-// a struct is not asserting the wire.
+// are joined only by this span() copy. Each end is covered by its own
+// package's tests, but without this one deleting the two assignments would
+// leave the suite green while the note silently vanished from every in-path
+// row. Asserting a struct is not asserting the wire.
 //
-// The sibling for phase 03's four attribution fields is
+// The sibling for the four attribution fields is
 // TestEventsForCopiesAttributionOntoBothHalves, which already covered its own
 // copy through this same closure.
 func TestEventsForCarriesTheResponseCompletenessFieldsOntoTheSpan(t *testing.T) {

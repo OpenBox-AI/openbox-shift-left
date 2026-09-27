@@ -7,8 +7,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
-// TestDuration_ToolUseIDKeyedPairing proves the E7-S8 stash keyed by
-// tool_use_id (AC-5): the completed event recovers the started event's
+// TestDuration_ToolUseIDKeyedPairing proves the duration stash keyed by
+// tool_use_id: the completed event recovers the started event's
 // timestamp, and two concurrent invocations of the same tool never swap start
 // times (the CC adapter's documented ambiguity, closed by tool_use_id).
 func TestDuration_ToolUseIDKeyedPairing(t *testing.T) {

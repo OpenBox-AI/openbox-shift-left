@@ -333,7 +333,7 @@ func TestSecondRunOverwritesTheFirst(t *testing.T) {
 // from disk was the approver persona and the file is plaintext. `auth` and
 // `init` are now two processes with nothing exported between them, so it has
 // to survive on disk -- and the exposure that argued against it is unchanged
-// and accepted (owner ruling O1).
+// and accepted.
 //
 // What is not negotiable is which file. This credential creates and rotates
 // agents across the whole organization; keeping it out of every per-tool store

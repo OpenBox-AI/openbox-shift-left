@@ -84,8 +84,7 @@ func TestANilElectionGateIsLoud(t *testing.T) {
 // TestTheGateIsConsultedPerCall asserts the SECOND call, not the first. Install
 // ordering starts a lane daemon before the env var is written, so the first
 // answer is legitimately "no" and a gate consulted once would stay that way for
-// the process's whole life. This repo has paid for a first-invocation-only test
-// before: fifteen green ones missed a defect because each ran init exactly once.
+// the process's whole life, and a first-invocation-only test cannot see that.
 func TestTheGateIsConsultedPerCall(t *testing.T) {
 	elected := false
 	em, spool, _ := electionEmitter(t, func() bool { return elected })
@@ -121,11 +120,10 @@ func TestTheGateIsCheckedBeforeTheSessionHeaderWarning(t *testing.T) {
 	}
 }
 
-// TestAFailedAppendAbandonsTheActivityRatherThanOrphaningAHalf is the regression
-// for a defect this pairing work introduced and a review caught: the append loop
-// used to `continue`, so a Started half that failed to spool while the Completed
-// half succeeded produced exactly the single-sided activity the pairing exists to
-// eliminate. Zero rows is a clean absence; one row is a contract violation that
+// TestAFailedAppendAbandonsTheActivityRatherThanOrphaningAHalf: an append loop
+// that `continue`s past a failure lets a Started half fail to spool while the
+// Completed half succeeds, producing exactly the single-sided activity the
+// pairing exists to eliminate. Zero rows is a clean absence; one row is a contract violation that
 // reads as a working record.
 func TestAFailedAppendAbandonsTheActivityRatherThanOrphaningAHalf(t *testing.T) {
 	// A delivery pool that refuses every submission (saturated): every Deliver

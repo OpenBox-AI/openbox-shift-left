@@ -200,8 +200,8 @@ func TestTurnActivityOutputOmitsWhatIsUnknown(t *testing.T) {
 	}
 }
 
-// TestTurnPairRidesAcceptListedWireTypes pins the INV-8 claim for the new
-// types: they map onto the same two stock activity types a tool call uses, so
+// TestTurnPairRidesAcceptListedWireTypes pins the no-accept-list-patch claim for
+// the new types: they map onto the same two stock activity types a tool call uses, so
 // a stock core accepts them with no patch and no accept-list change.
 func TestTurnPairRidesAcceptListedWireTypes(t *testing.T) {
 	cases := []struct {

@@ -99,7 +99,7 @@ func (a *app) runTransport(args []string) int {
 	// pool this lane used to send every record through: a lane record now
 	// interleaves with its session's hook events in append order, and an
 	// unaccepted one halts the run exactly like any other single-attempt
-	// delivery (CLAUDE.md; A4).
+	// delivery.
 	queues := laneQueues(identities, logger)
 
 	// A claude.ai chat completion has no tool session at all (no hook will

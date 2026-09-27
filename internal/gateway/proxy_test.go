@@ -81,7 +81,7 @@ func newTestGateway(t *testing.T, upstream string) *memhttptest.Server {
 	return serveGateway(t, g)
 }
 
-// TestForwardIdentity is the phase's load-bearing test: the forwarded request
+// TestForwardIdentity is the relay's load-bearing test: the forwarded request
 // must carry the client's exact bytes onward.
 func TestForwardIdentity(t *testing.T) {
 	var got recorded
@@ -303,7 +303,7 @@ func TestOddRequestTargetsPassThrough(t *testing.T) {
 	}
 }
 
-// TestRequestAttributionOptionReceivesRawBytes is the seam this phase adds:
+// TestRequestAttributionOptionReceivesRawBytes pins the attribution seam:
 // WithRequestAttribution's closure runs on the RAW bytes read off the wire --
 // byte-identical to what the client sent, before any selection or
 // truncation -- and its result rides Captured.Attribution.
@@ -411,10 +411,11 @@ func TestRequestAttributionRunsIndependentOfKeepBodies(t *testing.T) {
 	}
 }
 
-// --- Phase 04: response completeness (activity_output.openbox_capture) ---
+// --- Response completeness (activity_output.openbox_capture) ---
 
-// TestCaptureSinkCutIsTrueWhenMoreArrivedThanTheBufferKept is acceptance
-// criterion 1, and the whole reason this phase does not length-compare.
+// TestCaptureSinkCutIsTrueWhenMoreArrivedThanTheBufferKept is the core
+// completeness property, and the whole reason completeness is not a length
+// compare.
 // Write clamps buf to exactly maxCaptureSinkBytes, so len(Bytes()) can never
 // exceed that number and capturableBody's own `len(body) > maxCaptureInputBytes`
 // check can therefore never fire through the sink. seen counts every byte
@@ -451,8 +452,8 @@ func TestCaptureSinkCutIsFalseWhenNothingWasDropped(t *testing.T) {
 	}
 }
 
-// TestCaptureSinkSeenAccumulatesAcrossManyWritesPastTheBound is acceptance
-// criterion 6's arithmetic in isolation: streamTo offers the sink one
+// TestCaptureSinkSeenAccumulatesAcrossManyWritesPastTheBound is the full
+// byte count's arithmetic in isolation: streamTo offers the sink one
 // relayBufferSize chunk at a time, so seen must keep counting every chunk
 // offered, across every call, long after buf itself has stopped growing.
 func TestCaptureSinkSeenAccumulatesAcrossManyWritesPastTheBound(t *testing.T) {
@@ -491,8 +492,8 @@ func TestCaptureSinkNilIsSafe(t *testing.T) {
 	sink.Write([]byte("must not panic")) // no-op on a nil receiver
 }
 
-// TestResponseTruncatedIsTrueWhenStoredEndsInBodyCutNoteEvenIfTheSinkDidNot is
-// acceptance criterion 3: capRunes and decodeCapturable can each append
+// TestResponseTruncatedIsTrueWhenStoredEndsInBodyCutNoteEvenIfTheSinkDidNot
+// pins that a stored cut counts as truncation: capRunes and decodeCapturable can each append
 // bodyCutNote to the STORED form without the sink itself ever reaching its own
 // bound (a small compressed body decoding to a huge plaintext, or redaction
 // growth pushing an already-under-bound body over captureBodyRunes). The OR
@@ -521,7 +522,7 @@ func TestResponseTruncatedIsFalseForAWholeShortBody(t *testing.T) {
 	}
 }
 
-// TestShortResponseReportsCompleteWithExactByteCount is acceptance criterion 2,
+// TestShortResponseReportsCompleteWithExactByteCount pins the complete case,
 // end to end: a short reply must carry truncated:false and original_bytes
 // equal to its own length, not merely leave the sink able to say so.
 func TestShortResponseReportsCompleteWithExactByteCount(t *testing.T) {
@@ -554,8 +555,8 @@ func TestShortResponseReportsCompleteWithExactByteCount(t *testing.T) {
 	}
 }
 
-// TestResponseOverTheSinkBoundReportsTruncatedWithFullByteCountSeen is
-// acceptance criteria 1 and 6, wired end to end: a 300 KB identity-encoded
+// TestResponseOverTheSinkBoundReportsTruncatedWithFullByteCountSeen is cut
+// detection and the full byte count, wired end to end: a 300 KB identity-encoded
 // response is exactly the shape whose sink-kept length lands on the bound
 // (invisible to a `>` check) while original_bytes must still equal the FULL
 // pre-cut count the relay actually read off the wire, which requires seen to
@@ -596,7 +597,7 @@ func TestResponseOverTheSinkBoundReportsTruncatedWithFullByteCountSeen(t *testin
 }
 
 // TestCompressedResponseOverItsOwnBoundIsTruncatedEvenThoughTheSinkNeverFilled
-// is acceptance criterion 3's realistic case: a small compressed body that
+// is the stored-cut case's realistic shape: a small compressed body that
 // decodes to a huge plaintext never fills the sink (the sink only ever sees
 // the COMPRESSED bytes), yet decodeCapturable's own bound cuts the decoded
 // text and marks it -- so the report must still say truncated:true.

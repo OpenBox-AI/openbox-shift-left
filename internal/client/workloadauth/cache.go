@@ -121,8 +121,8 @@ func (c *FileCache) Load() (Entry, bool) {
 // WithExistingPermissions would leave a pre-existing 0644 target at 0644.
 // This is the same pattern as
 // internal/adapters/common/devconfig/envfile.go's WriteEnvFile, duplicated
-// deliberately rather than shared (CLAUDE.md: "grep the pattern, not the
-// importer").
+// deliberately rather than shared: to find every copy, grep the pattern, not
+// the importer.
 func (c *FileCache) Store(e Entry) error {
 	dir := filepath.Dir(c.Path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {

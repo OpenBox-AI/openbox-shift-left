@@ -25,8 +25,7 @@ const (
 	headerUserAgent     = "User-Agent"
 
 	// headerIdempotencyKey carries the event's idempotency key (==
-	// DevEvent.EventID == metadata.event_id) as a standard request header
-	// (INV-5).
+	// DevEvent.EventID == metadata.event_id) as a standard request header.
 	headerIdempotencyKey = "Idempotency-Key"
 
 	// headerWorkloadToken carries the exchanged Keycloak bearer. The
@@ -35,7 +34,7 @@ const (
 	headerWorkloadToken = "X-OpenBox-Workload-Token"
 )
 
-// Fail-open (INV-3): these bound delay, never whether Emit proceeds.
+// Fail-open: these bound delay, never whether Emit proceeds.
 const (
 	defaultTimeout    = 30 * time.Second
 	defaultMaxRetries = 2
@@ -54,7 +53,7 @@ func (nopLogger) Printf(string, ...any) {}
 
 // Config configures a Client.
 type Config struct {
-	BaseURL string // openbox-core base, e.g. https://core.openbox.ai
+	BaseURL string // OpenBox core base URL, e.g. https://core.openbox.ai
 	APIKey  string // obx_(live|test)_… runtime key (INV-1)
 
 	// WorkloadPrivateKey is the workload agent's RSA private key, a PEM
@@ -231,7 +230,7 @@ func isRefusal(err error) bool {
 }
 
 // Emit builds the core payload from a normalized dev event and POSTs it,
-// workload-identity-authenticated, to /evaluate. It is fail-open (INV-3): the
+// workload-identity-authenticated, to /evaluate. It is fail-open: the
 // Evaluation it returns on
 // any failure is the zero value, which every caller treats as allow, so a
 // failure here can never block a tool call.
@@ -241,7 +240,7 @@ func (c *Client) Emit(ctx context.Context, ev DevEvent) (Evaluation, error) {
 	// Both must be surfaced, not fail-open dropped; an empty one would silently
 	// corrupt session grouping.
 	if ev.EventID == "" {
-		return Evaluation{}, errors.New("client: DevEvent.EventID is required (INV-5 idempotency key)")
+		return Evaluation{}, errors.New("client: DevEvent.EventID is required (idempotency key)")
 	}
 	if ev.SessionID == "" {
 		// Still required even on a continued run: runIDFor selects the minted
@@ -302,7 +301,7 @@ func (c *Client) retryBudget() time.Duration {
 // Retry-After is a stop signal, not a sleep. Asking for longer than the budget
 // gets what the server actually wants -- no more requests -- while ErrDelivery
 // re-spools the event. Waiting inline buys nothing the spool does not, and
-// INV-3 says a hook must not hold the tool call open.
+// a hook must not hold the tool call open.
 func (c *Client) post(ctx context.Context, path string, body []byte, idemKey string) ([]byte, error) {
 	// Each delay is drawn from [0, 2*interval], and the intervals are
 	// retryBase/2 then retryBase thereafter, so the worst-case sum is

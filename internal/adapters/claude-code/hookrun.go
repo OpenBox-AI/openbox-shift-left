@@ -117,7 +117,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 	}
 
-	// Run identity (phase 08, RESUME-ONLY re-scope): resolved before
+	// Run identity (only a resume opens a new run): resolved before
 	// New()/Record(), so the run id this hook's event(s) are stamped with and
 	// the latch this hook consults just below agree. Only
 	// SessionStart(source=resume) bumps -- NOT clear: measured live against
@@ -128,7 +128,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// belongs to a DIFFERENT (fresh) session's future record. Every other hook
 	// -- and every other SessionStart source -- reads the existing record.
 	// Absent/unreadable/corrupt/inconsistent ⇒ generation 0 plus one stderr
-	// line (INV-3, R6): a run-identity lookup must never block a tool call or
+	// line (INV-3): a run-identity lookup must never block a tool call or
 	// drop an event.
 	runStore := obgit.RunStore{Dir: obgit.RunDir(regDir)}
 	var run RunIdentity
@@ -398,7 +398,7 @@ func forceFlusher(logger *log.Logger, sessionID string) {
 }
 
 // isBumpSource reports whether SessionStart's source enum opens a new run
-// generation (R4, resume-only re-scope): ONLY resume does. clear joins
+// generation: ONLY resume does. clear joins
 // startup, compact and fork as non-bumping -- a `/clear` was measured live
 // (Claude Code 2.1.263) to mint a brand-new session id, ~46ms after the
 // SessionEnd that sealed the old one, so the SessionStart it fires next has

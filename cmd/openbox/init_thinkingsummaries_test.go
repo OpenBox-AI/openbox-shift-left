@@ -48,8 +48,8 @@ func TestInitSetsThinkingSummariesAndSaysSo(t *testing.T) {
 	}
 }
 
-// TestInitCodexWritesNoThinkingSummariesKeyOrRecord is acceptance criterion
-// 8's install-time half: Codex has no equivalent key, so `init` for it must
+// TestInitCodexWritesNoThinkingSummariesKeyOrRecord is the install-time
+// half: Codex has no equivalent key, so `init` for it must
 // name nothing and leave no restore record for a later `uninstall` to find.
 func TestInitCodexWritesNoThinkingSummariesKeyOrRecord(t *testing.T) {
 	isolateHome(t)

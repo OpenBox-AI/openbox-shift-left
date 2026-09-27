@@ -8,9 +8,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// PathClass is what a relayed request actually was. `isModelCall` did two jobs
-// with one predicate and, as a CLASSIFIER, filed every POST as a completion while
-// ~40% were probes. docs/mapping.md §2.
+// PathClass is what a relayed request actually was. Classifying on the HTTP
+// method alone files every POST as a completion, token-count probes included,
+// and probes are a large share of relayed POSTs. docs/mapping.md §2.
 type PathClass int
 
 const (

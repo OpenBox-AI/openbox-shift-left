@@ -166,7 +166,7 @@ type ManagedStatus struct {
 	Readable bool
 	Locked   []string
 	// UnknownKeys names top-level keys in the managed file that match no setting.
-	// They are ignored rather than invalidating the file (OD-RF-2), so they must
+	// They are ignored rather than invalidating the file, so they must
 	// be reported or an org would not know its file has a typo.
 	UnknownKeys []string
 	// UnknownLocked names entries in `locked` that match no known setting.

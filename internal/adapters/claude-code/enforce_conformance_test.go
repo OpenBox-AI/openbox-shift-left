@@ -22,8 +22,8 @@ import (
 
 // This drives the real RunHook PreToolUse path end-to-end against a real
 // /evaluate stub (or a deliberately-unreachable one) and asserts the exact
-// Claude Code stdout contract per quadrant of the enforcement carve-out (that
-// decision / INV-3b).
+// Claude Code stdout contract per quadrant of the enforcement carve-out and its
+// hook latency bound.
 
 func TestEnforcementConformance(t *testing.T) {
 	isolateConfig(t)
@@ -72,8 +72,8 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	// C2/C3 pinned "fail_closed=0 => outage proceeds" (OD9). Delivery is now
-	// always fail-closed (HaltOnDeliveryFailure, plan round 3): the
+	// C2/C3 pinned "fail_closed=0 => outage proceeds". Delivery is now
+	// always fail-closed (HaltOnDeliveryFailure): the
 	// `fail_closed` key is deprecated, parsed only so it can warn, and no
 	// longer selects a policy. Both now assert the SAME outage-denies
 	// behaviour C4 pins, kept separate because they exercise a different
@@ -90,7 +90,7 @@ func TestEnforcementConformance(t *testing.T) {
 			t.Fatalf("permissionDecision = %q, want deny; delivery is always fail-closed regardless of fail_closed=0 (stdout=%q)", d, out)
 		}
 		if elapsed := time.Since(start); elapsed > 3*time.Second {
-			t.Errorf("enforce wait %v exceeds the INV-3b bound (CC kills the hook at 5s)", elapsed)
+			t.Errorf("enforce wait %v exceeds the hook latency bound (CC kills the hook at 5s)", elapsed)
 		}
 		assertNoLeak(t, out)
 	})
@@ -132,7 +132,7 @@ func TestEnforcementConformance(t *testing.T) {
 		// against an unreachable control plane, and each left its own
 		// escalation's own observe copy queued (unanswered, never a failure)
 		// in "s"'s own head file. The gate now drains its own session's
-		// queue before it escalates (this phase's own change), so reusing
+		// queue before it escalates, so reusing
 		// "s" here would have this call's own drain deliver that backlog
 		// against the reachable server this subtest sets up, inflating the
 		// hit count this assertion checks for a reason unrelated to what it
@@ -146,13 +146,13 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	t.Run("C6 fail-closed + unbundled denies (E6-S3 INFO-1 closed)", func(t *testing.T) {
+	t.Run("C6 fail-closed + unbundled denies (reachable-but-unbundled hole closed)", func(t *testing.T) {
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "1")
 		out := run(t, dangerPayload)
 		d, reason := parsePermissionDecision(t, []byte(out))
 		if d != ccDecisionDeny {
-			t.Fatalf("fail-closed + unbundled: permissionDecision = %q, want deny (INFO-1 hole); stdout=%q", d, out)
+			t.Fatalf("fail-closed + unbundled: permissionDecision = %q, want deny (reachable-but-unbundled hole); stdout=%q", d, out)
 		}
 		if !strings.Contains(reason, "fail-closed") {
 			t.Errorf("reason = %q, want the content-free fail-closed reason", reason)
@@ -208,7 +208,7 @@ func TestEnforcementConformance(t *testing.T) {
 	}
 
 	// Never weaken this to a substring check on a decision.
-	t.Run("C18 a secret in a Write body never reaches /evaluate (E8)", func(t *testing.T) {
+	t.Run("C18 a secret in a Write body never reaches /evaluate", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
 		srv := serveCapturing(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
@@ -404,7 +404,7 @@ func TestEnforcementConformance(t *testing.T) {
 				"PreToolUse with PostToolUseFailure: %s", failed)
 		}
 		if strings.Contains(failed, "exit code 3") {
-			t.Errorf("the tool's free-text error egressed (that decision owns it): %s", failed)
+			t.Errorf("the tool's free-text error egressed (only the content_capture gate may carry it): %s", failed)
 		}
 	})
 
@@ -577,7 +577,7 @@ func TestEnforcementConformance(t *testing.T) {
 		}
 	})
 
-	t.Run("C10 secret in Write body → redact-and-continue (E6-S9)", func(t *testing.T) {
+	t.Run("C10 secret in Write body → redact-and-continue", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
@@ -613,14 +613,14 @@ func TestEnforcementConformance(t *testing.T) {
 		assertNoEgress(t)
 	})
 
-	t.Run("C11 secret detection OFF → no redaction (opt-out, E6-S9)", func(t *testing.T) {
+	t.Run("C11 secret detection OFF → no redaction (opt-out)", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"allow"}`)
 		t.Setenv(envEnforce, "1")
 		t.Setenv(envFailClosed, "0")
 		t.Setenv(envContentCapture, "0")
 		t.Setenv(envSecretDetection, "0") // explicit opt-out
 		if out := run(t, secretWrite); strings.TrimSpace(out) != "" {
-			t.Errorf("with detection off + content-capture off the proceed path must write nothing (E6-S3 identical); got %q", out)
+			t.Errorf("with detection off + content-capture off the proceed path must write nothing; got %q", out)
 		}
 		assertNoEgress(t)
 	})

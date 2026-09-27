@@ -22,8 +22,8 @@ func TestAllowlistMatchesTheExactHost(t *testing.T) {
 	}
 }
 
-// TestAllowlistRefusesEverythingElse is the half that makes that decision
-// reversal defensible: every other host is blind-tunnelled, uninspected.
+// TestAllowlistRefusesEverythingElse is the half that makes an
+// unconstrained CA defensible: every other host is blind-tunnelled, uninspected.
 func TestAllowlistRefusesEverythingElse(t *testing.T) {
 	a := NewAllowlist("api.anthropic.com")
 
@@ -56,7 +56,7 @@ func TestAllowlistRefusesEverythingElse(t *testing.T) {
 }
 
 // TestEmptyAllowlistAllowsNothing pins the zero value's direction. Same shape
-// as telemetry Policy's zero value suppressing (phase 10): a half-built or
+// as telemetry Policy's zero value suppressing: a half-built or
 // misconfigured lane must fail toward doing nothing, not toward intercepting
 // everything.
 func TestEmptyAllowlistAllowsNothing(t *testing.T) {

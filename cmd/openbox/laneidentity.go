@@ -63,7 +63,7 @@ func resolveProviderIdentities(warn func(format string, args ...any)) map[string
 			// concurrent Store/Invalidate against the same file.
 			TokenCachePath:        "",
 			ContentCaptureEnabled: creds.ContentCaptureEnabled,
-			// 0, addressable: single-attempt delivery (this plan's own rule) means
+			// 0, addressable: single-attempt delivery means
 			// no client anywhere may retry a send on its own -- a lane record
 			// delivered through hookflow.LaneQueue or the transport lane's chat
 			// DeliverPool gets exactly one attempt, same as claude-code/codex's
@@ -110,7 +110,7 @@ func warnFn(warn func(format string, args ...any)) client.Logger {
 // subdirectory, resolved through laneSpoolDir -- the SAME directory that
 // provider's hook events already queue through, never a lane-daemon-private
 // one: a lane record has to interleave, in append order, with the hook
-// events of the same session (CLAUDE.md). "cc-spool"/"codex-spool" match
+// events of the same session. "cc-spool"/"codex-spool" match
 // claude-code.DefaultSpoolDir/codex.DefaultSpoolDir's own literals exactly
 // (both are themselves just devconfig.SpoolDir(that same string)).
 var providerSpoolSubdir = map[string]string{

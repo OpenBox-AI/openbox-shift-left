@@ -271,8 +271,8 @@ func TestEachLaneIsAddressedByItsOwnSupervisorIdentity(t *testing.T) {
 	}
 }
 
-// TestRemovalRestoresAForeignValueByteIdentically is the state-diff the
-// phase's acceptance criterion names. The org's own relay and proxy settings
+// TestRemovalRestoresAForeignValueByteIdentically is the removal state-diff.
+// The org's own relay and proxy settings
 // must come back exactly, and the keys OpenBox added must be gone; with
 // everything else in the file untouched.
 func TestRemovalRestoresAForeignValueByteIdentically(t *testing.T) {
@@ -574,9 +574,9 @@ func TestDoctorNamesAnElectedLaneThatIsNotThere(t *testing.T) {
 	}
 }
 
-// TestRemoveAllKeepsTheSharedSpool is a deliberate deviation from this phase's
-// requirement text, and it is the phase's own security constraint that decides
-// it: "never delete anything outside ~/.openbox/ and the managed keys".
+// TestRemoveAllKeepsTheSharedSpool: lane removal leaves the shared spool in
+// place, because removal must never delete anything outside ~/.openbox/ and
+// the managed keys.
 func TestRemoveAllKeepsTheSharedSpool(t *testing.T) {
 	skipUnlessSupervised(t)
 	h := newLaneHarness(t)

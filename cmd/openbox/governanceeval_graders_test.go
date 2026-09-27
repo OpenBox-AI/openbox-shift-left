@@ -86,7 +86,7 @@ func gradedScenarios() []gradedScenario {
 			whyNoMutation: "the gate redacts whenever secret detection OR content capture is on, so no scenario can switch redaction off; proven red against a synthetic run by TestGovernanceEvalRedactionGraderCanFail"},
 		{grader: fakecore.StartFirst(), base: ranFineSession},
 		{grader: fakecore.OneAttempt(), base: ranFineSession,
-			whyNoMutation: "no sequence of distinct native hook payloads can produce a same-key double-send: claude-code's own mapper derives EventID from a fresh, per-invocation high-resolution timestamp (INV-5), so two separate hook processes for identical content still mint two different keys. Proven red directly, against a hand-built Run, by internal/client/fakecore/graderreasons_test.go's own table"},
+			whyNoMutation: "no sequence of distinct native hook payloads can produce a same-key double-send: claude-code's own mapper derives EventID from a fresh, per-invocation high-resolution timestamp, so two separate hook processes for identical content still mint two different keys. Proven red directly, against a hand-built Run, by internal/client/fakecore/graderreasons_test.go's own table"},
 		{grader: fakecore.HaltedAfterFailure(), base: ranFineSession,
 			whyNoMutation: "no input mutation can un-halt a healthy binary for one call and not the next; the only thing that could make this grader fail is a code regression in the latch read on a later gated call, which no scenario fixture expresses. Proven red directly, against hand-built Runs, by internal/client/fakecore/graderreasons_test.go's own table"},
 	}

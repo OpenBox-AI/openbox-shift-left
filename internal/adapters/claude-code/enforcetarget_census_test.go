@@ -86,8 +86,7 @@ var toolCensusTable = map[string]toolCensusClass{
 // Likewise BashOutput/KillShell take bash_id/shell_id on the real wire, not
 // command; classifyTool still routes them through the shared
 // {ToolShell,"internal"} commandOf path, so a "command" fixture is what
-// exercises that shared path -- a pre-existing, separate gap this phase does
-// not touch.
+// exercises that shared path -- a separate gap this census does not cover.
 func censusFixture(t *testing.T, name string) (json.RawMessage, *client.Content) {
 	t.Helper()
 	switch name {
@@ -124,7 +123,7 @@ func censusFixture(t *testing.T, name string) (json.RawMessage, *client.Content)
 // wiring (the conformance case covers that); what it catches is a class
 // entering builtinTools, or losing its assignment, without an explicit
 // redaction decision -- this would have gone red the day Agent/ToolSearch
-// were added (commit 09c7b37).
+// were added.
 func TestEnforceCopyRedactionByClass(t *testing.T) {
 	names := make([]string, 0, len(builtinTools)+1)
 	for name := range builtinTools {

@@ -68,8 +68,8 @@ type Identity struct {
 	AgentID string
 
 	// RunID and RunGeneration are this call's resolved continue-as-new
-	// identity (phase 08): Emit resolves them from the shared RunStore and the
-	// R12 straddle check BEFORE building Identity, so EventsFor only ever
+	// identity: Emit resolves them from the shared RunStore and the
+	// straddle check BEFORE building Identity, so EventsFor only ever
 	// copies -- a lane must read the minted string, never derive one. Both
 	// empty/zero at generation 0, which is why an un-set Identity (as every
 	// existing caller/test builds one) still produces a byte-identical event.
@@ -78,7 +78,7 @@ type Identity struct {
 
 	// ToolName stamps Tool.Name on both halves this identity builds. "" ⇒
 	// "claude-code", so every existing caller and shipped fixture is
-	// byte-identical (INV-9): only a caller that sets this explicitly (a
+	// byte-identical: only a caller that sets this explicitly (a
 	// per-provider pre-resolved identity) ever sees a different value on the
 	// wire.
 	ToolName string
@@ -200,7 +200,7 @@ func semanticTypeFor(class PathClass) string {
 	return "internal"
 }
 
-// eventID derives the idempotency key (INV-5). Only structural fields feed the
+// eventID derives the idempotency key. Only structural fields feed the
 // hash; never a header value, a body, or the fingerprint, which derives from a
 // secret.
 func eventID(prefix string, parts ...string) string {

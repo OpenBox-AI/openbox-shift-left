@@ -55,7 +55,7 @@ func TestValidSamples(t *testing.T) {
 	}
 }
 
-// TestInvalidSamplesRejected AC (a): malformed / unknown-type events are
+// TestInvalidSamplesRejected: malformed / unknown-type events are
 // rejected.
 func TestInvalidSamplesRejected(t *testing.T) {
 	dir := "testdata/invalid"
@@ -74,8 +74,8 @@ func TestInvalidSamplesRejected(t *testing.T) {
 	}
 }
 
-// TestContentGate AC (b): any event carrying content is rejected when content-
-// capture is disabled, and accepted when it is enabled (INV-2 / OD4).
+// TestContentGate: any event carrying content is rejected when content-
+// capture is disabled, and accepted when it is enabled (INV-2).
 // The fixture set is read from the directory rather than listed here: a
 // hardcoded list means a fixture added for a new gated field is never
 // validated, and "no test ran it" is indistinguishable from "it passed".

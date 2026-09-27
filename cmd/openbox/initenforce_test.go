@@ -19,9 +19,8 @@ import (
 // identical on a fresh machine and differ on every machine that had a
 // leftover opt-out sitting on disk.
 //
-// The SECOND invocation is asserted explicitly. CLAUDE.md records fifteen green
-// tests that missed exactly this class of read/write defect because each ran
-// init once.
+// The SECOND invocation is asserted explicitly: a test that runs init only
+// once cannot see this class of read/write defect.
 func TestInitWritesNoEnforceKeyEverAgain(t *testing.T) {
 	isolateHome(t)
 	seedCredentials(t)

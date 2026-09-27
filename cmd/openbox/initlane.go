@@ -174,7 +174,8 @@ const advisoryFileEnvKey = "OPENBOX_ADVISORY_FILE"
 // latched refusal would land somewhere no one reads, or nowhere; without
 // OPENBOX_SPOOL_ROOT a lane record's own LaneQueue would spool into a
 // DIFFERENT directory than the one that tool's hook events already queue
-// through, breaking the append-order interleave A4 relies on; without
+// through, breaking the append-order interleave delivery ordering relies
+// on; without
 // OPENBOX_ADVISORY_FILE the daemon's own Advisory sink (wired by
 // hookflow.NewEngine into every LaneQueue's own Engine) would resolve a
 // bogus relative path (".config/openbox/advisories.jsonl") instead of

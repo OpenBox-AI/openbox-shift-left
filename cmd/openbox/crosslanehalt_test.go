@@ -221,7 +221,7 @@ func TestHaltDecoratorRefusesALatchedRun(t *testing.T) {
 	}
 }
 
-// TestHaltDecoratorRefusesARunLatchedByADeliveryFailure is R6: a run latched
+// TestHaltDecoratorRefusesARunLatchedByADeliveryFailure: a run latched
 // by an unaccepted event (HaltOnDeliveryFailure, not a HALT verdict) refuses
 // the run's NEXT relayed call exactly like a verdict-originated latch does --
 // the relay's own read side (haltDecorator) does not distinguish the two
@@ -274,8 +274,8 @@ func TestHaltDecoratorRefusesARunLatchedByADeliveryFailure(t *testing.T) {
 	}
 }
 
-// TestHaltDecoratorDoesNotRefuseAContinuedRunThatDidNotHalt pins the
-// correction the brief itself got wrong once: the run a session CURRENTLY
+// TestHaltDecoratorDoesNotRefuseAContinuedRunThatDidNotHalt pins the run
+// keying: the run a session CURRENTLY
 // belongs to is what gets consulted, never the session id or an ancestor
 // run. A `/clear`/`--resume` bump onto a fresh, unlatched run must not
 // inherit an old run's HALT.

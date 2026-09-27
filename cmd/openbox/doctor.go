@@ -169,7 +169,7 @@ func orUnset(s string) string {
 	return s
 }
 
-// lastDecisionSummary is switched onto the bounded tail reader (V6): its
+// lastDecisionSummary reads through the bounded tail reader: its
 // unmarshal, both format strings, and both fallbacks are unchanged, so its
 // printed output for any file under enforcementTailBytes is byte-identical to
 // the whole-file os.ReadFile version it replaces.
@@ -205,8 +205,8 @@ const configDenialToolKind = "config"
 // generous round number costs nothing.
 const configDenialScanLines = 4096
 
-// recentConfigDenials reports the last n config-change denials (D6), reading
-// through the same bounded tail helper lastDecisionSummary uses (V6): one
+// recentConfigDenials reports the last n config-change denials, reading
+// through the same bounded tail helper lastDecisionSummary uses: one
 // sink, two readers. unreadable distinguishes a corrupt sink (every raw line
 // failed to parse) from a healthy sink that simply has no config denials in
 // its window, so the caller can print "(unreadable)" only for the former.
@@ -302,7 +302,7 @@ func (a *app) reportIdentities() {
 // reportLegacyIdentity is the loud path for a store this binary cannot speak
 // for at all (devconfig.ErrLegacyStore): the mapper drops every event, so this
 // is the only place in the product that says so, and it says it once per
-// legacy tool, in wording the acceptance criteria pin.
+// legacy tool, in wording the tests pin.
 func (a *app) reportLegacyIdentity(name, cfgPath string, ls devconfig.LegacyStore) {
 	reasons := "no reason recorded"
 	if len(ls.Reasons) > 0 {

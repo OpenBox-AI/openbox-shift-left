@@ -74,7 +74,7 @@ func TestObserveDropsUnusable(t *testing.T) {
 
 // TestFlushIsObserveOnly proves the adapter neither blocks nor errors when the
 // emitter returns a deny verdict or a transport error; the whole point of
-// observe-only + fail-open (INV-3 / D7).
+// observe-only + fail-open (INV-3).
 func TestFlushIsObserveOnly(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	dir := t.TempDir()
@@ -105,7 +105,7 @@ func TestFlushIsObserveOnly(t *testing.T) {
 	}
 }
 
-// TestFlushRecordsAdvisory proves the Advisory tier (story-SL-9): a flush
+// TestFlushRecordsAdvisory proves the Advisory tier: a flush
 // whose evaluation carries a BLOCK verdict + a guardrail hit writes ONE
 // advisory record (would_block=true, guardrail category present) while the
 // flush neither blocks nor errors, and the record leaks no content/secret

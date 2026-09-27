@@ -52,7 +52,7 @@ func mockCreateServer(t *testing.T, createBody *map[string]any) *memhttptest.Ser
 	}))
 }
 
-// TestEndToEndClaudeCodeRealInstall is the SL4-wire-1 acceptance: a init for
+// TestEndToEndClaudeCodeRealInstall is the end-to-end acceptance: an init for
 // claude-code against a mock backend + a temp-HOME install materializes the
 // plugin bundle and the non-secret dev config, and NO written file contains a
 // secret value (INV-1).

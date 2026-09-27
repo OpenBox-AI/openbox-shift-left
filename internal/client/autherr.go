@@ -57,7 +57,7 @@ func diagnose(status int, body string) string {
 	case 400:
 		if strings.HasPrefix(msg, "invalid event_type") {
 			return "400 " + truncate(msg, maxDiagMsg) +
-				"; core has not accept-listed the dev event types yet; events fail-open drop until it does (INV-8)"
+				"; core has not accept-listed the dev event types yet; events fail-open drop until it does"
 		}
 		if msg != "" {
 			return "400 payload rejected: " + truncate(msg, maxDiagMsg)
@@ -81,12 +81,10 @@ func diagnose(status int, body string) string {
 // shape core currently emits on a runtime route -- which is the correct
 // answer, not a dead branch.
 //
-// Worth stating plainly, because it has now misread twice as a defect. Core's
-// envelope is `{Code int, Message string}` (`openbox-core/pkg/httpx/response.go:12-16`),
-// so `code` arrives as a JSON NUMBER; each candidate below is unmarshalled into a
+// Worth stating plainly, because it reads like a defect. Core's error
+// envelope is `{Code int, Message string}`, so `code` arrives as a JSON NUMBER; each candidate below is unmarshalled into a
 // `string`, so a numeric `code` fails to bind and is skipped, and the caller falls
-// through to its status-plus-message diagnosis. All 555 observed 401s took that
-// path, correctly. The `code` key still earns its place: a STRING `code` binds and
+// through to its status-plus-message diagnosis, which is correct. The `code` key still earns its place: a STRING `code` binds and
 // is pinned by autherr_test.go's "string code key" case, while the numeric case
 // is pinned by "401 identity". `reason_code` and `reason` are forward-compatible
 // with the bootstrap route's codes and are labelled as such in the test names --

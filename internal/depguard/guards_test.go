@@ -44,15 +44,14 @@ func guards() []subtreeGuard {
 		{
 			name: "internal/decision",
 			external: map[string]bool{
-				// D-OSS-4: the named-format detection rule pack.
+				// The named-format detection rule pack.
 				"github.com/zricethezav/gitleaks/v8": true,
 			},
 			repoLocal: map[string]bool{
-				// That decision: the decision module depends on client, never the
-				// reverse.
+				// The decision module depends on client, never the reverse.
 				repoPrefix + "/internal/client": true,
 			},
-			why: "the load-bearing half of that decision's compensating control",
+			why: "decision depends on client, never the reverse, and this list is what holds that direction",
 		},
 		{
 			name: "internal/telemetry",
@@ -83,17 +82,18 @@ func guards() []subtreeGuard {
 			repoLocal: map[string]bool{
 				// gateway, because this lane reuses the relay rather than forking
 				// it. Serving the existing gateway.Gateway over the hijacked
-				// connection is why nothing here imports client or decision; // the credential-path surface is smaller than phase 11 planned.
+				// connection is why nothing here imports client or decision, which keeps
+				// the credential-path surface small.
 				repoPrefix + "/internal/gateway": true,
 			},
-			why: "phase 11 expected {goproxy, gateway, client, decision}; the reuse decision removed two",
+			why: "reusing the gateway relay keeps client and decision out of this subtree",
 		},
 		{
 			name: "internal/gateway",
 			// One reviewed external, and the entry IS the review: a pure
 			// decompressor, no I/O, no credential surface, reachable only from the
 			// teed capture copy. It was added because `br` is the modal response
-			// encoding (74,477 of 83,190 recorded responses) and a gzip-only
+			// encoding (roughly nine in ten recorded responses) and a gzip-only
 			// decode set stored a marker for every one of them.
 			//
 			// The empty set this replaces was the strongest statement available at
@@ -112,7 +112,7 @@ func guards() []subtreeGuard {
 				repoPrefix + "/internal/client":   true,
 				repoPrefix + "/internal/decision": true,
 			},
-			why: "that decision's subject; the allowlist bounds what the lexical scan cannot follow",
+			why: "the gateway reaches client and decision directly; the allowlist bounds what the lexical credential scan cannot follow",
 		},
 	}
 }
@@ -129,7 +129,7 @@ func TestSubtreeDependenciesAreReviewed(t *testing.T) {
 			for _, p := range unallowed(got.external, g.external) {
 				t.Errorf("%s imports external %q, which its allowlist does not name (%s). "+
 					"Add it deliberately -- widening a list to make an import pass is what "+
-					"that decision forbids -- or move whatever needs it to a caller.", g.name, p, g.why)
+					"this guard forbids -- or move whatever needs it to a caller.", g.name, p, g.why)
 			}
 			for _, p := range unallowed(got.repoLocal, g.repoLocal) {
 				t.Errorf("%s imports repo-local %q, which its allowlist does not name. "+
@@ -166,7 +166,7 @@ func TestSubtreeAllowlistsHaveNoDeadEntries(t *testing.T) {
 // The distinction is the whole guard. `golang.org/x/text` is not imported by any
 // file here; it arrives through jsonschema -- so a direct-import check cannot
 // see it and would silently drop the entry. That would not be equivalence, and
-// this is the one guard that decision deliberately left closure-wide: its
+// this is the one guard deliberately left closure-wide: its
 // closure is two entries, which is readable, and the reason the bound is tight
 // is that three adapters import this package in their tests, so anything
 // reaching here links into their test binaries too. Link-time spread follows the
@@ -221,17 +221,10 @@ func TestConformanceClosureIsReviewed(t *testing.T) {
 	}
 }
 
-// TestNoReplacePointsOutsideTheRepo is the half of conformance's old guard that
-// has to outlive the phase.
-//
-// Its point was that the contract module must resolve identically in every
-// checkout, and a `replace` is what breaks that. Phase 03's acceptance criterion
-// says the collapsed repo carries no replace at all; but a criterion is checked
-// once, at merge, and a test is checked forever. This is the forever half.
-//
-// It means the same thing on both sides of the collapse: today the 45 intra-repo
-// replaces all resolve INSIDE the repository and pass; afterwards there are none
-// and it guards the root go.mod instead.
+// TestNoReplacePointsOutsideTheRepo: the contract module must resolve
+// identically in every checkout, and a local `replace` resolving outside the
+// repository is what breaks that: the build would depend on where the checkout
+// sits on disk. Every go.mod in the tree is checked.
 func TestNoReplacePointsOutsideTheRepo(t *testing.T) {
 	root := repoRoot(t)
 	mods := 0
@@ -307,14 +300,11 @@ func mustRel(root, path string) string {
 	return path
 }
 
-// TestAdaptersDoNotImportEachOther is the rule that decision's reason 2 used to
-// get from the compiler.
-//
-// While the adapters are separate modules, one importing the other needs a
-// `require` and a `replace`; mechanical, and nobody has to remember it. Under
-// one module they are siblings under internal/adapters/ and the compiler permits
-// it, so this test is the whole control. That is a real downgrade from a compiler
-// guarantee to a test, and that decision records it as one.
+// TestAdaptersDoNotImportEachOther is a rule the compiler would enforce if the
+// adapters were separate modules, where one importing the other needs a
+// `require` and a `replace`. Under one module they are siblings under
+// internal/adapters/ and the compiler permits it, so this test is the whole
+// control: a real downgrade from a compiler guarantee to a test.
 //
 // A negative rule rather than a positive allowlist, deliberately: neither adapter
 // has an allowlist today, and inventing two would be a new control rather than a

@@ -14,8 +14,8 @@ import (
 
 const redactedHeaderValue = "[redacted]"
 
-// credentialHeaders from phase 05's requirement 1, and a deliberately closed
-// list; a name not here is treated as ordinary metadata, so additions belong
+// credentialHeaders the headers that carry credentials, and a deliberately
+// closed list; a name not here is treated as ordinary metadata, so additions belong
 // in this constant rather than in a caller.
 var credentialHeaders = map[string]bool{
 	"Authorization":        true,

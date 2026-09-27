@@ -262,8 +262,7 @@ func codexOnlyMachine(t *testing.T, backlogLines int) string {
 	return out
 }
 
-// TestDoctorNamesCodexOnACodexOnlyMachine is R4 and the phase's "DX defects"
-// fix: a machine governed only by Codex must see its own real backlog and its
+// TestDoctorNamesCodexOnACodexOnlyMachine: a machine governed only by Codex must see its own real backlog and its
 // own real hook registration, not Claude Code's absence of either.
 func TestDoctorNamesCodexOnACodexOnlyMachine(t *testing.T) {
 	out := codexOnlyMachine(t, 3)
@@ -291,19 +290,19 @@ func TestDoctorNamesCodexOnACodexOnlyMachine(t *testing.T) {
 		}
 	})
 
-	// R4's own remediation ("Run `openbox init --provider claude-code`") must
+	// The Claude-Code-only remediation ("Run `openbox init --provider claude-code`") must
 	// not fire once Codex is named as governing instead. This is narrower than
 	// a whole-output substring scan: reportIdentities separately and
 	// legitimately tells Claude Code to run its OWN init when IT has no agent,
-	// regardless of Codex, and that is not what R4 is about.
+	// regardless of Codex, and that is not what this checks.
 	if strings.Contains(out, "Nothing is governed on this machine. Run `openbox init --provider claude-code`.") {
-		t.Errorf("a Codex-only machine must not fall back to the Claude-Code-only remediation (R4):\n%s", out)
+		t.Errorf("a Codex-only machine must not fall back to the Claude-Code-only remediation:\n%s", out)
 	}
 }
 
-// TestDoctorOutputUnchangedOnAClaudeCodeOnlyMachine is R5: a machine with only
+// TestDoctorOutputUnchangedOnAClaudeCodeOnlyMachine: a machine with only
 // Claude Code's spool and no Codex surface at all must render exactly the
-// sentences it always has -- the branches added for R4 must stay silent.
+// sentences it always has -- the Codex-only branches must stay silent.
 func TestDoctorOutputUnchangedOnAClaudeCodeOnlyMachine(t *testing.T) {
 	isolateHomeUnbound(t)
 	t.Setenv(devconfig.EnvSpoolDir, "")
@@ -391,7 +390,7 @@ func TestCodexHooksPresent(t *testing.T) {
 	}
 }
 
-// TestDoctorReportsOfflineAlwaysDeniesAndFailClosed is R5: delivery is
+// TestDoctorReportsOfflineAlwaysDeniesAndFailClosed: delivery is
 // always fail-closed now, so doctor's "if offline" row always says gated
 // calls are denied, never the retired "PROCEED" wording for a fail-open
 // posture that no longer exists.
@@ -412,7 +411,7 @@ func TestDoctorReportsOfflineAlwaysDeniesAndFailClosed(t *testing.T) {
 	}
 }
 
-// TestDoctorReportsHaltedRuns is R5's latch row: doctor shows the latch
+// TestDoctorReportsHaltedRuns covers the latch row: doctor shows the latch
 // count and, per latched run, the preserved cause -- never the reason text
 // (INV-2 content-free), which a delivery failure's own latch also carries.
 func TestDoctorReportsHaltedRuns(t *testing.T) {

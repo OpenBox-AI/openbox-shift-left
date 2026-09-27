@@ -221,7 +221,7 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		isolateConfig(t)
 		m := EffectivePosture().Metadata()
 		if m["decision_authority"] != DecisionAuthorityControlPlane {
-			t.Errorf("decision_authority = %v, want %q; that decision makes this posture's policy-provenance evidence",
+			t.Errorf("decision_authority = %v, want %q; it is this posture's policy-provenance evidence",
 				m["decision_authority"], DecisionAuthorityControlPlane)
 		}
 		if m["failure_policy"] != FailurePolicyFailClosed {
@@ -229,7 +229,7 @@ func TestPostureReportsDecisionProvenance(t *testing.T) {
 		}
 		for k := range m {
 			if strings.HasPrefix(k, "bundle_") || k == "staleness" {
-				t.Errorf("%q is still emitted; it reports a subsystem that decision deleted", k)
+				t.Errorf("%q is still emitted; it reports a subsystem that no longer exists", k)
 			}
 		}
 	})
@@ -289,7 +289,7 @@ func TestDeprecatedKeysAreDetectedWherePostureIsRead(t *testing.T) {
 // TestTier2DeprecationWarningFiresExactlyOnce tier2 no longer appears in the
 // posture (TestPostureMetadataOmitsTheInertTier2Key), so its one-shot stderr
 // warning is now the only remaining surface telling a developer the key is
-// dead (CLAUDE.md: "the key stays parseable so it can warn"). It must still
+// dead (the key stays parseable so it can warn). It must still
 // fire, and deprecationOnce must still cap it at one print per process even
 // across repeated resolution.
 func TestTier2DeprecationWarningFiresExactlyOnce(t *testing.T) {

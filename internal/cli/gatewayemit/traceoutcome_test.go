@@ -7,7 +7,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// TestNotElectedEmitYieldsCaptureOutcomeSkipped is phase 3's own contract on
+// TestNotElectedEmitYieldsCaptureOutcomeSkipped is the trace contract on
 // gatewayemit: an emitter that lost the election must not just emit nothing,
 // it must leave a local trace record saying so, with the right reason --
 // the same fact TestAnUnelectedLaneEmitsNothing checks against the spool.

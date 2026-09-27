@@ -80,8 +80,7 @@ func retryHarness(t *testing.T, status, retryAfter string) (*Client, *int, *[]ti
 // would have spent, sum(i*retryBase), so this asserts the new schedule cannot
 // cost the developer more than the old one did.
 //
-// (The plan budgeted 900ms here, counting a third wait the loop never took.
-// The bound is 450ms.)
+// The bound is 450ms: there are two waits, not three.
 func TestRetryStaysInsideTheBudgetTheLinearRampSpent(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c, calls, at := retryHarness(t, "503", "")
@@ -136,10 +135,9 @@ func TestRetryDelaysAreJittered(t *testing.T) {
 	}
 }
 
-// TestRetryAfterBeyondTheBudgetStopsRatherThanSleeps. Retry-After appeared
-// nowhere in this repo, so a 429 asking for a minute was retried 150ms later.
-// It is honoured now -- as a stop signal. Sleeping it out inline would hold a
-// tool call open for as long as the server asked (INV-3), and would buy
+// TestRetryAfterBeyondTheBudgetStopsRatherThanSleeps. Retry-After is honoured
+// as a stop signal: a 429 asking for a minute is not retried 150ms later. Sleeping it out inline would hold a
+// tool call open for as long as the server asked, and would buy
 // nothing: ErrDelivery re-spools the event and the next flush delivers it.
 // Refusing to send again is the half of Retry-After that protects the server,
 // and it is the half that is kept.
@@ -218,7 +216,7 @@ func TestRetryStopsImmediatelyOnAnUnretryableStatus(t *testing.T) {
 }
 
 // TestRetryAbortsOnContextCancel. The hook path depends on cancellation
-// winning: INV-3 says a hook must never hold the developer's tool call open,
+// winning: a hook must never hold the developer's tool call open,
 // and the enforcement caller cancels at its own evaluation budget.
 //
 // The attempt count is deliberately not asserted. The delays are drawn now, so

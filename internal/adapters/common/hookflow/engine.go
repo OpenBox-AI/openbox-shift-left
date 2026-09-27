@@ -305,9 +305,8 @@ func (e *Engine) emitFunc(em Emitter) FlushFunc {
 // misread error, and an error from core is never latched.
 //
 // This is the ONLY thing keeping a halted developer session refused on the
-// relay: core's own halted-session pre-check is gated on
-// !isDeveloperSession (../openbox-core/internal/services/
-// governance_workflow.go:370), so it never fires for the sessions this repo
+// relay: the OpenBox core server's own halted-session pre-check skips
+// developer sessions, so it never fires for the sessions this repo
 // governs. Removing this write silently un-halts every halted run on every
 // lane but the hook path's own narrow prompt-contract write (gate.go).
 func Deliver(ctx context.Context, em Emitter, advisory *Advisory, ev client.DevEvent, logger *log.Logger) (client.Evaluation, error) {

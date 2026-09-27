@@ -6,9 +6,8 @@ import (
 	"testing"
 )
 
-// TestCCArmIsUnchangedByTheCodexArm is the before/after table the phase's
-// acceptance requires: ResolveElection (the Claude Code arm) is not edited by
-// codexelection.go at all, so its answer for every representative settings
+// TestCCArmIsUnchangedByTheCodexArm is a fixed before/after table:
+// ResolveElection (the Claude Code arm) is not edited by codexelection.go at all, so its answer for every representative settings
 // input must be identical to what it was before this file existed. Recorded
 // here as a fixed table rather than "trust the diff", so a future change that
 // touches producer.go/settingsread.go and shifts one of these answers fails
@@ -95,8 +94,7 @@ func TestResolveCodexElectionRoutedAtLoopback(t *testing.T) {
 	}
 }
 
-// TestResolveCodexElectionNeverReadsClaudeCodeEnv is the phase's explicit
-// requirement: never reuse CLAUDE_CODE_ENABLE_TELEMETRY. Setting it in the
+// TestResolveCodexElectionNeverReadsClaudeCodeEnv: never reuse CLAUDE_CODE_ENABLE_TELEMETRY. Setting it in the
 // process environment must have zero effect on the Codex arm, which reads
 // only config.toml.
 func TestResolveCodexElectionNeverReadsClaudeCodeEnv(t *testing.T) {

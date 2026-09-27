@@ -429,8 +429,8 @@ func StartFirst() Grader {
 // identical event id -- wrong, caught by this Mutate itself staying green
 // against its own mutation: claude-code's own mapper derives EventID from
 // the arguments AND a high-resolution timestamp taken fresh inside each
-// hook process (mapper.go's own deriveID, INV-5's own per-event
-// distinguisher, deliberately so two distinct calls never collide), so two
+// hook process (mapper.go's own deriveID, the idempotency key's
+// per-event distinguisher, deliberately so two distinct calls never collide), so two
 // separate invocations of identical content still mint two DIFFERENT keys,
 // each correctly attempted once -- not a violation. The only way the same
 // key is EVER attempted twice is the one legitimate case HeldByKey already

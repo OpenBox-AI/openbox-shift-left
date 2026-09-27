@@ -23,7 +23,7 @@ type outputContract struct{}
 // REQUIRE_APPROVAL for a real decision first and renders what came back, so
 // `ask` never reaches the coding agent through it. Deliberately -- the
 // provider's own prompt would ask the developer to approve their own filed
-// request (OD-E9-1, gate.go).
+// request (gate.go).
 //
 // It stays non-empty because DecisionTightens treats an empty approval verb as
 // "does not tighten", which would let a REQUIRE_APPROVAL through.

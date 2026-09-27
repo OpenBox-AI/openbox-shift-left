@@ -2,7 +2,7 @@
 #
 # Two settings from golang-standards/project-layout are deliberately NOT taken.
 # `[*.md] indent_style = tab` would put every markdown file here in violation on
-# first save — there is not one leading tab in README.md, CLAUDE.md or docs/. And
+# first save — there is not one leading tab in README.md or docs/. And
 # `.gitattributes`' blanket `* -text` is a line-ending policy, wrong for a repo
 # that ships shell scripts and cross-compiles for Windows, and not layout anyway.
 root = true

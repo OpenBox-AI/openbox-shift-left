@@ -91,7 +91,7 @@ func TestPromptGate_BlockRendersDecisionBlock(t *testing.T) {
 	}
 }
 
-// (b) A HALT additionally stops the thread. This is the lever phase 00 measured:
+// (b) A HALT additionally stops the thread. This is the measured lever:
 // `Blocked` vs `Stopped` are two different states in Codex's own hook log.
 func TestPromptGate_HaltAlsoStopsTheThread(t *testing.T) {
 	gateEnv(t)
@@ -259,7 +259,7 @@ func TestOutputContracts_NeverRenderARejectedShape(t *testing.T) {
 	})
 }
 
-// TestPromptContract_IsTheOnlyLatchWriter states the design ruling as a test:
+// TestPromptContract_IsTheOnlyLatchWriter states the design rule as a test:
 // one writer, so there is a single place to reason about when a Codex session
 // becomes unrunnable. Both tool contracts still READ the latch (covered above).
 func TestPromptContract_IsTheOnlyLatchWriter(t *testing.T) {

@@ -56,7 +56,7 @@ func (r *rawRecorder) await(t *testing.T, n int) []RawCapture {
 	return got
 }
 
-// TestRawObserverSeesUnredactedBodyWhileCapturedStaysRedacted is phase 3's
+// TestRawObserverSeesUnredactedBodyWhileCapturedStaysRedacted is the
 // contract for the gateway seam: WithRawObserver must see the body exactly
 // as it came off the wire, secret-shaped fixture and all, at the same time
 // the ordinary Emitter -- wired in the very same call -- keeps seeing it

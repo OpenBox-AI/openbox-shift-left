@@ -48,8 +48,8 @@ func storedDoc(t *testing.T, stored string) ([]json.RawMessage, *selectionNote) 
 	return doc.Messages, doc.Selection
 }
 
-// TestATrailingTokenCounterDoesNotBecomeTheJudgedTurn is the case the phase
-// exists for: the newest element the provider sent is a token counter, and the
+// TestATrailingTokenCounterDoesNotBecomeTheJudgedTurn is the case the
+// walk-back exists for: the newest element the provider sent is a token counter, and the
 // judge would read it as the current goal.
 func TestATrailingTokenCounterDoesNotBecomeTheJudgedTurn(t *testing.T) {
 	const newest = "THE_REAL_NEWEST_TURN"

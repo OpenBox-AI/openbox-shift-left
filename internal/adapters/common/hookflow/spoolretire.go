@@ -16,9 +16,8 @@ const RetireSpoolAfter = 30 * 24 * time.Hour
 
 const MaxDrainPasses = 8
 
-// MaxRecoveryAttempts is retained only so doctor's existing (pre-phase-2)
-// wording still compiles and reads sensibly until that phase revises it: this
-// release has no carry-over/retry concept, so no code path here counts
+// MaxRecoveryAttempts is retained only so doctor's existing wording still
+// compiles and reads sensibly: this release has no carry-over/retry concept, so no code path here counts
 // against it any more.
 const MaxRecoveryAttempts = 5
 

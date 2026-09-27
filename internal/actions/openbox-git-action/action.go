@@ -34,12 +34,12 @@ type Action struct {
 	Log      Logger           // nil => discard
 	// Advisory records the Advisory-tier verdict/guardrail signals for the Deploy
 	// event. Nil ⇒ default sink (DefaultAdvisoryPath). Record-only: it never
-	// gates the deploy (INV-3).
+	// gates the deploy.
 	Advisory *Advisory
 }
 
 // Result is the outcome of a single run; returned for logging and tests
-// regardless of whether the emit succeeded (INV-3 fail-open).
+// regardless of whether the emit succeeded (fail-open).
 type Result struct {
 	Resolution Resolution
 	Event      client.DevEvent
@@ -62,7 +62,7 @@ func (a *Action) log() Logger {
 }
 
 // Run resolves the pushed commit, builds the Deploy event, and (unless Emitter
-// is nil) emits it. Emission is fail-open (INV-3): a transport failure is
+// is nil) emits it. Emission is fail-open: a transport failure is
 // logged and the Result still carries the full Resolution + Event so CI never
 // breaks over governance telemetry.
 func (a *Action) Run(ctx context.Context, target, base string) (Result, error) {
@@ -87,7 +87,7 @@ func (a *Action) Run(ctx context.Context, target, base string) (Result, error) {
 	out.Verdict = eval.Verdict
 	out.Emitted = true
 
-	// Record-only; never gates the deploy (INV-3).
+	// Record-only; never gates the deploy.
 	a.advisory().Record(ev, eval)
 	return out, nil
 }

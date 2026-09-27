@@ -10,23 +10,14 @@ import (
 )
 
 // TestConcurrentCapturesEachSpoolBothHalves is a REGRESSION GUARD and NOT a
-// reproduction, and that distinction is load-bearing enough to record here
-// rather than leave in a plan.
-//
-// It was written while investigating activities that reached the control plane
-// carrying only their Started half. Nothing in this package drove Emit
-// concurrently before, so the gap was worth closing on its own terms -- but this
-// test is EXPECTED TO PASS ON HEAD, and it does. The hypothesis that sent anyone
-// looking here is dead: a healthy session showed zero losses across 640
-// activity ids with probe bursts of 22 and 65 concurrent starts, while a 7-wide
-// burst lost one on a day the spool discarded 722 events inside two hours. Burst
-// width was standing in for "ran while delivery was failing". So a green run here
-// is not evidence that the field defect is fixed, and it must not be read as such.
+// reproduction. Concurrent captures are not what leaves an activity with only
+// its Started half at the control plane; failed delivery is. So a green run
+// here is not evidence about delivery loss, and it must not be read as such.
 //
 // What this test does own: Emit builds both halves at one call site and appends
 // them in order, stopping if the first append fails. If concurrent appends could
 // interleave, tear a line, or lose one, an activity would arrive single-sided --
-// a property worth holding whatever the field defect turns out to be.
+// a property worth holding on its own terms.
 func TestConcurrentCapturesEachSpoolBothHalves(t *testing.T) {
 	const (
 		session = "sess-concurrent"

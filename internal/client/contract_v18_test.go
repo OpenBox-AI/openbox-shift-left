@@ -8,11 +8,11 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
-// This file is phase 04's own scoped TDD coverage for the v1.8 contract bump:
-// 21 new lifecycle classes riding stock SignalReceived, and the three
-// additive run-identity fields declared here (produced by phase 08). Phase
-// 10 owns the cross-cutting vocabulary suite (signalvocabulary_test.go,
-// schema_guard_test.go, acceptancetest); this file does not duplicate it.
+// This file is the scoped coverage for the v1.8 contract bump: 21 new
+// lifecycle classes riding stock SignalReceived, and the three additive
+// run-identity fields declared here. The cross-cutting vocabulary suite
+// (signalvocabulary_test.go, schema_guard_test.go, acceptancetest) lives
+// elsewhere; this file does not duplicate it.
 
 func TestSchemaVersionIsV19(t *testing.T) {
 	if SchemaVersion != "1.9" {
@@ -20,7 +20,7 @@ func TestSchemaVersionIsV19(t *testing.T) {
 	}
 }
 
-// newLifecycleSignals is table B of the phase file: the 21 new classes, each
+// newLifecycleSignals is the 21 new classes, each
 // riding stock SignalReceived with its snake_case signal_name. Order matches
 // the constant declaration order.
 var newLifecycleSignals = []struct {
@@ -93,15 +93,15 @@ func TestNewClassesAreInAllEventTypes(t *testing.T) {
 	}
 }
 
-// TestNoSessionSuspended is V3's grep, codified: neither the constant nor the
+// TestNoSessionSuspended: there is no session_suspended class, so neither the constant nor the
 // wire string may exist anywhere the client declares its vocabulary.
 func TestNoSessionSuspended(t *testing.T) {
 	for _, et := range AllEventTypes {
 		if strings.Contains(string(et), "SessionSuspended") {
-			t.Errorf("AllEventTypes contains %s; V3 deleted SessionSuspended", et)
+			t.Errorf("AllEventTypes contains %s; SessionSuspended does not exist", et)
 		}
 		if _, name, err := wireTypeFor(et); err == nil && strings.Contains(name, "session_suspended") {
-			t.Errorf("%s maps to signal_name %q; V3 deleted session_suspended", et, name)
+			t.Errorf("%s maps to signal_name %q; session_suspended does not exist", et, name)
 		}
 	}
 }
@@ -116,7 +116,7 @@ func TestNoSessionSuspended(t *testing.T) {
 // signal_args as a new user goal. Core's source-and-name gate now suppresses
 // that for a developer-runtime signal whose name is not prompt_submitted, which
 // is why this inverts. A build carrying this projection must not reach a
-// developer before that gate is running -- see the plan's ordered rollout.
+// developer before that gate is running.
 func TestNewClassesProjectSignalArgs(t *testing.T) {
 	for _, tc := range newLifecycleSignals {
 		ev := DevEvent{
@@ -204,7 +204,7 @@ func TestNewContentKeysAreGated(t *testing.T) {
 }
 
 // TestRunIdentityFieldsOmitEmptyAtGeneration0 is the byte-identity guarantee
-// phase 08 depends on: a DevEvent that never continued marshals with none of
+// run continuation depends on: a DevEvent that never continued marshals with none of
 // the three run-identity keys present at all.
 func TestRunIdentityFieldsOmitEmptyAtGeneration0(t *testing.T) {
 	ev := DevEvent{
@@ -226,9 +226,9 @@ func TestRunIdentityFieldsOmitEmptyAtGeneration0(t *testing.T) {
 	}
 }
 
-// TestGovernancePayloadCarriesRunGenerationAndContinuedFromRunID: 5a's wiring
-// into the wire payload, both omitempty, RunID untouched (still ev.SessionID
-// — phase 08's derivation is not implemented here).
+// TestGovernancePayloadCarriesRunGenerationAndContinuedFromRunID: both fields
+// reach the wire payload, both omitempty, and RunID falls back to ev.SessionID
+// because this event sets no RunID of its own.
 func TestGovernancePayloadCarriesRunGenerationAndContinuedFromRunID(t *testing.T) {
 	ev := DevEvent{
 		EventID: "ev-1", EventType: EventSessionStarted, SessionID: "sess-1", DeveloperDID: "did:aip:x",
@@ -238,7 +238,7 @@ func TestGovernancePayloadCarriesRunGenerationAndContinuedFromRunID(t *testing.T
 	}
 	p := decodePayload(t, ev)
 	if p.RunID != "sess-1" {
-		t.Errorf("RunID = %q, want ev.SessionID %q unchanged (phase 08 replaces this)", p.RunID, "sess-1")
+		t.Errorf("RunID = %q, want ev.SessionID %q (no RunID set)", p.RunID, "sess-1")
 	}
 	if p.RunGeneration != 2 {
 		t.Errorf("run_generation = %d, want 2", p.RunGeneration)
@@ -331,8 +331,8 @@ func TestSchemaRejectsInvalidRunIdentityFields(t *testing.T) {
 }
 
 // TestSchemaEnumAndOneOfHave33Entries binds the schema's own declared
-// vocabulary size, independent of AllEventTypes (phase 10 asserts the two are
-// equal once it moves the other two lists).
+// vocabulary size, independent of AllEventTypes (the vocabulary suite asserts
+// the two are equal).
 func TestSchemaEnumAndOneOfHave33Entries(t *testing.T) {
 	schema, err := conformance.LoadSchema()
 	if err != nil {
@@ -372,7 +372,8 @@ func TestSchemaEnumAndOneOfHave33Entries(t *testing.T) {
 	}
 }
 
-// TestOpenboxSessionIDDescriptionNoLongerClaimsRunIDEquality is step 11b.
+// TestOpenboxSessionIDDescriptionNoLongerClaimsRunIDEquality: since v1.8 a
+// continued run mints its own run_id, so the description must not equate them.
 func TestOpenboxSessionIDDescriptionNoLongerClaimsRunIDEquality(t *testing.T) {
 	schema, err := conformance.LoadSchema()
 	if err != nil {
@@ -387,7 +388,7 @@ func TestOpenboxSessionIDDescriptionNoLongerClaimsRunIDEquality(t *testing.T) {
 }
 
 // TestExistingClassesUnchangedByV18Bump is the "no byte change at generation
-// 0" success criterion, scoped to what this file can assert independent of
+// 0" guarantee, scoped to what this file can assert independent of
 // the full golden suite: the 12 pre-1.8 classes' wireTypeFor/signal names are
 // untouched.
 func TestExistingClassesUnchangedByV18Bump(t *testing.T) {

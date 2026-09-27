@@ -33,7 +33,7 @@ func TestCapabilities(t *testing.T) {
 		}
 	}
 	// Both are opt-OUT now, and the profile has to say so. Verdict.apply read
-	// "opt-in, default observe" long after that decision flipped enforce ON; a
+	// "opt-in, default observe" long after enforcement became ON; a
 	// note telling a reader an unconfigured session cannot block, when it can.
 	for _, k := range []string{"verdict.apply"} {
 		if !strings.Contains(byKey[k].How, "default") {
@@ -57,7 +57,7 @@ func TestCapabilities(t *testing.T) {
 	// The profile said the gate renders "deny/ask on tools" for as long as the
 	// gate has been holding approvals instead. `ask` is the provider's own
 	// prompt, and showing it would ask the developer to approve their own filed
-	// request -- refused on purpose (OD-E9-1, gate.go). A profile that names a
+	// request -- refused on purpose (gate.go). A profile that names a
 	// verb the gate cannot render invites someone to test for it, or to "fix"
 	// the gate toward it.
 	//

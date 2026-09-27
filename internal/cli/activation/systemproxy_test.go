@@ -9,7 +9,7 @@ import (
 )
 
 // TestRecordLoadsAnOldFileWithNoSystemField is the back-compat requirement:
-// a record written before this phase carries no "system" key at all, and
+// a record written before the system field existed carries no "system" key at all, and
 // loading it must leave Record.System nil rather than erroring -- no schema
 // bump, no migration step.
 func TestRecordLoadsAnOldFileWithNoSystemField(t *testing.T) {

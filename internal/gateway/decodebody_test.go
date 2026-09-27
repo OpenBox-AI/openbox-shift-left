@@ -42,8 +42,8 @@ func encodedUpstream(t *testing.T, encoding string, body []byte) *memhttptest.Se
 	return srv
 }
 
-// TestGzippedResponseRelaysCompressedAndCapturesDecoded is the phase's
-// load-bearing test, and it asserts both halves of the trade the phase makes:
+// TestGzippedResponseRelaysCompressedAndCapturesDecoded is the load-bearing
+// decode test, and it asserts both halves of the trade decoding makes:
 // the client still receives the provider's exact compressed bytes, and the
 // capture holds text a reader (and the redactor) can inspect.
 func TestGzippedResponseRelaysCompressedAndCapturesDecoded(t *testing.T) {
@@ -260,12 +260,10 @@ func TestUndecodableGzipYieldsAMarker(t *testing.T) {
 // complaint. That is the same shape as the defect this file exists for: a
 // placeholder that reads as a documented limit rather than as a bug.
 //
-// This sentence is deliberately worded to avoid a keyword before a colon. The
-// version that shipped in b443053 read "...AsAHeaderToken: ${OPENBOX_REDACTED_SECRET_ASSIGNMENT} is a
-// LIST header", and this repo's own on-save secret detector matched `token` +
-// `:` + a 16-character value and replaced "Content-Encoding" with a
-// ${OPENBOX_REDACTED_*} placeholder -- in the committed comment. Third instance in
-// one session; see the derived fingerprint in internal/client/golden_test.go.
+// This comment is deliberately worded to avoid a keyword before a colon: the
+// on-save secret detector matches `token` + `:` + a 16-character value and
+// would rewrite the comment itself with a redaction placeholder. See the
+// derived fingerprint in internal/client/golden_test.go.
 func TestTheDecodeSetIsMatchedAsAHeaderToken(t *testing.T) {
 	for _, tc := range []struct {
 		encoding string
@@ -318,8 +316,8 @@ func brotliOf(t *testing.T, plain string) []byte {
 	return buf.Bytes()
 }
 
-// TestBrotliResponseRelaysCompressedAndCapturesDecoded is this phase's
-// load-bearing test, and it is deliberately the wired one: decodeCapturable
+// TestBrotliResponseRelaysCompressedAndCapturesDecoded is the other
+// load-bearing decode test, and it is deliberately the wired one: decodeCapturable
 // passing in isolation is what the gzip pair already proves. What was broken is
 // the whole path -- 89.5% of stored response bodies were a marker naming `br` --
 // so the assertion has to run through the relay, on both halves of the same

@@ -57,7 +57,7 @@ type Options struct {
 	// so sessions in that project are governed and sessions elsewhere are not.
 	ProjectDir string
 	// Findings persists the findings-loop posture into the dev config, so no
-	// runtime env var is needed (that decision for the mechanism).
+	// runtime env var is needed.
 	Findings *bool
 }
 
@@ -73,7 +73,7 @@ type Deps struct {
 	// DiscardLegacySpool discards one tool's spooled events queued under the
 	// legacy identity this run's write is about to replace, and reports how
 	// many it removed. nil (every fixture here, and cmd/openbox's wiring until
-	// a later phase supplies a real implementation) means "discard nothing":
+	// a real implementation is supplied) means "discard nothing":
 	// register calls it exactly the way a real implementation would, so
 	// wiring one in is a Deps assignment, not a change to this file.
 	DiscardLegacySpool func(tool string) (int, error)
@@ -339,7 +339,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 		Tags:        []string{"openbox-shift-left", "developer-runtime"},
 		AivssConfig: profile,
 		Config: map[string]any{
-			"managed_enable": o.ManagedEnable, // substrate only; not activated in Phase 1
+			"managed_enable": o.ManagedEnable, // substrate only; not activated yet
 		},
 		IdentityVerification: &backend.IdentityVerification{
 			Method:     devconfig.IdentityMethodKeycloakWorkload,
@@ -450,7 +450,7 @@ func register(ctx context.Context, o Options, d Deps) (*Result, provider.Credent
 	fmt.Fprintf(d.Out, "  %-12s %s (0600; values never printed, INV-1)\n",
 		"credentials", credentialFileLabel())
 	if o.ManagedEnable {
-		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated; Phase-1 pilot is opt-in).")
+		fmt.Fprintln(d.Out, "Managed force-enable substrate recorded (verified, not activated; force-enable is opt-in).")
 	}
 
 	return res, ref, nil

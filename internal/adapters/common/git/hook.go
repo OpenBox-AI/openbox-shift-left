@@ -7,7 +7,10 @@ import (
 	"strings"
 )
 
-const managedMarker = "managed-by: openbox-shift-left (STORY-SL-5)"
+// managedMarker identifies a hook this tool wrote. Older installs carry a
+// longer marker that begins with this one, so a Contains check still
+// recognises them as ours.
+const managedMarker = "managed-by: openbox-shift-left"
 
 // RunPrepareCommitMsg is the fail-open entrypoint a hook binary calls. Returns
 // the number of ids that were candidates for stamping (diagnostics only) and
@@ -39,7 +42,7 @@ func (g Git) ResolveSessions(r SessionResolver) []string {
 }
 
 // ResolveSessionsDetailed is ResolveSessions with the tier/tool each session
-// resolved from, for the commit-event sink's routing (R2): unlike the
+// resolved from, for the commit-event sink's routing: unlike the
 // trailer, which attributes any resolved session, an event may only be
 // emitted for a session an agent tool's own marker confirms.
 func (g Git) ResolveSessionsDetailed(r SessionResolver) []ResolvedSession {
@@ -137,7 +140,7 @@ func (g Git) HooksDir() (string, error) {
 }
 
 // HooksDirDefault is `<git-common-dir>/hooks`, ignoring core.hooksPath. The
-// opt-in ambient auto-install uses this (SL5-SEC-2): an implicit, session-
+// opt-in ambient auto-install uses this: an implicit, session-
 // start install must not follow a repo-controlled core.hooksPath, which a
 // malicious repo could point outside the tree.
 func (g Git) HooksDirDefault() (string, error) {
@@ -166,8 +169,8 @@ func hookScript(cfg HookConfig) string {
 	fixedArgs := strings.Join(parts, " ")
 
 	return "#!/bin/sh\n" +
-		"# OpenBox commit-trailer hook (STORY-SL-5). Stamps OpenBox-Session trailers\n" +
-		"# so pushed commits can be bound to their session(s) server-side (SL-6).\n" +
+		"# OpenBox commit-trailer hook. Stamps OpenBox-Session trailers\n" +
+		"# so pushed commits can be bound to their session(s) server-side.\n" +
 		"# OBSERVE-ONLY: this hook MUST NEVER fail a commit; every path exits 0.\n" +
 		"# " + managedMarker + "\n" +
 		"if [ -z \"$OPENBOX_GIT_HOOK\" ]; then\n" +

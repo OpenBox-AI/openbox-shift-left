@@ -1,4 +1,6 @@
-// Command refusal-injector is probe A's instrument. Never against real work: a
+// Command refusal-injector is a dev instrument that fabricates a provider
+// refusal mid-conversation to observe how the tool surfaces it. Never against
+// real work: a
 // refusal injected mid-conversation can leave the session's context in a state
 // the client did not expect, and the point of the exercise is to find out what
 // that state IS.

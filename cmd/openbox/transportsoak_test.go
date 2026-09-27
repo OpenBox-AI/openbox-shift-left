@@ -131,8 +131,9 @@ func TestTransportSoakMeasuresSpoolCostPerModelCall(t *testing.T) {
 		float64(perEvent)*5000/(1<<20))
 }
 
-// TestOversizedRecordedBodyIsCappedOnTheWire is OD1(c), exercised on a real
-// oversized recorded body rather than a synthetic one.
+// TestOversizedRecordedBodyIsCappedOnTheWire proves an oversized body is
+// truncated before egress, exercised on a real oversized recorded body
+// rather than a synthetic one.
 func TestOversizedRecordedBodyIsCappedOnTheWire(t *testing.T) {
 	ex := loadExchange(t, "messages-json.json")
 	reqRunes := utf8.RuneCountInString(ex.Request.Body)
@@ -184,7 +185,7 @@ func TestOversizedRecordedBodyIsCappedOnTheWire(t *testing.T) {
 		t.Errorf("the tail of an oversized recorded body reached the wire; the 65,536-rune cap " +
 			"is not bounding egress")
 	}
-	t.Logf("OD1(c): %d-rune recorded request body egressed as a %d-rune payload",
+	t.Logf("egress cap: %d-rune recorded request body egressed as a %d-rune payload",
 		reqRunes, utf8.RuneCountInString(body))
 }
 

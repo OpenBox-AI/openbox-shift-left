@@ -15,7 +15,7 @@ func TestIsHighRiskClass_Codex(t *testing.T) {
 	cases := map[string]bool{
 		"Bash":                   true,  // arbitrary shell
 		"mcp__github__create_pr": true,  // MCP execution
-		"apply_patch":            false, // file edit; T1 only (no /evaluate latency)
+		"apply_patch":            false, // file edit; local decision only (no /evaluate latency)
 		"web_search":             false, // catch-all shell, not arbitrary exec
 		"update_plan":            false,
 	}
@@ -31,22 +31,22 @@ func TestDecisionTightens_Codex(t *testing.T) {
 	approval := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}}
 	allow := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
 	if !decisionTightens(block) {
-		t.Error("BLOCK must count as tightening (T2 skipped)")
+		t.Error("BLOCK must count as tightening (/evaluate escalation skipped)")
 	}
 	if !decisionTightens(approval) {
-		t.Error("REQUIRE_APPROVAL→deny must count as tightening on Codex (OD-SL7-ASK)")
+		t.Error("REQUIRE_APPROVAL→deny must count as tightening on Codex")
 	}
 	if decisionTightens(allow) {
-		t.Error("ALLOW must NOT tighten (T2 fires)")
+		t.Error("ALLOW must NOT tighten (/evaluate escalation fires)")
 	}
 }
 
 func TestEvaluationDecision_Codex(t *testing.T) {
 	if d := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictUnknown}); !d.FailOpen {
-		t.Error("an unknown T2 verdict must fold to hookflow.FailOpen (no real verdict)")
+		t.Error("an unknown /evaluate verdict must fold to hookflow.FailOpen (no real verdict)")
 	}
 	if d := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictBlock}); d.FailOpen {
-		t.Error("a real T2 BLOCK must be hookflow.FailOpen=false")
+		t.Error("a real /evaluate BLOCK must be hookflow.FailOpen=false")
 	}
 }
 
@@ -70,7 +70,7 @@ func TestEscalateTier2_DegradesFailOpenOnZeroBudget(t *testing.T) {
 	}
 }
 
-// TestTier2EventIDMatchesObserve pins Sam G_SEC F2: the Tier-2 /evaluate copy
+// TestTier2EventIDMatchesObserve pins that the escalated /evaluate copy
 // of a PreToolUse event must derive the same deterministic event_id as its
 // spooled observe counterpart, so the two collapse under one Idempotency-Key
 // server-side (no double-count).

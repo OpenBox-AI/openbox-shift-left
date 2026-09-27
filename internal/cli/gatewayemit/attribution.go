@@ -33,7 +33,7 @@ const maxAttributionValueBytes = 256
 
 // attributionTokenKeys maps the token name Claude Code writes to the metadata
 // key this lane promotes it under. cc_workload and cc_version are
-// deliberately absent: this phase does not bind either.
+// deliberately absent: this lane does not bind either.
 var attributionTokenKeys = map[string]string{
 	"cc_prompt_id":  "prompt_id",
 	"cc_prev_req":   "previous_request_id",

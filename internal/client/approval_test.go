@@ -41,7 +41,7 @@ func approvalServer(t *testing.T, respond func() (int, string)) (*memhttptest.Se
 
 // TestApprovalKeyFor_MatchesTheWirePayload is the load-bearing property of the
 // whole hold: a poll must address the row the escalation created. Extended
-// (phase 08, T5) to generation >= 1: runIDFor is the ONE selection both
+// to generation >= 1: runIDFor is the ONE selection both
 // buildPayload and ApprovalKeyFor call, so a continued run's escalation and
 // its poll can never disagree about which row to hit.
 func TestApprovalKeyFor_MatchesTheWirePayload(t *testing.T) {

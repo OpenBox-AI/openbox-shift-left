@@ -370,8 +370,8 @@ func TestRemovedSecretBackendFlagFailsLoudly(t *testing.T) {
 	}
 }
 
-// TestClaudeCodeInstallsForRealExitsZero proves the SL4-wire-1 front door: the
-// CLI registers the real claudecode.Installer (not the SL-2 stub), so `init
+// TestClaudeCodeInstallsForRealExitsZero proves the real front door: the
+// CLI registers the real claudecode.Installer (not a stub), so `init
 // --provider claude-code` materializes the plugin bundle + dev config and
 // exits 0.
 func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
@@ -443,7 +443,7 @@ func setHookEnv(t *testing.T) string {
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(dir, "enforcements.jsonl"))
 	t.Setenv(devconfig.EnvPendingApprovalDir, filepath.Join(dir, "pending-approvals"))
 	t.Setenv("OPENBOX_ADVISORY_FILE", filepath.Join(dir, "advisories.jsonl"))
-	// Content capture defaults ON, and since that decision the observe path
+	// Content capture defaults ON, and the observe path
 	// carries the tool's input under that gate; so a hook test that left the
 	// posture to the default would silently start asserting the capture-ON
 	// behaviour.
@@ -500,7 +500,7 @@ func TestHookMisuseIsSafe(t *testing.T) {
 	}
 }
 
-// TestUnifiedBinaryHookObserveOnlyContract is the G_SEC re-verify: the SL-4
+// TestUnifiedBinaryHookObserveOnlyContract: the hook's
 // exit-0 contract must survive folding the hook into the multi-command
 // `openbox` binary. PreToolUse is gated unconditionally now (ResolveEnforce
 // always reports true); with no reachable control plane it denies (delivery
@@ -577,7 +577,7 @@ func onlySpoolFile(t *testing.T, dir string) string {
 //   - The HOT-PATH hooks (UserPromptSubmit, PreToolUse..PostToolUse) never
 //     block on the network except where gating or an inline single-attempt
 //     delivery says otherwise; delivery of everything else happens only at
-//     SessionEnd (AC4 latency budget: the async/no-network-on-hot-path
+//     SessionEnd (the latency budget: the async/no-network-on-hot-path
 //     guarantee);
 //   - SessionStart is the one exception among the non-gating hooks: it drains
 //     its own WorkflowStarted event inline, under its own session's stripe,
@@ -901,7 +901,7 @@ func TestSessionStartReachesCoreFirstWithALiveFlusher(t *testing.T) {
 	t.Logf("session-start-reaches-core-first: %d/%d iterations passed; SessionStart wall times: %v", iterations, iterations, sessionStartWallTimes)
 }
 
-// TestUnifiedBinaryGitHookStampsCommit proves the od17 git-hook fold end-to-
+// TestUnifiedBinaryGitHookStampsCommit proves the unified-binary git hook end-to-
 // end: `openbox hook git install` writes a prepare-commit-msg hook that re-
 // invokes the unified binary as `openbox hook git prepare-commit-msg`, and a
 // real commit gets the OpenBox-Session trailer stamped; with no separate
@@ -1121,8 +1121,8 @@ func setCodexHookEnv(t *testing.T) string {
 }
 
 // TestCodexHookIsObserveOnlyInProcess mirrors the claude-code routing test for
-// the new provider: exit 0, event spooled, no tool_input content in the spool
-// (SL3-SEC-3). PreToolUse is gated unconditionally now (ResolveEnforce always
+// the new provider: exit 0, event spooled, no tool_input content in the
+// spool. PreToolUse is gated unconditionally now (ResolveEnforce always
 // reports true); with no reachable control plane it denies (delivery is
 // always fail-closed), but the escalation was never attempted (no client
 // configured), so the gate's own SpoolObserve still appends this call's
@@ -1168,8 +1168,7 @@ func TestCodexHookMisuseIsSafe(t *testing.T) {
 	}
 }
 
-// TestCodexUnifiedBinaryObserveE2E is the story's real-binary observe E2E
-// (AC-10): build the actual `openbox` binary and drive ALL five wired events
+// TestCodexUnifiedBinaryObserveE2E is the real-binary observe E2E: build the actual `openbox` binary and drive ALL five wired events
 // through `openbox hook codex <event>` with the v0.145.0-shaped fixture
 // payloads from internal/adapters/codex/testdata.
 func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
@@ -1245,7 +1244,7 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 	}
 }
 
-// TestCodexInstallsForRealExitsZero proves the story-SL7-A registry swap
+// TestCodexInstallsForRealExitsZero proves the Codex registry swap
 // through the real `init` front door: the CLI registers the real
 // codex.Installer, so `init --provider codex` writes hooks.json (under the
 // redirected CODEX_HOME) + the dev config, surfaces the /hooks trust step, and

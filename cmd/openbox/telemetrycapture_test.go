@@ -84,7 +84,7 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	// append), so the fake core's inbox has to be waited for rather than read
 	// once immediately after the export returns.
 	// The wire's event_type is the generic ActivityStarted/ActivityCompleted
-	// pair -- "for a model call llm_completion IS the activity" (CLAUDE.md) --
+	// pair -- for a model call llm_completion IS the activity --
 	// never client.DevEvent's own TurnStarted/TurnCompleted Go-level value.
 	var completed, started fakecore.Received
 	deadline := time.Now().Add(10 * time.Second)
@@ -612,7 +612,7 @@ func TestTelemetryCommandHonoursEachToolsOwnRecordingPosture(t *testing.T) {
 }
 
 // otlpCodexAPIRequest is otlpAPIRequest's Codex shape: conversation.id in
-// place of session.id, which is what the probe recorded Codex actually
+// place of session.id, which is what Codex was observed to actually
 // exports -- a minimal, scoped attributability, not a full session-key
 // package.
 func otlpCodexAPIRequest(conversationID, requestID string) string {

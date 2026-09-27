@@ -7,7 +7,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// TestElectedNameFnTracesOnlyOnChange is phase 3's own contract: the
+// TestElectedNameFnTracesOnlyOnChange pins the election-trace contract: the
 // election is re-resolved on every relayed call, so tracing every
 // resolution would flood the trace; only a CHANGE in the elected lane's
 // name may produce an election record, and the very first resolution

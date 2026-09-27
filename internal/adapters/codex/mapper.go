@@ -27,7 +27,7 @@ type Identity struct {
 type Mapper struct {
 	Identity Identity
 	Now      func() time.Time // injectable clock; defaults to time.Now
-	// NewID, when non-nil, overrides the idempotency-id source (INV-5); used by
+	// NewID, when non-nil, overrides the idempotency-id source; used by
 	// tests to pin ids.
 	NewID func() string
 	// CaptureContent authorizes copying the (content) prompt text onto the
@@ -37,8 +37,7 @@ type Mapper struct {
 	CaptureContent bool
 	// RedactContent redacts a content body for secrets before it is attached to
 	// an event. Nil ⇒ identity, which is the honest `secret_detection:false`
-	// case: the text egresses unredacted (that decision says so rather than
-	// hiding it).
+	// case: the text egresses unredacted (said plainly rather than hidden).
 	RedactContent func(string) string
 	// Finops, when non-nil, carries the usage numbers only the finops reader
 	// extracted from the SessionEnd rollout jsonl.

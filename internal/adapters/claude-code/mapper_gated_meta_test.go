@@ -69,7 +69,7 @@ func TestGatedContentMetaIsBoundAndGated(t *testing.T) {
 			if got.Metadata[tc.key] != text {
 				t.Errorf("metadata[%q] = %v, want the free text", tc.key, got.Metadata[tc.key])
 			}
-			// R4: it must not displace the class's existing content field.
+			// It must not displace the class's existing content field.
 			if got.Content == nil || got.Content.SignalDetail != tc.sibling {
 				t.Errorf("content.signal_detail = %+v, want %q; the new key displaced it",
 					got.Content, tc.sibling)

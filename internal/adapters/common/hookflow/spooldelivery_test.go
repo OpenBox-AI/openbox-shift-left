@@ -68,7 +68,7 @@ func spoolEvent(t *testing.T, e *Engine, session, id string) {
 }
 
 // TestABurstAppendedDuringADrainIsStillDelivered is *the* regression test for
-// this phase, and it reproduces the measured shape rather than a generic
+// in-drain appends, and it reproduces the measured shape rather than a generic
 // "an event arrived after a flush".
 //
 // drainFile renames the session file aside before delivering anything, so an
@@ -182,7 +182,7 @@ func TestTheReDrainLoopIsBounded(t *testing.T) {
 }
 
 // TestAnAbandonedSessionFileIsSweptUp nothing retries a file whose session is
-// over: the 1,048 hook-lane events untouched since 2026-08-13 are that gap, and
+// over: hook-lane events left behind by an ended session are that gap, and
 // they are lane-agnostic, so the net has to run without the originating
 // session.
 func TestAnAbandonedSessionFileIsSweptUp(t *testing.T) {

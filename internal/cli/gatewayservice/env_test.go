@@ -62,8 +62,8 @@ func TestWriteEnvPreservesForeignConfiguration(t *testing.T) {
 	}
 }
 
-// TestPlainReWriteIsIdempotent is the second-invocation test, and it exists
-// because this repo has already shipped the bug it guards.
+// TestPlainReWriteIsIdempotent is the second-invocation test: a first-run-only
+// test cannot see a rewrite that is not idempotent.
 func TestPlainReWriteIsIdempotent(t *testing.T) {
 	home := t.TempDir()
 

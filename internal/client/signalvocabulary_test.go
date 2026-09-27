@@ -7,14 +7,14 @@ import (
 	"unicode/utf8"
 )
 
-// This file is phase 10's cross-cutting signal-vocabulary suite: it iterates
-// the FULL AllEventTypes (33, all 27 signal classes included — the 6
-// pre-1.8 signals plus the 21 v1.8 classes phase 04 scoped its own coverage
-// to), not just the new classes. Phase 04's contract_v18_test.go already
+// This file is the cross-cutting signal-vocabulary suite: it iterates the
+// FULL AllEventTypes (33, all 27 signal classes included — the 6 pre-1.8
+// signals plus the 21 v1.8 classes), not just the new classes.
+// contract_v18_test.go already
 // covers the 21 new classes in isolation; this file is the closed-vocabulary
 // guard that must hold across the whole list, forever, as new classes join.
 
-// TestSignalNamesAreUnique is insight 1's guard: core validates signal_name
+// TestSignalNamesAreUnique: core validates signal_name
 // with no allowlist at all (an optional *string), so two classes sharing a
 // name merge silently in the stored column and in OPA's input. This test is
 // the ONLY thing that would catch that.

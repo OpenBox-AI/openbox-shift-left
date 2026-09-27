@@ -113,11 +113,10 @@ func TestResolveTier2(t *testing.T) {
 	}
 }
 
-// TestPinnedClockStableEventID proves the minor-1 fix: with the Mapper clock
+// TestPinnedClockStableEventID: with the Mapper clock
 // pinned (as RunHook does per-invocation), mapping the same PreToolUse payload
 // twice; the Observe spool copy + the T2 /evaluate copy; yields the same
-// deterministic event_id, so the two collapse under one Idempotency-Key (OD-
-// sync-11).
+// deterministic event_id, so the two collapse under one Idempotency-Key.
 func TestPinnedClockStableEventID(t *testing.T) {
 	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
 		ToolInput: []byte(`{"command":"echo hi"}`)}
@@ -238,7 +237,7 @@ func TestInstalledHookTimeoutMatchesWhatIsRegistered(t *testing.T) {
 	}
 
 	for event, gs := range f.Hooks {
-		// ConfigChange also carries the raised ceiling: phase 04/05's D4 makes it
+		// ConfigChange also carries the raised ceiling: it is
 		// the third hook where a human decision (here, a settings edit) must not
 		// be lost to a budget too tight to evaluate against.
 		if event == "PreToolUse" || event == "UserPromptSubmit" || event == "SessionEnd" || event == "ConfigChange" {
@@ -388,7 +387,7 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// ── story-E6-S10 conformance: Tier-2 sync /evaluate escalation (C12-C17)
+// ── conformance: Tier-2 sync /evaluate escalation (C12-C17)
 // ──────
 func TestEnforcementConformance_Tier2(t *testing.T) {
 	isolateConfig(t)

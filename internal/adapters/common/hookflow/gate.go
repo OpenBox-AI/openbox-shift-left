@@ -55,7 +55,7 @@ type EnforceGate struct {
 	// explicit non-acceptance (EscalationSettled, already latched by
 	// HaltOnDeliveryFailure) invokes neither.
 	SpoolObserveHead func()
-	// RunID is the run this call belongs to (phase 08, R11/V14): what
+	// RunID is the run this call belongs to: what
 	// WriteSessionHalt latches on. "" (the zero value) falls back to
 	// t.SessionID(), the same selection client.runIDFor makes, and is what
 	// every existing caller gets -- Codex never sets this and its HALT never
@@ -330,7 +330,7 @@ func (g EnforceGate) escalate(ctx context.Context, logger *log.Logger, t Enforce
 	return dec, key
 }
 
-// awaitApproval an unanswered request denies (OD-E9-1): never a silent allow
+// awaitApproval an unanswered request denies: never a silent allow
 // in enforce mode, and never the provider's own approval prompt, which would
 // ask the developer to approve their own filed request.
 func (g EnforceGate) awaitApproval(ctx context.Context, logger *log.Logger, t EnforceTarget, cl Governor, clientErr error, dec decision.Decision, key client.ApprovalKey, enforceStart time.Time) decision.Decision {

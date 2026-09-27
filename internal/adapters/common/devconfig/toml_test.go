@@ -50,7 +50,7 @@ func TestTopLevelTOMLKeys_Edges(t *testing.T) {
 	if !TopLevelTOMLKeys([]byte(`"allowed_sandbox_modes" = ["read-only"]`))["allowed_sandbox_modes"] {
 		t.Error("a quoted top-level key should be reported by its bare name")
 	}
-	// The safety property is the first assertion and it is the E8-S8 one: asking
+	// The safety property is the first assertion: asking
 	// for `allow_managed_hooks_only` must NOT match
 	// `hooks.allow_managed_hooks_only`, because Codex reads the former and the
 	// file defines the latter.

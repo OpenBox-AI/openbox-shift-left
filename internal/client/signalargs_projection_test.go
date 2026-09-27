@@ -74,9 +74,9 @@ func TestSignalArgsProjectionCoversEveryClass(t *testing.T) {
 }
 
 // TestSignalArgsProjectionDoesNotUseCoreGoalKeys guards the mechanism behind
-// the plan's ordering hazard.
+// the rollout-ordering hazard (core's goal gate must be running first).
 //
-// Core's stringifySignalArgs tries ["prompt","message","input","text","content"]
+// Core tries ["prompt","message","input","text","content"]
 // in order and treats the first hit as the goal text. On a core WITHOUT the
 // source-and-name gate, a projected key with one of those names becomes the
 // session goal. No mapper writes one today; this test is what makes that a

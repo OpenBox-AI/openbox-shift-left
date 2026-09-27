@@ -8,8 +8,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// The walker replaces five guards, so its failure modes are the phase's failure
-// modes. Every case below is one of them, not a coverage exercise.
+// The walker backs all five guards, so its failure modes are theirs. Every
+// case below is one of them, not a coverage exercise.
 
 func tree(t *testing.T, files map[string]string) string {
 	t.Helper()

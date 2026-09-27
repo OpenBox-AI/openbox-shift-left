@@ -17,7 +17,7 @@ import (
 
 // defaultTraceBackendURL is used when neither --backend nor devconfig's own
 // resolver names one.
-const defaultTraceBackendURL = "https://openbox-api.node.lat"
+const defaultTraceBackendURL = devconfig.DefaultBackendURL
 
 // corePerPage is the page size `openbox trace --against-core` requests.
 const corePerPage = 100

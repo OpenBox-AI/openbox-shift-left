@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestSessionTree_ForkRecordsBothIDs e8-S4. Codex's app-server rule is that a
+// TestSessionTree_ForkRecordsBothIDs Codex's app-server rule is that a
 // forked thread keeps the root's session id, so the hook payload's session_id
 // is the right OpenBox session identity either way; what the payload cannot
 // tell us is *which* thread we are on.
@@ -36,7 +36,7 @@ func TestSessionTree_ForkRecordsBothIDs(t *testing.T) {
 
 // TestSessionTree_UnforkedEmitsNothing an unforked run; the ambient thread id
 // equals the session id, or no Codex env at all; must be byte-identical to
-// before the story: no extra keys.
+// the output without fork tracking: no extra keys.
 func TestSessionTree_UnforkedEmitsNothing(t *testing.T) {
 	for name, threadID := range map[string]string{
 		"root thread (ids equal)": "sess-1",
@@ -59,7 +59,7 @@ func TestSessionTree_UnforkedEmitsNothing(t *testing.T) {
 }
 
 // TestSessionTree_ForkEventIDsDoNotCollide a fork's events must not collide
-// with the root's under the idempotency derivation (INV-5): same session, same
+// with the root's under the idempotency derivation: same session, same
 // tool, same instant, different thread.
 func TestSessionTree_ForkEventIDsDoNotCollide(t *testing.T) {
 	payload := func() *HookEvent {

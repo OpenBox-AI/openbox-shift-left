@@ -52,7 +52,7 @@ func MigrateLegacyConfig() ([]string, error) {
 	return []string{name}, nil
 }
 
-// LegacyConfigPaths reports where the pre-that decision files live, for docs,
+// LegacyConfigPaths reports where the legacy config files live, for docs,
 // the migration note and `openbox doctor`. Callers (and the migration note in
 // docs/getting-started.md) enumerate legacy paths from here rather than from
 // memory, so the two cannot drift.

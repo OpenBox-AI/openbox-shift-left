@@ -67,7 +67,7 @@ type Plan struct {
 	PACURL string
 	// CAPath is the file path passed to `security add-trusted-cert` /
 	// `remove-trusted-cert`, recorded verbatim so Deactivate can name the
-	// same file later, before the caller (a later phase's uninstall) deletes
+	// same file later, before the caller (uninstall) deletes
 	// it.
 	CAPath string
 	// CAPEM is CAPath's own bytes, so this package computes the SHA-1

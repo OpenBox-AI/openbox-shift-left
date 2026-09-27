@@ -258,7 +258,7 @@ func TestEnvFileIsNotACoordinateSource(t *testing.T) {
 		})
 		_, err := ResolveCredentials()
 		if err == nil {
-			t.Fatal("an agent id in .env was treated as a coordinate source; that is the two-store bug that decision removed")
+			t.Fatal("an agent id in .env was treated as a coordinate source; that is the two-store bug the one-store-per-field split removed")
 		}
 		if !errors.Is(err, ErrMissingAgentID) {
 			t.Errorf("err = %v, want ErrMissingAgentID (the resolver must have reached the coordinate gate, not a secret gate)", err)
@@ -497,7 +497,7 @@ func TestResolveContentCapture_DefaultOn(t *testing.T) {
 	}
 }
 
-// TestResolveFinops_DefaultOn pins that decision posture flip, and it pins the
+// TestResolveFinops_DefaultOn pins the default-on posture, and it pins the
 // absent-field case specifically; which is the case the old implementation
 // could not express.
 func TestResolveFinops_DefaultOn(t *testing.T) {
@@ -728,7 +728,7 @@ func TestResolveTelemetryDefaultsOnAndEnvWins(t *testing.T) {
 }
 
 // TestControlTokenComesFromTheOrgFileWhenTheEnvIsEmpty the org control token
-// is persisted now (owner ruling O1): `auth` writes it once and `init` reads
+// is persisted: `auth` writes it once and `init` reads
 // it later, in a different process, with no exported variable between them.
 // The environment still outranks the file so an operator can override a run
 // without editing anything.

@@ -1,6 +1,6 @@
-// Package acceptance holds the core-acceptance contract test. That is E7-S2's
-// retirement, made executable, now against the workload-identity client
-// rather than v1 AIP signing.
+// Package acceptance holds the core-acceptance contract test: every dev event
+// maps onto a stock core wire type, so a stock core accepts all of them. It
+// runs against the workload-identity client.
 package acceptancetest
 
 import (
@@ -23,7 +23,7 @@ import (
 // original 12 plus 21 observe-only lifecycle signals) into one coherent
 // session rather than repeating client.AllEventTypes' declaration order:
 // Setup/InstructionsLoaded before SessionStarted, Elicitation mid-session,
-// PostCompact after PreCompact, SessionEnded always last (V3: /clear is a
+// PostCompact after PreCompact, SessionEnded always last (/clear is a
 // continue-as-new, never a mid-session terminal class).
 var devEventTypes = []client.EventType{
 	client.EventSetup,
@@ -62,7 +62,7 @@ var devEventTypes = []client.EventType{
 }
 
 // stockWireTypes is exactly the base SDK's accept-listed set; what a stock
-// core admits with no EXT-core patch. The client must emit only these.
+// core admits with no accept-list patch. The client must emit only these.
 var stockWireTypes = map[string]bool{
 	"WorkflowStarted":   true,
 	"WorkflowCompleted": true,
@@ -144,7 +144,7 @@ func probeTypes(t *testing.T, ctx context.Context, c *client.Client, did string)
 }
 
 // TestAcceptanceStockCoreAcceptsEmittedEvents is the env-gated live probe:
-// against a running stock core (no EXT-core patch), every emitted dev event
+// against a running stock core (no accept-list patch), every emitted dev event
 // must be accepted (non-400) because the client maps them onto stock base wire
 // types.
 func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
@@ -183,7 +183,7 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 
 	if len(rejected) > 0 {
 		t.Errorf("stock core rejected %d/%d emitted events with 400 \"invalid event_type\" (%s); "+
-			"the client is emitting a NON-stock wire type; the base-wire mapping (mapping.md §2) is broken. "+
+			"the client is emitting a NON-stock wire type; the base-wire mapping (docs/mapping.md) is broken. "+
 			"Every dev event must map to a stock base type (Workflow*/SignalReceived/ActivityStarted).",
 			len(rejected), len(devEventTypes), strings.Join(rejected, ", "))
 	}
@@ -193,14 +193,14 @@ func TestAcceptanceStockCoreAcceptsEmittedEvents(t *testing.T) {
 			len(inconclusive), strings.Join(inconclusive, "\n  - "), log)
 	}
 	if len(rejected) == 0 && len(inconclusive) == 0 {
-		t.Logf("✓ all %d dev events accepted (non-400) by STOCK core at %s; EXT-core retired, base-wire mapping holds", len(devEventTypes), baseURL)
+		t.Logf("✓ all %d dev events accepted (non-400) by STOCK core at %s; base-wire mapping holds", len(devEventTypes), baseURL)
 	}
 }
 
-// TestAcceptanceEmitsOnlyStockWireTypes pins the retirement offline: every
+// TestAcceptanceEmitsOnlyStockWireTypes pins the same property offline: every
 // event the client actually put on the wire, against a real fakecore, must be
 // one of the base wire types (proving the client emits no developer-specific
-// event_type; the EXT-core accept-list is genuinely unnecessary). The fake
+// event_type, so no core accept-list patch is needed). The fake
 // accepts everything here -- the assertion is what it recorded, not what it
 // refused.
 func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
@@ -228,7 +228,7 @@ func TestAcceptanceEmitsOnlyStockWireTypes(t *testing.T) {
 
 	if len(rejected) != 0 {
 		t.Fatalf("fakecore rejected %v with a 400 invalid event_type; the client emitted a "+
-			"non-stock wire type (EXT-core would still be needed). Every dev event must map to a "+
+			"non-stock wire type (core would need an accept-list patch). Every dev event must map to a "+
 			"base type in stockWireTypes.", rejected)
 	}
 	if len(inconclusive) != 0 {

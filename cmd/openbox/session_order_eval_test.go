@@ -73,7 +73,7 @@ import (
 // delivered first: it was appended to the spool before either concurrent
 // producer's own action began, and delivery order is append order,
 // regardless of which drainer performs it. The lane's own Started row still
-// precedes its Completed row, the ordinary in-lane pairing this plan never
+// precedes its Completed row, the ordinary in-lane pairing ordering never
 // changes.
 func TestLaneRecordAndAGatedHookOrderThroughTheSameSpool(t *testing.T) {
 	memhttptest.RequireBind(t)
@@ -285,7 +285,7 @@ func TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted(t *te
 // verdict comfortably inside its own hook budget: the gate's own drain step
 // clears the backlog (within its slack) before ever reaching its own
 // escalation. Measured, not merely asserted: p50/max wall time logged over
-// 10 runs, with a hard per-run ceiling well under the plan's own 29s bound.
+// 10 runs, with a hard per-run ceiling well under a 29s bound.
 func TestGatedVerdictWithinBudgetUnderBacklog(t *testing.T) {
 	if testing.Short() {
 		t.Skip("10 runs x a 50-record backlog; skipped in -short")
@@ -381,7 +381,7 @@ func wallPercentiles(samples []time.Duration) (p50, p95, max time.Duration) {
 // while a gated call for that session is made. The gate's own drain step
 // (Block mode) waits to ACQUIRE that held stripe, but never past
 // hookflow.MaxStripeWait (5s): a measured p95 above 5s here is exactly the
-// trigger the plan's own risk table pre-decided that cap for, so the gated
+// case that cap exists for, so the gated
 // call proceeds to its own escalation once the stripe frees OR the wait
 // bound elapses, whichever comes first -- never blocked anywhere near the
 // full 10s hold. Measured: gated-call wall p50/p95/max over several runs.
@@ -480,8 +480,8 @@ func TestGatedVerdictWhileAFlusherHoldsTheStripeOnASlowEvent(t *testing.T) {
 		}
 		// The gate's own wait for a busy stripe is capped (hookflow.MaxStripeWait):
 		// a busy stripe on a held event must never make a gated call wait
-		// anywhere near the event's own full hold (here 10s) -- the plan's
-		// own pre-decided response to a stripe-held p95 measured above 5s.
+		// anywhere near the event's own full hold (here 10s) -- the cap is
+		// the response to a stripe-held p95 measured above 5s.
 		const ceiling = 5500 * time.Millisecond
 		if elapsed >= ceiling {
 			t.Errorf("run %d: gated call took %v while the stripe was held, want < %v (the drain slack cap)", run, elapsed, ceiling)

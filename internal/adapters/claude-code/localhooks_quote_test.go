@@ -84,7 +84,7 @@ func TestLocalHooksIdempotentAgainstAnUnquotedLegacyEntry(t *testing.T) {
 }
 
 // TestReInitAddsTheNewHooksExactlyOnce every install that exists today
-// predates that decision hooks, so the first thing this change meets in the
+// predates the four newer hooks, so the first thing this change meets in the
 // field is a settings file holding the old seven and none of the new four.
 func TestReInitAddsTheNewHooksExactlyOnce(t *testing.T) {
 	dir := t.TempDir()

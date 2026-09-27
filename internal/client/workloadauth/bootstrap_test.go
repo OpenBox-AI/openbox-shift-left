@@ -20,8 +20,8 @@ func validBootstrapDoc() map[string]any {
 	return map[string]any{
 		"bootstrap_version":  3,
 		"contract_version":   3,
-		"issuer":             "https://identity.node.lat/realms/openbox",
-		"token_endpoint":     "https://identity.node.lat/realms/openbox/protocol/openid-connect/token",
+		"issuer":             "https://identity.example.com/realms/openbox",
+		"token_endpoint":     "https://identity.example.com/realms/openbox/protocol/openid-connect/token",
 		"audience":           "openbox-core",
 		"client_id":          "workload-client-1",
 		"service_account_id": "5f0f8a5e-4b6a-4d3a-9a1b-1a2b3c4d5e6f",
@@ -98,13 +98,13 @@ func TestBootstrapRejectsEveryNonCanonicalDocument(t *testing.T) {
 		{"bootstrap_version != 3", func(d map[string]any) { d["bootstrap_version"] = 2 }},
 		{"contract_version != 3", func(d map[string]any) { d["contract_version"] = 2 }},
 		{"http non-loopback issuer", func(d map[string]any) {
-			d["issuer"] = "http://identity.node.lat/realms/openbox"
-			d["token_endpoint"] = "http://identity.node.lat/realms/openbox/protocol/openid-connect/token"
+			d["issuer"] = "http://identity.example.com/realms/openbox"
+			d["token_endpoint"] = "http://identity.example.com/realms/openbox/protocol/openid-connect/token"
 		}},
-		{"issuer has query", func(d map[string]any) { d["issuer"] = "https://identity.node.lat/realms/openbox?x=1" }},
-		{"issuer has fragment", func(d map[string]any) { d["issuer"] = "https://identity.node.lat/realms/openbox#frag" }},
-		{"issuer has userinfo", func(d map[string]any) { d["issuer"] = "https://user:pass@identity.node.lat/realms/openbox" }},
-		{"token_endpoint != issuer+suffix", func(d map[string]any) { d["token_endpoint"] = "https://identity.node.lat/realms/openbox/wrong-path" }},
+		{"issuer has query", func(d map[string]any) { d["issuer"] = "https://identity.example.com/realms/openbox?x=1" }},
+		{"issuer has fragment", func(d map[string]any) { d["issuer"] = "https://identity.example.com/realms/openbox#frag" }},
+		{"issuer has userinfo", func(d map[string]any) { d["issuer"] = "https://user:pass@identity.example.com/realms/openbox" }},
+		{"token_endpoint != issuer+suffix", func(d map[string]any) { d["token_endpoint"] = "https://identity.example.com/realms/openbox/wrong-path" }},
 		{"empty client_id", func(d map[string]any) { d["client_id"] = "" }},
 		{"empty kid", func(d map[string]any) { d["kid"] = "" }},
 		{"empty audience", func(d map[string]any) { d["audience"] = "" }},
@@ -137,7 +137,7 @@ func TestBootstrapAcceptsTheCanonicalDocument(t *testing.T) {
 	if doc.ClientID != "workload-client-1" {
 		t.Errorf("ClientID = %q", doc.ClientID)
 	}
-	if doc.TokenEndpoint != "https://identity.node.lat/realms/openbox/protocol/openid-connect/token" {
+	if doc.TokenEndpoint != "https://identity.example.com/realms/openbox/protocol/openid-connect/token" {
 		t.Errorf("TokenEndpoint = %q", doc.TokenEndpoint)
 	}
 }

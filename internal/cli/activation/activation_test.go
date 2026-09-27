@@ -44,10 +44,9 @@ func activate(t *testing.T, home string, lane Lane, desired map[string]string) A
 	return got
 }
 
-// TestActivatePreservesEverythingItDoesNotOwn is the ownership rule this repo
-// paid for once already: `init` decided what it owned by exact-match,
-// preserved an entry written under a different HOME as foreign, and every
-// governed tool call was stored twice.
+// TestActivatePreservesEverythingItDoesNotOwn is the ownership rule: an `init`
+// that decides what it owns by exact-match preserves an entry written under a
+// different HOME as foreign, and every governed tool call is then stored twice.
 func TestActivatePreservesEverythingItDoesNotOwn(t *testing.T) {
 	home := t.TempDir()
 	seed(t, home, `{"permissions":{"allow":["Bash"]},"env":{"CORP_TOKEN_PATH":"/etc/corp/token"}}`)

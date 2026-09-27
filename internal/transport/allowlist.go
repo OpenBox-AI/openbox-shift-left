@@ -9,9 +9,9 @@ import (
 // Allowlist decides which CONNECT targets this lane may terminate TLS for.
 // Interception is allowlisted to the installed providers' host table union,
 // covering every row a provider names, not a single host. A freshly
-// minted CA carries no constraint of its own (owner ruling 2026-09-22), so
-// this allowlist -- combined with CA.CanIssueFor for a machine still holding
-// a legacy constrained CA -- is what makes that decision reversal defensible:
+// minted CA carries no name constraint of its own, so this allowlist --
+// combined with CA.CanIssueFor for a machine still holding a legacy
+// constrained CA -- is the sole containment for interception:
 // every CONNECT this allowlist does not name is blind-tunnelled; forwarded
 // byte-for-byte, never decrypted, never captured.
 type Allowlist struct {

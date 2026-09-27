@@ -17,7 +17,7 @@ const (
 
 // RefusalShape is the status and error type a refusal renders with. This is
 // not a config knob for orgs. It is deliberately absent from posture and from
-// anything an org writes: once probe A names a shape, the defaults change and
+// anything an org writes: once a probe settles on a shape, the defaults change and
 // this stays a probe affordance.
 type RefusalShape struct {
 	Status    int
@@ -117,7 +117,7 @@ func WriteRefusal(w http.ResponseWriter, d Decision) {
 	WriteRefusalAs(w, d, DefaultRefusalShape())
 }
 
-// WriteRefusalAs renders with an explicit shape, so probe A can drive the real
+// WriteRefusalAs renders with an explicit shape, so a refusal-shape probe can drive the real
 // path with a candidate.
 func WriteRefusalAs(w http.ResponseWriter, d Decision, shape RefusalShape) {
 	body, err := json.Marshal(refusalBody{

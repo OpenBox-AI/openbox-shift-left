@@ -130,8 +130,7 @@ func pacRoutesThrough(t *testing.T, body, host string) bool {
 // allowlist always agree with the provider union, over three unions
 // (claude-code only, codex only, both), including the both->claude-code-only
 // shrink case and the no-loopback assertion. Two consumers, not three -- the
-// CA carries no host bound of its own to keep in step (owner ruling
-// 2026-09-22).
+// CA carries no host bound of its own to keep in step.
 func TestHostTablePinsPACAllowlistAndUnion(t *testing.T) {
 	unions := map[string][]string{
 		"claude-code only": {"claude-code"},

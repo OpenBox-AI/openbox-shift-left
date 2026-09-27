@@ -13,7 +13,7 @@
 #
 # If no prebuilt asset matches your platform (or you set OPENBOX_FROM_SOURCE=1), it
 # FALLS BACK to building the one unified static engine from source — which then
-# requires a Go 1.27+ toolchain + git. Same OD17 binary either way: one no-cgo
+# requires a Go 1.27+ toolchain + git. Same binary either way: one no-cgo
 # `openbox` that is CLI + hook + sidecar + git-hook.
 #
 # It deliberately does NOT register you with OpenBox or wire Claude Code. That is

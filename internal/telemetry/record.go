@@ -3,14 +3,14 @@ package telemetry
 import "time"
 
 // Record is one normalized telemetry record, and it is the whole seam between
-// this phase and the mapping phase: the receiver produces these, the mappers
+// the receiver and the mappers: the receiver produces these, the mappers
 // consume them, and neither has to know the collector's pdata types.
 type Record struct {
 	// Signal names which OTLP endpoint the record arrived on.
 	Signal Signal
 
 	// EventName is the provider's own event discriminator (its `event.name`
-	// attribute; "api_request", "tool_decision", "user_prompt", …). Phase 10
+	// attribute; "api_request", "tool_decision", "user_prompt", …). The mapper
 	// dispatches on it, so an unrecognized value must reach the mapper intact
 	// rather than being normalized away here.
 	EventName string
@@ -39,8 +39,8 @@ const eventNameAttr = "event.name"
 const (
 	maxAttrs = 128
 
-	// maxAttrValueBytes real content would truncate ~4x tighter than the ruling
-	// (OD1(c)) blesses, silently.
+	// maxAttrValueBytes any smaller and real content would truncate ~4x
+	// tighter than the accepted wire truncation, silently.
 	maxAttrValueBytes = MaxAttrValueBytes
 )
 

@@ -2,8 +2,7 @@ package fakecore
 
 // Reference graders are the two wrong answers, kept executable.
 //
-// The phase that introduced pairing stated its real deliverable as two drills:
-// swapping the grader for a parity check must reject the blocked session, and
+// Pairing has two drills that must keep holding: swapping the grader for a parity check must reject the blocked session, and
 // exempting every single-sided start must accept a dropped completion. Run by
 // hand those are review anecdotes that rot the moment someone edits the
 // grader. Registered here, CI re-proves on every run that the fixtures still

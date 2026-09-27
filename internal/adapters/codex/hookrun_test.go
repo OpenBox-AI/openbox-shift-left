@@ -50,7 +50,7 @@ func runHook(t *testing.T, sub, payload string) (stdout, stderr string) {
 	return out.String(), errb.String()
 }
 
-// TestRunHook_ObserveOnlyContract (AC-3/AC-7 in-process): a PreToolUse spools
+// TestRunHook_ObserveOnlyContract (in-process): a PreToolUse spools
 // one ToolCall and the content never reaches the spool. PreToolUse is gated
 // unconditionally now (ResolveEnforce always reports true); with no reachable
 // control plane the gate itself denies (delivery is always fail-closed), but
@@ -140,7 +140,7 @@ func TestLegacyStoreHookSendsNothing(t *testing.T) {
 	}
 }
 
-// TestRunHook_SessionEndFlushesSpool (AC-6): SessionEnd drains the session's
+// TestRunHook_SessionEndFlushesSpool: SessionEnd drains the session's
 // spooled events through the real signed client to a loopback core; with no
 // content on the wire; and stdout stays empty throughout.
 func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
@@ -153,8 +153,8 @@ func TestRunHook_SessionEndFlushesSpool(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
-	// That decision evaluates every gated call inline, and an escalation does
-	// attach content when capture is on (E7), so leaving the default here would
+	// Every gated call is evaluated inline, and an escalation does
+	// attach content when capture is on, so leaving the default here would
 	// assert the absence of something the design now deliberately sends.
 	t.Setenv(devconfig.EnvContentCapture, "0")
 

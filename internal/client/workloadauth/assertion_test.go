@@ -13,7 +13,7 @@ import (
 
 func testDocForAssertion() *BootstrapDocument {
 	return &BootstrapDocument{
-		TokenEndpoint: "https://identity.node.lat/realms/openbox/protocol/openid-connect/token",
+		TokenEndpoint: "https://identity.example.com/realms/openbox/protocol/openid-connect/token",
 		ClientID:      "workload-client-1",
 		Kid:           "kid-abc",
 	}

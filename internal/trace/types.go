@@ -29,7 +29,7 @@ const MaxBodyBytes = 512 << 10
 // days before it.
 const RetainDays = 7
 
-// Stage names. These are the vocabulary other phases emit against; treat them
+// Stage names. These are the vocabulary other packages emit against; treat them
 // as a contract -- adding a stage is fine, renaming one is not, because a
 // reader (openbox trace) and a reconciler (--against-core) match on the
 // string.

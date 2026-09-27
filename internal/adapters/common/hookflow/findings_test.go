@@ -137,7 +137,7 @@ func TestSummarizeFindings_ContentFreeAggregate(t *testing.T) {
 	}
 }
 
-// TestSummarizeFindings_CategoryBoundedAndSanitized covers G_SEC LOW-1/info-1:
+// TestSummarizeFindings_CategoryBoundedAndSanitized:
 // a remote-sourced guardrail category with control chars / excess length is
 // sanitized, and a large category set is capped before it is injected into the
 // model context.
@@ -165,7 +165,7 @@ func TestSummarizeFindings_CategoryBoundedAndSanitized(t *testing.T) {
 	}
 }
 
-// TestSummarizeFindings_ConstraintCount covers G3 obs-3: the content-free
+// TestSummarizeFindings_ConstraintCount: the content-free
 // constraint count is surfaced.
 func TestSummarizeFindings_ConstraintCount(t *testing.T) {
 	rec := AdvisoryRecord{Verdict: "CONSTRAIN", Constraints: []map[string]any{{"type": "rate_limit"}, {"type": "scope"}}}
@@ -277,7 +277,8 @@ func TestSurfaceFindings_ShrunkFileResets(t *testing.T) {
 	}
 }
 
-// TestSurfaceFindings_EachProviderSeesEveryFinding oD-RF-1.
+// TestSurfaceFindings_EachProviderSeesEveryFinding: every provider surfaces
+// every finding, not only its own.
 func TestSurfaceFindings_EachProviderSeesEveryFinding(t *testing.T) {
 	adv, _ := findingsEnv(t, true)
 	t.Setenv(devconfig.EnvFindingsCursor, "")

@@ -132,7 +132,7 @@ func TestConnectActionInterceptsOnlyTheAllowlistedHost(t *testing.T) {
 // today's CA (constrained to api.anthropic.com) must not attempt a handshake
 // for claude.ai just because the allowlist now names it. That CONNECT stays
 // blind-tunnelled -- exactly today's behaviour, since claude.ai was never
-// intercepted before this phase either -- rather than hitting a mintLeaf
+// intercepted under the legacy constraint either -- rather than hitting a mintLeaf
 // failure that closes the connection in a way that looks like the provider
 // being down. api.anthropic.com, which the legacy CA CAN issue for, is still
 // intercepted.
@@ -354,7 +354,7 @@ func TestProductionHandlerIsTheGatewayRelay(t *testing.T) {
 // WIRE gateway.Gateway.WithGate (its own Evaluator and
 // gated predicate are cmd/openbox's to build, this package's import guard
 // excludes both hookflow and sessionkey), but it must never itself call
-// Decide, WriteRefusal or RefuseEverything -- that decision and its rendering
+// Decide, WriteRefusal or RefuseEverything -- the refusal decision and its rendering
 // stay inside gateway.Gateway.ServeHTTP, the one place they were reviewed.
 func TestProxyGoNeverRendersARefusalItself(t *testing.T) {
 	fset := token.NewFileSet()
@@ -369,7 +369,7 @@ func TestProxyGoNeverRendersARefusalItself(t *testing.T) {
 		if !ok || !forbidden[sel.Sel.Name] {
 			return true
 		}
-		t.Errorf("%s: proxy.go calls %s directly. That decision and its rendering belong inside "+
+		t.Errorf("%s: proxy.go calls %s directly. The refusal decision and its rendering belong inside "+
 			"gateway.Gateway.ServeHTTP, reached only through WithGate.", fset.Position(sel.Pos()), sel.Sel.Name)
 		return true
 	})

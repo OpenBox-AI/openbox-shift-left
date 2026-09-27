@@ -173,9 +173,9 @@ func TestGatedFieldsAreReachableWithoutOneOf(t *testing.T) {
 }
 
 // TestOneOfDiscriminatorSemantics the contract's next version adds oneOf
-// discriminator branches, and the retired walk had never been stressed on
-// them: its trial counted a branch valid whenever its own subset of keywords
-// found no fault, and it discarded siblings of $ref.
+// discriminator branches. A hand-rolled walk gets them wrong in two ways this
+// pins: counting a branch valid whenever its own subset of keywords finds no
+// fault, and discarding siblings of $ref.
 func TestOneOfDiscriminatorSemantics(t *testing.T) {
 	doc := map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema",

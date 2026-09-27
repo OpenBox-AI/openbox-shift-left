@@ -1,13 +1,14 @@
 // Package client is the OpenBox developer-runtime data-plane client: the
 // shared transport every adapter and the git action use to emit a normalized
-// developer event to OpenBox; build the openbox-core GovernanceEventPayload,
+// developer event to OpenBox; build the core GovernanceEventPayload,
 // authenticate with the workload identity's exchanged bearer, POST it to
 // /api/v3/governance/evaluate, and parse the verdict.
 //   - INV-1: the obx_ API key and the workload private key are never logged or
 //     placed on an argv; they live only in the Client and request headers.
 //   - INV-2: content (prompt/output/file/tool bodies) is stripped before
 //     egress unless content-capture is explicitly enabled for the org.
-//   - INV-3: fail-open.
+//   - Transport failures fail open here; what that means for a call is the
+//     caller's failure policy.
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
@@ -37,7 +38,7 @@ const (
 	EventSubagentStarted EventType = "SubagentStarted"
 	// EventPermissionDenied records that a policy or classifier refused a tool
 	// call; that a decision happened, which tool it was about and under the
-	// content gate, why (that decision: the provider's free-text `reason` rides
+	// content gate, why (the provider's free-text `reason` rides
 	// Content.SignalDetail → metadata.denial_reason). Never the tool's content.
 	EventPermissionDenied EventType = "PermissionDenied"
 	// EventAPIError records a turn that ended in a provider-side error rather
@@ -280,7 +281,7 @@ type Content struct {
 // built from a provider's native payload via the adapter's SPI emit().
 type DevEvent struct {
 	SchemaVersion string    `json:"schema_version"`
-	EventID       string    `json:"event_id"` // client idempotency key (INV-5)
+	EventID       string    `json:"event_id"` // client idempotency key
 	EventType     EventType `json:"event_type"`
 	SessionID     string    `json:"openbox_session_id"`
 
@@ -289,15 +290,15 @@ type DevEvent struct {
 	// event because the flusher resolves run_id from this event alone
 	// (client.go:195), long after the hook process that built the event
 	// exited, and a minted value cannot be recomputed. Set by the adapter at
-	// hook time from the run record. NOT derived here: phase 08 owns
-	// runIDFor and the run record; this phase declares the field only.
+	// hook time from the run record. NOT derived here: the adapter owns the
+	// run record, and runIDFor only reads the field.
 	RunID string `json:"run_id,omitempty"`
 
 	// RunGeneration is 0 for the original run; a SessionStart(source=resume)
 	// -- the one source that reopens an already-seen session id -- opens
 	// generation n+1. Present on every event type. Informational: a local
-	// counter that may restart after record loss (V7) — an ordering hint for
-	// openbox-fe, never a key and never something to derive an id from.
+	// counter that may restart after record loss — an ordering hint for
+	// the dashboard, never a key and never something to derive an id from.
 	RunGeneration int `json:"run_generation,omitempty"`
 
 	// ContinuedFromRunID is the run this one continued from, set only on the

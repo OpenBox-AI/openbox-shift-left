@@ -194,7 +194,7 @@ func TestSignalArgs_Prompt_ContentGated(t *testing.T) {
 // The commit message is content, so it rides only when capture is on — that is
 // the gate doing its job, not a leak. With capture off it must be gone from
 // BOTH destinations. tree_sha/parent_shas/patch_id/openbox_session_id are the
-// four keys phase-02's git post-commit hook (R6) adds on top of the three
+// four keys the git post-commit hook adds on top of the three
 // already covered here; none of them is in contentMetadataKeys, so all seven
 // structural keys must survive content_capture off on BOTH the wire `metadata`
 // object and `signal_args`.
@@ -275,9 +275,9 @@ func TestSignalArgs_DeployLineageProjects(t *testing.T) {
 	}
 }
 
-// TestSignalArgs_Prompt_Verbatim is R2: prompt_submitted's signal_args is a
-// shipped goal-creating contract and the projection must not touch it. Core's
-// stringifySignalArgs tries ["prompt","message","input","text","content"] in
+// TestSignalArgs_Prompt_Verbatim: prompt_submitted's signal_args is a
+// shipped goal-creating contract and the projection must not touch it. Core
+// tries ["prompt","message","input","text","content"] in
 // order, so a second key added here could silently become the goal text.
 func TestSignalArgs_Prompt_Verbatim(t *testing.T) {
 	ev := DevEvent{

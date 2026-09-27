@@ -36,7 +36,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 		t.Errorf("Name = %q", inst.Name())
 	}
 	if !inst.Available() {
-		t.Error("adapter must report Available()==true (not the SL-2 stub)")
+		t.Error("adapter must report Available()==true (not a stub)")
 	}
 
 	ref := CredentialRef{
@@ -96,7 +96,7 @@ func TestInstaller_WritesHooksAndConfig(t *testing.T) {
 	}
 }
 
-// TestInstaller_NoSecretInWrittenFiles iNV-1 (story NFR "Security"): neither
+// TestInstaller_NoSecretInWrittenFiles INV-1: neither
 // written file may carry a secret; and hooks.json specifically carries the
 // engine path + event names only; no key, DID, or URL.
 func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
@@ -121,7 +121,7 @@ func TestInstaller_NoSecretInWrittenFiles(t *testing.T) {
 	}
 }
 
-// TestInstaller_IdempotentAndPreservesForeignEntries AC-10: double-install
+// TestInstaller_IdempotentAndPreservesForeignEntries: double-install
 // never duplicates (byte-identical), and a pre-existing foreign hooks.json
 // entry; including a whole foreign event; is preserved untouched.
 func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
@@ -183,8 +183,8 @@ func TestInstaller_IdempotentAndPreservesForeignEntries(t *testing.T) {
 	}
 }
 
-// TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers g_SEC SL7-A F1
-// (adversarial): a foreign compound/wrapper handler that merely embeds an
+// TestInstaller_AnchoredOwnershipNeverClaimsCompoundHandlers (adversarial): a
+// foreign compound/wrapper handler that merely embeds an
 // openbox invocation must never be claimed; it survives re-install byte-for-
 // byte alongside exactly one genuine OpenBox entry, while an exact stale
 // OpenBox invocation (different engine path) is still owned and replaced.
@@ -282,7 +282,7 @@ func TestInstaller_RefusesUnparsableHooksFile(t *testing.T) {
 	}
 }
 
-// TestInstaller_PersistsPosture that decision parity: the posture chosen at
+// TestInstaller_PersistsPosture onboarding parity with Claude Code: the posture chosen at
 // `init` time persists into dev.json. Enforce is no longer part of this: it
 // has no CLI/install-time knob at all now (ResolveEnforce always reports
 // true).

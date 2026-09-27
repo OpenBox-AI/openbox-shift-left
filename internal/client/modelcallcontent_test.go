@@ -86,8 +86,7 @@ func nestedString(t *testing.T, m map[string]any, field, key string) string {
 	return s
 }
 
-// TestTheRequestBodyRidesActivityInput is acceptance criterion 2, and the field
-// NAME is the assertion. Goal Alignment reads its judgeable operation out of
+// TestTheRequestBodyRidesActivityInput: the field NAME is the assertion. Goal Alignment reads its judgeable operation out of
 // activity_input, and capOperationInput orders keys by a fixed priority list,
 // appends unlisted keys alphabetically, then breaks on the first overflow and
 // discards everything after it. Under `request_body` the one field carrying what
@@ -106,7 +105,7 @@ func TestTheRequestBodyRidesActivityInput(t *testing.T) {
 	}
 }
 
-// TestTheResponseBodyRidesActivityOutput is acceptance criterion 1: the field
+// TestTheResponseBodyRidesActivityOutput: the field
 // core stores as the row's `output`, rather than a span it throws away.
 func TestTheResponseBodyRidesActivityOutput(t *testing.T) {
 	const reply = `{"type":"message","role":"assistant","content":[{"type":"text","text":"hi"}]}`
@@ -212,7 +211,7 @@ func TestNoPayloadCarriesHookTrigger(t *testing.T) {
 // bytes, against BOTH new homes. A carrier change that forgot the gate would be
 // a content leak with no test failing.
 //
-// Extended for acceptance criterion 5: activity_output.openbox_capture is
+// Also: activity_output.openbox_capture is
 // attached inside the SAME Span.ResponseBody arm that content lives in
 // (turnActivityOutput), so stripContent emptying ResponseBody must remove the
 // note along with the body it describes -- not just the body, leaving a
@@ -325,8 +324,7 @@ func TestTheAttributionKeysAreNotContentMetadataKeys(t *testing.T) {
 	}
 }
 
-// TestIsSubagentNeverRidesMetadataAsFalse is acceptance criterion 2 at the
-// wire boundary: a call whose source carried no cc_is_subagent entry (which
+// TestIsSubagentNeverRidesMetadataAsFalse, at the wire boundary: a call whose source carried no cc_is_subagent entry (which
 // collapses to Span.IsSubagent's zero value, false) must ship NO
 // metadata.is_subagent key at all. A stored `false` would read to a consumer
 // as "confirmed not a subagent", which is a claim this lane never has grounds
@@ -343,7 +341,7 @@ func TestIsSubagentNeverRidesMetadataAsFalse(t *testing.T) {
 	}
 }
 
-// TestSchemaAcceptsTheAttributionFields is acceptance criterion 5, mirroring
+// TestSchemaAcceptsTheAttributionFields mirrors
 // TestSchemaAcceptsRunIdentityFields (contract_v18_test.go): a client.Span
 // carrying all four new fields must pass conformance.ValidateDevEvent, or
 // $defs/span's additionalProperties:false rejects every in-path event.
@@ -418,11 +416,9 @@ func TestRequestBodyTruncationKeepsTheTail(t *testing.T) {
 // left open: a selected document passes this cap untouched -- no truncation mark,
 // no cut, byte-identical.
 //
-// What this test does NOT do, deliberately, is police the gateway's budget. An
-// earlier version duplicated `48 * 1024` here as a local const and claimed to go
-// red if the gateway's budget ever reached this cap. It would not have: it reds
-// only if someone edits the copy too, so it passed whether or not the invariant
-// held -- the same shape of placebo as the test above it. The real guard lives in
+// What this test does NOT do, deliberately, is police the gateway's budget. A
+// local copy of `48 * 1024` here would go red only if someone edited the copy
+// too, so it would pass whether or not the invariant held. The real guard lives in
 // internal/gateway, asserting `selectionBudget < client.MaxModelCallBodyBytes`
 // against the exported constant, in the package that can see both numbers.
 //
@@ -503,10 +499,10 @@ func TestCapBodyStillCutsRunesForEveryOtherField(t *testing.T) {
 	}
 }
 
-// TestTheModelCallDurationReachesTheWire is acceptance criterion 4. The relay
-// measured the call and discarded it; every stored in-path row had a null
-// duration while api_response_ms -- the CONTROL PLANE's own response time -- sat
-// next to it and is easily mistaken for the model's.
+// TestTheModelCallDurationReachesTheWire: the relay measures the call, and
+// without this the stored in-path row's duration would be null while
+// api_response_ms -- the CONTROL PLANE's own response time -- sits next to it
+// and is easily mistaken for the model's.
 func TestTheModelCallDurationReachesTheWire(t *testing.T) {
 	m := wireOf(t, modelCallEvent(EventTurnCompleted, "{}", "{}"))
 	got, ok := m["duration_ms"].(float64)
@@ -703,7 +699,7 @@ func TestTheRelayedStatusReachesTheWire(t *testing.T) {
 	}
 }
 
-// --- Phase 04: response completeness (activity_output.openbox_capture) ---
+// --- response completeness (activity_output.openbox_capture) ---
 
 // openboxCapture reads activity_output.openbox_capture off the wire payload,
 // or nil when the key is absent. A local helper rather than nestedString
@@ -721,8 +717,7 @@ func openboxCapture(t *testing.T, m map[string]any) map[string]any {
 	return oc
 }
 
-// TestTheResponseCompletenessNoteRidesActivityOutput is acceptance criterion
-// 2: a short, whole response reports truncated:false -- emitted, not omitted,
+// TestTheResponseCompletenessNoteRidesActivityOutput: a short, whole response reports truncated:false -- emitted, not omitted,
 // because that IS the "this reply is complete" signal -- and original_bytes
 // equal to the body's own length.
 func TestTheResponseCompletenessNoteRidesActivityOutput(t *testing.T) {
@@ -843,8 +838,7 @@ func TestOriginalBytesForAnUndecodableMarkerIsItsOwnHonestLength(t *testing.T) {
 	}
 }
 
-// TestTheResponseCompletenessNoteORsInTheClientsOwnCut is acceptance
-// criterion 4: a response over maxModelCallBodyBytes is cut by capModelCallBody
+// TestTheResponseCompletenessNoteORsInTheClientsOwnCut: a response over maxModelCallBodyBytes is cut by capModelCallBody
 // at the client, independent of anything the gateway reported, and that cut
 // alone must still flip truncated to true.
 func TestTheResponseCompletenessNoteORsInTheClientsOwnCut(t *testing.T) {
@@ -868,9 +862,8 @@ func TestTheResponseCompletenessNoteORsInTheClientsOwnCut(t *testing.T) {
 	// itself is unaffected; this test only asserts the note is additive to it.
 }
 
-// TestNoResponseBodyMeansNoCompletenessNote is acceptance criterion 5's other
-// half: a completed call that carries no response body at all (never
-// observed one, or content capture stripped it) must not carry the note
+// TestNoResponseBodyMeansNoCompletenessNote: a completed call that carries no
+// response body at all (never observed one, or content capture stripped it) must not carry the note
 // either -- there is no stored body for it to describe.
 func TestNoResponseBodyMeansNoCompletenessNote(t *testing.T) {
 	ev := modelCallEvent(EventTurnCompleted, "{}", "")
@@ -889,8 +882,7 @@ func TestNoResponseBodyMeansNoCompletenessNote(t *testing.T) {
 	}
 }
 
-// TestSchemaAcceptsTheResponseCompletenessFields is acceptance criterion 7,
-// mirroring TestSchemaAcceptsTheAttributionFields: a Span carrying the two new
+// TestSchemaAcceptsTheResponseCompletenessFields mirrors TestSchemaAcceptsTheAttributionFields: a Span carrying the two new
 // fields must still pass conformance.ValidateDevEvent, or $defs/span's
 // additionalProperties:false rejects every in-path event.
 func TestSchemaAcceptsTheResponseCompletenessFields(t *testing.T) {

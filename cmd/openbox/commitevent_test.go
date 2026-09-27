@@ -17,10 +17,10 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
 
-// TestRouteCommitTool is R2, "agent commits only": the test matrix's six
-// routing cases. A wrong answer here either drains an event under the wrong
-// agent's client (mismatch) or silently emits one for a hand commit, which
-// R2 says must never happen.
+// TestRouteCommitTool covers "agent commits only" across six routing cases.
+// A wrong answer here either drains an event under the wrong agent's client
+// (mismatch) or silently emits one for a hand commit, which must never
+// happen.
 func TestRouteCommitTool(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -48,7 +48,7 @@ func TestRouteCommitTool(t *testing.T) {
 	}
 }
 
-// TestCommitEventID_DeterministicAndDistinct is R1: the same (session, run,
+// TestCommitEventID_DeterministicAndDistinct: the same (session, run,
 // sha) triple always yields the same id, so a re-fired hook dedupes at core;
 // any one of the three changing yields a different id, so two runs' events
 // for the same commit are never silently merged.
@@ -74,8 +74,8 @@ func TestCommitEventID_DeterministicAndDistinct(t *testing.T) {
 	}
 }
 
-// TestEmitCommitEvent_MissingCredentials R3: a tool with no credential store
-// yet must skip the append and exit as if nothing happened (R7) -- never
+// TestEmitCommitEvent_MissingCredentials: a tool with no credential store
+// yet must skip the append and exit as if nothing happened -- never
 // block the commit, never panic.
 func TestEmitCommitEvent_MissingCredentials(t *testing.T) {
 	home := isolateHomeUnbound(t)
@@ -103,7 +103,7 @@ func TestEmitCommitEvent_MissingCredentials(t *testing.T) {
 	}
 }
 
-// TestEmitCommitEvent_HaltedRunSkipped R4: a run already latched as halted
+// TestEmitCommitEvent_HaltedRunSkipped: a run already latched as halted
 // (generation > 0, matching the RESUME-ONLY run-keyed latch) must never
 // receive a new event -- the drainer would only discard it later, so
 // skipping here is strictly better than spooling it.
@@ -146,7 +146,7 @@ func TestEmitCommitEvent_HaltedRunSkipped(t *testing.T) {
 // TestEmitCommitEvent_TwoSessionsTwoSpools two sessions resolved from the
 // same commit, each attributed to a different tool, must each land in that
 // tool's OWN spool -- never one draining under the other agent's client
-// (the routing-mismatch risk the plan calls out). It also proves R1's
+// (the routing-mismatch risk). It also proves the event id's
 // dedupe promise end to end: re-firing the sink for the same commit and
 // sessions (a hook that ran twice) yields the identical event_id both times.
 func TestEmitCommitEvent_TwoSessionsTwoSpools(t *testing.T) {
@@ -203,7 +203,7 @@ func TestEmitCommitEvent_TwoSessionsTwoSpools(t *testing.T) {
 		t.Fatalf("unmarshal second cc event: %v", err)
 	}
 	if second.EventID != ccEv.EventID {
-		t.Errorf("re-fired event id = %q, want the identical %q (R1 dedupe)", second.EventID, ccEv.EventID)
+		t.Errorf("re-fired event id = %q, want the identical %q (dedupe)", second.EventID, ccEv.EventID)
 	}
 }
 

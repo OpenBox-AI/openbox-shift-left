@@ -32,7 +32,7 @@ func findLastEventType(events []client.DevEvent, et client.EventType) client.Dev
 	return client.DevEvent{}
 }
 
-// TestSourceBumpTable is T2's five-source table (re-scoped to resume-only,
+// TestSourceBumpTable is the five-source table (only resume bumps,
 // live-measured: a `/clear` mints a DIFFERENT session id -- Claude Code
 // 2.1.263, ~46ms apart -- so it is never asked to continue a run it never
 // saw; there is no prior run for it to bump). It drives isBumpSource, the
@@ -53,9 +53,9 @@ func TestSourceBumpTable(t *testing.T) {
 	}
 }
 
-// TestSessionStartClearWithNoRecordStaysGeneration0 is T2's added sub-case:
+// TestSessionStartClearWithNoRecordStaysGeneration0 is the table's added sub-case:
 // a SessionStart(source=clear) on a session id with NO run record (this is
-// what every `/clear` looks like post-re-scope, since it always arrives on a
+// what every `/clear` looks like, since it always arrives on a
 // session id core has never seen) must NOT be treated as a continuation --
 // generation 0, run_id falls back to the session id on the wire, and no
 // continued_from_run_id.
@@ -82,13 +82,13 @@ func TestSessionStartClearWithNoRecordStaysGeneration0(t *testing.T) {
 	}
 }
 
-// TestSessionStartResumeBumpsOnTheSecondInvocation is T3: two
+// TestSessionStartResumeBumpsOnTheSecondInvocation: two
 // SessionStart(source=resume) hooks against one temp registry produce
 // generations 1 then 2, two DISTINCT run_id UUIDs neither equal to the
 // session id, and continued_from_run_id = the session id then = the first
 // UUID. Read and write paths are asserted SEPARATELY, and the assertion that
-// matters is on the SECOND invocation (CLAUDE.md: fifteen green tests once
-// missed a defect because each ran init exactly once). A version of this
+// matters is on the SECOND invocation (a test that runs only once cannot see
+// a defect that only the second run exposes). A version of this
 // test that passes with the write stubbed out is a defect -- the independent
 // re-read below is what rules that out.
 func TestSessionStartResumeBumpsOnTheSecondInvocation(t *testing.T) {
@@ -140,9 +140,9 @@ func TestSessionStartResumeBumpsOnTheSecondInvocation(t *testing.T) {
 	}
 }
 
-// TestRunIdentityChainAcrossGenerations is T8: N SessionStart(resume) bumps
+// TestRunIdentityChainAcrossGenerations: N SessionStart(resume) bumps
 // with a PreToolUse between each. The chain is built from the EVENTS across
-// generations, not read back from the record (V7 restarts the local counter
+// generations, not read back from the record (record loss restarts the local counter
 // after record loss while the chain still points at the sealed run, so
 // asserting run_generation == chain length fleet-wide would be wrong).
 func TestRunIdentityChainAcrossGenerations(t *testing.T) {
@@ -199,7 +199,7 @@ func TestRunIdentityChainAcrossGenerations(t *testing.T) {
 	}
 }
 
-// TestLatchEscapesOnlyABumpedGeneration is T9 (R11/V14): a HALT latched at
+// TestLatchEscapesOnlyABumpedGeneration: a HALT latched at
 // generation 0 still replays across a non-bumping SessionStart (b: startup),
 // and stops replaying once the run is actually bumped (a: resume) -- because
 // the latch is keyed by the run id, which only a bump changes.

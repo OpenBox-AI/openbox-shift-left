@@ -27,8 +27,7 @@ type priorValue struct {
 
 // priorSettings is the whole restore record: which settings file it guards,
 // and one entry per key captured there. It is not dev.json (coordinates
-// only) and not .env (secrets only) -- CLAUDE.md's one-store-per-field rule
-// -- so it gets its own sibling file under ~/.openbox, named after the
+// only) and not .env (secrets only) -- one store per field -- so it gets its own sibling file under ~/.openbox, named after the
 // existing gateway-prior-env.json precedent (internal/cli/gatewayservice).
 type priorSettings struct {
 	Schema       string                `json:"schema"`

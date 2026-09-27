@@ -8,7 +8,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// TestRunEmitsProcStartAndExit is the process-edge contract phase 3 owns: every
+// TestRunEmitsProcStartAndExit is the trace's process-edge contract: every
 // command dispatched through app.run, hook included, brackets its work with a
 // proc.start / proc.exit pair carrying argv, version, os/arch and the exit
 // code -- regardless of which command ran or what it returned.

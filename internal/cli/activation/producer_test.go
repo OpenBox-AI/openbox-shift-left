@@ -74,8 +74,8 @@ func TestABaseURLTakesTransportOutOfThePath(t *testing.T) {
 }
 
 // TestTheElectionNamesWhatItOutranked. An automatic precedence the developer
-// cannot see is the "configured but not in force" shape that decision promised
-// would always be detectable, so the reason has to name the losers.
+// cannot see is the "configured but not in force" shape that must always be
+// detectable, so the reason has to name the losers.
 func TestTheElectionNamesWhatItOutranked(t *testing.T) {
 	e := electionFrom(map[string]string{
 		"HTTPS_PROXY":                      "http://127.0.0.1:8790",
@@ -170,7 +170,7 @@ func TestTelemetryKeysAreTheProvenSet(t *testing.T) {
 
 	keys := TelemetryKeys("127.0.0.1:8789")
 	if keys["OTEL_EXPORTER_OTLP_PROTOCOL"] != "http/protobuf" {
-		t.Errorf("protocol = %q; the corpus phase 10's mapper was built against is http/protobuf", keys["OTEL_EXPORTER_OTLP_PROTOCOL"])
+		t.Errorf("protocol = %q; the corpus the mapper was built against is http/protobuf", keys["OTEL_EXPORTER_OTLP_PROTOCOL"])
 	}
 	if keys["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] != "http://127.0.0.1:8789/v1/logs" {
 		t.Errorf("logs endpoint = %q; the path is part of the contract, not decoration", keys["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"])
@@ -181,7 +181,7 @@ func TestTelemetryKeysAreTheProvenSet(t *testing.T) {
 	// A green suite must not be how somebody discovers we started writing raw
 	// prompt and completion bodies to a directory nothing reads.
 	if _, present := keys["OTEL_LOG_RAW_API_BODIES"]; present {
-		t.Error("OTEL_LOG_RAW_API_BODIES is set: that makes the client dump raw request and response bodies to disk, and nothing in this product reads them yet (phase 10 deferred body ingestion pending the confinement-root decision)")
+		t.Error("OTEL_LOG_RAW_API_BODIES is set: that makes the client dump raw request and response bodies to disk, and nothing in this product reads them yet (body ingestion from disk is not implemented)")
 	}
 }
 

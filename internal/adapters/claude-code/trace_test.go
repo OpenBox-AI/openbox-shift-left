@@ -10,7 +10,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// TestRunHookTracesRawStdinAndNeverLeaksCredentials is the phase-2
+// TestRunHookTracesRawStdinAndNeverLeaksCredentials is the trace
 // end-to-end test: a gated PreToolUse call whose tool_input carries a
 // secret-shaped (code-derived, never committed) literal is traced in full --
 // hook.in records the RAW payload, including that literal -- and no trace

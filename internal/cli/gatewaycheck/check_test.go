@@ -321,7 +321,7 @@ func TestLoopbackSpellingIsCaseInsensitive(t *testing.T) {
 }
 
 // TestEnvValueIsReportedWithoutClaimingItWins testEnvValueIsDetected is the
-// control on a report that could previously assert the opposite of the truth.
+// control on a report that could otherwise assert the opposite of the truth.
 func TestEnvValueIsReportedWithoutClaimingItWins(t *testing.T) {
 	home := t.TempDir()
 	writeSettings(t, filepath.Join(home, ".claude", "settings.json"), "http://127.0.0.1:8788")

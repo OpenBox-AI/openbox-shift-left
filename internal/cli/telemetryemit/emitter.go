@@ -20,7 +20,7 @@ type Emitter struct {
 	// Deliver is how this emitter actually gets an event to core: the
 	// telemetry daemon hands it a bounded pool's Submit, in-process, never a
 	// spool write. Required; nil is a wiring
-	// defect, counted the same way a spool-write failure used to be. It
+	// defect. It
 	// returns false when the record was NOT accepted (a saturated pool),
 	// which stops the pair's loop: Completed is never sent after a dropped
 	// Started.

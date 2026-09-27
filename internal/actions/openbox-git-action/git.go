@@ -57,7 +57,7 @@ func (r Repo) run(args ...string) (string, error) {
 
 // runLimited unlike run it streams stdout through an io.LimitReader so a
 // hostile, arbitrarily large output (e.g. A giant commit body) can never be
-// buffered whole into memory (SEC-6-1).
+// buffered whole into memory.
 func (r Repo) runLimited(maxBytes int64, args ...string) (out string, truncated bool, err error) {
 	cmd := r.command(args)
 	stdout, perr := cmd.StdoutPipe()

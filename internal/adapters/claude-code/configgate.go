@@ -64,8 +64,8 @@ func (t configSubject) DevEvent(*client.Content) (client.DevEvent, bool) {
 
 var _ hookflow.EnforceTarget = configSubject{}
 
-// recordConfigEnforcement is the fifth RecordEnforcement call site (phase 03).
-// D6: Claude Code surfaces no message to the developer for a blocked
+// recordConfigEnforcement is the fifth RecordEnforcement call site.
+// Claude Code surfaces no message to the developer for a blocked
 // ConfigChange, so a DENY/HALT also gets one human line on stderr naming the
 // file, the source, and the policy-authored reason -- the same string already
 // rendered to stdout (never tool content; INV-2). Stderr only, exit 0: INV-3

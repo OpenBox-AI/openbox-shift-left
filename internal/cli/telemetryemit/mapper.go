@@ -78,10 +78,10 @@ func (o Outcome) String() string {
 type Mapper struct {
 	did    string
 	policy Policy
-	// runStore resolves this session's run identity (RunID/RunGeneration,
-	// phase 08 R7). The zero value resolves to runs/ under the resolved
+	// runStore resolves this session's run identity (RunID/RunGeneration),
+	// the same record a hook event reads. The zero value resolves to runs/ under the resolved
 	// DefaultSessionDir() -- what a production daemon gets from its unit's
-	// OPENBOX_SESSION_DIR (insight 7, a daemon has no $HOME) -- and a test
+	// OPENBOX_SESSION_DIR (a daemon has no $HOME) -- and a test
 	// points Dir at a temp directory so it never touches the developer's real
 	// registry.
 	runStore obgit.RunStore
@@ -183,10 +183,10 @@ func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 		start = end.Add(-time.Duration(d) * time.Millisecond)
 	}
 
-	// R12: decided ONCE per Started/Completed pair, on the pair's own start
+	// The straddle rule: decided ONCE per Started/Completed pair, on the pair's own start
 	// bound, before either half is built -- never per half, or one activity_id
 	// would split across two run_ids. Read failure (absent/unreadable/
-	// corrupt/inconsistent) fails open to generation 0 (INV-3).
+	// corrupt/inconsistent) fails open to generation 0.
 	runID, runGen := "", 0
 	if runRec, err := m.runStore.Read(session); err == nil && runRec.Generation > 0 {
 		if start.UnixNano() < runRec.UpdatedAt {

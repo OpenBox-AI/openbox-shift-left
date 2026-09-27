@@ -34,7 +34,7 @@ func Gateway(addr, upstream, settingsPath string, verbose bool) Spec {
 	}
 }
 
-// Telemetry is the local OTLP receiver (that decision `:otel:`).
+// Telemetry is the local OTLP receiver (activity-id namespace `:otel:`).
 func Telemetry(addr, settingsPath string, verbose bool) Spec {
 	args := []Arg{
 		Literal("telemetry"),
@@ -53,7 +53,7 @@ func Telemetry(addr, settingsPath string, verbose bool) Spec {
 	}
 }
 
-// Transport is the in-path CONNECT/TLS relay (that decision `:proxy:`).
+// Transport is the in-path CONNECT/TLS relay (activity-id namespace `:proxy:`).
 func Transport(addr, settingsPath string, verbose bool) Spec {
 	args := []Arg{
 		Literal("transport"),

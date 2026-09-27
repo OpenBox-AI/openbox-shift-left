@@ -1,5 +1,5 @@
 {
-  "//": "OpenBox managed settings for Claude Code (E8-S8). Deploy root-owned and user-unwritable to /etc/claude-code/managed-settings.json (Linux), /Library/Application Support/ClaudeCode/ (macOS), or C:\\Program Files\\ClaudeCode\\ (Windows; the older ProgramData path is no longer read). See ../README.md for what each key does and does not guarantee.",
+  "//": "OpenBox managed settings for Claude Code. Deploy root-owned and user-unwritable to /etc/claude-code/managed-settings.json (Linux), /Library/Application Support/ClaudeCode/ (macOS), or C:\\Program Files\\ClaudeCode\\ (Windows; the older ProgramData path is no longer read). See ../README.md for what each key does and does not guarantee.",
 
   "//hooks": "Admin-defined OpenBox hooks. The binary path below is absolute because a managed hook cannot depend on the provider's working directory; fill it in when you deploy this file.",
   "hooks": {
@@ -34,7 +34,7 @@
     "allowUnsandboxedCommands": false
   },
 
-  "//permissions": "Deny rules that do not depend on OpenBox policy being fresh — defence in depth for the classes the incident record shows matter most (credential exfiltration, remote-piped shell).",
+  "//permissions": "Deny rules that do not depend on OpenBox policy being fresh — defence in depth for the classes that matter most (credential exfiltration, remote-piped shell).",
   "permissions": {
     "deny": [
       "Read(./.env)",

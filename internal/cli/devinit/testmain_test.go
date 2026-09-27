@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
-// TestMain is the asserted-hermeticity control from incident INC-sl7a-devjson
-// (G_SEC SL7-A F4): this suite's mock-backend integration test once assumed
-// "codex is a Stub ⇒ Install() is a no-op" and, when story-SL7-A made codex a
-// real installer, wrote the developer's actual ~/.codex/hooks.json and
-// ~/.config/openbox/dev.json.
+// TestMain is the asserted-hermeticity control: a mock-backend integration
+// test that assumes an installer is a no-op writes the developer's actual
+// ~/.codex/hooks.json and ~/.config/openbox/dev.json the moment that installer
+// becomes real. Every test here runs under a sentinel HOME instead.
 func TestMain(m *testing.M) {
 	sentinel, err := os.MkdirTemp("", "openbox-hermetic-home-")
 	if err != nil {
@@ -26,7 +25,7 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 
 	if leaks := filesUnder(sentinel); len(leaks) > 0 {
-		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION (INC-SL7A-DEVJSON guard): %d file(s) written under the sentinel HOME; a test escaped its path pinning and would have touched the real home dir:\n", len(leaks))
+		fmt.Fprintf(os.Stderr, "HERMETICITY VIOLATION: %d file(s) written under the sentinel HOME; a test escaped its path pinning and would have touched the real home dir:\n", len(leaks))
 		for _, l := range leaks {
 			fmt.Fprintf(os.Stderr, "  %s\n", l)
 		}

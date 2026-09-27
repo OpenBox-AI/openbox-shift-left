@@ -74,7 +74,7 @@ func freeAddr(t *testing.T) string {
 func skipUnlessSupervised(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skipf("no daemon packaging on %s (phase 07 req 7)", runtime.GOOS)
+		t.Skipf("no daemon packaging on %s ", runtime.GOOS)
 	}
 }
 

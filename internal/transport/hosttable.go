@@ -14,8 +14,8 @@ type HostRule struct {
 }
 
 // hostTable carries the API and app hosts each provider's model-call traffic
-// and browser surface reach, keyed by provider rather than one shared list
-// (owner ruling 2026-09-22): every consumer below -- the intercept allowlist
+// and browser surface reach, keyed by provider rather than one shared list:
+// every consumer below -- the intercept allowlist
 // and the PAC body -- is built from the union of the rows of the providers a
 // caller names (Config.Providers), never from the whole table. The transport
 // daemon does not yet derive that set from what is installed, so it runs on

@@ -15,7 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
-// ── configChangeOutputContract (insight 2 + 4): mirrors TestPromptContractRender,
+// ── configChangeOutputContract: mirrors TestPromptContractRender,
 // but pins the config gate's OWN literal and shape (never aliased to the
 // prompt gate's).
 func TestConfigChangeOutputContractRender(t *testing.T) {
@@ -72,7 +72,7 @@ func TestConfigChangeOutputContractRender(t *testing.T) {
 	var _ hookflow.OutputContract = configContract
 }
 
-// ── configSubject (insight 4): the promptTarget template, not enforceTarget --
+// ── configSubject: the promptTarget template, not enforceTarget --
 // no tool_input, no HighRisk, identity + source/file_path axes only.
 func TestConfigSubject_Fields(t *testing.T) {
 	id := Identity{DeveloperDID: testDID}
@@ -152,10 +152,10 @@ func runConfigHook(t *testing.T, payload string) (stdout, stderr string) {
 	return out.String(), errBuf.String()
 }
 
-// TestRunHook_ConfigChange_BlockDeniesAndRecords is the Success Criteria's
+// TestRunHook_ConfigChange_BlockDeniesAndRecords is the config gate's
 // core end-to-end guard: DENY -> exactly one JSON line {"decision":"block",
-// "reason":...} on stdout, one human line on stderr (D6), one enforcement
-// record with tool_kind=="config" carrying ts+reason (phase 03).
+// "reason":...} on stdout, one human line on stderr, one enforcement
+// record with tool_kind=="config" carrying ts+reason.
 func TestRunHook_ConfigChange_BlockDeniesAndRecords(t *testing.T) {
 	setupConfigChangeEnv(t)
 	serveVerdict(t, `{"verdict":"block","reason":"unauthorized settings edit","policy_id":"cc-pol"}`)
@@ -175,10 +175,10 @@ func TestRunHook_ConfigChange_BlockDeniesAndRecords(t *testing.T) {
 	}
 
 	if !strings.Contains(errOut, "user_settings") || !strings.Contains(errOut, "settings.json") {
-		t.Errorf("D6 stderr line missing file/source: %q", errOut)
+		t.Errorf("stderr denial line missing file/source: %q", errOut)
 	}
 	if !strings.Contains(errOut, "unauthorized settings edit") {
-		t.Errorf("D6 stderr line missing the policy reason: %q", errOut)
+		t.Errorf("stderr denial line missing the policy reason: %q", errOut)
 	}
 
 	data, err := os.ReadFile(os.Getenv(envEnforcementFile))
@@ -193,10 +193,10 @@ func TestRunHook_ConfigChange_BlockDeniesAndRecords(t *testing.T) {
 		t.Errorf("tool_kind = %q, want %q", rec.ToolKind, configToolKind)
 	}
 	if rec.Timestamp == "" {
-		t.Error("ts must be present (phase 03)")
+		t.Error("ts must be present")
 	}
 	if rec.Reason != "unauthorized settings edit" {
-		t.Errorf("reason = %q, want the verbatim policy reason (phase 03)", rec.Reason)
+		t.Errorf("reason = %q, want the verbatim policy reason", rec.Reason)
 	}
 	if rec.AppliedDecision != ccConfigDecisionBlock {
 		t.Errorf("applied_decision = %q, want %q", rec.AppliedDecision, ccConfigDecisionBlock)
@@ -214,7 +214,7 @@ func TestRunHook_ConfigChange_AllowWritesNothing(t *testing.T) {
 		t.Errorf("allow must write nothing to stdout; got %q", out)
 	}
 	if strings.Contains(errOut, "OpenBox blocked") {
-		t.Errorf("allow must not write the D6 denial line; stderr=%q", errOut)
+		t.Errorf("allow must not write the stderr denial line; stderr=%q", errOut)
 	}
 }
 
@@ -252,8 +252,8 @@ func TestRunHook_ConfigChange_HaltLatchesAndReplays(t *testing.T) {
 	}
 }
 
-// TestRunHook_ConfigChange_PolicySettingsNeverGated is insight 3's central
-// guard: source=="policy_settings" must never enter the gate, even when the
+// TestRunHook_ConfigChange_PolicySettingsNeverGated is the central
+// policy_settings guard: source=="policy_settings" must never enter the gate, even when the
 // server would block. Nothing is written (stdout or stderr), no enforcement
 // record is filed (a block that never happened must never be claimed), and
 // the observe copy still spools.
@@ -266,7 +266,7 @@ func TestRunHook_ConfigChange_PolicySettingsNeverGated(t *testing.T) {
 		t.Errorf("policy_settings must never be gated; stdout=%q", out)
 	}
 	if strings.Contains(errOut, "OpenBox blocked") {
-		t.Errorf("policy_settings must never file a D6 denial line; stderr=%q", errOut)
+		t.Errorf("policy_settings must never file a stderr denial line; stderr=%q", errOut)
 	}
 	if _, err := os.Stat(os.Getenv(envEnforcementFile)); err == nil {
 		t.Error("policy_settings must never write an enforcement record (it would claim a block that never happened)")
@@ -279,7 +279,7 @@ func TestRunHook_ConfigChange_PolicySettingsNeverGated(t *testing.T) {
 }
 
 // TestRunHook_ConfigChange_RawCompare_UnknownSourceStillGates guards the raw-
-// vs-EnumOr distinction (insight 3): an unrecognized future `source` must
+// vs-EnumOr distinction: an unrecognized future `source` must
 // still be gated, not silently exempted by an allowlist round-trip.
 func TestRunHook_ConfigChange_RawCompare_UnknownSourceStillGates(t *testing.T) {
 	setupConfigChangeEnv(t)
@@ -298,7 +298,7 @@ func TestRunHook_ConfigChange_RawCompare_UnknownSourceStillGates(t *testing.T) {
 	}
 }
 
-// TestTouchesSessionRegistry_RestrictedToEleven pins insight 8: the registry
+// TestTouchesSessionRegistry_RestrictedToEleven pins that the registry
 // touch (session -> cwd, for the git trailer) fires only for the 11 hooks
 // that already perform it; none of the 21 new hooks (including ConfigChange
 // and CwdChanged) write it.
@@ -346,7 +346,7 @@ func TestRunHook_ConfigChange_RegistryNotTouched(t *testing.T) {
 }
 
 // TestSurfaceFindings_UnreachableForConfigChange is the RunHook-level trace
-// for insight 7: SurfaceFindings is guarded at hookrun.go by hook equality
+// that SurfaceFindings is guarded at hookrun.go by hook equality
 // checks that ConfigChange (and every other new hook) can never satisfy.
 //
 // ConfigChange's own source is pinned to policy_settings, which is the one
@@ -372,7 +372,7 @@ func TestSurfaceFindings_UnreachableForConfigChange(t *testing.T) {
 	}
 }
 
-// TestRecordConfigEnforcement_NoContentLeak: the D6 stderr line carries only
+// TestRecordConfigEnforcement_NoContentLeak: the stderr denial line carries only
 // file_path, source, and the policy-authored reason -- never tool content,
 // consistent with the config subject's Content-free DecisionRequest.
 func TestRecordConfigEnforcement_NoContentLeak(t *testing.T) {

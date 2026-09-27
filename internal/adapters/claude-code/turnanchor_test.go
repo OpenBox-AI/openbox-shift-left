@@ -17,8 +17,8 @@ func anchorTurnLine(in, out int) string {
 		strconv.Itoa(in) + `,"output_tokens":` + strconv.Itoa(out) + `}}}` + "\n"
 }
 
-// TestResumeAnchorsTheTurnCursorInsteadOfRebillingTheSitting pins R13, and pins
-// it in both directions in one test because the anchored assertion alone would
+// TestResumeAnchorsTheTurnCursorInsteadOfRebillingTheSitting pins the resume
+// anchor, and pins it in both directions in one test because the anchored assertion alone would
 // also pass if readTurnUsage were simply broken.
 //
 // The bug: SessionEnd clears the cursor, so a resumed sitting reopens the SAME
@@ -66,7 +66,7 @@ func TestResumeAnchorsTheTurnCursorInsteadOfRebillingTheSitting(t *testing.T) {
 	}
 	if unanchored.Input != 67 || unanchored.Output != 11 {
 		t.Fatalf("unanchored window = %d/%d, want 67/11 -- if this changed, the "+
-			"bug R13 guards has moved and the anchored assertion below proves less",
+			"re-billing bug this guards has moved and the anchored assertion below proves less",
 			unanchored.Input, unanchored.Output)
 	}
 

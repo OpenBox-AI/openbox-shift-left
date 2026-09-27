@@ -12,11 +12,11 @@ import (
 // patchIDTimeout bounds the diff-tree/patch-id pipeline: the commit already
 // exists (this runs from post-commit), so a slow computation on a huge commit
 // must never hold the hook open; patch_id is diagnostic and best-effort, so a
-// timeout simply omits it (R6).
+// timeout simply omits it.
 const patchIDTimeout = 2 * time.Second
 
 // CommitFacts is the structural identity of one commit: everything a commit
-// event's metadata (R6) needs and nothing else. No message, no diff, no patch
+// event's metadata needs and nothing else. No message, no diff, no patch
 // body -- only ids and a hash.
 type CommitFacts struct {
 	SHA     string
@@ -34,8 +34,8 @@ type CommitFacts struct {
 
 // ReadCommitFacts reads rev's structural identity. It never returns a partial
 // CommitFacts on a caught error: PatchID is the only field allowed to be
-// silently absent, because it is diagnostic (R6) and every other field is
-// required for R6's metadata contract.
+// silently absent, because it is diagnostic and every other field is
+// required by the commit event's metadata contract.
 func (g Git) ReadCommitFacts(rev string) (CommitFacts, error) {
 	sha, err := g.RevParse(rev)
 	if err != nil {

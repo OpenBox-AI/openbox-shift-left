@@ -22,7 +22,7 @@ type Posture struct {
 	ProviderVersion string
 
 	// DecisionAuthority names what decides this session's gated tool calls:
-	// "control_plane" since that decision, when /evaluate answers. It replaces
+	// "control_plane", when /evaluate answers. It replaces
 	// the bundle coordinates above as the posture's policy-provenance evidence,
 	// and it deliberately answers a smaller question.
 	DecisionAuthority string

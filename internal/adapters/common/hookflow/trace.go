@@ -8,7 +8,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// This file wires internal/trace (phase 1's local, full-fidelity record) into
+// This file wires internal/trace (the local, full-fidelity record) into
 // this package's own delivery, spool, lane-queue, latch and gate-verdict
 // paths. Every call here MUST stay off the blocking/failing path: trace.Emit
 // itself never blocks long or panics (see internal/trace), and every helper
@@ -242,7 +242,7 @@ func traceLatchSet(runID string, info SessionHaltInfo) {
 // traceLocalRedaction records the local (never-egressed) secret-redaction
 // step: the raw content BEFORE redaction and the result AFTER it, plus the
 // content-free category names that fired. Recorded regardless of
-// content_capture (the owner ruling: the trace captures everything), unlike
+// content_capture (the trace captures everything), unlike
 // the durable enforcement audit (EnforcementRecord), which only ever carries
 // the category names.
 func traceLocalRedaction(sessionID string, eventType client.EventType, before string, after *client.Content, categories []string) {

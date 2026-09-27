@@ -23,10 +23,10 @@ const unsanitized = `{
         "body": {"stringValue": "claude_code.api_request"},
         "attributes": [
           {"key": "event.name", "value": {"stringValue": "api_request"}},
-          {"key": "session.id", "value": {"stringValue": "07c7412f-10e5-4da2-a05c-6949da9ae927"}},
+          {"key": "session.id", "value": {"stringValue": "4e6a8c02-3d5f-4b7c-9e1a-2f4b6c8d0e13"}},
           {"key": "request_id", "value": {"stringValue": "req_011CVrealrequestid00"}},
           {"key": "user.email", "value": {"stringValue": "real.person@example-corp.com"}},
-          {"key": "user.id", "value": {"stringValue": "b55705345a5d6d700ee59956e6da1596f422a98d"}},
+          {"key": "user.id", "value": {"stringValue": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"}},
           {"key": "organization.id", "value": {"stringValue": "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"}},
           {"key": "model", "value": {"stringValue": "claude-fable-5"}},
           {"key": "input_tokens", "value": {"intValue": "2"}},
@@ -89,10 +89,10 @@ func TestSanitizeRemovesEveryRealIdentity(t *testing.T) {
 	}
 	for _, real := range []string{
 		"realdev",
-		"07c7412f-10e5-4da2-a05c-6949da9ae927",
+		"4e6a8c02-3d5f-4b7c-9e1a-2f4b6c8d0e13",
 		"req_011CVrealrequestid00",
 		"real.person@example-corp.com",
-		"b55705345a5d6d700ee59956e6da1596f422a98d",
+		"a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
 		"6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8",
 		"/Users/realdev",
 		"secret-project",

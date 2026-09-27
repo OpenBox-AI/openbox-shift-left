@@ -576,7 +576,7 @@ func TestSessionOrder_KilledMidPassLeavesAReclaimableOrphan(t *testing.T) {
 
 	// Exactly what a real DrainSession call does up through the read -- and
 	// exactly where it stops if the process dies right here: collectSession
-	// itself no longer removes what it read (that decision now belongs to
+	// itself no longer removes what it read (removal belongs to
 	// DrainSession, made only once the remainder is durably queued).
 	lines, rotated, err := sp.collectSession("sess")
 	if err != nil {

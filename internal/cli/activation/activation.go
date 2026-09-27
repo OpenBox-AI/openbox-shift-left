@@ -30,9 +30,9 @@ type Lane string
 const (
 	// LaneGateway is the loopback base-URL relay.
 	LaneGateway Lane = "gateway"
-	// LaneTelemetry is the local OTLP receiver (that decision `:otel:`).
+	// LaneTelemetry is the local OTLP receiver (activity-id namespace `:otel:`).
 	LaneTelemetry Lane = "telemetry"
-	// LaneTransport is the in-path CONNECT/TLS relay (that decision `:proxy:`).
+	// LaneTransport is the in-path CONNECT/TLS relay (activity-id namespace `:proxy:`).
 	LaneTransport Lane = "transport"
 )
 

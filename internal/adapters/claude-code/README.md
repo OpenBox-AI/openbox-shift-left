@@ -1,7 +1,7 @@
 # OpenBox Claude Code adapter
 
-The first realization of the generic Provider Adapter Contract (architecture
-§1b): it maps Claude Code's native hooks onto the normalized developer event
+The first realization of the generic Provider Adapter Contract (see
+[architecture.md](../../../docs/architecture.md)): it maps Claude Code's native hooks onto the normalized developer event
 contract and emits them through the shared AIP-signed transport.
 
 It has **two legs, and they are not the same posture.** The telemetry leg is
@@ -34,7 +34,7 @@ Claude Code hook (stdin JSON)
 ## Why a spool instead of emitting inline
 
 Claude Code command hooks are synchronous; a slow hook delays the tool call.
-Doing network I/O on `PreToolUse`/`PostToolUse` would blow the NFR-2 `<50 ms`
+Doing network I/O on `PreToolUse`/`PostToolUse` would blow the `<50 ms` hot-path
 budget and couple the tool call to OpenBox reachability. So the hot path only
 maps + appends one JSON line to a per-session spool file (local,
 sub-millisecond); delivery itself happens either **inline, in the hook that
@@ -68,7 +68,7 @@ could not get to stays queued, unchanged, for the next drain.
 Each event's `event_id` is derived deterministically from its structural fields
 (`deriveID` in `mapper.go`): the same logical event always hashes to the same id
 and two distinct events never collide, so the id is stable through the whole
-spool → rotate → drain → reclaim lifecycle (INV-5) -- there is no separate
+spool → rotate → drain → reclaim lifecycle -- there is no separate
 recovery-file stage any more; a crash-orphaned file is reclaimed by the same
 drain path as an ordinary one. That is the client half of idempotency. The
 server-side half is partial and lives outside this adapter -
@@ -105,7 +105,7 @@ reads and which are inert.
 
 ## Privacy (INV-2)
 
-**Content capture is ON by default (2026-07-15).** One key, `content_capture`,
+**Content capture is ON by default.** One key, `content_capture`,
 gates every content class this adapter binds:
 
 | Class | Since | Redacted before attach? |

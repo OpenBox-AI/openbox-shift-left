@@ -101,8 +101,8 @@ func TestReplyTextIsContentGated(t *testing.T) {
 // TestReplyTextUsesTheSameByteCapAsItsSibling. Both keys carry the same string,
 // so they must be cut by the same function: capModelCallBody measures BYTES,
 // while capBody measures runes. Two copies of one value clipped by two
-// different rules is how a truncation bug hides — CLAUDE.md: test a cap in the
-// unit it claims.
+// different rules is how a truncation bug hides, so test a cap in the unit it
+// claims.
 func TestReplyTextUsesTheSameByteCapAsItsSibling(t *testing.T) {
 	// Multi-byte on purpose: a rune-cap would not truncate this at all, so a
 	// wrong cap fails loudly here instead of passing on ASCII.

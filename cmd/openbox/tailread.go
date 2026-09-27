@@ -8,8 +8,8 @@ import (
 
 // enforcementTailBytes bounds a LOCAL read of the enforcement audit file
 // (`enforcements.jsonl`) for `openbox doctor`. It is NOT an egress bound and
-// must not be spelled with, or reused as, one (CLAUDE.md: bounds have
-// owners) -- MaxCommandLen and MaxRedactBody/capBody bound different things
+// must not be spelled with, or reused as, one (each bound has one owner)
+// -- MaxCommandLen and MaxRedactBody/capBody bound different things
 // for different reasons.
 //
 // 64 KiB is DECIDED, not measured, and does not need to be: the reader it

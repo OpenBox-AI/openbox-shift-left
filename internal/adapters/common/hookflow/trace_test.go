@@ -11,7 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// TestMaxBodyBytesMatchesMaxRedactBody is the phase-2 contract check: the
+// TestMaxBodyBytesMatchesMaxRedactBody is the trace contract check: the
 // trace's per-body cap must never diverge from the cap the in-process secret
 // detector already applies, or a trace record could store MORE of a body
 // than the redaction path itself ever reasons about.
@@ -39,7 +39,7 @@ func withTraceDir(t *testing.T) string {
 	return dir
 }
 
-// TestDeliverTracesOneAttemptAndOneResult covers the phase-2 test: a Deliver
+// TestDeliverTracesOneAttemptAndOneResult: a Deliver
 // call produces exactly one deliver.attempt + one deliver.result row, and the
 // egressed event it carries is the (already redacted) form Deliver actually
 // received -- never a secret that never reached this function in the first
@@ -102,7 +102,7 @@ func TestDeliverTracesOneAttemptAndOneResult(t *testing.T) {
 	}
 }
 
-// TestDeliverRetryTracesTwoAttempts covers the phase-2 test: a retried
+// TestDeliverRetryTracesTwoAttempts: a retried
 // delivery (one transient failure, then success, through
 // Spool.attemptLines/DrainSession -- the one retry every drainer allows) is
 // visible as two attempt/result pairs, not one.
@@ -166,8 +166,7 @@ func TestDeliverRetryTracesTwoAttempts(t *testing.T) {
 	}
 }
 
-// TestTraceHookInCarriesRawStdinEvenOnParseFailure covers the phase-2 test:
-// hook.in records the raw payload -- including a secret-shaped value -- even
+// TestTraceHookInCarriesRawStdinEvenOnParseFailure: hook.in records the raw payload -- including a secret-shaped value -- even
 // when the payload cannot be parsed at all.
 func TestTraceHookInCarriesRawStdinEvenOnParseFailure(t *testing.T) {
 	dir := withTraceDir(t)

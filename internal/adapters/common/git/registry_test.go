@@ -124,7 +124,7 @@ func TestRegistry_TTLFromEnv(t *testing.T) {
 	}
 }
 
-// TestRegistry_WriteRejectsInvalidID sL5-SEC-3: an invalid/secret-shaped id
+// TestRegistry_WriteRejectsInvalidID: an invalid/secret-shaped id
 // must never be persisted to the registry (validate at source, not only at the
 // trailer sink). Skips silently.
 func TestRegistry_WriteRejectsInvalidID(t *testing.T) {

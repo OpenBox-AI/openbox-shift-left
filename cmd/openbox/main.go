@@ -275,7 +275,7 @@ func (a *app) warnIfUnconfigured(name string, logger *log.Logger) {
 	}
 }
 
-// runRewake is the background approval watcher (E9 §2.2), invoked by an
+// runRewake is the background approval watcher, invoked by an
 // `asyncRewake` hook handler alongside the gate.
 func (a *app) runRewake(args []string) (code int) {
 	defer func() {
@@ -312,8 +312,8 @@ func (a *app) runRewake(args []string) (code int) {
 func (a *app) runDevInit(args []string) int {
 	fs := a.newFlagSet("openbox init")
 	var o devinit.Options
-	// One flag. Everything an install used to be able to vary is now a decision
-	// the owner already made once, for every machine: full for the provider,
+	// One flag. Everything an install used to be able to vary is now fixed
+	// once, for every machine: full for the provider,
 	// user-wide, enforcing, with the commit-trailer hook on. A knob that only
 	// ever has one correct setting is a way to get it wrong.
 	fs.StringVar(&o.Provider, "provider", "",

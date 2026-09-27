@@ -153,11 +153,10 @@ func TestLaunchdUnitCapturesStdio(t *testing.T) {
 	}
 }
 
-// TestSpecCarriesTheResolvedSessionDir is T7's gateway-lane half (phase 08,
-// insight 8): the gateway unit carried NO env block at all before this, yet
-// gatewayemit (the :gateway: and :proxy: lanes' emitter) needs the same
-// resolved directory the hooks use, or its lane disagrees with them about
-// which run a call belongs to.
+// TestSpecCarriesTheResolvedSessionDir is the gateway-lane half of the
+// resolved-session-dir rule: gatewayemit (the :gateway: and :proxy: lanes'
+// emitter) needs the same resolved directory the hooks use, or its lane
+// disagrees with them about which run a call belongs to.
 func TestSpecCarriesTheResolvedSessionDir(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(obgit.EnvSessionDir, dir)

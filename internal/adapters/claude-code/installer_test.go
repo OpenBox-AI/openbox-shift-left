@@ -27,7 +27,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 		t.Errorf("Name = %q", inst.Name())
 	}
 	if !inst.Available() {
-		t.Error("adapter must report Available()==true (not the SL-2 stub)")
+		t.Error("adapter must report Available()==true (not a stub)")
 	}
 
 	ref := CredentialRef{
@@ -75,7 +75,7 @@ func TestInstaller_MaterializesBundleAndConfig(t *testing.T) {
 	}
 }
 
-// TestInstaller_PersistsPosture proves that decision onboarding change: the
+// TestInstaller_PersistsPosture proves the onboarding contract: the
 // posture chosen at `init` time (ref.Tier2/Findings, set by the resolved
 // posture) is written to dev.json, so the runtime hook reads it with NO env
 // var. Enforce is no longer part of this: it has no CLI/install-time knob at
@@ -226,7 +226,7 @@ func TestInstaller_SetsThinkingSummariesAndRecordsThePriorValue(t *testing.T) {
 	}
 }
 
-// TestInstaller_PlacesEngineBinary story-SL4-wire-2: when EngineBinary is set,
+// TestInstaller_PlacesEngineBinary when EngineBinary is set,
 // Install copies the unified engine into the bundle's bin/openbox
 // (executable), idempotently.
 func TestInstaller_PlacesEngineBinary(t *testing.T) {

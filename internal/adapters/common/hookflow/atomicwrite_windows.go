@@ -12,8 +12,7 @@ import (
 // quotes ext4's lead developer on why: without the fsync, "a zero-length file
 // is a valid and possible outcome after the rename". This copy renamed without
 // one, so the durability guarantee held on Unix and not on Windows -- the same
-// asymmetry internal/cli/atomicfile had, in a second copy the phase that fixed
-// the first one missed.
+// asymmetry internal/cli/atomicfile once had, in a second copy.
 //
 // The temporary file is synced and the parent directory is not, which is
 // exactly what renameio does on the other side. Losing the directory entry

@@ -56,7 +56,7 @@ func TestEventTypeIsTurnCompleted(t *testing.T) {
 	}
 }
 
-// TestToolNameDefaultsToClaudeCode pins the byte-identical fixture (INV-9):
+// TestToolNameDefaultsToClaudeCode pins the byte-identical fixture:
 // every caller that has never heard of Identity.ToolName must keep shipping
 // "claude-code" on the wire.
 func TestToolNameDefaultsToClaudeCode(t *testing.T) {
@@ -80,7 +80,7 @@ func TestToolNameCarriesPerRecord(t *testing.T) {
 }
 
 // TestGatewayRequestIDIsSet keeps the two turn producers in disjoint activity-
-// id namespaces (that decision requirement 8).
+// id namespaces.
 func TestGatewayRequestIDIsSet(t *testing.T) {
 	ev := mustEvent(LaneGateway, sampleIdentity(), "req-1", sampleAt, sampleCaptured())
 	if ev.GatewayRequestID != "req-1" {
@@ -88,7 +88,7 @@ func TestGatewayRequestIDIsSet(t *testing.T) {
 	}
 }
 
-// TestEventIDIsDeterministicPerCall is INV-5. The spool can be drained by a
+// TestEventIDIsDeterministicPerCall: the spool can be drained by a
 // different process long after the daemon that wrote it exited, and a retry
 // must present the same idempotency key or core counts the call twice.
 func TestEventIDIsDeterministicPerCall(t *testing.T) {
@@ -143,9 +143,9 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 	}
 	started, completed := decode(pair[0]), decode(pair[1])
 
-	// The bodies, in the fields that actually persist. They used to ride spans[],
-	// which core parses on the normal path and then discards, so every one of
-	// these assertions passed while nothing was stored.
+	// The bodies, in the fields that actually persist -- not spans[], which core
+	// parses on the normal path and then discards, so assertions there would
+	// pass while nothing was stored.
 	if !strings.Contains(string(started.ActivityInput), "claude-opus-4") {
 		t.Errorf("the request body did not reach activity_input: %s", started.ActivityInput)
 	}
@@ -164,7 +164,7 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 			"instead of every turn: %s", completed.ActivityOutput)
 	}
 
-	// The measured call, which the relay used to compute and throw away.
+	// The measured call, which the relay computes and must not throw away.
 	if completed.DurationMs == nil {
 		t.Fatal("duration_ms is null on the completed half; the relay measured the call")
 	}
@@ -202,9 +202,8 @@ func TestObservedExchangeReachesTheWire(t *testing.T) {
 // gate, asserted on outbound bytes for the same reason, and on BOTH halves of
 // the pair: a gate that held on one would leak on every model call.
 //
-// The headers are no longer part of this test's subject because they no longer
-// egress at all. They only ever reached core inside spans[], which is discarded,
-// and they were the highest-risk class this client carried -- the developer's
+// The headers are not part of this test's subject because they do not egress
+// at all: they are the highest-risk class this client sees -- the developer's
 // live provider credential is on every model request.
 func TestCaptureOffStripsBodiesButKeepsTheFingerprint(t *testing.T) {
 	c := sampleCaptured()
@@ -220,7 +219,7 @@ func TestCaptureOffStripsBodiesButKeepsTheFingerprint(t *testing.T) {
 			t.Errorf("%s: headers egressed", ev.EventType)
 		}
 		if !strings.Contains(got, "a1b2c3d4e5f60718") {
-			t.Errorf("%s: credential fingerprint disappeared under the content gate; that decision keeps it ungated", ev.EventType)
+			t.Errorf("%s: credential fingerprint disappeared under the content gate; it must stay ungated", ev.EventType)
 		}
 	}
 }

@@ -9,8 +9,7 @@ import (
 	"testing"
 )
 
-// TestTailLines_UnderCapReturnsLastNComplete (V6, phase-09's tail-cap
-// decision, case a): a file of many lines under the cap yields the last n
+// TestTailLines_UnderCapReturnsLastNComplete (case a): a file of many lines under the cap yields the last n
 // COMPLETE lines, newest last.
 func TestTailLines_UnderCapReturnsLastNComplete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "enforcements.jsonl")

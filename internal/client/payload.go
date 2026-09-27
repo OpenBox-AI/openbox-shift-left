@@ -18,7 +18,7 @@ type governanceEventPayload struct {
 	Source    string `json:"source"`
 	EventType string `json:"event_type"`
 	// ActivityType is core's pass-through activity_type column, which the
-	// openbox-fe dashboard's "Activity" column reads first. Always set (see
+	// OpenBox dashboard's "Activity" column reads first. Always set (see
 	// activityLabel) so the UI never falls back to "Unknown".
 	ActivityType string `json:"activity_type,omitempty"`
 	// ActivityID pairs a tool call's ActivityStarted and ActivityCompleted onto
@@ -42,14 +42,14 @@ type governanceEventPayload struct {
 	// SignalName is required on a SignalReceived event, empty on
 	// Workflow*/Activity* events.
 	SignalName string `json:"signal_name,omitempty"`
-	// SignalArgs carries a SignalReceived event's arguments (the openbox-fe
+	// SignalArgs carries a SignalReceived event's arguments (the OpenBox
 	// Verify-tab "Input" detail reads log.signal_args).
 	SignalArgs json.RawMessage `json:"signal_args,omitempty"`
 	// ActivityInput rides ActivityStarted; core stores it as the row's `input`
-	// and runs Guardrails stage "0" over it (services/guardrail.go:180).
+	// and runs Guardrails stage "0" over it.
 	ActivityInput json.RawMessage `json:"activity_input,omitempty"`
 	// ActivityOutput rides ActivityCompleted; core stores it as the row's
-	// `output` and runs Guardrails stage "1" over it (services/guardrail.go:192).
+	// `output` and runs Guardrails stage "1" over it.
 	ActivityOutput json.RawMessage `json:"activity_output,omitempty"`
 	// DurationMs is how long the tool call took, in milliseconds.
 	DurationMs *float64        `json:"duration_ms,omitempty"`
@@ -351,12 +351,12 @@ func turnActivityOutput(ev DevEvent, cut *cutLog) json.RawMessage {
 		// itself compares bytes (see its doc comment), so a rune-based check
 		// here would fire on a different body than the one actually cut.
 		clientCut := len(body) > maxModelCallBodyBytes
-		// truncated_paths is a COMPLETE index of what is incomplete on egress (owner
-		// ruling), and the gateway's cut is exactly that: a body this
+		// truncated_paths is a COMPLETE index of what is incomplete on egress,
+		// and the gateway's cut is exactly that: a body this
 		// row admits is short. Keyed off the same bool captureNote ORs below, so the
 		// note and the index cannot disagree. A gateway cut whose buffer lands at or
-		// under our own cap leaves clientCut false, which is how one live row carried
-		// truncated:true with the index silent.
+		// under our own cap leaves clientCut false, which on its own would let a row
+		// carry truncated:true with the index silent.
 		if clientCut || ev.Span.ResponseTruncated {
 			cut.note("activity_output", modelCallContentKey)
 		}
@@ -494,12 +494,11 @@ var contentMetadataKeys = map[string]bool{
 // observesAResponse is which half of an activity may assert an HTTP status.
 //
 // A Started row represents a request that has not been answered, so a status code
-// on one is a claim about a response that did not exist when the row was made --
-// and 116 of 116 live Started rows asserted `200`. The cause was structural:
-// gatewayemit builds both halves from one shared `span(stage)` closure
-// (`internal/cli/gatewayemit/event.go:84-93`) that copies HTTPStatus onto each.
-// So the condition lives here, in the one funnel every adapter passes through,
-// rather than in the adapter that exposed it.
+// on one is a claim about a response that did not exist when the row was made.
+// The hazard is structural: gatewayemit builds both halves from one shared
+// `span(stage)` closure (`internal/cli/gatewayemit/event.go`) that copies
+// HTTPStatus onto each. So the condition lives here, in the one funnel every
+// adapter passes through, rather than in one adapter.
 //
 // It gates the metadata KEY and not only the span field, because buildMetadata
 // copies caller metadata in first: an adapter writing `http_status` by hand would
@@ -525,8 +524,8 @@ func signalDetailKeyFor(t EventType) string {
 		return "error_details"
 	// v1.8: 8 cases, 7 distinct keys — the count is of the v1.8 block below, not
 	// of the whole switch, which is 10 cases and 9 distinct keys with the two
-	// above. Counted twice already; leave the scoping explicit. No case for
-	// EventUserPromptExpansion — it is structural-only (D1).
+	// above. Leave the scoping explicit. No case for
+	// EventUserPromptExpansion — it is structural-only.
 	case EventPermissionRequest:
 		return "requested_tool_input"
 	case EventNotification:
@@ -900,8 +899,7 @@ const modelCallContentKey = "content"
 
 // modelCallReplyKey is what makes an assistant turn judgeable at all.
 //
-// Core's replyTextFromActivityOutput (openbox-core
-// internal/services/goal_alignment.go) reads this exact top-level string off
+// Core's goal-alignment judge reads this exact top-level string off
 // activity_output, and its model-turn judge keys the whole branch on the key's
 // PRESENCE with deliberately NO fallback to `content`: old producers keep
 // sending SSE frames there indefinitely, and a fallback would feed the judge

@@ -201,7 +201,7 @@ func signalCases() []signalCase {
 }
 
 // TestMap_21SignalClasses is the single table-driven test over all 21 v1.8
-// observe-only lifecycle signals: none becomes an Activity (insight 1), each
+// observe-only lifecycle signals: none becomes an Activity, each
 // rides signalEvent's fixed shape, and each carries its documented structural
 // metadata.
 func TestMap_21SignalClasses(t *testing.T) {
@@ -258,7 +258,7 @@ func TestMap_21SignalClasses(t *testing.T) {
 // TestMap_ContentGatingForSignalClasses: with capture ON, the 8 classes that
 // have a content line get it (gated through gatedSignalDetail, never a raw
 // Content literal); MessageDisplay, PostToolBatch and UserPromptExpansion
-// never get Content even with capture on (D1 / A-04 A1). With capture OFF,
+// never get Content even with capture on (they are structural-only). With capture OFF,
 // none of the 21 ever get Content.
 func TestMap_ContentGatingForSignalClasses(t *testing.T) {
 	off := testMapper()
@@ -316,8 +316,8 @@ func TestMap_ContentGatingForSignalClasses(t *testing.T) {
 	}
 }
 
-// TestMap_PerHookEnumAllowlistsAreDistinct proves EnumOr is applied per hook
-// (insight 2): reusing another hook's allowlist would silently drop a value
+// TestMap_PerHookEnumAllowlistsAreDistinct proves EnumOr is applied per hook:
+// reusing another hook's allowlist would silently drop a value
 // that hook's own table accepts, and would accept a value another hook's
 // table rejects.
 func TestMap_PerHookEnumAllowlistsAreDistinct(t *testing.T) {
@@ -386,7 +386,7 @@ func TestMap_ConfigChangeInvalidSourceOmitsKey(t *testing.T) {
 }
 
 // TestMap_CommandSourceIsFreeform: command_source binds through capStr, not
-// EnumOr (R1) — there is only one documented value and no confirmed table, so
+// EnumOr — there is only one documented value and no confirmed table, so
 // an unconfirmed allowlist must not silently discard real data.
 func TestMap_CommandSourceIsFreeform(t *testing.T) {
 	m := testMapper()
@@ -492,7 +492,7 @@ func TestMapTurn_PromptIDThreadedOnBothHalves(t *testing.T) {
 	}
 }
 
-// TestMap_HookSessionEndAllReasonsSealTheRun: V3 — every SessionEnd,
+// TestMap_HookSessionEndAllReasonsSealTheRun: every SessionEnd,
 // including reason=clear, terminates the run; there is no branch to test
 // separately from this loop.
 func TestMap_HookSessionEndAllReasonsSealTheRun(t *testing.T) {
@@ -511,7 +511,7 @@ func TestMap_HookSessionEndAllReasonsSealTheRun(t *testing.T) {
 	}
 }
 
-// TestSourceValues_GainsFork: phase 08 reads sourceValues to decide when a run
+// TestSourceValues_GainsFork: run identity reads sourceValues to decide when a run
 // continues (clear/resume bump; startup/compact/fork do not) — a missing
 // value there is a wrong run identity, not a cosmetic metadata gap.
 func TestSourceValues_GainsFork(t *testing.T) {

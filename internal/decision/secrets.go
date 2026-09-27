@@ -14,7 +14,7 @@ import (
 //   - Deterministic + stateless + concurrency-safe: the pattern set is
 //     compiled once at package init; Redact reads no shared mutable state, so
 //     the server can call it from parallel connection handlers with no lock
-//     (INV-3b: no I/O either).
+//     (no I/O either).
 //   - Local-only (INV-1/INV-2): it never logs the content or the secret, never
 //     performs I/O.
 

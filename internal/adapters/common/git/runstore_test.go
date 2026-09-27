@@ -23,7 +23,8 @@ func TestRunStore_ReadAbsentIsGeneration0NoError(t *testing.T) {
 	}
 }
 
-// TestRunStore_BumpTwiceIsTheSecondInvocation is T3's registry-level half:
+// TestRunStore_BumpTwiceIsTheSecondInvocation is the registry-level half of
+// the second-invocation check:
 // two bumps against one store produce generations 1 then 2, two distinct
 // UUIDs neither equal to the session id, and PreviousRunID = the session id
 // then = the first UUID. The assertion that matters is on the SECOND call.
@@ -70,7 +71,7 @@ func TestRunStore_BumpTwiceIsTheSecondInvocation(t *testing.T) {
 	}
 }
 
-// TestRunStore_BumpAbsentRecordMintsGeneration1 is V7/R5: resume (or clear)
+// TestRunStore_BumpAbsentRecordMintsGeneration1: resume (or clear)
 // with no record mints a new run at generation 1, PreviousRunID = the session
 // id -- not a collision with a sealed generation-0 run, because the minted id
 // is a fresh UUID either way.
@@ -88,7 +89,7 @@ func TestRunStore_BumpAbsentRecordMintsGeneration1(t *testing.T) {
 	}
 }
 
-// TestRunStore_ReadFailOpen is T6: every malformed-record shape yields
+// TestRunStore_ReadFailOpen: every malformed-record shape yields
 // generation 0 (the zero value) and a non-nil error the caller logs once and
 // continues past -- never a block.
 func TestRunStore_ReadFailOpen(t *testing.T) {
@@ -161,7 +162,7 @@ func TestRunStore_ReadFailOpen(t *testing.T) {
 		s := RunStore{Dir: dir}
 		rec, err := s.Bump("sess-1")
 		if err != nil {
-			t.Fatalf("Bump must recover from a corrupt OLD record (R6 fail-open), got: %v", err)
+			t.Fatalf("Bump must recover from a corrupt OLD record (fail-open), got: %v", err)
 		}
 		if rec.Generation != 1 || rec.PreviousRunID != "sess-1" {
 			t.Errorf("Bump after a corrupt old record = %+v, want a fresh generation 1 rooted at the session id", rec)
@@ -190,7 +191,7 @@ func TestRunStore_BumpNewIDErrorFailsOpen(t *testing.T) {
 	}
 }
 
-// TestRunDirIsASubdirectoryNeverAFlatSibling pins insight 3/step 1's
+// TestRunDirIsASubdirectoryNeverAFlatSibling pins the run store's
 // structural guarantee: SessionResolver.resolveFromRegistry's directory scan
 // (session.go:139) skips runs/ only because it IS a directory. If this ever
 // stops being a subdirectory of the session dir, that scan would start trying

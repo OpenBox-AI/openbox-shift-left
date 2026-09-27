@@ -60,8 +60,8 @@ func TestGatingHooksAreNeverAsync(t *testing.T) {
 	})
 }
 
-// TestUpdatedInputCommandStaysAString pins the other half of the fail-open
-// hazard measured in phase 00.
+// TestUpdatedInputCommandStaysAString pins the other half of the measured
+// fail-open hazard.
 //
 // Codex requires `updatedInput.command` to be a JSON **string**. Emit anything
 // else and it rejects the whole output — and a rejected PreToolUse output means

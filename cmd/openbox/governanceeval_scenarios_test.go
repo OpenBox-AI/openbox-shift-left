@@ -44,9 +44,9 @@ func postBash(toolUseID, command string) fakecore.HookPayload {
 }
 
 // authoredProvenance says plainly that these payloads were written, not
-// captured. Recording a real session is an upgrade a later phase makes;
+// captured. Recording a real session would be an upgrade;
 // labelling an authored fixture as recorded would be the lie that matters.
-const authoredProvenance = "authored 2026-09-14 from the native shapes in cmd/openbox/main_test.go; not recorded from a live session"
+const authoredProvenance = "authored from the native shapes in cmd/openbox/main_test.go; not recorded from a live session"
 
 // ranFineSession is the control: one Bash call that was allowed and completed.
 func ranFineSession() fakecore.Scenario {
@@ -355,8 +355,8 @@ func TestGovernanceEvalOneAttemptPerFailureClass(t *testing.T) {
 				// A halted run's remaining events -- here, the two denied
 				// calls' own observe copies plus SessionEnd's own
 				// WorkflowCompleted -- still each get their own one
-				// delivery attempt (plan: "failures there do not change
-				// the latch"), and every one of THOSE independently
+				// delivery attempt (failures there do not change the
+				// latch), and every one of THOSE independently
 				// re-attempts the exchange too (nothing ever caches a
 				// valid token), so ExchangeHits is not pinned to 1 here;
 				// what IS pinned is that a failure at this stage never

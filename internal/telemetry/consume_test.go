@@ -126,7 +126,7 @@ func TestSiblingRecordsDoNotShareAttributes(t *testing.T) {
 
 // TestUnnamedRecordStillDelivered a record naming no event still reaches the
 // emitter. Dropping it here would hide a provider rename as silence, and
-// silence is the one signal OD4 turns into a finding; it must mean "the client
+// silence is the one signal doctor turns into a finding; it must mean "the client
 // sent nothing", not "we discarded it".
 func TestUnnamedRecordStillDelivered(t *testing.T) {
 	cap := &captureEmitter{}

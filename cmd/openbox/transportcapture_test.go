@@ -304,8 +304,8 @@ func countSpoolFiles(t *testing.T, dir string) int {
 
 var _ = gateway.Captured{}
 
-// TestTheTransportDaemonResolvesItsOwnElection is the whole of phase 06 in one
-// assertion: the unit's --settings value reaches the daemon, the daemon reads
+// TestTheTransportDaemonResolvesItsOwnElection is the daemon's election
+// wiring in one assertion: the unit's --settings value reaches the daemon, the daemon reads
 // that file, the election answers from it, and the emitter's gate is wired to
 // the answer.
 //

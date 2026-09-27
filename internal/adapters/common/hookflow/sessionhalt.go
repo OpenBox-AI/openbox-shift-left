@@ -48,8 +48,8 @@ func DefaultHaltDir() string {
 	return filepath.Join(openboxConfigDir(), "halted-sessions")
 }
 
-// haltPath, WriteSessionHalt and SessionHalted all take a RUN id (phase 08,
-// R11/V14), not a session id, though the parameter is untyped and the name
+// haltPath, WriteSessionHalt and SessionHalted all take a RUN id, not a
+// session id, though the parameter is untyped and the name
 // below stays "sessionID" for every existing caller and test: at generation
 // 0 the run id IS the session id (client.runIDFor's own selection), so every
 // caller that predates continue-as-new is unaffected and every existing

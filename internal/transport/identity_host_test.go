@@ -4,13 +4,13 @@ import "testing"
 
 // TestKeycloakIdentityHostIsNeverIntercepted pins that the relay never
 // intercepts or reads the Keycloak identity host: the workload client's
-// bootstrap and token exchange must reach identity.node.lat (and any other
-// provider's Keycloak realm) over a connection the transport lane does not
+// bootstrap and token exchange must reach the identity host (whichever
+// Keycloak realm is configured) over a connection the transport lane does not
 // see, which is what lets that client carry the API key and the signed
 // assertion in the clear over their own TLS session rather than the
 // relay's.
 func TestKeycloakIdentityHostIsNeverIntercepted(t *testing.T) {
-	const identityHost = "identity.node.lat"
+	const identityHost = "identity.example.com"
 
 	if provider, ok := ProviderForHost(identityHost); ok {
 		t.Fatalf("ProviderForHost(%q) = %q, true; want no provider to claim the identity host", identityHost, provider)

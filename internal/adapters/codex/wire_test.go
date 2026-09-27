@@ -163,7 +163,7 @@ func TestWire_MCPIdentifiersRideActivityInput(t *testing.T) {
 	}
 }
 
-// TestWire_LifecycleEventsUseBaseWireTypes (AC-5, E7-S5 rule): lifecycle
+// TestWire_LifecycleEventsUseBaseWireTypes: lifecycle
 // events ride the base Workflow*/SignalReceived wire types with workflow_type
 // set on signals too, and are span-less.
 func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
@@ -204,7 +204,7 @@ func TestWire_LifecycleEventsUseBaseWireTypes(t *testing.T) {
 	}
 }
 
-// TestWire_NoContentLeakEndToEnd (SL3-SEC-3, AC-7/AC-10): sentinel content in
+// TestWire_NoContentLeakEndToEnd: sentinel content in
 // tool_input and the prompt (with content-capture OFF) never reaches the wire
 // bytes.
 func TestWire_NoContentLeakEndToEnd(t *testing.T) {

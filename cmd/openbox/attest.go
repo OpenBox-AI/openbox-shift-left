@@ -8,7 +8,7 @@ import (
 // markers the tool leaves in the environment. The marker routes commit
 // events; it never signs anything -- the absence of a marker returns ""
 // rather than a default, so a commit a human made in a plain shell is never
-// attributed to a tool. It decides commit-event routing (newCommitSink, R2,
+// attributed to a tool. It decides commit-event routing (newCommitSink,
 // "agent commits only"): the same marker, checked against the resolved
 // session's own tool, is what lets a hand commit in a governed worktree keep
 // its trailer without ever producing a CommitCreated event.

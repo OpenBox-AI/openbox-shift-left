@@ -39,8 +39,8 @@ func TestStatusOnToolResult(t *testing.T) {
 // independent copy of the contract.
 func TestStatusLiteralsMatchTheConsumer(t *testing.T) {
 	if StatusCompleted != "completed" {
-		t.Errorf("StatusCompleted = %q; openbox-core compares against \"completed\" "+
-			"(observability/errors.go:333) and scores every other value as a failure", StatusCompleted)
+		t.Errorf("StatusCompleted = %q; core compares against \"completed\" "+
+			"and scores every other value as a failure", StatusCompleted)
 	}
 	if StatusFailed != "failed" {
 		t.Errorf("StatusFailed = %q, want \"failed\"", StatusFailed)
@@ -59,8 +59,7 @@ func TestStatusOutsideTheVocabularyIsDropped(t *testing.T) {
 }
 
 // TestStatusRidesToolResultsOnly scope. Payload.status is copied into the
-// row's workflow_status column for ANY event type (openbox-core
-// activities/governance/storage_event.go:417), so a status on a lifecycle
+// row's workflow_status column for ANY event type, so a status on a lifecycle
 // event overwrites a genuinely workflow-scoped field with a tool outcome.
 func TestStatusRidesToolResultsOnly(t *testing.T) {
 	for _, et := range []EventType{

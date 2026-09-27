@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// TestCapabilitiesProfile the declared capability profile is the §1b coverage
+// TestCapabilitiesProfile the declared capability profile is the coverage
 // contract for this provider: pin the keys and the truth (telemetry.tokens
-// true as of the SL7-C finops leg; verdict.apply + enforce.rewrite true as of
-// the SL7-B enforce leg) so a silent flip fails loudly here.
+// true with the finops leg; verdict.apply + enforce.rewrite true with the
+// enforce leg) so a silent flip fails loudly here.
 func TestCapabilitiesProfile(t *testing.T) {
 	want := map[string]bool{
 		"identity.register": true,
@@ -41,11 +41,9 @@ func TestCapabilitiesProfile(t *testing.T) {
 		byKey[c.Key] = c.How
 	}
 
-	// Phase 03 wired Stop, so the four substrings this used to pin ("PER SESSION",
-	// "NOT per turn", "Stop hook exists", "unwired") became false. What replaces
-	// them is the same discipline aimed at the new claim: per-turn is asserted,
-	// the rollup's surviving role is stated, and the owner's double-count ruling
-	// is visible in the note rather than only in a plan file.
+	// Stop is wired, so usage is per turn: per-turn is asserted, the rollup's
+	// surviving role is stated, and the no-double-count rule (the rollup ships
+	// only when no turn fired) is visible in the note.
 	tokens := byKey["telemetry.tokens"]
 	for _, want := range []string{"PER TURN", "DELTA", "zero turns", "SUB-counts"} {
 		if !strings.Contains(tokens, want) {
@@ -53,11 +51,11 @@ func TestCapabilitiesProfile(t *testing.T) {
 		}
 	}
 	// Every live claim must be traceable. A note that says "measured" without
-	// naming which probe measured it is the thing this repo keeps banning.
+	// naming what holds it is a claim nothing verifies.
 	for key, note := range byKey {
-		if !strings.Contains(note, "probe P0.") && !strings.Contains(note, "Test") &&
+		if !strings.Contains(note, "Test") &&
 			!strings.Contains(note, ".go") && !strings.Contains(note, "provider-independent") {
-			t.Errorf("capability %q cites neither a probe id, a test name nor a source file: %q", key, note)
+			t.Errorf("capability %q cites neither a test name nor a source file: %q", key, note)
 		}
 	}
 	for _, forbidden := range []string{"cannot", "impossible", "not possible"} {

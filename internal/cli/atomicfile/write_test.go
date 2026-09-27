@@ -34,7 +34,7 @@ func TestWriteCreatesTheFileWithTheRequestedMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Windows mode bits are a fiction; ~/.openbox/.env is unprotected there by
-	// design (CLAUDE.md), and this package must not imply otherwise.
+	// design, and this package must not imply otherwise.
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("mode = %v, want 0600. The activation record can hold a displaced relay URL with an "+
 			"embedded credential, and its caller passes 0600 for that reason", info.Mode().Perm())

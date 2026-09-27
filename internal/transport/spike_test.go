@@ -17,9 +17,8 @@ import (
 	"time"
 )
 
-// Pre-decided branches: passes ⇒ phase 11 proceeds; mutates bytes irreparably
-// or cannot stream per-chunk ⇒ stop AND report, do not hand-roll a replacement
-// inside the phase.
+// If goproxy mutates bytes irreparably or cannot stream per-chunk, that is a
+// reason to replace the library, not to hand-roll a replacement.
 
 // fixtureAPIKey the credential fixtures are assembled, not written as
 // literals, and that is not style either.
@@ -169,8 +168,8 @@ func TestGoproxyForwardsIdentically(t *testing.T) {
 	}
 }
 
-// TestClientAcceptEncodingSurvives is the assertion the plan did not
-// anticipate.
+// TestClientAcceptEncodingSurvives pins that the client's own
+// Accept-Encoding reaches upstream unchanged.
 func TestClientAcceptEncodingSurvives(t *testing.T) {
 	requireBind(t)
 	var got recorded

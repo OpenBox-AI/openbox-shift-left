@@ -136,9 +136,8 @@ func TestBothInPathLanesRoutedElectsExactlyOne(t *testing.T) {
 // Install ordering starts a lane daemon before the env var is written -- unit,
 // start, prove it listens, then env -- so the startup election legitimately sees
 // no routed lane. An answer cached at startup would therefore silence the lane
-// for its entire lifetime. This repo has paid for a first-invocation-only test
-// once already: fifteen green tests missed a defect because each ran init exactly
-// once.
+// for its entire lifetime, and a test that only exercises the first invocation
+// cannot see that.
 func TestTheElectionIsReDerivedPerCall(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".claude", "settings.json")

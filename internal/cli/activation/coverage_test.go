@@ -132,7 +132,7 @@ func TestCoverageRefusesToGuessFromAnUnreadableSettingsFile(t *testing.T) {
 	}
 }
 
-// TestTheInstallWindowDoesNotFalsePositive is the interaction the plan flags:
+// TestTheInstallWindowDoesNotFalsePositive guards a known interaction:
 // install ordering starts the daemon BEFORE the env is written, on purpose
 // (writing the var first points the tool at a dead port), so "unit installed,
 // keys absent" is legitimate for a few seconds. What distinguishes the two is the

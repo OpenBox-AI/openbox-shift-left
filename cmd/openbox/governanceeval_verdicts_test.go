@@ -216,9 +216,8 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 
 	// sc.AlwaysStatus applies to EVERY /evaluate POST, including SessionStart's
 	// own inline WorkflowStarted delivery -- which now runs, and fails,
-	// BEFORE the gated call ever escalates (phase 1: SessionStart delivers
-	// inline; plan round 3: "a failed WorkflowStarted halts the run like any
-	// other failure"). So the run is already latched by the time the gated
+	// BEFORE the gated call ever escalates (SessionStart delivers inline,
+	// and a failed WorkflowStarted halts the run like any other failure). So the run is already latched by the time the gated
 	// call's own gate runs, and it denies via the latch replay without
 	// asking /evaluate again -- not via its own failed escalation. This
 	// supersedes the old ordering pin (the gated call's OWN escalation
@@ -248,7 +247,7 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 				t.Errorf("the fail-closed reason quoted the tool content (%q); it must be content-free: %q", leak, d.Reason)
 			}
 		}
-		// An outage now IS a run-halting condition (plan round 3), the
+		// An outage now IS a run-halting condition, the
 		// opposite of the old "an outage is not a kill switch" pin.
 		if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
 			t.Errorf("%d session halt latch(es) were written, want exactly 1", n)

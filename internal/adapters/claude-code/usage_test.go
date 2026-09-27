@@ -713,7 +713,7 @@ func TestFinops_NoContentOnWire(t *testing.T) {
 	for _, s := range sentinels {
 		if strings.Contains(capturedBody, s) {
 			t.Fatalf("INV-2 breach: transcript sentinel %q reached the wire on a "+
-				"content-capturing turn; that decision amendment authorised thinking and "+
+				"content-capturing turn; the projection is authorised to bind thinking and "+
 				"NOTHING else, so the projection must still be unable to see this: %s",
 				s, capturedBody)
 		}
@@ -857,8 +857,8 @@ func TestTurnUsage_CostIsNeverDerived(t *testing.T) {
 }
 
 // TestFinops_OffByteIdentical: with no finops usage attached (flag off), the
-// SessionEnded event carries no tokens/cost; byte-identical to pre-SL-16
-// output.
+// SessionEnded event carries no tokens/cost; byte-identical to the output
+// without the usage leg.
 func TestFinops_OffByteIdentical(t *testing.T) {
 	m := NewMapper(Identity{DeveloperDID: testDID})
 	m.NewID = func() string { return "evt-1" }

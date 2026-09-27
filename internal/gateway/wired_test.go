@@ -147,8 +147,8 @@ func TestCaptureReportsRedactedEvidence(t *testing.T) {
 	}
 }
 
-// TestUngatedCallMakesNoRoundTripThroughTheRelay is requirement 5, asserted
-// through the real handler rather than only against Decide.
+// TestUngatedCallMakesNoRoundTripThroughTheRelay an ungated call asks nothing,
+// asserted through the real handler rather than only against Decide.
 func TestUngatedCallMakesNoRoundTripThroughTheRelay(t *testing.T) {
 	var got recorded
 	upstream := upstreamRecorder(t, &got, nil)
@@ -239,7 +239,7 @@ func TestGatedHaltRefusesAndNeverReachesUpstream(t *testing.T) {
 }
 
 // TestCaptureDoesNotBufferTheStream keeps the tee from reintroducing the
-// failure phase 04 exists to prevent. The sink must not delay a byte.
+// failure completeness tracking exists to prevent. The sink must not delay a byte.
 func TestCaptureDoesNotBufferTheStream(t *testing.T) {
 	const stall = 600 * time.Millisecond
 	upstream := sseUpstream(t, func(w http.ResponseWriter, ctl *http.ResponseController) {

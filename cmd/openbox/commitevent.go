@@ -18,15 +18,15 @@ import (
 
 // newCommitSink builds the post-commit hook's CommitCreated producer:
 // for each session the git package resolved, it
-// decides whether an agent tool's own marker actually produced this commit
-// (R2), resolves that tool's identity (R3), reads its current run and skips a
-// halted one (R4), and appends one event into that tool's own spool before
-// nudging the realtime flusher (R5). getenv is the same source
+// decides whether an agent tool's own marker actually produced this commit,
+// resolves that tool's identity, reads its current run and skips a halted
+// one, and appends one event into that tool's own spool before nudging the
+// realtime flusher. getenv is the same source
 // attestProvider reads its marker from; logger is the git-hook engine's own
 // logger, so a skip reason lands on the same stderr stream as every other
 // git-hook diagnostic.
 //
-// This never touches the network (R8) and never fails a commit (R7): every
+// This never touches the network and never fails a commit: every
 // branch below is a log line and a return, the same fail-open shape the
 // git-hook engine uses everywhere else.
 func newCommitSink(getenv func(string) string, logger *log.Logger) obgit.CommitSink {
@@ -106,7 +106,7 @@ func emitCommitEvent(marker string, facts obgit.CommitFacts, rs obgit.ResolvedSe
 	hookflow.RealtimeTrigger{Spool: spool, Provider: tool}.Maybe(logger, rs.ID)
 }
 
-// routeCommitTool is R2, "agent commits only": an event is emitted only when
+// routeCommitTool enforces "agent commits only": an event is emitted only when
 // the tool marker attestProvider found agrees with the tool the session
 // itself resolved from (git.ResolvedSession.Tool) -- never derived from the
 // marker alone, and never from the session alone.
@@ -115,8 +115,7 @@ func emitCommitEvent(marker string, facts obgit.CommitFacts, rs obgit.ResolvedSe
 //   - sessionTool == "" -> a session-env override (not attributable to a
 //     tool) or a registry record written before the Tool field existed.
 //   - marker != sessionTool -> the two disagree; a wrong guess here would
-//     drain the event under another agent's client (see the plan's risk
-//     table), so this is a skip, never a best-effort pick of either side.
+//     drain the event under another agent's client, so this is a skip, never a best-effort pick of either side.
 //   - anything else not in provider.Supported() -> an unrecognized tool name,
 //     defensive against a future marker/record value this binary does not
 //     know how to bind.
@@ -136,7 +135,7 @@ func routeCommitTool(marker, sessionTool string) (tool, reason string) {
 	return marker, ""
 }
 
-// commitEventMetadata is R6's metadata contract: structural commit identity
+// commitEventMetadata is the commit event's metadata contract: structural commit identity
 // only, no message/diff/patch body, plus the trailer's own session id so core
 // can bind this leaf to a resumed run's claim (a resumed run's wire run_id is
 // a minted UUID that never appears in the trailer).
@@ -163,7 +162,7 @@ func commitEventMetadata(facts obgit.CommitFacts, sessionID string) map[string]a
 	return meta
 }
 
-// commitEventID is R1: deterministic over (session id, run id, commit sha) so
+// commitEventID is deterministic over (session id, run id, commit sha) so
 // a re-fired hook (an amend, a re-run of the same post-commit) dedupes at
 // core rather than double-counting. runKey is whatever the caller used to
 // check the halt latch (the minted run id, or the session id at generation

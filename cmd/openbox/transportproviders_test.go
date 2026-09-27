@@ -106,7 +106,7 @@ func TestTransportCommandProvidersEmptyInterceptsNothing(t *testing.T) {
 // process already queued its own event into (seeded here to stand in for
 // one), so core receives them in append order regardless of producer, and
 // the session's spool ends up EMPTY -- everything queued got its one
-// attempt (CLAUDE.md's own "lane records queue through it").
+// attempt (lane records queue through the session spool).
 func TestLaneRecordInterleavesWithHookEventsInAppendOrder(t *testing.T) {
 	memhttptest.RequireBind(t)
 

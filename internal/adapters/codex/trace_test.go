@@ -12,7 +12,7 @@ import (
 )
 
 // TestRunHookTracesRawStdinAndNeverLeaksCredentials is the codex half of the
-// phase-2 end-to-end test also covered for claude-code: a gated PreToolUse
+// end-to-end trace test also covered for claude-code: a gated PreToolUse
 // call whose tool_input carries a secret-shaped (code-derived, never
 // committed) literal is traced in full -- hook.in records the RAW payload,
 // including that literal -- and no trace record anywhere carries the fake

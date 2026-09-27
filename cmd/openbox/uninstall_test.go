@@ -395,8 +395,8 @@ func TestUninstallOnACodexOnlyTelemetryMachineReportsNoUnrecordedLane(t *testing
 	}
 }
 
-// TestUninstallDeletesCredentialsEvenOnPartialFailure is the owner's ruling,
-// and its condition: keeping .env alone preserves nothing retryable, because
+// TestUninstallDeletesCredentialsEvenOnPartialFailure: credentials go even
+// when removal partly fails, and the loss is reported: keeping .env alone preserves nothing retryable, because
 // the spool is deleted unconditionally. One rule, reported precisely.
 func TestUninstallDeletesCredentialsEvenOnPartialFailure(t *testing.T) {
 	skipUnlessSupervised(t)
@@ -426,8 +426,8 @@ func TestUninstallDeletesCredentialsEvenOnPartialFailure(t *testing.T) {
 	}
 }
 
-// TestUninstallWithoutCredentialsStillCompletes. CLAUDE.md's ordering rule:
-// removal runs before the credential gate, so a missing credential downgrades
+// TestUninstallWithoutCredentialsStillCompletes. The ordering rule: removal
+// runs before the credential gate, so a missing credential downgrades
 // the flush to reported loss rather than refusing the whole command.
 func TestUninstallWithoutCredentialsStillCompletes(t *testing.T) {
 	skipUnlessSupervised(t)
@@ -559,8 +559,8 @@ func TestUninstallNeverPrintsASecret(t *testing.T) {
 	}
 }
 
-// TestUninstallReportsTheSpoolBacklogItIsAboutToDestroy. The owner's condition
-// on the full-purge ruling: the loss is reported, not silent.
+// TestUninstallReportsTheSpoolBacklogItIsAboutToDestroy. A full purge
+// destroys the backlog, so the loss is reported, not silent.
 func TestUninstallReportsTheSpoolBacklogItIsAboutToDestroy(t *testing.T) {
 	skipUnlessSupervised(t)
 	m := newInstalledMachine(t)

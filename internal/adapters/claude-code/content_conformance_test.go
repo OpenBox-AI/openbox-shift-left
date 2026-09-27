@@ -530,8 +530,8 @@ func TestContentCaptureConformance(t *testing.T) {
 	// metadata.<key> with capture on; absent with capture off while the
 	// signal still ships; a planted secret never appears; an oversized body
 	// is capped at maxBodySize. C50 is deliberately unused (retired when
-	// UserPromptExpansion became structural-only, D1) -- the gap is left so a
-	// future reader does not "fix" the numbering and lose that history.
+	// UserPromptExpansion became structural-only) -- the gap is left so a
+	// future reader does not "fix" the numbering.
 	type newContentKeyCase struct {
 		label        string // "C43 requested_tool_input", etc.
 		hook         string
@@ -724,7 +724,7 @@ func TestContentCaptureConformance(t *testing.T) {
 	// one key. With capture on and a redactor installed, a MessageDisplay
 	// payload carrying a delta and a PostToolBatch payload carrying
 	// tool_calls[].tool_response produce bytes containing neither string
-	// anywhere -- D1/A1's guarantee is that these classes carry no content at
+	// anywhere -- the structural-only guarantee is that these classes carry no content at
 	// all, structural or otherwise.
 	t.Run("C51 MessageDisplay and PostToolBatch never carry their raw text, anywhere in the payload", func(t *testing.T) {
 		const deltaSentinel = "DELTA-SENTINEL-must-never-appear"
@@ -757,7 +757,7 @@ func TestContentCaptureConformance(t *testing.T) {
 	})
 
 	// C52: every new class carries signal_args and still carries NO activity_id,
-	// asserted on the actual bytes that reach /evaluate (CLAUDE.md: asserting a
+	// asserted on the actual bytes that reach /evaluate (asserting a
 	// struct is not asserting the wire) -- all 21 v1.8 classes, driven through
 	// RunHook.
 	//

@@ -26,7 +26,7 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 // DevEvent maps the call for the inline evaluation, and; unlike the observe
 // copy of the same call; attaches the content the server needs to judge it.
 // The observe path spools its own separately-mapped copy that never carries
-// one, so SL3-SEC-3 holds by construction.
+// one, so the observe path stays content-free by construction.
 func (t enforceTarget) DevEvent(redacted *client.Content) (client.DevEvent, bool) {
 	ev, ok := t.mapper.Map(HookPreToolUse, t.ev)
 	if !ok {

@@ -8,7 +8,7 @@ use to emit a normalized developer event to OpenBox.
 normalized DevEvent ─▶ strip content (INV-2) ─▶ build GovernanceEventPayload
                      ─▶ acquire workload bearer (cached, or cold bootstrap+
                        exchange) ─▶ POST /api/v3/governance/evaluate
-                     ─▶ parse verdict (observe: ignored in Phase 1)
+                     ─▶ parse verdict
 ```
 
 It is deliberately **not** the control-plane client. Onboarding/registration
@@ -39,7 +39,7 @@ if err != nil { /* unusable identity; construction fault */ }
 
 verdict, err := c.Emit(ctx, client.DevEvent{
     SchemaVersion: client.SchemaVersion,
-    EventID:       uuid,               // idempotency key (INV-5)
+    EventID:       uuid,               // idempotency key
     EventType:     client.EventToolCall,
     SessionID:     openboxSessionID,   // → core run_id
     DeveloperDID:  agentDID,
@@ -62,8 +62,8 @@ verdict, err := c.Emit(ctx, client.DevEvent{
 |---|---|
 | **INV-1** obx_ key + workload private key + bearer never logged/leaked | the private key lives only in `workloadauth.Authenticator`; `client.go` logs only ids/types/errors via `describeDrop`/`describeWorkloadError` (stage/status/reason/guidance, never the token); plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
 | **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit`. The posture is the caller's: `devconfig` resolves it, and an unset `content_capture` resolves to ON |
-| **INV-3** fail-open on transport | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error. Fail-open *here* is not fail-open end to end: what an unknown verdict means for the call is the org's failure policy, applied after this returns |
-| **INV-5** client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe; adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **Server-side dedupe is partial**; see below |
+| **Fail-open on transport** | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error. Fail-open *here* is not fail-open end to end: what an unknown verdict means for the call is the org's failure policy, applied after this returns |
+| **Idempotency**: client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe; adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **Server-side dedupe is partial**; see below |
 
 ## No spans, so no semantic_type
 
@@ -79,7 +79,7 @@ locators carry that distinction instead. The `DevEvent.Span` struct still exists
   `activity_input`/`activity_output` rather than serializing it.
   `docs/mapping.md` §3 is the authority on which fields it reads.
 
-## Idempotency (INV-5): the client half is guaranteed
+## Idempotency: the client half is guaranteed
 
 The client owns **half** the idempotency contract and guarantees it:
 
@@ -95,17 +95,15 @@ The client owns **half** the idempotency contract and guarantees it:
   one); the spool never re-sends an acked event across rotate/flush/recovery.
 
 The **server-side half** is partial and not built here. Core dedupes on
-`(agent_id, workflow_id, run_id, activity_id, event_type)`
-(`activities/governance/validation.go:96`), so a retried **tool** event does
+`(agent_id, workflow_id, run_id, activity_id, event_type)`, so a retried **tool** event does
 match an existing row and returns its cached verdict; tool events carry an
 `activity_id`. Lifecycle and signal events carry none, and
-`CheckExistingEventActivity` skips the duplicate check entirely without one
-(`validation.go:86-89`), so a retry of a `SessionStarted`/`SignalReceived` after
+`CheckExistingEventActivity` skips the duplicate check entirely without one, so a retry of a `SessionStarted`/`SignalReceived` after
 an ambiguous success (stored, but the 200 was lost) can still be counted twice.
-That is telemetry skew in observe, not a safety issue, and closes when core keys
+That is telemetry skew, not a safety issue, and closes when core keys
 dedupe on the `event_id` / `Idempotency-Key` value.
 
-## Cross-repo alignment (verified via Explore, 2026-07-08)
+## Alignment with core
 
 - **Workload identity** is a Keycloak-issued bearer, acquired via
   `internal/client/workloadauth`: a cached token is reused as-is; a cold call
@@ -115,7 +113,7 @@ dedupe on the `event_id` / `Idempotency-Key` value.
   independently (`crypto/rsa`, never `workloadauth`'s own code) rather than
   trusting anything the caller asserts about itself.
 - **Payload** mirrors the subset of core's `GovernanceEventPayload`
-  (`internal/content/governance.go:186`) the client sets:
+  the client sets:
   `source="developer-runtime"`, `run_id`=session, `workflow_id`=workspace/DID,
   `duration_ms` as float milliseconds, `metadata` as `json.RawMessage`. Fields
   core populates for Temporal events (`task_queue`, `parent_workflow_id`,
@@ -124,12 +122,12 @@ dedupe on the `event_id` / `Idempotency-Key` value.
   a plain lowercase string (`allow|constrain|require_approval|block|halt`) with
   a legacy `action` fallback; parsed in `verdict.go`.
 
-## No core accept-list patch (INV-8)
+## No core accept-list patch
 
 The client never sends a developer `event_type` string. Every event maps onto
 one of five stock base wire types; `WorkflowStarted`, `WorkflowCompleted`,
 `SignalReceived`, `ActivityStarted`, `ActivityCompleted`; all of which are on
-core's accept-list (`internal/api/governance.go:273-286`), so a stock core
+core's accept-list, so a stock core
 accepts everything with no patch. `wireTypeFor` returns an error rather than
 falling back to the dev string, because emitting a non-accept-listed type
 produced a 400 that the fail-open path then swallowed: a new event type would

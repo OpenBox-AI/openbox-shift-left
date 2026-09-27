@@ -1,4 +1,4 @@
-// Package transport is the in-path model-call lane (that decision, `:proxy:`).
+// Package transport is the in-path model-call lane (activity-id namespace `:proxy:`).
 package transport
 
 import (

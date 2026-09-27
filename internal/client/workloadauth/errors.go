@@ -1,8 +1,8 @@
 // Package workloadauth is the RS256 client-assertion workload-identity
 // client: private-key handling, the public JWK and its RFC 7638 thumbprint,
 // the strict bootstrap parse, the client assertion, the token exchange, the
-// disk/memory cache and single-flight Authenticator. It has no callers yet;
-// wiring lands in a later phase. Imports stdlib and golang-jwt/jwt/v5 only.
+// disk/memory cache and single-flight Authenticator. Imports stdlib and
+// golang-jwt/jwt/v5 only.
 package workloadauth
 
 import (

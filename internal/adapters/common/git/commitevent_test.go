@@ -34,7 +34,7 @@ func TestReadCommitFacts_RootCommit(t *testing.T) {
 }
 
 // TestReadCommitFacts_MergeCommitHasNoPatchID a merge commit has more than one
-// parent, so there is no single-parent diff to identify (R6): PatchID must
+// parent, so there is no single-parent diff to identify: PatchID must
 // stay empty rather than describe only one side of the merge.
 func TestReadCommitFacts_MergeCommitHasNoPatchID(t *testing.T) {
 	r := newRepo(t)

@@ -41,7 +41,7 @@ const v3ClientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-b
 const headerIdempotencyKey = "Idempotency-Key"
 
 // v3AttributionAIPNamespace restates devconfig.AttributionAIPNamespace
-// (verified against core openbox_did.go:30 and backend aip-namespace.ts).
+// (the namespace core and the OpenBox backend derive attribution DIDs under).
 // TestFakecoreAttributionDIDMatchesTheVerifiedVector pins the same vector
 // devconfig's own TestAttributionDIDMatchesCoreDerivation asserts, so a drift
 // here is caught without importing devconfig.

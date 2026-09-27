@@ -79,7 +79,7 @@ func TestTurn_ThreeStopsEmitThreePairs(t *testing.T) {
 	runHook(t, "Stop", stopPayload("th-turn", rollout, "three"))
 
 	// Group by turn_index, which is what the wire turns into <session>:turn:N.
-	// Checked per index, never by a global row count (CLAUDE.md): six rows would
+	// Checked per index, never by a global row count: six rows would
 	// also pass for three started and three completed halves that never pair up.
 	byIndex := map[float64][]string{}
 	for _, r := range spoolRecords(t, spool) {
@@ -347,13 +347,11 @@ func TestTurn_SubagentUsesItsOwnCursor(t *testing.T) {
 	}
 }
 
-// TestRolloutAllowlistIsExhaustive is the guard the thinking-capture ruling
-// traded for. The rollout reader used to be a numbers-only projection, and that
+// TestRolloutAllowlistIsExhaustive is the guard thinking capture traded for. The rollout reader used to be a numbers-only projection, and that
 // STRUCTURE was the guarantee that no content escaped. Now that it binds
 // reasoning text, the guarantee has to be declarative.
 //
-// Be precise about what this proves, because an earlier version of this comment
-// overclaimed. Two distinct properties:
+// Be precise about what this proves. Two distinct properties:
 //
 //  1. Nothing binds without being classified: a developer who adds a field to
 //     rolloutPayload and forgets to classify it fails here. Checked by reflection
@@ -394,7 +392,7 @@ func TestRolloutAllowlistIsExhaustive(t *testing.T) {
 	}
 
 	// Property 2: every key of every payload shape observed on a real rollout is
-	// classified. These are the shapes phase 00 captured (keys only, no content).
+	// classified. These are the shapes captured from real rollouts (keys only, no content).
 	observed := []string{
 		`{"type":"token_count","info":{"total_token_usage":{},"last_token_usage":{}}}`,
 		`{"type":"reasoning","id":"x","summary":[],"encrypted_content":"x","internal_chat_message_metadata_passthrough":{}}`,
@@ -428,7 +426,8 @@ func TestThinkingBoundStaysAboveTheWireCap(t *testing.T) {
 	}
 }
 
-// TestRollupIsGatedOnZeroTurns is the owner's double-count ruling, as a test.
+// TestRollupIsGatedOnZeroTurns is the no-double-count rule, as a test: the
+// session rollup ships only when no turn pair was emitted.
 func TestRollupIsGatedOnZeroTurns(t *testing.T) {
 	t.Run("turns emitted ⇒ no rollup", func(t *testing.T) {
 		spool := setHookEnv(t)

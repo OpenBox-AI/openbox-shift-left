@@ -16,7 +16,7 @@ import (
 // this repo's own local hook rewrites secret-shaped literals on disk, so a
 // pasted key would silently become a placeholder in the source file and the
 // test would assert nothing. Split, it survives the edit and still matches the
-// detector's keyword rule byte-for-byte (CLAUDE.md, "Privacy posture").
+// detector's keyword rule byte-for-byte.
 func awsSecretFixture() string { return "AKIA" + "IOSFODNN7EXAMPLE" }
 
 // spooledBody returns the single spool file's contents.
@@ -46,13 +46,12 @@ func promptPayload(session, secret string) string {
 }
 
 // TestRunHook_PromptIsRedactedBeforeItIsSpooled is the regression test for the
-// live content leak this phase exists to close: the Codex prompt is the
-// adapter's only egressed content class and it shipped unscanned even with
-// secret_detection on, because the Codex Mapper had no RedactContent
-// collaborator at all.
+// content leak it closes: the Codex prompt is the adapter's only egressed
+// content class, and without a RedactContent collaborator on the Codex Mapper
+// it would ship unscanned even with secret_detection on.
 //
 // The assertion is the triple from the Claude Code precedent
-// (claude-code/content_conformance_test.go C42): the secret absent, AND the
+// (claude-code/content_conformance_test.go): the secret absent, AND the
 // placeholder present, AND the surrounding prose intact. Absence alone also
 // passes for a client that stopped sending prompts entirely, and a placeholder
 // without the surrounding text would not distinguish redaction from truncation.
@@ -103,7 +102,7 @@ func TestRunHook_PromptOptOutIsHonestlyUnredacted(t *testing.T) {
 	}
 }
 
-// TestRunHook_PromptCaptureOffAttachesNothing guards the ordering the phase
+// TestRunHook_PromptCaptureOffAttachesNothing guards the ordering redaction
 // depends on: the CaptureContent gate is checked BEFORE the redactor is
 // consulted, so capture-off attaches no prompt at all and the redactor is never
 // built. A redactor that ran first would make capture-off cost work it should
@@ -127,7 +126,7 @@ func TestRunHook_PromptCaptureOffAttachesNothing(t *testing.T) {
 
 // TestWire_PromptIsRedactedOnTheOutboundBytes asserts the same triple one layer
 // out, on the bytes the real client puts on the wire. Asserting a struct is not
-// asserting the wire (claude-code/content_conformance_test.go:363), and the
+// asserting the wire, and the
 // spool assertions above stop one layer short of egress.
 func TestWire_PromptIsRedactedOnTheOutboundBytes(t *testing.T) {
 	// Content capture must be on at the CLIENT too, or Emit strips Content before
@@ -168,7 +167,7 @@ func TestWire_PromptIsRedactedOnTheOutboundBytes(t *testing.T) {
 }
 
 // TestMapper_RedactionIsStructural pins redaction inside the mapper rather than
-// at the call site, so a second caller of Map inherits it. Phase 02's prompt
+// at the call site, so a second caller of Map inherits it. The prompt
 // gate re-maps the same event through this same Mapper for its DecisionRequest;
 // if redaction lived at the RunHook call site instead, the gate's copy would
 // carry the raw prompt. (claude-code/mapper_test.go TestMapTurn_RedactionIsStructural

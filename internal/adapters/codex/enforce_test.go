@@ -178,7 +178,7 @@ func TestMapVerdict_Codex(t *testing.T) {
 		{"HALT→deny", client.Evaluation{Verdict: client.VerdictHalt, Reason: "halted"}, codexDecisionDeny, "halted"},
 		{"BLOCK→deny", client.Evaluation{Verdict: client.VerdictBlock, Reason: "blocked"}, codexDecisionDeny, "blocked"},
 		{"guardrail-fail→deny", client.Evaluation{Verdict: client.VerdictAllow, Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii"}}}}, codexDecisionDeny, "pii"},
-		{"REQUIRE_APPROVAL→deny (OD-SL7-ASK)", client.Evaluation{Verdict: client.VerdictRequireApproval}, codexDecisionDeny, "approval"},
+		{"REQUIRE_APPROVAL→deny", client.Evaluation{Verdict: client.VerdictRequireApproval}, codexDecisionDeny, "approval"},
 		{"CONSTRAIN→proceed", client.Evaluation{Verdict: client.VerdictConstrain}, "", ""},
 		{"ALLOW→proceed", client.Evaluation{Verdict: client.VerdictAllow}, "", ""},
 		{"UNKNOWN→proceed", client.Evaluation{Verdict: client.VerdictUnknown}, "", ""},
@@ -312,7 +312,7 @@ func TestApplyFailurePolicy_Codex(t *testing.T) {
 
 // TestClampsDerivedFromInstalledTimeout the adapter-owned clamps are derived
 // from the installed gate-hook timeout, not copied from Claude Code's
-// constants (OD-SL7-T2-timeout).
+// constants.
 func TestClampsDerivedFromInstalledTimeout(t *testing.T) {
 	if (Engine{}).HookCeilings().Gating != time.Duration(preToolUseHookTimeoutSec)*time.Second {
 		t.Errorf("(Engine{}).HookCeilings().Gating must derive from the installer's preToolUseHookTimeoutSec")
@@ -321,7 +321,7 @@ func TestClampsDerivedFromInstalledTimeout(t *testing.T) {
 		t.Errorf("hookflow.EnforceBudget((Engine{}).HookCeilings()) must be the installed timeout minus the margin")
 	}
 	if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
-		t.Errorf("the whole-hook budget must land strictly before Codex's hook kill (probe P1 fail-open)")
+		t.Errorf("the whole-hook budget must land strictly before Codex's hook kill (Codex fails open on a kill)")
 	}
 	if evaluator.MaxTimeout != 0 {
 		t.Errorf("evaluator.MaxTimeout = %v; production must leave it zero or it re-clamps the gate's escalation budget", evaluator.MaxTimeout)

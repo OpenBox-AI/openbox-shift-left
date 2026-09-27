@@ -32,9 +32,8 @@ var (
 
 // transportSystemPACProviders is the union System PAC activation records for
 // the transport lane. Claude Code only, today: Codex never gets a transport
-// lane at all (initlanes.go's laneRequest.transport is CC-only, per
-// plan.md's "Codex rows stay out of the union" ruling), so there is exactly
-// one entry until that changes.
+// lane at all (initlanes.go's laneRequest.transport is CC-only: Codex rows
+// stay out of the union), so there is exactly one entry until that changes.
 var transportSystemPACProviders = []string{string(provider.ClaudeCode)}
 
 // systemPACURL is the relay's own PAC endpoint. Never "localhost": some
@@ -117,8 +116,8 @@ func systemPACAlreadyActive(homeDir, pacURL string, caPEM []byte) (*activation.S
 
 // deactivateSystemPAC restores the system PAC and untrusts the CA before the
 // caller (runRemovals) lets purgeLaneData delete the CA files
-// entry.CATrust names -- the ordering CLAUDE.md's "trust-before-PAC
-// ordering" requires: untrusting a CA whose files are already gone can never
+// entry.CATrust names -- the trust-before-PAC ordering, reversed for
+// removal, requires it: untrusting a CA whose files are already gone can never
 // work. A machine that never activated system PAC (LoadSystemEntry returns
 // nil) never calls the Runner seam at all.
 //
@@ -169,8 +168,8 @@ func (a *app) deactivateSystemPAC(home string) (keepRecord bool) {
 }
 
 // printSystemPACDeactivateFailed is the exact-manual-commands-with-SHA-1
-// report line CLAUDE.md's uninstall wiring requires. manual is the library's
-// own command list when it has one (declined/failed at the authorize stage);
+// report line uninstall prints when deactivation cannot finish. manual is
+// the library's own command list when it has one (declined/failed at the authorize stage);
 // the fallback below (built from entry's own recorded fields) covers the one
 // shape the library does not populate Manual for: a hard error partway
 // through deactivation, after authorization succeeded. Both shapes are
@@ -242,8 +241,7 @@ func (r laneReport) printSystemPAC(a *app) {
 }
 
 // printSystemPACActive is the disclosure required whenever activation is
-// ACTIVE: the exact wording CLAUDE.md's install-report requirement names,
-// item by item (which hosts, the unconstrained-CA blast radius, `; DIRECT`,
+// ACTIVE: the install report names, item by item (which hosts, the unconstrained-CA blast radius, `; DIRECT`,
 // the sudo/trust prompt).
 func (a *app) printSystemPACActive(o activation.Outcome) {
 	url := ""

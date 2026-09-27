@@ -1136,11 +1136,10 @@ func TestManualDeactivateCommandsNeverReferenceAFileAboutToBeDeleted(t *testing.
 	}
 }
 
-// TestActivateTracesCATrustReadbackAndPACWriteSteps closes phase 3's gap for
-// this file: activateSystemPACDarwin ran three privileged steps (trust the
-// CA, read its trust back, write each scope's PAC url/state) and traced none
-// of them. Each must now leave a StageActivation record, in order, carrying
-// its own step name.
+// TestActivateTracesCATrustReadbackAndPACWriteSteps: activateSystemPACDarwin
+// runs three privileged steps (trust the CA, read its trust back, write each
+// scope's PAC url/state). Each must leave a StageActivation record, in order,
+// carrying its own step name.
 func TestActivateTracesCATrustReadbackAndPACWriteSteps(t *testing.T) {
 	withSeams(t, 501, true)
 	home := t.TempDir()

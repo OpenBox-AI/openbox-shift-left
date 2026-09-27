@@ -53,7 +53,7 @@ func corpusShapedRequestWithTools(t *testing.T, messages, perMessage int, newest
 		msgsJSON, strings.Repeat("s", 8192), tools)
 }
 
-// TestTheNewestTurnSurvivesSelection is the phase's load-bearing assertion and
+// TestTheNewestTurnSurvivesSelection is selection's load-bearing assertion and
 // the one that fails on the pre-selection tree. Every byte window over a
 // corpus-shaped body stored boilerplate: `messages` is p50 82.1% of the body and
 // 95.3% of bodies exceed 64 KiB, so a head window keeps `model` plus the start of
@@ -95,7 +95,7 @@ func TestSelectionIsOneDistinctValuePerCall(t *testing.T) {
 	}
 }
 
-// TestMessagesIsTheLastKeyInTheSelectedDocument is the trap this phase exists to
+// TestMessagesIsTheLastKeyInTheSelectedDocument is the trap selection exists to
 // avoid, and it is not hypothetical: json.Marshal of a MAP sorts keys, which puts
 // "messages" first -- ahead of "model", "system" and the selection note -- landing
 // the newest turn in the blind middle of the judge's window. Only a struct with
@@ -131,7 +131,7 @@ func TestSelectionDropsToolDefinitionsAndSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(got, `"tools"`) {
 		t.Error("tools was dropped without being named in dropped_keys; an unrecorded drop is the " +
-			"failure mode this phase is repairing, not a smaller version of it")
+			"failure mode selection repairs, not a smaller version of it")
 	}
 	var doc struct {
 		Selection struct {
@@ -299,7 +299,7 @@ func TestASingleMessageLargerThanTheBudgetKeepsItsTail(t *testing.T) {
 }
 
 // TestAnEscapingHeavyNewestMessageStillStoresConversation is the field defect
-// this phase exists to remove, and the one the suite could not see.
+// selection exists to remove, and the one the suite could not see.
 //
 // 26.5% of measured model calls stored no conversation at all. The mechanism is
 // arithmetic, not structure: tailAsJSONString budgeted a FIXED 16 bytes for what
@@ -416,7 +416,7 @@ func literalMarkupBody(t *testing.T, count, perMessage int, newest string) strin
 }
 
 // TestLiteralMarkupInKeptMessagesDoesNotCostTheSelection is the SECOND expander,
-// and the one the plan's arithmetic denied existed.
+// and the one a naive size estimate misses.
 //
 // keepNewestMessages charges each element len(element)+1 against `room`,
 // measuring the RAW RawMessage. But json.Marshal re-escapes while it compacts a
@@ -559,7 +559,7 @@ func TestAReasonStringCannotMoveTheMarkerBoundary(t *testing.T) {
 }
 
 // BenchmarkSelectAP50RequestBody the relay is the one component that must never
-// slow the tool down. p50 request is 520,452 bytes; the plan's requirement was to
+// slow the tool down. p50 request is 520,452 bytes; the requirement is to
 // MEASURE this rather than argue it, against a model call that takes seconds.
 func BenchmarkSelectAP50RequestBody(b *testing.B) {
 	msgs := make([]string, 0, 200)
@@ -620,8 +620,8 @@ func TestTheNewestTurnSurvivesTheWholeCapturePath(t *testing.T) {
 	}
 	if len(captured) >= 65536 {
 		t.Errorf("captured %d bytes; the client's capModelCallRequest tail-cuts at 65,536 and capRunes "+
-			"head-cuts before it, so anything at or over that bound is back on the boundary this "+
-			"phase exists to leave", len(captured))
+			"head-cuts before it, so anything at or over that bound is back on the boundary "+
+			"selection exists to leave", len(captured))
 	}
 	if strings.Contains(captured, "input_schema") {
 		t.Error("tool definitions reached the stored body; they are the constant that made 28 calls store 4 distinct values")
@@ -646,7 +646,7 @@ func TestTheNewestTurnSurvivesTheWholeCapturePath(t *testing.T) {
 // keyword-adjacent values -- a pasted .env, a k8s secrets manifest -- and not a
 // large one. Below the fix, this fixture selected 49,115 bytes which redaction
 // grew to 83,770, and the stored result was 65,536 bytes of invalid JSON cut
-// mid-token with NO marker: the unmarked-head-window mode this phase exists to
+// mid-token with NO marker: the unmarked-head-window mode selection exists to
 // kill, resurrected inside the fix for it.
 func TestRedactionGrowthDoesNotCostTheNewestTurn(t *testing.T) {
 	const newest = "NEWEST_AFTER_REDACTION_GROWTH"
@@ -719,7 +719,7 @@ func TestRedactionGrowthDoesNotCostTheNewestTurn(t *testing.T) {
 func TestTheSelectionBudgetStaysBelowTheClientsByteNet(t *testing.T) {
 	if selectionBudget >= client.MaxModelCallBodyBytes {
 		t.Fatalf("selectionBudget is %d and the client cuts at %d; a selected document at or over "+
-			"the net gets head-cut by capRunes, which is the defect this phase removed",
+			"the net gets head-cut by capRunes, which is the defect selection removed",
 			selectionBudget, client.MaxModelCallBodyBytes)
 	}
 	// And the gap must be big enough to be a real margin rather than a rounding

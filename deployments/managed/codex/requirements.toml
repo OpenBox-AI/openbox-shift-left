@@ -1,4 +1,4 @@
-# OpenBox managed requirements for Codex CLI (E8-S8).
+# OpenBox managed requirements for Codex CLI.
 #
 # Deploy root-owned and user-unwritable to /etc/codex/requirements.toml. Requirements
 # are the mandate layer: they pin what a local config is allowed to select. See

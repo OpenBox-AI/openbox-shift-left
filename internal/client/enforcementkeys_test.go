@@ -166,11 +166,10 @@ func TestEveryEnforcementKeyIsAContentKeyOrStructural(t *testing.T) {
 	}
 }
 
-// TestASubagentSpawnDoesNotCollideWithTheEnforcementKeys is phase 07's TDD
-// case (b), and the safety constraint stated as a red test rather than a
-// review note (insight 4). A subagent spawn is shell-KINDED -- classifyTool
-// routes it through the shell arm so the local enforce gate is unchanged
-// (insight 6) -- but its span carries the "llm_tool_call" semantic, and its
+// TestASubagentSpawnDoesNotCollideWithTheEnforcementKeys states a safety
+// constraint as a test rather than a review note. A subagent spawn is
+// shell-KINDED -- classifyTool routes it through the shell arm so the local
+// enforce gate is unchanged -- but its span carries the "llm_tool_call" semantic, and its
 // content must NEVER land under `command`: that key is one of the three
 // enforcementKeys 71 of the control pack's 104 conditions match, and a
 // model-written subagent prompt arriving there would be judged by the 17
@@ -195,7 +194,7 @@ func TestASubagentSpawnDoesNotCollideWithTheEnforcementKeys(t *testing.T) {
 	}
 	got, _ := in["arguments"].(string)
 	if got == "" {
-		t.Fatalf("activity_input.arguments is empty; the whole tool_input must land there (owner ruling 2). Keys: %v",
+		t.Fatalf("activity_input.arguments is empty; the whole tool_input must land there. Keys: %v",
 			sortedKeys(in))
 	}
 	if !strings.Contains(got, "do the thing") {

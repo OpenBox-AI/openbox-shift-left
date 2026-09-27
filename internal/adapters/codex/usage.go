@@ -86,7 +86,7 @@ var rolloutAllowedPayloadFields = map[string]string{
 	"status":           "IGNORED: structural",
 	"cwd":              "IGNORED: structural",
 	"message":          "IGNORED: structural",
-	"last_token_usage": "IGNORED: per-CALL usage; the turn number is a window delta (P0.7b)",
+	"last_token_usage": "IGNORED: per-CALL usage; the turn number is a window delta",
 }
 
 type rolloutLine struct {
@@ -185,7 +185,7 @@ func nonNegRollout(v int) int {
 }
 
 // ---------------------------------------------------------------------------
-// Per-turn windowed reader (phase 03).
+// Per-turn windowed reader.
 //
 // aggregateRolloutUsage above stays exactly as it was: the SessionEnd rollup
 // still depends on it byte-for-byte. This is a second reader beside it, not a
@@ -193,7 +193,7 @@ func nonNegRollout(v int) int {
 //
 // Codex's rollout carries CUMULATIVE snapshots -- verified on a real 93-snapshot
 // rollout: total_token_usage is monotonically non-decreasing, and its delta
-// equals last_token_usage on every transition (phase 00 probe P0.7b). So a
+// equals last_token_usage on every transition. So a
 // per-turn number is a DELTA between two snapshots, never a read of one.
 //
 // last_token_usage is deliberately not used as the per-turn value: it is the
@@ -206,7 +206,7 @@ func nonNegRollout(v int) int {
 // cap, which counts 65536 RUNES: a rune is up to 4 bytes, so a byte bound below
 // 4x the rune cap would truncate here, in a unit the wire does not measure in,
 // and the client's cap would never get the chance to do its job. The bound has
-// one owner and it is the client (CLAUDE.md, "Bounds have owners").
+// one owner and it is the client.
 const maxThinkingBytes = 4 * 65536
 
 // turnWindow is one turn's usage delta plus the model and reasoning text in

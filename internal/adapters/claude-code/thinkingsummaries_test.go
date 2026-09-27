@@ -50,7 +50,7 @@ func thinkingSummariesValue(t *testing.T, path string) string {
 	return string(raw)
 }
 
-// TestWriteThinkingSummariesFourRowStateMatrix is the plan-level acceptance
+// TestWriteThinkingSummariesFourRowStateMatrix is the top-level acceptance
 // table: whatever showThinkingSummaries held before `init` -- absent, false,
 // true, or a non-boolean value a developer typed -- `init` forces it to true,
 // and a later `uninstall` (RestoreThinkingSummaries, called directly here to
@@ -127,8 +127,8 @@ func TestWriteThinkingSummariesFourRowStateMatrix(t *testing.T) {
 // TestWriteThinkingSummariesIsByteIdempotent is criterion 2's unit-level
 // twin: a second call over its own output, with the record already captured,
 // must not touch the settings file at all -- not just converge on the same
-// content, but skip the write outright (insight 8's "skip the splice", but
-// for the whole file since there is only one key).
+// content, but skip the write outright (for the whole file, since there is
+// only one key).
 func TestWriteThinkingSummariesIsByteIdempotent(t *testing.T) {
 	home := t.TempDir()
 	settingsPath := settingsFixture(t, home, `{"other": 1}`)
@@ -254,7 +254,7 @@ func TestRestoreThinkingSummariesOnAMachineWithNoRecordIsANoOp(t *testing.T) {
 	}
 }
 
-// TestRestoreThinkingSummariesDrift is acceptance criterion 1: a developer
+// TestRestoreThinkingSummariesDrift: a developer
 // who changes the value after `init` keeps that change through `uninstall`,
 // which reports the drift and touches nothing rather than failing.
 func TestRestoreThinkingSummariesDrift(t *testing.T) {

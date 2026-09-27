@@ -38,8 +38,7 @@ func testMapper() Mapper {
 }
 
 // TestClassifyTool_GroundedLiterals is the durable record of the Codex hook
-// tool_name literals (story AC-4: "ground the exact tool_name literals ... And
-// record them in a test").
+// tool_name literals, grounded in the Codex source and pinned here.
 func TestClassifyTool_GroundedLiterals(t *testing.T) {
 	tests := []struct {
 		name string
@@ -149,7 +148,7 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 				t.Errorf("developer_did = %q, want %q", got.DeveloperDID, testDID)
 			}
 			if got.EventID == "" {
-				t.Error("event_id is empty (INV-5)")
+				t.Error("event_id is empty (the idempotency key)")
 			}
 			if got.Content != nil {
 				t.Errorf("content must be nil, got %+v", got.Content)
@@ -171,7 +170,7 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 	}
 }
 
-// TestMap_NoContentLeak is the SL3-SEC-3 guard (story AC-7): content present
+// TestMap_NoContentLeak is the observe-path content guard: content present
 // in a hook's tool_input (command string / apply_patch body) or tool_response
 // must never appear anywhere in the emitted event; not in metadata, not in
 // tool.name, not in a span body.
@@ -220,7 +219,7 @@ func TestMap_NoContentLeak(t *testing.T) {
 	}
 }
 
-// TestMap_PromptCaptureGatedOnContentCapture (story AC-7): the prompt is
+// TestMap_PromptCaptureGatedOnContentCapture: the prompt is
 // content; carried onto PromptSubmitted only when content-capture is on (ON by
 // default at runtime; the mapper default here is off so the gate itself is
 // what is under test; CC-adapter parity).
@@ -332,7 +331,7 @@ func TestMap_IdentifiersBounded(t *testing.T) {
 	}
 }
 
-// TestDeriveID_ToolUseIDDistinguishes pins the INV-5 improvement Codex
+// TestDeriveID_ToolUseIDDistinguishes pins the idempotency-id improvement Codex
 // enables: two otherwise-identical same-instant Bash calls get distinct event
 // ids (the tool_use_id rides the invocation slot that feeds deriveID), while
 // the same logical event always re-derives the same id.

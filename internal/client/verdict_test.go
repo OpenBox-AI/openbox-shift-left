@@ -4,7 +4,7 @@ import "testing"
 
 // TestParseEvaluation_FullFields parses a rich /evaluate response (mirroring
 // the reference SDK GovernanceVerdictResponse) and asserts every sibling
-// signal is carried onto the Evaluation; the Advisory-tier value (story-SL-9).
+// signal is carried onto the Evaluation; the Advisory-tier value.
 func TestParseEvaluation_FullFields(t *testing.T) {
 	body := []byte(`{
 		"verdict": "block",
@@ -70,10 +70,10 @@ func TestParseEvaluation_FullFields(t *testing.T) {
 	// carries it (internal/adapters/claude-code advisory_test.go).
 }
 
-// TestParseEvaluation_VerdictOnly proves graceful degradation: a Phase-1 core
+// TestParseEvaluation_VerdictOnly proves graceful degradation: an older core
 // that returns only `verdict` still yields a usable Evaluation with every rich
 // field at its zero value (never an error); the load-bearing forward-compat
-// AC.
+// property.
 func TestParseEvaluation_VerdictOnly(t *testing.T) {
 	e := parseEvaluation([]byte(`{"verdict":"allow"}`))
 	if e.Verdict != VerdictAllow {
@@ -98,8 +98,7 @@ func TestParseEvaluation_LegacyAction(t *testing.T) {
 }
 
 // TestParseEvaluation_Malformed never errors: a body that will not decode into
-// the rich shape falls back to VerdictUnknown (INV-3 fail-open, stop
-// condition).
+// the rich shape falls back to VerdictUnknown (fail-open).
 func TestParseEvaluation_Malformed(t *testing.T) {
 	e := parseEvaluation([]byte(`not json`))
 	if e.Verdict != VerdictUnknown {
@@ -124,7 +123,7 @@ func TestParseEvaluation_GuardrailAbsentDefaultsPassed(t *testing.T) {
 }
 
 // TestParseEvaluation_Drift parses core's age_result into the content-free
-// DriftResult (story-E6-S11): only the boolean/count signals, never the free-
+// DriftResult: only the boolean/count signals, never the free-
 // text reason / final_trust_score / span_results detail.
 func TestParseEvaluation_Drift(t *testing.T) {
 	body := []byte(`{

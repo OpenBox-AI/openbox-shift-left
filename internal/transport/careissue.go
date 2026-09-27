@@ -3,7 +3,7 @@ package transport
 import "os"
 
 // ReissueIfNeeded re-mints the CA in dir when it still carries the
-// pre-2026-09-22 name constraint (CANeedsReissue), and returns it unchanged
+// legacy name constraint (CANeedsReissue), and returns it unchanged
 // otherwise. It is the one-time migration off a legacy constrained CA: delete
 // both files, then LoadOrCreateCA regenerates an unconstrained pair under the
 // same filenames (caCertFile/caKeyFile are constants), so NODE_EXTRA_CA_CERTS

@@ -9,7 +9,7 @@ import (
 // dashboard shows an agent's runtime key on the agent page, so that is what
 // people paste.
 func TestControlTokenProblemNamesTheWrongKey(t *testing.T) {
-	agentKey := "obx_test_8ab210d6acd7847f3135e4c4a14349fe"
+	agentKey := "obx_test_8ab00000000000000000000000000000"
 	problem := controlTokenProblem(agentKey)
 	if problem == "" {
 		t.Fatal("an agent runtime key was accepted as a control credential")
@@ -59,7 +59,7 @@ func TestSelfHostedWithoutDataPlaneWarns(t *testing.T) {
 		// It asked "does the backend look private?", and none of these do, so the
 		// warning never fired and the install went on to sign every request against
 		// the hosted core.
-		"https://openbox-api.node.lat/",
+		"https://api.example.com/",
 		"https://openbox.example.com",
 		"https://api.acme.io",
 		"https://openbox-backend.fly.dev",

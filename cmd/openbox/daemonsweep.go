@@ -15,7 +15,8 @@ import (
 // traceRawCapture is the gateway.WithRawObserver callback every relay lane
 // (gateway.go, transport.go) wires: it is the one place a RAW,
 // pre-redaction request/response body reaches the local trace, satisfying
-// the "everything, regardless of content_capture" ruling -- this is a LOCAL
+// the rule that the local trace keeps every body regardless of
+// content_capture -- this is a LOCAL
 // record, never egressed, so the redaction the client-facing Emitter still
 // applies is untouched.
 func traceRawCapture(c gateway.RawCapture) {

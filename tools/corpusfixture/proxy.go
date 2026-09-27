@@ -188,7 +188,7 @@ func withoutContentEncoding(h map[string]string) map[string]string {
 
 func fixtureFor(req, resp *event) any {
 	return map[string]any{
-		"note": "Sanitized from an openbox-logger desktop-observation run. " +
+		"note": "Sanitized from a recorded desktop traffic-capture run. " +
 			"Every free-text field is synthetic filler of the recorded rune length: the request's " +
 			"prompts, thinking, tool arguments, tool output and tool descriptions, and the response's " +
 			"event-stream deltas. No recorded prose is committed, and every consumer is content-agnostic. " +

@@ -519,7 +519,7 @@ func (s Spool) reclaimStemLegacy(stem string) {
 // reclaimStemOrphans discards every `.flushing.` rotation belonging to stem
 // that is old enough to prove its drainer died mid-pass (ReclaimOrphanAfter):
 // the outcome of its lines cannot be known, so they are never redelivered,
-// only counted and, through onFailure, individually failed so a later phase's
+// only counted and, through onFailure, individually failed so the delivery
 // latch can halt the run they belonged to. Returns how many parseable
 // lines it reclaimed.
 func (s Spool) reclaimStemOrphans(stem string, onFailure func(client.DevEvent, error)) int {

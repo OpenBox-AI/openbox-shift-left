@@ -6,7 +6,7 @@
 //   - Auth is a global JwtAuthGuard accepting either a Keycloak Bearer JWT
 //     (which also requires the x-openbox-client header) or an org control-
 //     plane key via X-API-Key (obx_key_...). Organization_id is derived from
-//     the caller identity, never from the body (INV-4).
+//     the caller identity, never from the body.
 //   - A minimal valid body is agent_name + icon + full aivss_config; icon is
 //     @IsNotEmpty on the DTO.
 package backend

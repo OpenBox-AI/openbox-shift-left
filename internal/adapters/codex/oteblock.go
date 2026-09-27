@@ -10,8 +10,8 @@ import (
 )
 
 // otelEnvironmentMarker identifies an [otel] table this installer owns.
-// Codex's own `environment` field is free text (the probe recorded
-// "openbox-probe"), so pinning it to this exact value is a PARSED ownership
+// Codex's own `environment` field is free text (any value the user chose), so
+// pinning it to this exact value is a PARSED ownership
 // check -- decoding the table and comparing one field -- never a substring
 // scan of the raw file, the same rule writeHooks holds for hooks.json.
 const otelEnvironmentMarker = "openbox-shift-left"

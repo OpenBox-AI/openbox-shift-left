@@ -37,8 +37,9 @@ func (t enforceTarget) DecisionRequest(localRedaction bool) decision.DecisionReq
 //   - An MCP call carries its whole tool_input verbatim; same rationale, same
 //     carve-out.
 //   - A file write carries the redacted body, rebuilt through the same
-//     RedactToolInput the local decider already redacted with (E8: the
-//     enforce copy is the same bytes the rewrite put on disk), and then the
+//     RedactToolInput the local decider already redacted with (redaction
+//     precedes attachment: the enforce copy is the same bytes the rewrite put
+//     on disk), and then the
 //     whole rebuilt object is scanned: the rebuild preserves byte-for-byte
 //     every field the decider was never handed.
 //   - Everything else -- a subagent spawn's prompt (Agent/ToolSearch), a file
@@ -99,7 +100,8 @@ func (t enforceTarget) overrideContent(kind client.ToolKind, sem string, redacte
 		// Verbatim by decision (same rationale, same doc).
 		return bounded(string(t.ev.ToolInput))
 	case hookflow.IsFileSemantic(sem) && redacted != nil && redacted.FileText != "":
-		// E8: the enforce copy is the same bytes the rewrite put on disk.
+		// Redaction precedes attachment: the enforce copy is the same bytes
+		// the rewrite put on disk.
 		// The rebuild swaps only the content field, so every other field is
 		// still the original -- an Edit's old_string among them, a full copy
 		// of the text being replaced that the decider never saw, because
@@ -108,7 +110,7 @@ func (t enforceTarget) overrideContent(kind client.ToolKind, sem string, redacte
 		// the observe copy runs over tool_input, so the two copies agree on
 		// what redaction covers. Re-scanning the body the decider already
 		// redacted is a no-op: the assignment rule and the entropy pass both
-		// skip a value containing OPENBOX_REDACTED, so the bytes E8 is about
+		// skip a value containing OPENBOX_REDACTED, so the redacted bytes
 		// are unchanged. This is the egress copy only; the disk rewrite goes
 		// through ApplyInputRedaction, which must keep old_string verbatim or
 		// the Edit stops matching the file.
@@ -153,11 +155,11 @@ func bounded(s string) string {
 func toolInputExtract(e *HookEvent) string {
 	kind, sem, _, _, _ := classifyTool(e.ToolName)
 	// A subagent spawn (Agent/ToolSearch) is shell-KINDED, so the local enforce
-	// gate is unchanged (insight 6), but its semantic is "llm_tool_call", not a
+	// gate is unchanged, but its semantic is "llm_tool_call", not a
 	// real shell command: e.command() would unmarshal it against {command} and
-	// yield "". Carry the whole tool_input instead (owner ruling 2) -- a thin
+	// yield "". Carry the whole tool_input instead -- a thin
 	// {subagent_type} alone would be a judgement about a spawn the judge cannot
-	// see (insight 3).
+	// see.
 	if kind == client.ToolShell && sem != "llm_tool_call" {
 		return e.command()
 	}

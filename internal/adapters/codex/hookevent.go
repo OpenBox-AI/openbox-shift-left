@@ -70,9 +70,9 @@ type HookEvent struct {
 
 	// ToolName preToolUse / PostToolUse / PermissionRequest.
 	ToolName string `json:"tool_name"`
-	// ToolUseID pairs a PreToolUse with its PostToolUse (new in 0.145.0, addendum
-	// #5); the per-invocation pairing id Claude Code lacks. PermissionRequest
-	// does NOT carry one -- verified on 0.150.0-alpha.8 (probe P0.6), where the
+	// ToolUseID pairs a PreToolUse with its PostToolUse (new in 0.145.0); the
+	// per-invocation pairing id Claude Code lacks. PermissionRequest
+	// does NOT carry one -- verified on 0.150.0-alpha.8, where the
 	// payload has tool_name and tool_input but no tool_use_id -- so a
 	// PermissionRequest cannot be paired to the tool call it escalates from.
 	ToolUseID string `json:"tool_use_id"`

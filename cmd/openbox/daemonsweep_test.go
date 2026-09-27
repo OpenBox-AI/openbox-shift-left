@@ -13,8 +13,8 @@ import (
 )
 
 // TestTracedLoggerTeesLinesIntoTraceLogStage: a lane daemon's ordinary
-// logger.Printf calls are the operator-facing diagnostic surface, and phase
-// 3's own requirement is that every one of them ALSO becomes a trace.StageLog
+// logger.Printf calls are the operator-facing diagnostic surface, and the
+// trace's own requirement is that every one of them ALSO becomes a trace.StageLog
 // record with no change at any of the daemon's own call sites -- so this
 // tees the io.Writer log.New is built on, not logger.Printf itself.
 func TestTracedLoggerTeesLinesIntoTraceLogStage(t *testing.T) {
@@ -49,7 +49,7 @@ func TestTracedLoggerTeesLinesIntoTraceLogStage(t *testing.T) {
 }
 
 // TestRunTraceSweepsRunsAtStartupAndOnTick exercises the sweep loop against a
-// fake clock crossing midnight, mirroring phase 1's own rotation contract:
+// fake clock crossing midnight, mirroring the trace's own rotation contract:
 // a daemon must sweep once immediately (not wait a full hour for its first
 // housekeeping pass) and again on its ticker.
 func TestRunTraceSweepsRunsAtStartupAndOnTick(t *testing.T) {

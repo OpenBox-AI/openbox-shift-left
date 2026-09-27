@@ -14,8 +14,8 @@ import (
 )
 
 // TestClassifyPath is the table, asserted directly. Classifying on the HTTP
-// method filed every POST as a completion, and roughly 40% of `llm_completion`
-// rows were token-count probes.
+// method files every POST as a completion, so token-count probes would be
+// stored as `llm_completion` rows.
 func TestClassifyPath(t *testing.T) {
 	for _, tc := range []struct {
 		url  string
@@ -71,8 +71,8 @@ func TestActivityTypesComeFromTheClosedVocabulary(t *testing.T) {
 	}
 }
 
-// TestCompletionIsTheOnlyLLMCompletion is criterion 3 of the plan, asserted at
-// the level that decides it.
+// TestCompletionIsTheOnlyLLMCompletion: only a completion stores as an LLM
+// completion, asserted at the level that decides it.
 func TestCompletionIsTheOnlyLLMCompletion(t *testing.T) {
 	if got := ClassCompletion.ActivityType(); got != client.ActivityTypeLLMCompletion {
 		t.Errorf("a completion stores as %q", got)
@@ -218,11 +218,10 @@ func TestAProbeWarningCannotSilenceACompletionWarning(t *testing.T) {
 // zero-only assertion would also pass on a broken emitter that spools nothing
 // at all; the paired completion assertion is what makes this a verdict.
 func TestAProbeIsClassifiedAndNotSpooled(t *testing.T) {
-	// Relocated from TestEmittedActivityTypeFollowsThePath: EventsFor itself is
-	// unchanged and still classifies+pairs a probe correctly on the wire; what
-	// changed is that Emit (below) never calls it for this class. Proving both
-	// is what keeps insight 1 true -- classification and emission stay separate
-	// points, so the 40%-distortion bug cannot reopen by deleting the class.
+	// EventsFor itself still classifies+pairs a probe correctly on the wire;
+	// Emit (below) never calls it for this class. Proving both keeps
+	// classification and emission separate points, so deleting the class cannot
+	// reopen probes being filed as completions.
 	for _, ev := range mustPair(LaneProxy, sampleIdentity(), "px-1", sampleAt, capturedFor("sess-1", "https://api.anthropic.com/v1/messages/count_tokens")) {
 		if ev.ActivityType != client.ActivityTypeTokenCount {
 			t.Errorf("%s: DevEvent.ActivityType = %q, want %q", ev.EventType, ev.ActivityType, client.ActivityTypeTokenCount)

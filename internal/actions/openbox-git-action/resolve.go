@@ -30,7 +30,7 @@ const (
 	SourceNote Source = "note-mirror"
 )
 
-// Status is the INV-6 attribution outcome for a deploy.
+// Status is the attribution outcome for a deploy.
 type Status string
 
 const (
@@ -44,7 +44,7 @@ const (
 	StatusUnattributed Status = "unattributed"
 )
 
-// Reason explains a non-attributed outcome (INV-6's required marker reason).
+// Reason explains a non-attributed outcome (the required marker reason).
 type Reason string
 
 const (
@@ -52,7 +52,7 @@ const (
 	ReasonTrailerStripped Reason = "trailer-stripped" // recovered from the notes mirror; trailer gone
 
 	// ReasonNonAgent is a reserved reason value, declared for contract
-	// completeness (the story enumerates it) but NOT produced server-side: a bare
+	// completeness (the attribution contract enumerates it) but NOT produced server-side: a bare
 	// git commit cannot tell "a human with no agent session wrote this" apart
 	// from "the trailer is absent"; both surface as ReasonNoTrailer.
 	ReasonNonAgent Reason = "non-agent"
@@ -67,7 +67,7 @@ type SessionClaim struct {
 	Reason    string `json:"reason,omitempty"` // verification note when not Verified
 }
 
-// Resolution is the full server-side attribution of a pushed commit (INV-6).
+// Resolution is the full server-side attribution of a pushed commit; never a silent wrong attribution.
 type Resolution struct {
 	CommitSHA   string   `json:"commit_sha"`   // the real, verified pushed SHA
 	Scope       []string `json:"scope"`        // commits considered (newest first)
@@ -134,7 +134,7 @@ func (r *Resolver) verifier() OwnershipVerifier {
 }
 
 // Resolve resolves the session set for a pushed commit. Target is the pushed
-// rev (resolved to the real pushed SHA, INV-6). Base is optional: when set,
+// rev (resolved to the real pushed SHA). Base is optional: when set,
 // the scope is base..target; when empty, a merge target resolves its
 // introduced commits and any other commit resolves itself.
 func (r *Resolver) Resolve(ctx context.Context, target, base string) (Resolution, error) {

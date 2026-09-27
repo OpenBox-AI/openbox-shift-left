@@ -58,13 +58,14 @@ func TestNoRefusalWithoutAnEvaluationAttempt(t *testing.T) {
 				t.Errorf("evaluator called %d times, want exactly 1 before any refusal", tc.ev.calls)
 			}
 			if d.Reason == "" {
-				t.Error("refusal carries no reason; requirement 6 wants the developer to see why")
+				t.Error("refusal carries no reason; the developer must be able to see why")
 			}
 		})
 	}
 }
 
-// TestUngatedCallAddsNoRoundTrip is requirement 5.
+// TestUngatedCallAddsNoRoundTrip an ungated call is forwarded without asking
+// /evaluate.
 func TestUngatedCallAddsNoRoundTrip(t *testing.T) {
 	ev := &recordingEvaluator{verdict: client.VerdictHalt}
 	d := Decide(context.Background(), ev, false, Captured{})
@@ -81,7 +82,7 @@ func TestUngatedCallAddsNoRoundTrip(t *testing.T) {
 }
 
 // TestAllowForwards keeps the gate from being a blanket denier; the failure
-// mode the security note calls out, where a bug that refuses everything is
+// mode worth guarding against, where a bug that refuses everything is
 // indistinguishable from an outage.
 func TestAllowForwards(t *testing.T) {
 	ev := &recordingEvaluator{verdict: client.VerdictAllow}
@@ -94,8 +95,9 @@ func TestAllowForwards(t *testing.T) {
 	}
 }
 
-// TestUnreachableRefusesRegardlessOfPosture is requirement 4; the owner's
-// divergence from the hook path.
+// TestUnreachableRefusesRegardlessOfPosture an unreachable /evaluate refuses a
+// gated call whatever the posture; the relay deliberately diverges from the
+// hook path here.
 func TestUnreachableRefusesRegardlessOfPosture(t *testing.T) {
 	ev := &recordingEvaluator{err: errors.New("no route to host")}
 	d := Decide(context.Background(), ev, true, Captured{})
@@ -133,7 +135,7 @@ func TestPolicyRefusalNamesPolicy(t *testing.T) {
 }
 
 // TestRefusalShapeIsProbePending exists so nobody mistakes the two provisional
-// constants for a verified answer. What it CAN assert without probe A is the
+// constants for a verified answer. What it CAN assert without a refusal-shape probe is the
 // requirement: the shape must not look like a transient provider error,
 // because Claude Code's retry logic matches on upstream error wording.
 func TestRefusalShapeIsProbePending(t *testing.T) {
@@ -159,8 +161,8 @@ func TestRefusalShapeIsProbePending(t *testing.T) {
 	}
 }
 
-// TestWriteRefusalRendersTheReason is requirement 6 on the actual response
-// bytes.
+// TestWriteRefusalRendersTheReason the refusal reason reaches the developer on
+// the actual response bytes.
 func TestWriteRefusalRendersTheReason(t *testing.T) {
 	rec := httptest.NewRecorder()
 	WriteRefusal(rec, Decision{Reason: reasonPolicyRefused("secrets policy triggered")})

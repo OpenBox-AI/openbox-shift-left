@@ -189,7 +189,7 @@ func TestNoSessionHeaderEmitsNothingAndSaysSo(t *testing.T) {
 }
 
 // TestWarningIsEmittedOnce keeps a per-call warning from filling the daemon
-// log: ~52 model calls were measured per turn window.
+// log: a single turn can make dozens of model calls.
 func TestWarningIsEmittedOnce(t *testing.T) {
 	em, _, warnings := newTestEmitter(t)
 	c := sampleCaptured()
@@ -202,7 +202,7 @@ func TestWarningIsEmittedOnce(t *testing.T) {
 	}
 }
 
-// TestEmitSurvivesADeliverDrop is INV-3 at the relay boundary: a saturated
+// TestEmitSurvivesADeliverDrop: at the relay boundary, a saturated
 // delivery pool's accepted risk of losing a record must never panic or
 // block the relay, only warn.
 func TestEmitSurvivesADeliverDrop(t *testing.T) {

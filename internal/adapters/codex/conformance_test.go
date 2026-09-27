@@ -8,9 +8,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/conformance"
 )
 
-// TestEmittedEventsAreConformant is the cross-contract acceptance check (story
-// AC-10): every event the Codex adapter produces must validate against the
-// SL-1 dev-event schema with content-capture disabled. If the contract
+// TestEmittedEventsAreConformant is the cross-contract acceptance check: every
+// event the Codex adapter produces must validate against the dev-event schema
+// with content-capture disabled. If the contract
 // tightens, this breaks here rather than silently at ingest.
 func TestEmittedEventsAreConformant(t *testing.T) {
 	m := testMapper()
@@ -38,7 +38,7 @@ func TestEmittedEventsAreConformant(t *testing.T) {
 			}
 			raw := mustMarshalContractShape(t, ev)
 			if err := conformance.ValidateDevEvent(raw, false); err != nil {
-				t.Fatalf("emitted event is not SL-1 conformant:\n%s\nerror: %v", raw, err)
+				t.Fatalf("emitted event is not dev-event schema conformant:\n%s\nerror: %v", raw, err)
 			}
 		})
 	}
@@ -80,7 +80,7 @@ func TestUsageRollupPairIsConformant(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := mustMarshalContractShape(t, tc.ev)
 			if err := conformance.ValidateDevEvent(raw, false); err != nil {
-				t.Fatalf("emitted rollup half is not SL-1 conformant:\n%s\nerror: %v", raw, err)
+				t.Fatalf("emitted rollup half is not dev-event schema conformant:\n%s\nerror: %v", raw, err)
 			}
 		})
 	}

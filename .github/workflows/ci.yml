@@ -2,9 +2,7 @@ name: ci
 
 # Build, vet and test the repository on every change.
 #
-# `./...` covers everything because there is one module. It used to be fifteen,
-# discovered from go.work, and the state before that (eleven modules, no CI at
-# all) is the failure mode worth engineering against.
+# `./...` covers everything because there is one module.
 on:
   push:
     branches: [main]
@@ -27,13 +25,7 @@ jobs:
       - name: Set up Go
         # A SUPPORTED major, and the reason is security rather than features.
         # Go patches only the two most recent majors, so a pin to an older one
-        # stops receiving stdlib fixes entirely while still building green:
-        # this was once pinned to 1.23 two majors past its end of life, and
-        # govulncheck found reachable stdlib vulnerabilities in every module
-        # (quadratic net/url resolvePath, a crypto/tls post-handshake message
-        # limit, encoding/asn1 recursion depth, net/textproto error escaping)
-        # whose fixes shipped only in 1.25.11+ and could therefore never arrive
-        # on any 1.23 patch.
+        # stops receiving stdlib fixes entirely while still building green.
         #
         # The go.mod language floor is 1.27.0 too, so the two currently coincide.
         # They remain independent knobs — a newer toolchain compiles an older
@@ -75,27 +67,12 @@ jobs:
         # not, because they never reach the test log. internal/depguard's
         # conformance closure guard shells out to `go list`, so without this flag
         # it can serve a stale `ok` while the closure has actually changed.
-        #
-        # Measured 2026-08-30, when the repo was still fifteen modules: reads
-        # landing in a sibling workspace module were not verified either, and five
-        # tree-walking guards served stale passes. The collapse to one module
-        # closed that half — a same-module read IS tracked — and left this one.
         run: go test -race -count=1 ./...
 
       - name: Every top-level directory is documented
-        # The convention that replaces the go.work coverage check this workflow
-        # used to run. That step failed when a go.mod on disk was missing from the
-        # workspace; this one fails when a DIRECTORY on disk is missing from
-        # docs/architecture.md's Layout table. Same idea, one hop over: from
-        # registered to documented.
-        #
-        # It reads ONE table. CLAUDE.md carries a layout map too, and making both
-        # authoritative would recreate the drift this exists to stop —
-        # architecture.md is user-facing and CLAUDE.md already points at it.
-        #
-        # Before this repo had any of it, two entire modules were undocumented,
-        # the module count was stale, and three filenames deviated from a
-        # convention nobody had written down. None of that was catchable.
+        # Fails when a top-level DIRECTORY on disk is missing from
+        # docs/architecture.md's Layout table. It reads ONE table, so the layout
+        # has exactly one authority and cannot drift against a second copy.
         run: |
           layout=$(sed -n '/^## Layout/,/^## /p' docs/architecture.md)
           if [ -z "$layout" ]; then
@@ -107,14 +84,9 @@ jobs:
             d="${dir%/}"
             case "$d" in .*|plans) continue;; esac
             # An exact FIRST-CELL match, which is the rule stated directly:
-            # "there is a row whose first cell is this directory".
-            #
-            # Two weaker forms were tried and both passed when they should not
-            # have. `grep -q` on the bare name matched any mention, so deleting
-            # the tools/ row left the cmd/ row's "belongs in `tools/`" behind.
-            # Anchoring with grep -E then interpolated the directory name into a
-            # PATTERN, so a directory named `a.b` was satisfied by a row for
-            # `aXb` — the dot matching any character. No regex, no escaping.
+            # "there is a row whose first cell is this directory". A bare grep
+            # would match any mention, and a regex would let `a.b` match `aXb`;
+            # awk string equality needs no escaping.
             printf '%s\n' "$layout" | awk -F'|' -v want="\`$d/\`" '
               NF > 2 { cell = $2; gsub(/^[ \t]+|[ \t]+$/, "", cell); if (cell == want) found = 1 }
               END { exit !found }' || missing="$missing $d"
@@ -128,9 +100,7 @@ jobs:
 
       - name: Vulnerability scan
         # The gate that makes the pin above self-maintaining. Without it, the
-        # toolchain silently ages out of support again and nothing says so —
-        # which is exactly how it reached two majors past end of life, green the
-        # whole way.
+        # toolchain silently ages out of support and nothing says so.
         #
         # A RED result here usually means "bump the toolchain", not "this change
         # broke something": a newly published stdlib advisory fails an unrelated
@@ -162,9 +132,8 @@ jobs:
         # stray unix-only call (syscall.Umask, /dev/null, os/exec of `security`),
         # and it costs one step with no extra runner.
         #
-        # Everything about Windows beyond "it compiles" is in phase 8's manual
-        # checklist and stated as unverified in the docs. Do not let this step be
-        # read as more than it is.
+        # Everything about Windows beyond "it compiles" is stated as unverified
+        # in the docs. Do not let this step be read as more than it is.
         run: GOOS=windows GOARCH=amd64 go build ./...
 
       - name: Cross-compile for Linux arm64
@@ -177,9 +146,7 @@ jobs:
         # shallow cases on every change; the corpus persists in testdata for
         # anything found.
         #
-        # The two rego-path fuzzers went with the local evaluator.
-        # FuzzRedact was defined in the same file and had to be deliberately
-        # kept: it covers code that still runs on every gated call with a body.
+        # FuzzRedact covers code that runs on every gated call with a body.
         run: |
           cd internal/decision
           go test -run XXX -fuzz FuzzRedact -fuzztime 20s ./
@@ -203,14 +170,10 @@ jobs:
           fi
 
       - name: Gateway units invoke only flags that exist
-        # Phase 07's plan documented the service unit as running
-        # `openbox gateway --config <path>`. No such flag exists, so a generated
-        # unit would have been rejected by flag parsing and the gateway would have
-        # failed to start on EVERY BOOT — a total outage of the phase's own
-        # deliverable, discoverable only by running it.
-        #
-        # Four separate phantom flags were written into this plan's docs before
-        # this gate existed, so it is mechanical rather than a review habit.
+        # A generated service unit that passes a flag the CLI does not define
+        # is rejected by flag parsing, so the lane would fail to start on EVERY
+        # BOOT — discoverable only by running it. Mechanical rather than a
+        # review habit.
         run: |
           go test -run 'TestUnitsUseFlagsThatExist|TestUnitStopTimeoutMatchesTheGracePeriod' ./internal/cli/gatewayservice/
 
@@ -223,16 +186,12 @@ jobs:
         #
         # Phrases, not vocabulary: "not prevented" and "prevention needs your MDM"
         # are the CORRECT phrasings, so banning the word would push the wording in
-        # exactly the wrong direction. That mistake was made once already while
-        # writing the equivalent Go test.
+        # exactly the wrong direction.
         #
         # Known limit, stated so the fix is obvious: this cannot distinguish a
-        # CLAIM from a DISCLAIMER. A sentence promising never to say "cannot be
-        # bypassed" trips it — that happened on the first run, in the MDM recipe's
-        # own "what OpenBox will not do" list. The remedy is to REWORD the doc, not
-        # to weaken the gate: prose that disclaims a phrase reads almost the same
-        # as prose that asserts it, and a reader skimming will not tell them apart
-        # either.
+        # CLAIM from a DISCLAIMER. The remedy is to REWORD the doc, not to weaken
+        # the gate: prose that disclaims a phrase reads almost the same as prose
+        # that asserts it, and a reader skimming will not tell them apart either.
         run: |
           hits=$(grep -rniE 'cannot be bypassed|cannot bypass|bypass is prevented|impossible to bypass|tamper-proof' \
             docs README.md 2>/dev/null || true)
@@ -243,12 +202,13 @@ jobs:
           fi
 
       - name: No tracked file points at the retired end-to-end suite
-        # The shell suite left the public tree. A stale path is worse than a
-        # missing one: a contributor follows it, finds nothing, and cannot tell
-        # whether the suite moved or the document is wrong.
+        # The end-to-end suite lives in Go tests, not a top-level shell
+        # directory. A stale path is worse than a missing one: a contributor
+        # follows it, finds nothing, and cannot tell whether the suite moved or
+        # the document is wrong.
         #
         # Driven off `git ls-files` so it scans tracked files only, which
-        # excludes plans/ and .claude/ without a path list that would rot.
+        # excludes untracked local state without a path list that would rot.
         #
         # The needle is assembled at run time rather than written out, so this
         # gate does not match its own source -- which would make it fail
@@ -271,10 +231,8 @@ jobs:
           echo "no tracked file references the retired suite"
 
       - name: Docs never show an openbox flag the CLI does not define
-        # Four separate phantom flags were written into this feature's docs before
-        # any gate existed. The worst was a service unit documented as
-        # `openbox gateway --config <path>`: flag parsing rejects it, so the
-        # supervised gateway would have failed to start on EVERY BOOT.
+        # A documented command with a flag the CLI does not define fails the
+        # moment a reader copies it — for a service unit, on EVERY BOOT.
         #
         # Scoped to COPYABLE commands — lines inside ``` fences, or lines that are
         # themselves an invocation. Prose is excluded on purpose: a sentence saying
@@ -291,8 +249,7 @@ jobs:
           # Only lines that a reader could copy: a fenced/indented command, or a
           # line whose first token is `openbox`.
           # [[:space:]] not \s: BSD grep (macOS, where this is developed) does not
-          # support \s in ERE, so the pattern silently matched almost nothing and the
-          # gate passed on a real phantom flag. Caught by a mutation drill, not review.
+          # support \s in ERE, so the pattern would silently match almost nothing.
           used=$(grep -rhE '^[[:space:]]*(\$ )?openbox [a-z]' docs README.md 2>/dev/null \
             | grep -oE '\-\-[a-z][a-z0-9-]+' | sed 's/^--//' | sort -u)
           bad=""

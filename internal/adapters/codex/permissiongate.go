@@ -10,8 +10,8 @@ import (
 )
 
 // PermissionRequest fires when a tool call needs escalated permission, between
-// PreToolUse and PostToolUse (ordering verified on codex-cli 0.150.0-alpha.8,
-// probe P0.6). It is the only lever in the whole Codex surface that can LOOSEN:
+// PreToolUse and PostToolUse (ordering verified on codex-cli 0.150.0-alpha.8).
+// It is the only lever in the whole Codex surface that can LOOSEN:
 // `behavior:"allow"` skips the human approval prompt outright.
 //
 // OpenBox therefore never emits allow here -- not bundled with a rewrite, not

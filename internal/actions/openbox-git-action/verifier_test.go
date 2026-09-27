@@ -112,18 +112,18 @@ func TestAPIVerifier_MatchesRunIDNotSessionEntityID(t *testing.T) {
 	v := m.verifier(t, 0)
 
 	if ok, _ := v.OwnsSession(ctx, "sess-A"); ok {
-		t.Fatal("matched on id PK; must match run_id only (SL-15 correctness detail)")
+		t.Fatal("matched on id PK; must match run_id only")
 	}
 }
 
 func TestAPIVerifier_ParsesRealBackendEnvelope(t *testing.T) {
-	// A body captured verbatim from the running backend must resolve as owned.
-	body := `{"status":200,"data":{"data":[{"id":"941a5940-b69e-4930-941e-79ae0d5bf943",` +
+	// A body in the running backend's exact envelope shape must resolve as owned.
+	body := `{"status":200,"data":{"data":[{"id":"2c4e6a80-1b3d-4f5a-9c7e-0d2f4a6b8c01",` +
 		`"agent_id":"` + testAgentID + `","workflow_id":"` + testPusherDID(t) + `",` +
-		`"run_id":"606a02c8-c982-415c-823e-8887b3e8b8b7","status":"completed",` +
+		`"run_id":"3d5f7b91-2c4e-4a6b-8d0f-1e3a5b7c9d02","status":"completed",` +
 		`"metadata":null,"current_step":{"event_type":"SessionStarted"}}],"total":1,"page":1}}`
 	m := newMockBackend(t, 200, body)
-	if ok, err := m.verifier(t, 0).OwnsSession(ctx, "606a02c8-c982-415c-823e-8887b3e8b8b7"); !ok || err != nil {
+	if ok, err := m.verifier(t, 0).OwnsSession(ctx, "3d5f7b91-2c4e-4a6b-8d0f-1e3a5b7c9d02"); !ok || err != nil {
 		t.Fatalf("real backend envelope = (%v,%v), want owned (data.data[] parse)", ok, err)
 	}
 }
@@ -133,14 +133,14 @@ func TestAPIVerifier_ForeignAgentRowRejected(t *testing.T) {
 	v := m.verifier(t, 0)
 
 	if ok, _ := v.OwnsSession(ctx, "sess-A"); ok {
-		t.Fatal("a row owned by a different agent_id must be rejected (INV-4)")
+		t.Fatal("a row owned by a different agent_id must be rejected: identity comes from the caller, never the body")
 	}
 }
 
 func TestAPIVerifier_RowMissingAgentIDNotOwned(t *testing.T) {
 	m := newMockBackend(t, 200, `{"status":200,"data":{"data":[{"run_id":"sess-A"}]}}`)
 	if ok, err := m.verifier(t, 0).OwnsSession(ctx, "sess-A"); ok || err != nil {
-		t.Fatalf("a row without agent_id = (%v,%v), want (false,nil) not-owned (INV-4)", ok, err)
+		t.Fatalf("a row without agent_id = (%v,%v), want (false,nil) not-owned", ok, err)
 	}
 }
 
@@ -439,7 +439,7 @@ func TestAPIVerifier_ForgedTrailerStaysInferred(t *testing.T) {
 		t.Fatalf("status = %s, want inferred (forged, unowned claim)", res.Status)
 	}
 	if res.Sessions[0].Verified {
-		t.Fatal("forged sess-victim must NOT be Verified (SL5-SEC-1)")
+		t.Fatal("forged sess-victim must NOT be Verified")
 	}
 }
 

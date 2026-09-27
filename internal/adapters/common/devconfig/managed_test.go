@@ -86,7 +86,7 @@ func TestManaged_AbsentFieldFallsThrough(t *testing.T) {
 }
 
 // TestManaged_NoManagedFileIsUnchangedBehaviour with no managed file at all,
-// behaviour is byte-identical to before the story.
+// behaviour is byte-identical to the unmanaged default.
 func TestManaged_NoManagedFileIsUnchangedBehaviour(t *testing.T) {
 	dir := t.TempDir()
 	userPath := filepath.Join(dir, "dev.json")
@@ -196,7 +196,7 @@ func TestEffectivePosture_ReportsSourceForEveryFlag(t *testing.T) {
 // TestManaged_ShippedTemplateLoadsAndLocks the shipped template must actually
 // load; an ops file that documents itself with "//" keys would be rejected by
 // the strict decode if the exemption broke, and the failure mode (silently
-// unmanaged) is the one this story exists to prevent.
+// unmanaged) is the one managed settings exist to prevent.
 func TestManaged_ShippedTemplateLoadsAndLocks(t *testing.T) {
 	// It has to be counted again whenever this package moves, and a wrong count
 	// does not fail -- it skips, which silently retires a test whose own subject
@@ -249,7 +249,7 @@ func TestManaged_DocKeyIsNotASetting(t *testing.T) {
 // supplies the identity it requires, so the assertions below turn on the
 // content posture alone. Values are derived in code rather than written as
 // literals: this repo's own redactor rewrites secret-shaped assignments in
-// files an agent authors (see CLAUDE.md, "Privacy posture").
+// files an agent authors.
 func credsEnvForManagedTest(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv(EnvHome, dir)

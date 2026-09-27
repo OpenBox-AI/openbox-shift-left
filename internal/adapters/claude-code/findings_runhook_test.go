@@ -157,8 +157,8 @@ func TestRunHook_FindingsNotSurfacedOnOtherHooks(t *testing.T) {
 }
 
 // TestRunHook_FindingsNeverSurfacedOnObserveOnlyNewHooks is the exhaustive
-// form of TestSurfaceFindings_UnreachableForConfigChange (configchange_test.go,
-// phase 09), which samples 4 of the 21 v1.8 hooks. SurfaceFindings is only
+// form of TestSurfaceFindings_UnreachableForConfigChange (configchange_test.go),
+// which samples 4 of the 21 v1.8 hooks. SurfaceFindings is only
 // reachable from PostToolUse/UserPromptSubmit (hookrun.go's two hook-equality
 // guards), so none of the 21 new classes -- ConfigChange included -- can ever
 // satisfy either check; this proves it for all 21, not a sample.

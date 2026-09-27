@@ -126,7 +126,7 @@ func TestBuildDecisionRequest(t *testing.T) {
 	})
 }
 
-// TestBuildDecisionRequest_ContentGating covers E6-S4 AC-5: the file body is
+// TestBuildDecisionRequest_ContentGating: the file body is
 // carried on the local DecisionRequest only when content-capture is on, and
 // only for a file tool; it is never carried for a non-file tool and never with
 // capture off.
@@ -211,7 +211,7 @@ func TestRunHook_EnforceGate(t *testing.T) {
 	}
 }
 
-// TestRunHook_EnforceOnlyPreToolUse guards AC-6: a non-PreToolUse hook never
+// TestRunHook_EnforceOnlyPreToolUse guards that a non-PreToolUse hook never
 // dials the sidecar (the gate is a pre-execution concept), regardless of
 // enforcement (always on now).
 func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
@@ -244,7 +244,7 @@ func parsePermissionDecision(t *testing.T, out []byte) (decision, reason string)
 	return got.HookSpecificOutput.PermissionDecision, got.HookSpecificOutput.PermissionDecisionReason
 }
 
-// TestMapVerdict exercises the full SDK cascade port (OD-ENF-scope):
+// TestMapVerdict exercises the full SDK cascade port:
 // HALT/BLOCK/guardrail-fail → deny; REQUIRE_APPROVAL → ask; constrain/ALLOW/
 // unknown → proceed (no decision).
 //
@@ -439,8 +439,8 @@ func contentField(t *testing.T, raw json.RawMessage) string {
 	return ""
 }
 
-// TestApplyInputRedaction covers the E6-S9 content-field reconstruction and
-// its gates (AC-1/AC-3/AC-5): it rebuilds the original tool_input with only
+// TestApplyInputRedaction covers the content-field reconstruction and
+// its gates: it rebuilds the original tool_input with only
 // the content field replaced by the redacted body, when local redaction is on
 // and the result differs; otherwise nil (no rewrite).
 func TestApplyInputRedaction(t *testing.T) {
@@ -483,8 +483,7 @@ func TestApplyInputRedaction(t *testing.T) {
 	}
 }
 
-// TestApplyInputRedaction_StructuralFieldsInviolable covers AC-2 (the E6-S7
-// carry-forward): the emitted updatedInput differs from the original only in
+// TestApplyInputRedaction_StructuralFieldsInviolable: the emitted updatedInput differs from the original only in
 // the content field; structural locators are carried over verbatim and can
 // never be altered by the sidecar's returned body (the body is a plain string;
 // only the content field can change).
@@ -512,8 +511,7 @@ func TestApplyInputRedaction_StructuralFieldsInviolable(t *testing.T) {
 	}
 }
 
-// TestApplyInputRedaction_NonEmptyFieldSelection covers G3 Finding 1 / G_SEC
-// LOW-1: redactToolInput must write the redacted body into the same field
+// TestApplyInputRedaction_NonEmptyFieldSelection: redactToolInput must write the redacted body into the same field
 // fileText() reads; the first NON-empty content key.
 func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
 	redactedBody := "tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
@@ -538,10 +536,10 @@ func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
 	}
 }
 
-// TestApplyDecision_Redaction covers AC-1/AC-4/AC-5: on the proceed path a
+// TestApplyDecision_Redaction: on the proceed path a
 // redaction is emitted as updatedInput alone (no permissionDecision); a
 // deny/ask carries no updatedInput; and with local redaction off the proceed
-// path writes nothing (byte-identical to E6-S3).
+// path writes nothing (byte-identical to the no-redaction path).
 func TestApplyDecision_Redaction(t *testing.T) {
 	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
 	rc := &client.Content{FileText: "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}
@@ -568,7 +566,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 		}
 	})
 
-	t.Run("proceed + redaction OFF → nothing (E6-S3 identical)", func(t *testing.T) {
+	t.Run("proceed + redaction OFF → nothing", func(t *testing.T) {
 		var out bytes.Buffer
 		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
 		if _, emitted := applyDecision(&out, dec, false, orig); emitted || out.Len() != 0 {
@@ -605,7 +603,7 @@ func TestApplyDecision_Redaction(t *testing.T) {
 	})
 }
 
-// TestRecordEnforcement_NoRedactionLeak covers AC-3: the redacted content
+// TestRecordEnforcement_NoRedactionLeak: the redacted content
 // lives on the sidecar Decision (local-only) and must never be serialized into
 // the durable enforcement audit; the audit stays content-free even for a
 // proceed+redaction, carrying only the category names.
@@ -641,7 +639,7 @@ func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
 	}
 }
 
-// TestRunHook_EnforceApply_Block is the E6-S2 end-to-end guard: enforce ON + a
+// TestRunHook_EnforceApply_Block is the block end-to-end guard: enforce ON + a
 // live sidecar whose bundle blocks `rm -rf` → a PreToolUse hook writes a
 // `deny` permissionDecision to stdout AND appends a content-free durable
 // enforcement record.
@@ -711,7 +709,7 @@ func TestRunHook_EnforceApply_Block(t *testing.T) {
 	}
 }
 
-// TestApplyFailurePolicy guards AC-2/AC-3/AC-4: the transform synthesizes a
+// TestApplyFailurePolicy: the transform synthesizes a
 // HALT only on a fail-open decision under fail-closed; every other case is a
 // no-op (fail-open proceeds; a real verdict is never overridden under either
 // policy).
@@ -774,7 +772,7 @@ func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
 	}
 }
 
-// TestRunHook_EnforceFailClosed is the AC-4 end-to-end guard: with enforce ON
+// TestRunHook_EnforceFailClosed is the fail-closed end-to-end guard: with enforce ON
 // and fail_closed ON, an unreachable sidecar → a `deny` on stdout (a fail-
 // closed deny), while a reachable sidecar's real ALLOW still proceeds (the
 // policy governs outages only).
@@ -815,7 +813,7 @@ func TestRunHook_EnforceFailClosed(t *testing.T) {
 }
 
 // TestRecordEnforcement_GuardrailCategoryOnly guards the durable-audit half of
-// AC-6 / INV-2 (G3 LOW-2, G_SEC LOW-1): a guardrail-failure decision records
+// INV-2: a guardrail-failure decision records
 // the category type only; never the guardrail reason free text (which can
 // describe detected content) or the field name.
 func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
@@ -856,7 +854,7 @@ func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
 	}
 }
 
-// TestApprovalReason guards AC-1 / INV-2: the ask reason surfaces the content-
+// TestApprovalReason guards INV-2: the ask reason surfaces the content-
 // free approval context; the policy reason, the policy id, and the server
 // approval id (the one approval-specific evaluate field); with a generic
 // fallback when the policy carried no reason, and never any tool-content free
@@ -894,7 +892,7 @@ func TestApprovalReason(t *testing.T) {
 	})
 }
 
-// TestRecordEnforcement_ReasonAndTimestamp guards R1-R3: the audit line
+// TestRecordEnforcement_ReasonAndTimestamp: the audit line
 // carries the verbatim policy-authored reason (never the "OpenBox
 // governance:" stdout framing) and a generated RFC3339Nano timestamp, so a
 // denial is diagnosable from one file instead of joining reason (stdout) and
@@ -940,7 +938,7 @@ func TestRecordEnforcement_ReasonAndTimestamp(t *testing.T) {
 	}
 }
 
-// TestRecordEnforcement_ApprovalID guards the audit half of AC-1/AC-2: an ask
+// TestRecordEnforcement_ApprovalID guards the audit half of approval: an ask
 // decision carrying a server approval id records approval_ref (a correlation
 // id, not content) so the ask is tie-able to the governance approval; and the
 // audit stays content-free (INV-2).
@@ -987,7 +985,7 @@ func TestRecordEnforcement_ApprovalID(t *testing.T) {
 	}
 }
 
-// TestApprovalRefFallsBackToGovernanceEventID guards E9 §1.3 defect 1: core
+// TestApprovalRefFallsBackToGovernanceEventID: core
 // declares approval_id but never assigns it, so a reference built from that
 // field alone was always empty and the code quoting it was dead.
 func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
@@ -1007,7 +1005,7 @@ func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
 	}
 }
 
-// TestRunHook_EnforceApply_Approval is the E6-S6 end-to-end guard: enforce ON
+// TestRunHook_EnforceApply_Approval is the approval end-to-end guard: enforce ON
 // + a live sidecar whose bundle requires approval for an MCP tool → a
 // PreToolUse hook writes an `ask` permissionDecision to stdout with a content-
 // free reason (policy reason + id), the durable audit records the ask, and
@@ -1059,8 +1057,8 @@ func TestRunHook_EnforceApply_Approval(t *testing.T) {
 	}
 }
 
-// TestEscalationCarriesApprovalContext_ObserveNeverDoes the evaluation context
-// (OD-E9-7): a gated call must carry what it is asking to do, or neither the
+// TestEscalationCarriesApprovalContext_ObserveNeverDoes the evaluation
+// context: a gated call must carry what it is asking to do, or neither the
 // server nor an approver can decide about it; `kind=shell tool_name=Bash`
 // tells them exactly nothing.
 func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
@@ -1125,10 +1123,10 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	red := &client.Content{FileText: "AWS_ACCESS_KEY_ID=OPENBOX_REDACTED"}
 	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent(red)
 	if ev.Content == nil {
-		t.Fatal("a gated Write must carry its body for evaluation (that decision E7)")
+		t.Fatal("a gated Write must carry its body for evaluation")
 	}
 	if strings.Contains(ev.Content.ToolInput, "AKIAIOSFODNN7EXAMPLE") {
-		t.Errorf("the RAW body was attached; redaction must precede attachment (E8): %q", ev.Content.ToolInput)
+		t.Errorf("the RAW body was attached; redaction must precede attachment: %q", ev.Content.ToolInput)
 	}
 	if !strings.Contains(ev.Content.ToolInput, "OPENBOX_REDACTED") {
 		t.Errorf("the redacted body was not attached: %q", ev.Content.ToolInput)
@@ -1138,8 +1136,8 @@ func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
 	}
 }
 
-// TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator is phase 10's
-// addition to configchange_test.go's TestRunHook_ConfigChange_PolicySettingsNeverGated:
+// TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator is the
+// companion to configchange_test.go's TestRunHook_ConfigChange_PolicySettingsNeverGated:
 // that test asserts on OUTPUT (stdout/stderr/enforcement-file all empty), which
 // is also exactly what an ALLOW verdict produces -- so it cannot distinguish
 // "the gate ran and allowed" from "the gate never ran at all". This asserts on

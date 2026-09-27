@@ -1,4 +1,4 @@
-# GoReleaser config for the unified `openbox` engine (OD17: one static, no-cgo
+# GoReleaser config for the unified `openbox` engine (one static, no-cgo
 # binary that is CLI + hook + sidecar + git-hook). Produces per-platform archives
 # + a checksums.txt that install.sh downloads and verifies, so `curl … | bash`
 # drops a prebuilt binary with NO Go toolchain on the developer's machine.

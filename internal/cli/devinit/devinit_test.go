@@ -516,8 +516,8 @@ func TestDefaultAgentNameIsToolScoped(t *testing.T) {
 }
 
 // TestNilRegistrarIsANamedError the caller wires a registrar on the register
-// branch only, so a nil one here is a wiring defect. It used to be a nil
-// dereference, which surfaced as a stack trace from a path where every other
+// branch only, so a nil one here is a wiring defect. It must be a named error, not a nil
+// dereference surfacing as a stack trace from a path where every other
 // failure is a sentence.
 func TestNilRegistrarIsANamedError(t *testing.T) {
 	isolateHome(t)

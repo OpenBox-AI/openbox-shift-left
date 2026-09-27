@@ -29,7 +29,7 @@ type registeredHooksJSON struct {
 			Timeout     int    `json:"timeout"`
 			AsyncRewake bool   `json:"asyncRewake"`
 			// Async is a pointer: absent and false must never collapse into one
-			// state (insight 6/D5). A plain bool cannot tell "the key was not
+			// state. A plain bool cannot tell "the key was not
 			// written" from "the key was written false".
 			Async *bool `json:"async"`
 		} `json:"hooks"`
@@ -131,9 +131,8 @@ func TestTurnHooksAreWiredAsNonGating(t *testing.T) {
 // TestAsyncRowsWriteTheAsyncKey is derived by iteration over localHookEvents,
 // never a hand-written list: every row with Async: true must write
 // "async": true, and every row with Async: false must write no async key at
-// all. (Renamed from TestObserveOnlyHooksRegisterAsync; insight 6 — after D5,
-// "observe-only" and "async" are no longer the same set, so this test can no
-// longer be phrased in terms of observe-only-ness.)
+// all. ("observe-only" and "async" are not the same set, so this test is not
+// phrased in terms of observe-only-ness.)
 func TestAsyncRowsWriteTheAsyncKey(t *testing.T) {
 	parsed := registeredHooks(t)
 	for _, ev := range localHookEvents {
@@ -153,7 +152,7 @@ func TestAsyncRowsWriteTheAsyncKey(t *testing.T) {
 }
 
 // TestHeadlineSyncSetIsExact is the exhaustive closed-set guard
-// TestGatingHooksAreNeverAsync alone cannot be (insight 7: that test names
+// TestGatingHooksAreNeverAsync alone cannot be (that test names
 // only the three gating hooks, so flipping PermissionRequest to async would
 // pass it silently). An async hook is killed at `claude -p` teardown, so
 // demoting one of these 17 to async would silently lose a human-decision
@@ -208,9 +207,9 @@ func TestAsyncIsAbsentNotFalse(t *testing.T) {
 }
 
 // TestGatingHooksAreNeverAsync the three hooks that can return a blocking
-// verdict (PreToolUse, UserPromptSubmit, and ConfigChange since D4) can never
+// verdict (PreToolUse, UserPromptSubmit, and ConfigChange) can never
 // be registered async: an async hook cannot hold a tool call open while core
-// decides. Not a sufficient guard on its own (insight 7) — see
+// decides. Not a sufficient guard on its own — see
 // TestHeadlineSyncSetIsExact for the exhaustive form.
 func TestGatingHooksAreNeverAsync(t *testing.T) {
 	parsed := registeredHooks(t)

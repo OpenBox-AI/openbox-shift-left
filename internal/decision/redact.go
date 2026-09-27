@@ -9,7 +9,7 @@ import (
 // Decider is the seam the enforce gate depends on, so it holds a contract
 // rather than a concrete type and a test can substitute a fake. It never
 // returns an error: every fault yields a decision that proceeds, so a fault in
-// this layer can never block the developer (INV-3b).
+// this layer can never block the developer.
 type Decider interface {
 	Decide(ctx context.Context, req DecisionRequest) Decision
 }

@@ -292,7 +292,7 @@ func TestEmit_EmptyEventID_IsCallerError(t *testing.T) {
 	ev := sampleEvent()
 	ev.EventID = ""
 	if _, err := c.Emit(context.Background(), ev); err == nil {
-		t.Error("expected error for empty EventID (INV-5)")
+		t.Error("expected error for empty EventID (idempotency key)")
 	}
 }
 
@@ -350,10 +350,10 @@ func TestEmit_RetryReusesSameEventID(t *testing.T) {
 	}
 }
 
-// TestEmit_IdempotencyKeyHeader (story-SL-14): every POST carries an
+// TestEmit_IdempotencyKeyHeader: every POST carries an
 // Idempotency-Key request header equal to the event's EventID and to the
 // metadata.event_id in the signed body; the explicit, header-standard half of
-// the dedupe contract (inert until EXT-core consumes it).
+// the dedupe contract (inert until core consumes it).
 func TestEmit_IdempotencyKeyHeader(t *testing.T) {
 	var mu sync.Mutex
 	var headers []string
@@ -397,7 +397,7 @@ func TestEmit_IdempotencyKeyHeader(t *testing.T) {
 	}
 }
 
-// TestEmit_IdempotencyKeyStableAcrossRetries (story-SL-14): a retry after a
+// TestEmit_IdempotencyKeyStableAcrossRetries: a retry after a
 // lost 200 (modeled as a 500 then 200) re-sends the same Idempotency-Key;
 // never a freshly generated one; so an eventual server-side dedupe collapses
 // the two stored copies.

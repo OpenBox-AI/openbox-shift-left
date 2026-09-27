@@ -15,8 +15,8 @@ import (
 // a file's timestamp against a clock, so there is no window to probe. The tests
 // below are what the new mechanism actually promises.
 
-// TestInstallLockRefusesRatherThanQueues. The incident the lock exists for is
-// recorded in its own comment: past a few dozen concurrent installers the queue
+// TestInstallLockRefusesRatherThanQueues. The failure the lock exists for is
+// described in its own comment: past a few dozen concurrent installers the queue
 // drained slower than it filled and the processes never exited. A blocking
 // acquire rebuilds exactly that, so the acquire must be non-blocking and the
 // second caller must be told no, immediately.

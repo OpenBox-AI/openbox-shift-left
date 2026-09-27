@@ -12,7 +12,7 @@ import (
 )
 
 // Past all of those the request is undecided, and an undecided approval
-// denies; never a silent allow (OD-E9-1).
+// denies; never a silent allow.
 
 // DefaultApprovalHold is the default bounded wait for a filed approval.
 const DefaultApprovalHold = 20 * time.Second

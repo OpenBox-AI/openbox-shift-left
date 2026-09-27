@@ -199,7 +199,7 @@ func TestKeycloakDownDeniesAndHaltsTheRun(t *testing.T) {
 // cached-but-rejected token (an agent revoked after a token was issued),
 // that 401 is never resent, and the cache file is deleted so the NEXT hook
 // goes cold rather than replaying the same dead bearer forever. Delivery is
-// always fail-closed now (plan round 3): the 401'd call denies and the run
+// always fail-closed now: the 401'd call denies and the run
 // halts (HaltOnDeliveryFailure); single-attempt delivery has no carry-over,
 // so the event is ledgered and gone, never held in the spool for a later
 // drain -- superseding the old fail-open pin. SessionEnd is not a gated

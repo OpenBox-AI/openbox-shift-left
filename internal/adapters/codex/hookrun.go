@@ -39,7 +39,7 @@ const sessionStartAttemptTimeout = sessionStartInlineWindow - time.Second
 // sessionEndInlineWindow bounds SessionEnd's own inline delivery attempt.
 // Codex clamps SessionEnd's own hook timeout to 3s and logs that it did
 // ("clamping SessionEnd hook timeout to 3s in <hooks.json>", measured on
-// codex-cli 0.150.0-alpha.8; phase 00 probe P0.4); 2s leaves roughly a second
+// codex-cli 0.150.0-alpha.8); 2s leaves roughly a second
 // for process start, ResolveCredentials and client.New.
 const sessionEndInlineWindow = 2 * time.Second
 
@@ -290,7 +290,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	}
 
 	if hook == HookSessionEnd {
-		// Owner ruling (2026-09-17): the session rollup fires ONLY when no turn
+		// The session rollup fires ONLY when no turn
 		// pair was emitted for this session. Per-turn is the primary record; the
 		// rollup survives for sessions where Stop never fired at all -- a crash, a
 		// kill, or a surface that does not run the hook. Those are not rare (the

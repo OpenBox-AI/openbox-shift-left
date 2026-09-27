@@ -173,7 +173,7 @@ func TestMap_LifecycleAndToolEvents(t *testing.T) {
 				t.Errorf("developer_did = %q, want %q", got.DeveloperDID, testDID)
 			}
 			if got.EventID == "" {
-				t.Error("event_id is empty (INV-5)")
+				t.Error("event_id is empty (the idempotency key)")
 			}
 			if got.Content != nil {
 				t.Errorf("content must be nil (metadata-only, INV-2), got %+v", got.Content)
@@ -226,7 +226,7 @@ func TestMap_NoContentLeak(t *testing.T) {
 	}
 }
 
-// TestMap_PromptCaptureGatedOnContentCapture story-E7-S7 (OD4): the prompt is
+// TestMap_PromptCaptureGatedOnContentCapture the prompt is
 // content; carried onto the PromptSubmitted event only when content-capture is
 // opted in, never by default.
 func TestMap_PromptCaptureGatedOnContentCapture(t *testing.T) {
@@ -699,15 +699,15 @@ func TestMap_FreeTextErrorNeverEgresses(t *testing.T) {
 }
 
 // TestMap_AgentSpawnCarriesSubagentTypeAndWholeToolInput replaces the vacuous
-// TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt (phase 07, insight 7): that
+// TestMap_TaskSubagentTypeIsCarriedButNotItsPrompt: that
 // test never set CaptureContent, so no tool's input ever egressed in it, and
 // it drove ToolName "Task", a name production no longer emits (the
 // producer's tool is "Agent").
 //
-// This asserts the DECIDED behaviour (owner ruling 2): with capture on, an
+// This asserts the decided behaviour: with capture on, an
 // Agent spawn's WHOLE tool_input egresses -- prompt included -- so the judge
 // can see what the spawn is for; a thin `{subagent_type}` alone would buy
-// judgements about a spawn the judge cannot see (insight 3). With capture
+// judgements about a spawn the judge cannot see. With capture
 // off, the event carries no content at all: the gate must still hold.
 func TestMap_AgentSpawnCarriesSubagentTypeAndWholeToolInput(t *testing.T) {
 	ev := loadFixtureHookEvent(t, "pretooluse-agent.json")
@@ -753,7 +753,7 @@ func TestMap_AgentSpawnCarriesSubagentTypeAndWholeToolInput(t *testing.T) {
 	})
 }
 
-// --- phase 10: cross-cutting enum, subset, pointer and prompt_id assertions ---
+// --- cross-cutting enum, subset, pointer and prompt_id assertions ---
 
 // TestMap_AllFifteenAllowlistsAreEnforced is the exhaustive form of
 // TestMap_PerHookEnumAllowlistsAreDistinct: for EACH of the 15 v1.8 per-hook
@@ -827,7 +827,7 @@ func TestMap_AllFifteenAllowlistsAreEnforced(t *testing.T) {
 }
 
 // TestMap_ConfigChangeAndSessionStartDoNotShareSourceAllowlist is the named
-// shared-key case (insight 2/step 11): source=user_settings is valid for
+// shared-key case: source=user_settings is valid for
 // ConfigChange but not SessionStart, and the reverse (source=startup is valid
 // for SessionStart but not ConfigChange) -- proving a globally-shared
 // allowlist would pass every single-event test but fail this cross-check.

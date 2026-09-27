@@ -244,6 +244,30 @@ the adapters' own test suites (`internal/adapters/claude-code/`,
 go test -run TestGovernanceEval -v ./cmd/openbox/
 ```
 
+The governance evals run the real hook binary against an in-process fake
+control plane and grade what it captured. Each grader is named here so a
+reader can find the check behind a claim; `cmd/openbox/evidencetable_test.go`
+fails if a citation stops resolving or a registered grader goes unnamed.
+
+| Claim | Class | Evidence |
+|---|---|---|
+| A hook event reaches the wire from the real binary | E2 | `cmd/openbox/main_test.go` · `TestHookEndToEndSmoke` |
+| A call that ran is reported as exactly two rows sharing one `activity_id` | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`pairing`) |
+| Nothing is lost between the hook's stdin and the wire | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`completeness`) |
+| A call's label is the tool that was invoked, on both halves | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`activity-type`) |
+| One call, one row of each kind | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`delivery-once`) |
+| A lifecycle signal carries its payload in `signal_args` | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`signal-args`) |
+| Content leaves only when capture is on, and only in a content field | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalContentGateBothDirections` (`content-gate`) |
+| A secret is rewritten before it reaches either the disk or the wire | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalRedactionRunsBeforeAttachment` (`redaction`) |
+| A session's first core row is `WorkflowStarted` | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`start-first`) |
+| Every delivery-failure class is exactly one attempt | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalOneAttemptPerFailureClass` (`one-attempt`) |
+| An unaccepted event halts the rest of its run | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers` (`halted-after-failure`) |
+| A HALT refuses the rest of the run without asking again | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalHaltLatchesTheRestOfTheRun` |
+| An approval unanswered denies, rejected denies, granted proceeds | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalApproval` |
+| Every grader can actually fail | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalMutations` |
+| Windows behaves at runtime as it does on macOS and Linux | **E0** | Cross-compiled in CI only; not run. |
+| The control plane accepts, stores and keeps apart what the client sends | **E3** | Needs a live platform. |
+
 What nothing here proves: that the control plane accepts the wire, stores a
 row, keeps two rows apart, or that a socket binds and TLS terminates against
 a real listener. Each of those is E3, owned entirely by the closed side.

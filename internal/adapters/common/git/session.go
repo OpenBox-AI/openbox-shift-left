@@ -32,7 +32,7 @@ const (
 )
 
 // ResolvedSession is one session id in scope for a commit, with enough about
-// where it came from for a commit event's routing (R2) to decide whether an
+// where it came from for a commit event's routing to decide whether an
 // agent tool actually produced this commit.
 type ResolvedSession struct {
 	ID   string
@@ -118,7 +118,7 @@ func (r SessionResolver) Resolve(worktree string) []string {
 
 // ResolveDetailed is Resolve with the tier and tool each id resolved from, for
 // a caller (the commit-event sink) that must not attribute an event to a
-// session unless an agent tool actually produced the commit (R2).
+// session unless an agent tool actually produced the commit.
 func (r SessionResolver) ResolveDetailed(worktree string) []ResolvedSession {
 	//   - Inheritance: any process launched from within a Codex exec (a nested
 	//     agent session, a long-lived shell) inherits the var, so its commits
@@ -128,8 +128,8 @@ func (r SessionResolver) ResolveDetailed(worktree string) []ResolvedSession {
 	//   - Suppression: a present-but-garbage value wins Tier-0 here and is then
 	//     dropped by the sink's validation, with no fallback to the remaining
 	//     tiers; the commit lands unattributed rather than mis-guessed
-	//     (INV-6-safe, but an env-writing process can exploit it to suppress
-	//     attribution).
+	//     (never a wrong attribution, but an env-writing process can exploit
+	//     it to suppress attribution).
 	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
 		return []ResolvedSession{{ID: id, Tier: TierCodexEnv, Tool: "codex"}}
 	}

@@ -176,7 +176,7 @@ func TestRewakeBindsItsProvider(t *testing.T) {
 	}
 }
 
-// TestHookWithNoIdentityWarnsAndContinues (owner ruling V3.) Under the
+// TestHookWithNoIdentityWarnsAndContinues: under the
 // no-legacy-fallback rule an upgraded machine has no per-tool store until
 // `init` runs again, and the first thing the developer would see is governance
 // quietly doing nothing. One line naming the fix is the whole remedy -- and it

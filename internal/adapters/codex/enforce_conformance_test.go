@@ -19,8 +19,8 @@ import (
 
 // It drives the real RunHook PreToolUse path end-to-end against a real
 // decision.InProcessDecider (or a deliberately-absent bundle) and asserts the
-// exact Codex stdout contract per quadrant of the enforcement carve-out (that
-// decision / INV-3b).
+// exact Codex stdout contract per quadrant of the enforcement carve-out and its
+// hook latency bound.
 
 func isolateEnforce(t *testing.T) {
 	t.Helper()
@@ -72,8 +72,8 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		}
 	})
 
-	// CDX-C2 pinned "fail_closed=0 => outage proceeds" (OD9). Delivery is now
-	// always fail-closed (HaltOnDeliveryFailure, plan round 3): the
+	// CDX-C2 pinned "fail_closed=0 => outage proceeds". Delivery is now
+	// always fail-closed (HaltOnDeliveryFailure): the
 	// `fail_closed` key is deprecated, parsed only so it can warn, and no
 	// longer selects a policy, so this now asserts the same outage-denies
 	// behaviour CDX-C4 pins, kept separate for its timing bound.
@@ -87,7 +87,7 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 			t.Fatalf("decision = %q, want deny; delivery is always fail-closed regardless of fail_closed=0 (stdout=%q)", d, out)
 		}
 		if elapsed := time.Since(start); elapsed > hookflow.EnforceBudget((Engine{}).HookCeilings()) {
-			t.Errorf("enforce wait %v exceeds the derived whole-hook budget %v (probe P1: Codex fails open past it)", elapsed, hookflow.EnforceBudget((Engine{}).HookCeilings()))
+			t.Errorf("enforce wait %v exceeds the derived whole-hook budget %v (Codex fails open past it)", elapsed, hookflow.EnforceBudget((Engine{}).HookCeilings()))
 		}
 		assertNoLeak(t, out)
 	})
@@ -144,7 +144,7 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	// left for a PreToolUse/UserPromptSubmit/PermissionRequest call. Nothing
 	// replaces it; the condition cannot arise.
 
-	t.Run("CDX-C8 hook-timeout fail-open bound (probe P1, degraded-state)", func(t *testing.T) {
+	t.Run("CDX-C8 hook-timeout fail-open bound (degraded-state)", func(t *testing.T) {
 		if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
 			t.Fatalf("whole-hook budget %v must be < installed gate-hook timeout %v (else Codex's fail-open kill defeats fail-closed)",
 				hookflow.EnforceBudget((Engine{}).HookCeilings()), (Engine{}).HookCeilings().Gating)
@@ -216,7 +216,7 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 		assertNoEgress(t)
 	})
 
-	t.Run("CDX-C12 REQUIRE_APPROVAL → deny (OD-SL7-ASK; Codex rejects 'ask')", func(t *testing.T) {
+	t.Run("CDX-C12 REQUIRE_APPROVAL → deny (Codex rejects 'ask')", func(t *testing.T) {
 		serveVerdict(t, `{"verdict":"require_approval","reason":"production deploy needs approval","policy_id":"conf-approval-policy"}`)
 		t.Setenv(devconfig.EnvApprovalHold, "200")
 		t.Setenv(devconfig.EnvEnforce, "1")

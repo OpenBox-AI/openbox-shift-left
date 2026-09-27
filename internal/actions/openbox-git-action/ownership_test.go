@@ -53,7 +53,7 @@ func TestOwnership_PartialVerificationStaysAttributedButFlagsClaims(t *testing.T
 		t.Fatal("sess-mine should be Verified")
 	}
 	if byID["sess-victim"].Verified {
-		t.Fatal("forged sess-victim must NOT be Verified (SL5-SEC-1)")
+		t.Fatal("forged sess-victim must NOT be Verified")
 	}
 	if byID["sess-victim"].Reason == "" {
 		t.Fatal("unverified claim should carry a reason")

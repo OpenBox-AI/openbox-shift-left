@@ -9,8 +9,8 @@ import (
 )
 
 // TestEmittedEventsAreConformant is the cross-contract acceptance check: every
-// event the Claude Code adapter produces must validate against the SL-1 dev-
-// event schema with content-capture disabled (the default).
+// event the Claude Code adapter produces must validate against the dev-event
+// schema with content-capture disabled (the default).
 func TestEmittedEventsAreConformant(t *testing.T) {
 	m := testMapper()
 
@@ -36,7 +36,7 @@ func TestEmittedEventsAreConformant(t *testing.T) {
 			}
 			raw := mustMarshalContractShape(t, ev)
 			if err := conformance.ValidateDevEvent(raw, false); err != nil {
-				t.Fatalf("emitted event is not SL-1 conformant:\n%s\nerror: %v", raw, err)
+				t.Fatalf("emitted event is not dev-event schema conformant:\n%s\nerror: %v", raw, err)
 			}
 		})
 	}
@@ -51,7 +51,7 @@ func mustMarshalContractShape(t *testing.T, ev client.DevEvent) []byte {
 	return raw
 }
 
-// TestNewSignalClassesAreConformant is phase 10's extension of
+// TestNewSignalClassesAreConformant is the extension of
 // TestEmittedEventsAreConformant to the 21 v1.8 observe-only lifecycle
 // signals (conformance_parity_test.go's anchor drifted; this is the file
 // that actually validates against the schema): all 21 classes must validate
@@ -77,7 +77,7 @@ func TestNewSignalClassesAreConformant(t *testing.T) {
 				}
 				raw := mustMarshalContractShape(t, ev)
 				if err := conformance.ValidateDevEvent(raw, false); err != nil {
-					t.Fatalf("not SL-1 conformant:\n%s\nerror: %v", raw, err)
+					t.Fatalf("not dev-event schema conformant:\n%s\nerror: %v", raw, err)
 				}
 			})
 			t.Run("capture on, generation 0", func(t *testing.T) {
@@ -87,7 +87,7 @@ func TestNewSignalClassesAreConformant(t *testing.T) {
 				}
 				raw := mustMarshalContractShape(t, ev)
 				if err := conformance.ValidateDevEvent(raw, true); err != nil {
-					t.Fatalf("not SL-1 conformant:\n%s\nerror: %v", raw, err)
+					t.Fatalf("not dev-event schema conformant:\n%s\nerror: %v", raw, err)
 				}
 			})
 			t.Run("capture off, generation >= 1", func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestNewSignalClassesAreConformant(t *testing.T) {
 				ev.ContinuedFromRunID = "sess-0-prior-run-id"
 				raw := mustMarshalContractShape(t, ev)
 				if err := conformance.ValidateDevEvent(raw, false); err != nil {
-					t.Fatalf("not SL-1 conformant at generation >= 1:\n%s\nerror: %v", raw, err)
+					t.Fatalf("not dev-event schema conformant at generation >= 1:\n%s\nerror: %v", raw, err)
 				}
 			})
 			t.Run("capture on, generation >= 1", func(t *testing.T) {
@@ -113,7 +113,7 @@ func TestNewSignalClassesAreConformant(t *testing.T) {
 				ev.ContinuedFromRunID = "sess-0-prior-run-id"
 				raw := mustMarshalContractShape(t, ev)
 				if err := conformance.ValidateDevEvent(raw, true); err != nil {
-					t.Fatalf("not SL-1 conformant at generation >= 1:\n%s\nerror: %v", raw, err)
+					t.Fatalf("not dev-event schema conformant at generation >= 1:\n%s\nerror: %v", raw, err)
 				}
 			})
 		})

@@ -337,7 +337,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// signature: both are response-side facts Complete never had (it only
 			// ever saw the already-computed respBody string), and capture_test.go
 			// already calls Complete directly, so widening its signature would
-			// touch a file this phase does not own for a fact this call site is
+			// touch another caller for a fact this call site is
 			// the only place that has.
 			captured.ResponseBytesSeen = sink.Seen()
 			captured.ResponseTruncated = decodeCut || responseTruncated(sink, captured.ResponseBody, streamErr)

@@ -90,7 +90,7 @@ func TestCodexInitSaysEverySessionIsGoverned(t *testing.T) {
 
 // TestPrintGovernedScopeStatesTheTruth this string is the one place a user
 // learns the truth about coverage, so its content is pinned rather than left
-// to drift. The truth inverted with this phase: one install governs every
+// to drift. The truth is now inverted: one install governs every
 // session on this machine, and it takes effect without a restart.
 func TestPrintGovernedScopeStatesTheTruth(t *testing.T) {
 	isolateHome(t)
@@ -118,8 +118,8 @@ func optionsFor(providerName, projectDir string) devinit.Options {
 	return devinit.Options{Provider: providerName, ProjectDir: projectDir}
 }
 
-// TestInstallOutputDoesNotUnderstateCoverage. The failure direction reversed
-// with this phase. It used to be over-claiming; now the install really does
+// TestInstallOutputDoesNotUnderstateCoverage. The failure direction has
+// reversed. It used to be over-claiming; now the install really does
 // govern every session, so the danger is a leftover sentence telling somebody
 // that one directory is covered or that an administrator has to finish the job.
 func TestInstallOutputDoesNotUnderstateCoverage(t *testing.T) {

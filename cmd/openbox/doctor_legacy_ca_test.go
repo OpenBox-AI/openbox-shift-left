@@ -18,9 +18,9 @@ import (
 )
 
 // writeLegacyConstrainedCA writes a CA file pair in the exact shape this
-// binary generated before the 2026-09-22 owner ruling that removed the name
-// constraint: PermittedDNSDomains set to api.anthropic.com, critical. It
-// stands in for a real pre-ruling install, since transport.LoadOrCreateCA
+// binary generated before the name constraint was removed:
+// PermittedDNSDomains set to api.anthropic.com, critical. It stands in for a
+// real older install, since transport.LoadOrCreateCA
 // itself no longer produces this shape.
 func writeLegacyConstrainedCA(t *testing.T, dir string) {
 	t.Helper()

@@ -164,7 +164,7 @@ func TestHoldBudget_ClampedByTheHookCeiling(t *testing.T) {
 	}
 }
 
-// TestApprovalUndecided_DeniesWithTheReference oD-E9-1: an undecided approval
+// TestApprovalUndecided_DeniesWithTheReference an undecided approval
 // denies, and names the reference so the model can say what is being waited
 // on. It must never fall through to the provider's own prompt, which would ask
 // the developer to approve their own request.

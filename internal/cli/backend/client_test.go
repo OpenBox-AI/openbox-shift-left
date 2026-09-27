@@ -185,7 +185,7 @@ func TestCreateParsesWorkloadIdentity(t *testing.T) {
 			`"identity":{"method":"keycloak_workload","source_type":"openbox",`+
 			`"workload_identity_id":"`+workloadID+`","credential_id":"`+credentialID+`",`+
 			`"service_account_id":"`+serviceAccountID+`","client_id":"`+clientID+`","kid":"`+kid+`",`+
-			`"token_endpoint":"https://identity.node.lat/realms/openbox/protocol/openid-connect/token",`+
+			`"token_endpoint":"https://identity.example.com/realms/openbox/protocol/openid-connect/token",`+
 			`"audience":"openbox-core","private_key_available_from_openbox":false}}}`)
 	}))
 	defer srv.Close()
@@ -204,7 +204,7 @@ func TestCreateParsesWorkloadIdentity(t *testing.T) {
 		ServiceAccountID:               serviceAccountID,
 		ClientID:                       clientID,
 		Kid:                            kid,
-		TokenEndpoint:                  "https://identity.node.lat/realms/openbox/protocol/openid-connect/token",
+		TokenEndpoint:                  "https://identity.example.com/realms/openbox/protocol/openid-connect/token",
 		Audience:                       "openbox-core",
 		PrivateKeyAvailableFromOpenBox: false,
 	}
@@ -379,7 +379,7 @@ func repeat(s string, n int) string {
 	return string(out)
 }
 
-// TestGetCurrentPolicy_BuilderConfig story-E6-S8: GetCurrentPolicy parses the
+// TestGetCurrentPolicy_BuilderConfig: GetCurrentPolicy parses the
 // {status,data:PolicyEntity|null} envelope, sends the org key on X-API-Key
 // with the read:agent_policy path, and extracts config.policy_builder / raw-
 // rego presence.

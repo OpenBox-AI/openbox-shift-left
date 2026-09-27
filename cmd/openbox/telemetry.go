@@ -104,7 +104,7 @@ func (a *app) runTelemetry(args []string) int {
 	// of the spool-less bounded pool this lane used to send every record
 	// through: a record interleaves with its session's hook events in append
 	// order, and an unaccepted one halts the run exactly like any other
-	// single-attempt delivery (CLAUDE.md; A4). The client that signs is
+	// single-attempt delivery. The client that signs is
 	// resolved from the event's own Tool.Name via each provider's own queue,
 	// so a Codex record is never sent by the Claude Code client. Telemetry has
 	// no chat completions (claude.ai is a transport/proxy concept only), so

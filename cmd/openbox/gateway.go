@@ -39,11 +39,11 @@ func (a *app) runGateway(args []string) int {
 	upstream := fs.String("upstream", gateway.DefaultUpstream, "provider base URL to forward to")
 	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight streams drain after a stop signal")
 	verbose := fs.Bool("verbose", false, "log every relayed call and whether it was recorded (no credentials, headers or bodies are printed)")
-	refuseAll := fs.Bool("refuse-all", false, "PROBE A ONLY: refuse every model call, to measure how Claude Code reacts to the refusal shape")
+	refuseAll := fs.Bool("refuse-all", false, "REFUSAL PROBE ONLY: refuse every model call, to measure how Claude Code reacts to the refusal shape")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to the governed tool's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
-	refuseStatus := fs.Int("refusal-status", 0, "PROBE A ONLY: override the refusal status code (default: the provisional 403)")
-	refuseType := fs.String("refusal-error-type", "", "PROBE A ONLY: override the refusal error type string")
+	refuseStatus := fs.Int("refusal-status", 0, "REFUSAL PROBE ONLY: override the refusal status code (default: the provisional 403)")
+	refuseType := fs.String("refusal-error-type", "", "REFUSAL PROBE ONLY: override the refusal error type string")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -129,7 +129,7 @@ func (a *app) runGateway(args []string) int {
 		handler = gateway.RefuseEverything(shape)
 		fmt.Fprintf(a.stderr, "PROBE MODE: refusing EVERY model call with status %d, error type %q.\n", shape.Status, shape.ErrorType)
 		fmt.Fprintf(a.stderr, "  Nothing is forwarded and no governance decision is consulted. This exists to\n")
-		fmt.Fprintf(a.stderr, "  measure how Claude Code reacts to the refusal shape (probe A). Watch the CLIENT:\n")
+		fmt.Fprintf(a.stderr, "  measure how Claude Code reacts to the refusal shape. Watch the CLIENT:\n")
 		fmt.Fprintf(a.stderr, "  how many requests arrive for one prompt, what the session prints, whether it\n")
 		fmt.Fprintf(a.stderr, "  disables a capability for the rest of its life, and its exit code.\n")
 		fmt.Fprintf(a.stderr, "  CAPTURE IS ALSO OFF in this mode: nothing reaches the relay, so nothing is\n")

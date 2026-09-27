@@ -77,23 +77,22 @@ func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
 		t.Fatalf("signal_name = %q, want deploy", p.SignalName)
 	}
 
-	// The keys the deleted allowlist named must still be there — that is the
-	// actual R5 evidence, and the golden could not supply it.
+	// The lineage keys must be there; the golden alone could not prove it.
 	for _, k := range []string{"deploy_id", "commit_sha", "repo", "environment", "deploy_did"} {
 		if _, ok := p.SignalArgs[k]; !ok {
 			t.Errorf("signal_args lost allowlisted lineage key %q: %v", k, p.SignalArgs)
 		}
 	}
-	// And the keys it did NOT name, which is the point of deleting it: a deploy
-	// policy can now match attribution, not just identity.
+	// And the attribution keys too, so a deploy policy can match attribution,
+	// not just identity.
 	for _, k := range []string{"attribution_status", "attribution_reason", "attribution_note",
 		"session_count", "scope_walked", "scope_total", "sessions", "verified_session_ids"} {
 		if _, ok := p.SignalArgs[k]; !ok {
-			t.Errorf("signal_args is missing %q, which the allowlist used to drop: %v", k, p.SignalArgs)
+			t.Errorf("signal_args is missing %q, which a deploy policy needs: %v", k, p.SignalArgs)
 		}
 	}
 
-	// Projected, not moved: metadata is untouched (R4).
+	// Projected, not moved: metadata is untouched.
 	for k := range p.SignalArgs {
 		if _, kept := p.Metadata[k]; !kept {
 			t.Errorf("signal_args[%q] is not in metadata; the projection moved a key instead of "+
@@ -114,7 +113,7 @@ func TestDeployProjectsItsWholeMetadataIntoSignalArgs(t *testing.T) {
 		t.Errorf("nested session claim did not survive the projection: %v", sessions[0])
 	}
 
-	// R3: the client signs nothing, so no sessions[] entry carries an
+	// The client signs nothing, so no sessions[] entry carries an
 	// attestation key, verified or not.
 	for _, raw := range sessions {
 		entry, ok := raw.(map[string]any)

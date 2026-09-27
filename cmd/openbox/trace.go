@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
@@ -49,7 +50,7 @@ func (a *app) runTrace(args []string) int {
 	fs.BoolVar(&list, "list", false, "list sessions seen in the trace, instead of one session/run's timeline")
 	fs.BoolVar(&againstCore, "against-core", false, "reconcile the local trace against core's agent logs")
 	fs.StringVar(&agentID, "agent", "", "agent id to query core for (required with --against-core)")
-	fs.StringVar(&backendFlag, "backend", "", "openbox-backend base URL (default: devconfig's resolver, else https://openbox-api.node.lat)")
+	fs.StringVar(&backendFlag, "backend", "", "openbox-backend base URL (default: devconfig's resolver, else "+devconfig.DefaultBackendURL+")")
 	fs.StringVar(&apiKeyFile, "api-key-file", "", "file holding the core API key (else $OPENBOX_API_KEY)")
 	fs.Usage = func() {
 		fmt.Fprint(a.stderr, `usage:

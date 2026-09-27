@@ -126,7 +126,7 @@ func (promptOutputContract) ContentFieldKeys() []string { return nil }
 // session-stop lever. Measured on codex-cli 0.150.0-alpha.8: a plain block logs
 // `hook: UserPromptSubmit Blocked`, and the same output plus `continue:false`
 // logs `hook: UserPromptSubmit Stopped` -- two distinct states, which is what
-// makes the latch meaningful (phase 00 probe P0.5).
+// makes the latch meaningful.
 func (promptOutputContract) Render(decision, reason string, _ json.RawMessage) ([]byte, string) {
 	if decision == "" {
 		return nil, "" // proceed → write nothing

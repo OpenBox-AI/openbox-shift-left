@@ -52,7 +52,7 @@ func TestEnforceCopy_ScansFieldsTheDeciderNeverSaw(t *testing.T) {
 
 	got, ok := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: ev}.DevEvent(dec.RedactedContent)
 	if !ok || got.Content == nil {
-		t.Fatal("a gated Edit must carry its body for evaluation (E7)")
+		t.Fatal("a gated Edit must carry its body for evaluation")
 	}
 
 	if strings.Contains(got.Content.ToolInput, oldKey) {
@@ -62,7 +62,8 @@ func TestEnforceCopy_ScansFieldsTheDeciderNeverSaw(t *testing.T) {
 	if strings.Contains(got.Content.ToolInput, newKey) {
 		t.Errorf("new_string egressed raw: %q", got.Content.ToolInput)
 	}
-	// E8 survives the added pass: the body is still the redacted one, and the
+	// Redaction-before-attachment survives the added pass: the body is still
+	// the redacted one, and the
 	// rebuild's structural fields are still there.
 	if !strings.Contains(got.Content.ToolInput, "OPENBOX_REDACTED") {
 		t.Errorf("no redaction placeholder in the attached body: %q", got.Content.ToolInput)

@@ -108,8 +108,8 @@ Target paths:
 
 ### Cursor
 
-Not shipped: the a Cursor adapter adapter does not exist yet. Cursor gained a hook surface
-in v3.11 (2026-07-10), so this becomes a real template when that adapter lands.
+Not shipped: a Cursor adapter does not exist yet. Cursor gained a hook surface
+in v3.11, so this becomes a real template when that adapter lands.
 
 ## Deploying
 

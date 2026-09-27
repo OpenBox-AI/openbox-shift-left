@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// TestCorrelation_ToolUseIDRidesTheInvocationSlot e8-S3: Claude Code carries
+// TestCorrelation_ToolUseIDRidesTheInvocationSlot Claude Code carries
 // tool_use_id on both PreToolUse and PostToolUse, so a call's two events pair
 // by identity rather than by a (session, tool, locator) heuristic that
 // collided for two identical sequential calls.

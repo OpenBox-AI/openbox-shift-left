@@ -31,8 +31,8 @@ const repoPrefix = "github.com/openbox-ai/openbox-shift-left"
 // imports is one subtree's import surface, split along the two axes the guards
 // bound independently.
 //
-// Both halves are load-bearing and an earlier draft of this phase kept only the
-// first. Four of the five allowlists being replaced contain repo-local entries; // gateway's contains nothing else; and telemetry's repo-local set is
+// Both halves are load-bearing. Four of the five allowlists contain repo-local
+// entries; gateway's contains nothing else; and telemetry's repo-local set is
 // deliberately empty, which is the whole quarantine. A repo-local-blind guard
 // would let internal/gateway import the package that reads ~/.openbox/.env while
 // staying green.
@@ -144,7 +144,7 @@ func sorted(m map[string]bool) []string {
 // `pdata/pmetric`, `pdata/pcommon`; decision allows `gitleaks/v8` and imports
 // `gitleaks/v8/{config,detect,report}`. Under equality every one of those is red
 // on the first run, and the obvious "fix" of rewriting entries to package paths
-// grows both lists, which is precisely what that decision forbids. Prefix
+// grows both lists, which is precisely what these guards forbid. Prefix
 // matching is also what a `require` already meant.
 func unallowed(got []string, allow map[string]bool) []string {
 	var bad []string

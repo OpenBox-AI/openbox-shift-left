@@ -39,7 +39,7 @@ func writeAndParseHooks(t *testing.T, engine string) asyncFixture {
 	return parsed
 }
 
-// TestWriteHooksWrites32Keys is the plan-level success criterion: writeHooks
+// TestWriteHooksWrites32Keys is the top-level success criterion: writeHooks
 // into an empty dir writes 32 keys under hooks.
 func TestWriteHooksWrites32Keys(t *testing.T) {
 	parsed := writeAndParseHooks(t, "/opt/openbox/bin/openbox")
@@ -52,9 +52,9 @@ func TestWriteHooksWrites32Keys(t *testing.T) {
 	}
 }
 
-// TestAsyncRegistrationTable pins D5's sync/async split by event, exactly.
-// ConfigChange writes no async key and timeout 30 (the one armed hook, phase
-// 09); the 15 async rows write "async": true and timeout 5; the 5 other new
+// TestAsyncRegistrationTable pins the sync/async split by event, exactly.
+// ConfigChange writes no async key and timeout 30 (the one armed hook);
+// the 15 async rows write "async": true and timeout 5; the 5 other new
 // sync rows (PermissionRequest, TaskCreated, TaskCompleted, Elicitation,
 // ElicitationResult) write no async key at all -- "async": false must never
 // appear, or absent and false become two states.
@@ -114,8 +114,8 @@ func TestAsyncRegistrationTable(t *testing.T) {
 	}
 }
 
-// TestExistingRowsTimeoutUnchangedByOtherHookTimeoutSecConstant proves step 10
-// is byte-identical: replacing the literal 5 with otherHookTimeoutSec must not
+// TestExistingRowsTimeoutUnchangedByOtherHookTimeoutSecConstant proves the
+// named constant is byte-identical: replacing the literal 5 with otherHookTimeoutSec must not
 // move any existing row's written timeout.
 func TestExistingRowsTimeoutUnchangedByOtherHookTimeoutSecConstant(t *testing.T) {
 	parsed := writeAndParseHooks(t, "/opt/openbox/bin/openbox")
@@ -224,7 +224,7 @@ func mustJSON(t *testing.T, s string) string {
 	return string(b)
 }
 
-// TestFileChangedMatcherIsTheWatchList pins D7: the matcher IS the watch
+// TestFileChangedMatcherIsTheWatchList pins that the matcher IS the watch
 // list, no wildcard.
 func TestFileChangedMatcherIsTheWatchList(t *testing.T) {
 	if fileChangedMatcher != ".env|.envrc|.mcp.json|CLAUDE.md" {

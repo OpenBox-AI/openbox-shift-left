@@ -16,7 +16,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
-// TestLaneUnitEnvCarriesTraceDirAndLeavesArgsUnchanged is phase 3's own
+// TestLaneUnitEnvCarriesTraceDirAndLeavesArgsUnchanged pins the unit
 // contract: the trace directory rides the unit's Env (rendered separately by
 // LaunchdPlist/SystemdUnit), never Args -- so a machine with tracing off
 // (trace.Dir() == "") gets byte-identical argv to one with it on, and every

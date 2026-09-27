@@ -1,10 +1,10 @@
 {
-  "//": "Managed OpenBox posture (E8-S9). Deploy root-owned, mode 0644, to /etc/openbox/dev.json. Fields listed in `locked` override BOTH the user's ~/.config/openbox/dev.json AND the environment. Fields present but NOT locked act as org defaults the developer may still override. `enforce` and `fail_closed` are deliberately absent: every gated tool call is evaluated unconditionally now and delivery is always fail-closed (an event OpenBox cannot record halts the run), so neither key selects anything any more -- `openbox doctor` reports a lock on either as locking NOTHING.",
+  "//": "Managed OpenBox posture. Deploy root-owned, mode 0644, to /etc/openbox/dev.json. Fields listed in `locked` override BOTH the user's ~/.config/openbox/dev.json AND the environment. Fields present but NOT locked act as org defaults the developer may still override. `enforce` and `fail_closed` are deliberately absent: every gated tool call is evaluated unconditionally now and delivery is always fail-closed (an event OpenBox cannot record halts the run), so neither key selects anything any more -- `openbox doctor` reports a lock on either as locking NOTHING.",
 
-  "//content_capture": "OD-E8-1, recorded compromise: the PRODUCT default stays ON (brian's 2026-07-15 decision), while this ENTERPRISE profile defaults it off so prompt content is not egressed unless an org opts in. It is deliberately NOT in `locked`, so a team with a business reason can still turn it on. Change to true, or lock it, per your privacy review. NOTE: this decision (OD-E8-1) is not yet ratified.",
+  "//content_capture": "The PRODUCT default stays ON, while this ENTERPRISE profile defaults it off so prompt content is not egressed unless an org opts in. It is deliberately NOT in `locked`, so a team with a business reason can still turn it on. Change to true, or lock it, per your privacy review.",
   "content_capture": false,
 
-  "//secret_detection": "Locked on: Tier-1 local secret redaction is cheap, stays local, and the incident record shows credential access dominates blocked coding-agent activity.",
+  "//secret_detection": "Locked on: Tier-1 local secret redaction is cheap, stays local, and credential access is among the riskiest things a coding agent does.",
   "secret_detection": true,
 
   "locked": ["secret_detection"]

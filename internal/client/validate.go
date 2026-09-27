@@ -10,7 +10,7 @@ import (
 	"strconv"
 )
 
-// AuthValidatePath is openbox-core's read-only preflight route (GET
+// AuthValidatePath is core's read-only preflight route (GET
 // /api/v3/auth/validate).
 const AuthValidatePath = "/api/v3/auth/validate"
 

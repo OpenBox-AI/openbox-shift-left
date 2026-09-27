@@ -12,7 +12,7 @@ import (
 // (hosttable.go), kept as a named value for callers built before the
 // per-provider table existed. It is no longer the only host this lane
 // terminates TLS for: an installed provider's whole table union is, and the
-// CA itself carries no host bound at all (owner ruling 2026-09-22).
+// CA itself carries no host bound at all.
 var DefaultInterceptHost = exactHostFor("claude-code")
 
 // DefaultAddr is this lane's deterministic loopback listen address. Three
@@ -46,7 +46,7 @@ type Config struct {
 	// means every provider was uninstalled, so Validate must NOT fall back to
 	// claude-code -- the union, the allowlist and the PAC all become empty
 	// (intercept nothing, PAC returns DIRECT for every host), never the
-	// default host. Wiring this from the activation record is a later phase's
+	// default host. Wiring this from the activation record is the caller's
 	// job; this package only defaults and consumes it.
 	Providers []string
 
@@ -143,8 +143,8 @@ func requireLoopback(host string) error {
 	return nil
 }
 
-// ProxyURL is the value the proxy environment keys are set to (phase 12 owns
-// the activation itself; this is the one place that spells the URL).
+// ProxyURL is the value the proxy environment keys are set to (activation
+// lives outside this package; this is the one place that spells the URL).
 func (c Config) ProxyURL() string {
 	u := url.URL{Scheme: "http", Host: c.Addr}
 	return u.String()

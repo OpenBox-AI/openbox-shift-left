@@ -57,7 +57,7 @@ func TestRunRewake_InertWhenNothingCanFileAnApproval(t *testing.T) {
 }
 
 // TestApprovalKeyIsStableAcrossProcessesAndRetries the load-bearing cross-
-// process property (E9 §2.5): the gate and the watcher are separate processes
+// process property: the gate and the watcher are separate processes
 // that map the same payload independently, and later a retry maps it a third
 // time.
 func TestApprovalKeyIsStableAcrossProcessesAndRetries(t *testing.T) {

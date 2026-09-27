@@ -13,7 +13,7 @@ import (
 // Advisory is the local sink for the Advisory governance tier on the deploy
 // path: it records what OpenBox would enforce for a Deploy event; the verdict,
 // a would_block label, and the trust/risk/guardrail/constraint signals;
-// without ever gating the deploy (INV-3).
+// without ever gating the deploy.
 type Advisory struct {
 	// Path is the jsonl sink.
 	Path string
@@ -47,7 +47,7 @@ func DefaultAdvisoryPath() string {
 
 // Record writes a deploy advisory when the evaluation is worth recording
 // (Evaluation.IsAdvisory) and emits one summary line. Best-effort: any failure
-// is logged and swallowed, never returned (INV-3).
+// is logged and swallowed, never returned.
 func (a *Advisory) Record(ev client.DevEvent, eval client.Evaluation) {
 	if a == nil || !eval.IsAdvisory() {
 		return

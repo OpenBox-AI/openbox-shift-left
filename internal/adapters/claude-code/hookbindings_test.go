@@ -7,10 +7,9 @@ import (
 	"testing"
 )
 
-// registeredHookNames32 is every hook this adapter registers after phase 05:
-// the 11 pre-existing hooks plus the 21 new classes from phase 04's 33-row
-// contract table, table-B order. HookWorktreeCreate is deliberately absent --
-// registering it would make this hook responsible for printing the created
+// registeredHookNames32 is every hook this adapter registers: the 11 original
+// hooks plus the 21 v1.8 classes, in the schema's table order.
+// HookWorktreeCreate is deliberately absent -- registering it would make this hook responsible for printing the created
 // worktree path back to Claude Code, breaking `claude --worktree`,
 // isolation:"worktree" subagents and background sessions.
 var registeredHookNames32 = []string{
@@ -25,7 +24,7 @@ var registeredHookNames32 = []string{
 	"ElicitationResult",
 }
 
-// TestParseHookName_Accepts32AndRejectsWorktreeCreate is the plan-level
+// TestParseHookName_Accepts32AndRejectsWorktreeCreate is the top-level
 // vocabulary count: ParseHookName is the dispatch gate (hookevent.go:54), and
 // a constant with no registration would let a future edit register it by
 // accident -- so the refusal of WorktreeCreate is pinned here, not left to
@@ -115,7 +114,7 @@ func TestNumericAndBoolFieldsAbsentStayNil(t *testing.T) {
 }
 
 // TestFieldBindings_OneEventPerNewGroup spot-checks one payload per new field
-// group against phase 04's field binding table, exact JSON keys.
+// group against hookevent.go's field bindings, exact JSON keys.
 func TestFieldBindings_OneEventPerNewGroup(t *testing.T) {
 	cases := []struct {
 		name string

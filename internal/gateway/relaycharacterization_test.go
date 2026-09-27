@@ -14,8 +14,8 @@ import (
 )
 
 // The relay's header handling, its stream loop and its emit ordering have no
-// covering tests. Phase 06 proposes replacing all three with
-// httputil.ReverseProxy, and swapping untested hand-rolled code for stdlib is a
+// covering tests. Replacing all three with httputil.ReverseProxy is a
+// candidate change, and swapping untested hand-rolled code for stdlib is a
 // change nobody could review -- there would be nothing to compare against.
 //
 // These are that comparison, written against the hand-rolled relay first. Each
@@ -38,7 +38,7 @@ func rawExchange(t *testing.T, front *memhttptest.Server, request string) *http.
 	return rawExchangeTo(t, strings.TrimPrefix(front.URL, "http://"), request)
 }
 
-// rawExchangeTo is the same against a bare address, so the spike can reuse it.
+// rawExchangeTo is the same against a bare address, so other tests can reuse it.
 func rawExchangeTo(t *testing.T, addr, request string) *http.Response {
 	t.Helper()
 	conn, err := dialFront(t, addr)

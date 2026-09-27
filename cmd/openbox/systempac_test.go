@@ -18,16 +18,16 @@ import (
 )
 
 // This file is the wiring-level test matrix for systempac.go. It never
-// exercises the real darwin authorize dance end to end: this sandbox has no
-// controlling terminal (confirmed: os.OpenFile("/dev/tty", ...) fails with
-// "device not configured"), which is also true of most CI runners, so
+// exercises the real darwin authorize dance end to end: a test process
+// usually has no controlling terminal (os.OpenFile("/dev/tty", ...) fails
+// with "device not configured"), which is true of most CI runners, so
 // activation.ActivateSystemPAC's own authorizeDarwin would return
 // NotAttempted before ever touching a Runner regardless of what these tests
 // script -- proving nothing about THIS package's own ordering. Instead these
 // tests drive activateSystemPACFn/deactivateSystemPACFn/liveSystemPACFn
 // directly with scripted fakes (a "fails the test if invoked" fake wherever
-// the assignment calls for zero privileged argv), which is exactly the
-// wiring surface this phase owns. The real OS-argv shapes are the library's
+// a path must issue zero privileged argv), which is exactly the
+// wiring surface this package owns. The real OS-argv shapes are the library's
 // own test suite's job (internal/cli/activation), already covered there with
 // its own in-package seams (geteuidFn, openControllingTTY) this package
 // cannot reach.
@@ -102,7 +102,7 @@ func findCertificateRunner(t *testing.T, sha1 string) activation.Runner {
 	}
 }
 
-// failingRunner is the fake the assignment names: it fails the test the
+// failingRunner fails the test the
 // instant it is invoked, so a scenario that must produce zero privileged
 // argv proves it the same way the library's own tests do.
 func failingRunner(t *testing.T) activation.Runner {
@@ -541,8 +541,7 @@ func TestUninstallDeactivateHardErrorFallbackNeverReferencesTheDeletedFileAndNam
 	}
 }
 
-// TestNonDarwinReportLine is the exact sentence CLAUDE.md's assignment names
-// for an OS this build does not support: no manual commands, and no claim
+// TestNonDarwinReportLine is the exact sentence printed for an OS this build does not support: no manual commands, and no claim
 // that anything was attempted.
 func TestNonDarwinReportLine(t *testing.T) {
 	a, out, _ := testApp(nil)

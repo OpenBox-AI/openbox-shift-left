@@ -125,11 +125,11 @@ func createCA(dir, certPath, keyPath string) (*CA, error) {
 		MaxPathLen:            0,
 		MaxPathLenZero:        true,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
-		// No PermittedDNSDomains: the CA is unconstrained (owner ruling
-		// 2026-09-22, reversing the earlier name-constraint bound). It may sign
-		// a leaf for any host; the allowlist, not the CA, is what a widening
-		// provider union or a leaked key is contained by. See CANeedsReissue for
-		// the one-time migration a CA minted before this ruling still needs.
+		// No PermittedDNSDomains: the CA is unconstrained. It may sign a leaf
+		// for any host; the allowlist, not the CA, is what a widening provider
+		// union or a leaked key is contained by. See CANeedsReissue for the
+		// one-time migration a CA minted with the older name constraint still
+		// needs.
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
@@ -159,8 +159,8 @@ func createCA(dir, certPath, keyPath string) (*CA, error) {
 	return &CA{cert: cert, key: key, pem: certPEM, leaves: map[string]*tls.Config{}}, nil
 }
 
-// CANeedsReissue reports whether ca was minted before the 2026-09-22 owner
-// ruling that removed the name constraint: a machine holding one of those
+// CANeedsReissue reports whether ca is a legacy CA minted with a name
+// constraint, before CAs became unconstrained: a machine holding one of those
 // still carries PermittedDNSDomains, and every host outside it stays
 // blind-tunnelled rather than intercepted (Proxy.intercepts guards on
 // CanIssueFor for exactly this reason) until the CA is reissued.
@@ -173,8 +173,8 @@ func CANeedsReissue(ca *CA) bool {
 }
 
 // CanIssueFor reports whether ca can mint a usable leaf for host: always true
-// for an unconstrained CA (the shape every CA has had since the 2026-09-22
-// owner ruling), and for a legacy CA still carrying PermittedDNSDomains, true
+// for an unconstrained CA (the shape every newly minted CA has), and for a
+// legacy CA still carrying PermittedDNSDomains, true
 // only when host equals or is a label-boundary subdomain of one of them --
 // the same boundary rule Allowlist.Allows uses, so a legacy CA constrained to
 // "api.anthropic.com" does not also claim "evilapi.anthropic.com.evil.test".

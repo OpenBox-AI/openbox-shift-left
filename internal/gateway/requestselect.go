@@ -66,7 +66,7 @@ const systemBudget = 4 * 1024
 // json.Marshal sorts a MAP's keys, which would emit "messages" first, ahead of
 // "model", "openbox_selection" and "system". The alignment judge sees roughly
 // 390-444 bytes of this document and keeps them as head 3/5 + tail 2/5
-// (elideMiddle, openbox-core goal_alignment_session.go:773-786), so a sorted
+// (the core server's middle elision), so a sorted
 // document puts the newest turn in precisely the middle the judge discards.
 // Declaring Messages last is what lands it in the tail the judge keeps -- and it
 // is why this cannot be built with a map, however much more convenient that
@@ -249,7 +249,7 @@ func selectPromptRequest(body string, fields map[string]json.RawMessage, rawProm
 }
 
 // keepNewestMessages fills the budget greedily FROM THE END. Newest-first is the
-// entire ordering argument of this phase: the last entry is the turn that
+// entire ordering argument of selection: the last entry is the turn that
 // distinguishes this call from the previous one.
 //
 // The bool is whether the budget could be established at all. It is not
@@ -549,7 +549,7 @@ const (
 // droppedKeys names every top-level key selection discards, sorted so the stored
 // value is deterministic for the same input. `tools` is the big one: it is
 // near-constant boilerplate, it was being stored on every call, and dropping it
-// is the one change in this phase that REDUCES egress.
+// is the one part of selection that REDUCES egress.
 func droppedKeys(fields map[string]json.RawMessage, turnKey string) []string {
 	var out []string
 	for k := range fields {

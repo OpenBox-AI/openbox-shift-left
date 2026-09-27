@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// The two capabilities Phase 06 identified as missing. Both were absent because
+// Two relay capabilities that were once missing. Both were absent because
 // Trailer and Te sat in the hop-by-hop table and were dropped wholesale, and
 // because nothing watched for an informational response.
 

@@ -77,7 +77,7 @@ func TestWriteLocalHooksKeepsTheDevelopersOtherSettings(t *testing.T) {
 	// WorktreeCreate, not Notification: a real Claude Code event OpenBox
 	// PERMANENTLY refuses to register (hookevent.go:40) is the only fixture
 	// that keeps testing "we preserve what is not ours" honestly. Notification
-	// joined the 32-event vocabulary in v1.8 (D5), so writeHooks now APPENDS
+	// joined the 32-event vocabulary in v1.8, so writeHooks now APPENDS
 	// its own handler alongside a foreign Notification entry instead of
 	// leaving it untouched -- a key that can become ours cannot prove this.
 	if !strings.Contains(got, "Bash(git*)\"\n") && !strings.Contains(got, "        \"Bash(git*)\"") {

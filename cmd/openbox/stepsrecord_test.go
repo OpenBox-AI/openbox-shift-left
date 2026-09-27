@@ -9,7 +9,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// TestSetupLaneEmitsUnitAndActivationRecordsInOrder is phase 3's own gap: a
+// TestSetupLaneEmitsUnitAndActivationRecordsInOrder closes a trace gap: a
 // lane install (setupTelemetry/setupTransport, through the shared setupLane)
 // wrote no trace record at all before this -- only the unit's OPENBOX_TRACE_DIR
 // env key (laneunitenv_test.go) and the election watcher (StageElection) were
@@ -109,7 +109,7 @@ func TestSetupLaneEmitsFailedUnitRecordWhenTheSupervisorRefuses(t *testing.T) {
 	}
 }
 
-// TestRunDoctorEmitsOneDoctorFindingPerRow closes phase 3's other gap:
+// TestRunDoctorEmitsOneDoctorFindingPerRow closes another trace gap:
 // `openbox doctor` printed a report but recorded none of it, so a developer
 // could not later ask "what did doctor see" from the trace. A fresh,
 // never-installed machine still has findings (identity, gateway, coverage),

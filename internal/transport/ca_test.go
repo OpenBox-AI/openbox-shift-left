@@ -113,17 +113,16 @@ func TestCAShapeIsWhatThePhaseSpecifies(t *testing.T) {
 	if life < 2*365*24*time.Hour-48*time.Hour || life > 2*365*24*time.Hour+48*time.Hour {
 		t.Errorf("CA lifetime = %v, want ~2 years", life)
 	}
-	// Inverted deliberately (owner ruling 2026-09-22, reversing the prior
-	// name-constraint bound): a freshly generated CA must carry NO
+	// Deliberate: a freshly generated CA must carry NO
 	// PermittedDNSDomains. The blast radius this widens is real and accepted --
 	// a leaked ~/.openbox/transport-ca.key can now mint a certificate for ANY
 	// host this machine trusts it for, not just the six the table names -- and
 	// containment moves to the allowlist instead (an unlisted CONNECT is
-	// blind-tunnelled, never decrypted). A PR re-adding this field is reverting
-	// that ruling, not fixing a regression.
+	// blind-tunnelled, never decrypted). A PR re-adding this field is changing
+	// that design, not fixing a regression.
 	if len(leaf.PermittedDNSDomains) != 0 {
-		t.Errorf("the CA carries a name constraint (%v); it must be unconstrained per the 2026-09-22 "+
-			"owner ruling, or every host outside it fails its handshake in a way that looks like the "+
+		t.Errorf("the CA carries a name constraint (%v); it must be unconstrained, "+
+			"or every host outside it fails its handshake in a way that looks like the "+
 			"provider being down", leaf.PermittedDNSDomains)
 	}
 }
@@ -242,9 +241,8 @@ func TestHandshakeOverAnInMemoryPipe(t *testing.T) {
 	}
 }
 
-// TestServerConfigIssuesForAnyHostNowThatTheCAIsUnconstrained is inverted
-// deliberately (owner ruling 2026-09-22, reversing the prior name-constraint
-// bound): the CA itself no longer refuses a host outside the table, on
+// TestServerConfigIssuesForAnyHostNowThatTheCAIsUnconstrained is deliberate:
+// the CA itself no longer refuses a host outside the table, on
 // purpose -- containment is the allowlist's job now (an unlisted CONNECT is
 // never hijacked, so ServerConfigFor is never even called for it in
 // production). This asserts the CA's own new blast radius directly, so a
@@ -258,7 +256,7 @@ func TestServerConfigIssuesForAnyHostNowThatTheCAIsUnconstrained(t *testing.T) {
 	}
 	if _, err := ca.ServerConfigFor("evil.test"); err != nil {
 		t.Errorf("ServerConfigFor refused a host outside the old table (%v); the CA is meant to be "+
-			"unconstrained per the 2026-09-22 owner ruling, with the allowlist as the sole containment", err)
+			"unconstrained, with the allowlist as the sole containment", err)
 	}
 }
 
@@ -294,15 +292,15 @@ func TestCANeedsReissue(t *testing.T) {
 		}
 		if !CANeedsReissue(ca) {
 			t.Error("CANeedsReissue is false for a CA that still carries PermittedDNSDomains " +
-				"(the pre-2026-09-22 shape); a machine holding it will fail every handshake for a " +
+				"(the legacy constrained shape); a machine holding it will fail every handshake for a " +
 				"host outside the old constraint in a way that looks like the provider being down")
 		}
 	})
 }
 
 // writeLegacyConstrainedCA writes a CA file pair in the exact shape this
-// package generated before the 2026-09-22 owner ruling: PermittedDNSDomains
-// set to api.anthropic.com, critical. It stands in for a real pre-ruling
+// package generated before CAs became unconstrained: PermittedDNSDomains
+// set to api.anthropic.com, critical. It stands in for a real legacy
 // install, since createCA itself no longer produces this shape.
 func writeLegacyConstrainedCA(t *testing.T, dir string) {
 	t.Helper()

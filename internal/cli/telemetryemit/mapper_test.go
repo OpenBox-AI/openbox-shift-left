@@ -169,7 +169,7 @@ func TestSessionlessRecordEmitsNothing(t *testing.T) {
 }
 
 // TestUnknownEventNamesAreIgnoredNotErrors: the export is a provider surface
-// on a beta flag (OD3). An unrecognised event name must be a no-op, never a
+// on a beta flag. An unrecognised event name must be a no-op, never a
 // failure, or a routine upstream addition becomes a lane outage.
 func TestUnknownEventNamesAreIgnoredNotErrors(t *testing.T) {
 	rec := apiRequest(map[string]string{"event.name": "some_future_event"})
@@ -219,12 +219,12 @@ func TestDurationDerivesTheTurnWindow(t *testing.T) {
 	}
 }
 
-// TestEventIDIsDeterministic: INV-5.
+// TestEventIDIsDeterministic: a retry must present the same idempotency key.
 func TestEventIDIsDeterministic(t *testing.T) {
 	a, _ := completedHalf(elected().EventsFor(apiRequest(nil)))
 	b, _ := completedHalf(elected().EventsFor(apiRequest(nil)))
 	if a.EventID == "" {
-		t.Fatal("no event id (INV-5)")
+		t.Fatal("no event id")
 	}
 	if a.EventID != b.EventID {
 		t.Errorf("event ids differ across identical records: %q vs %q", a.EventID, b.EventID)
@@ -274,7 +274,7 @@ func TestZeroTimestampIsDropped(t *testing.T) {
 	}
 }
 
-// TestOutcomeSeparatesSkipsFromDrops holds phase 10's inherited pin. A lane
+// TestOutcomeSeparatesSkipsFromDrops keeps skips and drops apart. A lane
 // that goes quiet because every record now fails validation must not look
 // identical to a quiet session.
 func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
@@ -325,9 +325,8 @@ func TestOutcomeSeparatesSkipsFromDrops(t *testing.T) {
 	}
 }
 
-// TestElectionIsAnsweredPerRecordNotAtConstruction is the regression for a
-// defect that reached review: a lane emitting turns it had already lost the
-// right to emit.
+// TestElectionIsAnsweredPerRecordNotAtConstruction: an election answered once
+// at construction lets a lane emit turns it has already lost the right to emit.
 func TestElectionIsAnsweredPerRecordNotAtConstruction(t *testing.T) {
 	elected := true
 	m := New(testDID, Policy{Elected: func() bool { return elected }})

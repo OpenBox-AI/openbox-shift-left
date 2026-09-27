@@ -2,20 +2,17 @@ package client
 
 import "testing"
 
-// `metadata.http_status` shipped on BOTH halves, and 116 of 116 live
-// `ActivityStarted` rows asserted `200`. A Started row represents a request that
-// has not been answered yet; a status code on it is a claim about a response that
-// did not exist when the row was made. `docs/mapping.md` §3 already said
-// completed-only, so the code and the docs disagreed and NO test pinned either
-// direction, which is why the disagreement survived.
+// `metadata.http_status` rides the completed half only. A Started row represents
+// a request that has not been answered yet; a status code on it is a claim about
+// a response that did not exist when the row was made. `docs/mapping.md` §3 says
+// completed-only, and these tests pin both directions.
 //
-// The cause was structural rather than a typo: gatewayemit builds both halves
-// from one shared `span(stage)` closure (`internal/cli/gatewayemit/event.go:84-93`)
-// that sets `HTTPStatus` unconditionally, and `buildMetadata` emitted it for any
-// non-zero value. So the fix belongs here, in the one funnel every adapter passes
-// through, rather than in the one adapter that happened to expose it.
+// The hazard is structural: gatewayemit builds both halves from one shared
+// `span(stage)` closure (`internal/cli/gatewayemit/event.go`) that sets
+// `HTTPStatus` unconditionally, so the filter belongs here, in the one funnel
+// every adapter passes through, rather than in one adapter.
 
-// TestTheStartedHalfCarriesNoHTTPStatus is the direction that was wrong.
+// TestTheStartedHalfCarriesNoHTTPStatus: no status on a Started row.
 func TestTheStartedHalfCarriesNoHTTPStatus(t *testing.T) {
 	for _, et := range []EventType{EventTurnStarted, EventToolCall} {
 		t.Run(string(et), func(t *testing.T) {
@@ -30,15 +27,14 @@ func TestTheStartedHalfCarriesNoHTTPStatus(t *testing.T) {
 			}
 			if got, present := meta["http_status"]; present {
 				t.Errorf("http_status = %v on an %s row; a Started row is an unanswered request, "+
-					"so a status on it asserts a response that did not exist. 116/116 live rows "+
-					"carried this.", got, et)
+					"so a status on it asserts a response that did not exist.", got, et)
 			}
 		})
 	}
 }
 
 // TestTheCompletedHalfStillCarriesHTTPStatus is the other direction, and it is
-// half the point: removing a false assertion must not remove the true one. A 5xx
+// half the point: filtering the Started half must not strip the Completed one. A 5xx
 // and a call whose transport failed before any response existed would otherwise
 // store identically to a success whose reply was not captured.
 func TestTheCompletedHalfStillCarriesHTTPStatus(t *testing.T) {

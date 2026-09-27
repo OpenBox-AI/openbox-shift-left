@@ -30,7 +30,7 @@ var ownedInvocation = regexp.MustCompile(`^hook (?:codex|claude-code) [A-Za-z]+$
 //
 // SessionEnd is not ours to choose: Codex clamps it to 3 s and logs that it did
 // ("clamping SessionEnd hook timeout to 3s in <hooks.json>", measured on
-// codex-cli 0.150.0-alpha.8; phase 00 probe P0.4). Registering anything larger
+// codex-cli 0.150.0-alpha.8). Registering anything larger
 // was fiction -- the value in the file was 15, the enforced ceiling was 3, and
 // the engine's own drain budget sat above both. Ask for exactly what we get.
 //
@@ -44,7 +44,7 @@ const (
 	sessionEndHookTimeoutSec = 3
 )
 
-const hooksDescription = "OpenBox observe hooks (STORY-SL7-A); managed by `openbox init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
+const hooksDescription = "OpenBox observe hooks; managed by `openbox init --provider codex`; re-running updates the openbox entries in place and never touches foreign hooks."
 
 // Installer writes the OpenBox hook entries into Codex's hooks.json and the
 // non-secret dev config, delegated from `openbox init` (the provider seam).

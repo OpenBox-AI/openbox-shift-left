@@ -36,7 +36,7 @@ func truncated(t *testing.T, ev DevEvent) []string {
 	return out
 }
 
-// TestOpenboxCapture_ToolOutputOverCap is measurable outcome 1's cut half: an
+// TestOpenboxCapture_ToolOutputOverCap is the cut half: an
 // over-cap tool output names exactly the one path it landed on.
 func TestOpenboxCapture_ToolOutputOverCap(t *testing.T) {
 	over := strings.Repeat("x", maxBodySize+1)
@@ -51,8 +51,7 @@ func TestOpenboxCapture_ToolOutputOverCap(t *testing.T) {
 	}
 }
 
-// TestOpenboxCapture_ExactCapMeansNoKeyAtAll is measurable outcome 1's other
-// half: a value that lands exactly on the cap is not cut, so the summary must
+// TestOpenboxCapture_ExactCapMeansNoKeyAtAll is the other half: a value that lands exactly on the cap is not cut, so the summary must
 // not appear at all -- not an empty object, not an empty array.
 func TestOpenboxCapture_ExactCapMeansNoKeyAtAll(t *testing.T) {
 	exact := strings.Repeat("x", maxBodySize)
@@ -67,9 +66,9 @@ func TestOpenboxCapture_ExactCapMeansNoKeyAtAll(t *testing.T) {
 	}
 }
 
-// TestOpenboxCapture_DenialReasonCutTwice is measurable outcome 2 (Key
-// Insight 8): denial_reason arrives via ev.Metadata (not Content), so the
-// dynamic backstop (site 7, eventMetadataForEgress) is the one that fires --
+// TestOpenboxCapture_DenialReasonCutTwice: denial_reason arrives via
+// ev.Metadata (not Content), so the dynamic backstop
+// (eventMetadataForEgress) is the one that fires --
 // once from buildMetadata's call and once from buildSignalArgs's, because
 // PermissionDenied is a signal class and both builders run for it. The same
 // value is genuinely cut into two different wire objects: two entries, no
@@ -87,7 +86,7 @@ func TestOpenboxCapture_DenialReasonCutTwice(t *testing.T) {
 	}
 }
 
-// TestOpenboxCapture_MetadataCommandBackstop is measurable outcome 3: an
+// TestOpenboxCapture_MetadataCommandBackstop: an
 // over-cap command arrives via ev.Metadata rather than Content, so only the
 // backstop can see it. EventSessionStarted is not a signal class, so
 // buildSignalArgs never runs and only metadata.command is recorded.
@@ -104,8 +103,8 @@ func TestOpenboxCapture_MetadataCommandBackstop(t *testing.T) {
 	}
 }
 
-// TestOpenboxCapture_AbsentWhenContentGateStrips is measurable outcome 4 and
-// the Requirements' INV-2 clause: with content capture off, contentStripped
+// TestOpenboxCapture_AbsentWhenContentGateStrips is INV-2 applied to the
+// summary: with content capture off, contentStripped
 // makes eventMetadataForEgress `continue` before capBodyInto ever runs, so
 // nothing is cut and the summary cannot exist to reveal that a value was
 // once there.
@@ -125,8 +124,8 @@ func TestOpenboxCapture_AbsentWhenContentGateStrips(t *testing.T) {
 	}
 }
 
-// TestOpenboxCapture_PromptSubmittedStaysOneKeyAndRecordsCut is measurable
-// outcome 5: prompt_submitted's signal_args is the goal (R2) and must stay a
+// TestOpenboxCapture_PromptSubmittedStaysOneKeyAndRecordsCut:
+// prompt_submitted's signal_args is the goal and must stay a
 // one-key map even when its value is capped, while the cut still surfaces in
 // metadata.openbox_capture (a different destination) rather than being lost.
 func TestOpenboxCapture_PromptSubmittedStaysOneKeyAndRecordsCut(t *testing.T) {
@@ -145,8 +144,8 @@ func TestOpenboxCapture_PromptSubmittedStaysOneKeyAndRecordsCut(t *testing.T) {
 	}
 }
 
-// TestOpenboxCapture_TruncatedIsSortedAcrossMapIteration is measurable
-// outcome 6. eventMetadataForEgress iterates ev.Metadata, a Go map with
+// TestOpenboxCapture_TruncatedIsSortedAcrossMapIteration:
+// eventMetadataForEgress iterates ev.Metadata, a Go map with
 // randomized iteration order; two over-cap keys in the same map, read by both
 // buildMetadata and buildSignalArgs (PermissionDenied is a signal class),
 // give four cuts whose recording order would otherwise vary run to run.
@@ -166,8 +165,7 @@ func TestOpenboxCapture_TruncatedIsSortedAcrossMapIteration(t *testing.T) {
 	}
 }
 
-// TestOpenboxCaptureKeyIsNotAContentMetadataKey is measurable outcome 7,
-// asserted directly. contentMetadataKeys entries are dropped entirely by
+// TestOpenboxCaptureKeyIsNotAContentMetadataKey, asserted directly. contentMetadataKeys entries are dropped entirely by
 // payload.go's egress loop when content is stripped -- exactly when a reader
 // needs the summary -- so the summary must never join that map.
 func TestOpenboxCaptureKeyIsNotAContentMetadataKey(t *testing.T) {
@@ -177,8 +175,8 @@ func TestOpenboxCaptureKeyIsNotAContentMetadataKey(t *testing.T) {
 	}
 }
 
-// TestOpenboxCaptureSurvivesAsNestedObject is measurable outcome 9. The
-// backstop (site 7) only ever sees ev.Metadata's own keys, and openbox_capture
+// TestOpenboxCaptureSurvivesAsNestedObject: the
+// backstop (eventMetadataForEgress) only ever sees ev.Metadata's own keys, and openbox_capture
 // is written into the output map afterward -- so it can never be re-capped as
 // a string. Proven observably: it must decode as an object, not a string.
 func TestOpenboxCaptureSurvivesAsNestedObject(t *testing.T) {
@@ -297,12 +295,10 @@ func TestAnAdapterWrittenCaptureSummaryIsDropped(t *testing.T) {
 // cut (len(body) > maxModelCallBodyBytes), but
 // activity_output.openbox_capture.truncated is the OR of clientCut and
 // ev.Span.ResponseTruncated. A gateway cut whose stored buffer lands AT OR
-// UNDER the client's own cap left clientCut false, so the row said
-// truncated:true while truncated_paths stayed silent about the one thing
-// that admission describes -- confirmed live on one row of 3104 (session
-// b1d98e0f, activity …:proxy:req_011CeuKVe5QpD7EY6TXShfXY):
-// original_bytes == len(content) == 65536 with truncated:true and no
-// truncated_paths entry at all.
+// UNDER the client's own cap leaves clientCut false, so without the OR the row
+// would say truncated:true while truncated_paths stayed silent about the one
+// thing that admission describes: original_bytes == len(content) == 65536
+// with truncated:true and no truncated_paths entry at all.
 
 // gatewayCutMarker reproduces gateway/capture.go's unexported bodyCutNote
 // verbatim. internal/client cannot import internal/gateway -- gateway imports
@@ -310,8 +306,8 @@ func TestAnAdapterWrittenCaptureSummaryIsDropped(t *testing.T) {
 // the live wire shape is inlined here rather than referenced.
 const gatewayCutMarker = "\n[openbox: truncated here; the rest of this body is not stored]"
 
-// TestGatewayCutAtOrUnderTheClientCapStillIndexes reproduces the live
-// defect's exact wire signature: a stored body landing exactly at
+// TestGatewayCutAtOrUnderTheClientCapStillIndexes reproduces that exact wire
+// signature: a stored body landing exactly at
 // maxModelCallBodyBytes (so clientCut's own `>` comparison cannot fire) that
 // ends in the gateway's own cut marker, with Span.ResponseTruncated set --
 // the gateway's own report that its copy was incomplete before this client

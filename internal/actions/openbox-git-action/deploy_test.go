@@ -39,7 +39,7 @@ func TestBuildDeployEvent_ShapeAndMetadata(t *testing.T) {
 	if ev.WorkspaceID != meta.Repo {
 		t.Fatalf("WorkspaceID = %s, want %s", ev.WorkspaceID, meta.Repo)
 	}
-	wantDeployID := "deploy-production-37ec0a3f1c9b2e0000000000000000000000abcd" // full SHA (P2)
+	wantDeployID := "deploy-production-37ec0a3f1c9b2e0000000000000000000000abcd" // full SHA
 	if ev.SessionID != wantDeployID {
 		t.Fatalf("SessionID(run_id) = %s, want %s (stable deploy id)", ev.SessionID, wantDeployID)
 	}
@@ -88,7 +88,7 @@ func TestBuildDeployEvent_IsIdempotentAcrossRuns(t *testing.T) {
 func TestBuildDeployEvent_SurvivesClientEmitBuild(t *testing.T) {
 	ev := BuildDeployEvent(fixedResolution(), DeployMeta{Repo: "r", Environment: "e"}, time.Unix(1, 0))
 	if ev.EventID == "" || ev.SessionID == "" {
-		t.Fatal("event missing required INV-5 idempotency / run_id fields")
+		t.Fatal("event missing required idempotency / run_id fields")
 	}
 	if _, err := json.Marshal(ev.Metadata); err != nil {
 		t.Fatalf("metadata not serializable: %v", err)

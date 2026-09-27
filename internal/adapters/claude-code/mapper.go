@@ -28,7 +28,7 @@ type Identity struct {
 type Mapper struct {
 	Identity Identity
 	Now      func() time.Time // injectable clock; defaults to time.Now
-	// NewID, when non-nil, overrides the idempotency-id source (INV-5); used by
+	// NewID, when non-nil, overrides the idempotency-id source; used by
 	// tests to pin ids.
 	NewID func() string
 	// Finops, when non-nil, carries the usage numbers only the finops reader
@@ -40,8 +40,7 @@ type Mapper struct {
 	CaptureContent bool
 	// RedactContent redacts a content body for secrets before it is attached to
 	// an event. Nil ⇒ identity, which is the honest `secret_detection:false`
-	// case: the text egresses unredacted (that decision says so rather than
-	// hiding it).
+	// case: the text egresses unredacted (said plainly rather than hidden).
 	RedactContent func(string) string
 	// Posture, when non-nil, is the session's effective posture, attached
 	// to the SessionStarted event's metadata only.
@@ -50,7 +49,7 @@ type Mapper struct {
 	// known to be undelivered at session end.
 	Evidence *EvidenceState
 	// Run, when non-nil, is this hook invocation's resolved continue-as-new
-	// identity (phase 08): hookrun.go resolves it once, from the run record,
+	// identity: hookrun.go resolves it once, from the run record,
 	// before New()/Record() runs, and every event Map/MapTurn emits is stamped
 	// from it -- never derived here, because a minted run id cannot be
 	// recomputed from anything an event carries.
@@ -61,8 +60,8 @@ type Mapper struct {
 // generation 0 (the zero value) means "no continuation has ever happened for
 // this session", in which case the wire run_id falls back to the session id
 // (client.runIDFor) -- Run being nil on the Mapper means exactly the same
-// thing, so an adapter that never wires this seam (or a hook that hit R6's
-// fail-open path) emits byte-identical generation-0 events.
+// thing, so an adapter that never wires this seam (or a hook that hit the
+// run-identity fail-open path) emits byte-identical generation-0 events.
 type RunIdentity struct {
 	Generation int
 	// RunID is the minted run id; empty at generation 0.
@@ -125,7 +124,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		if m.Posture != nil {
 			ev.Metadata["posture"] = m.Posture.Metadata()
 		}
-		// The only case that sets it (phase 08 R2): lineage is a property of
+		// The only case that sets it: lineage is a property of
 		// the boundary, not of every row.
 		if m.Run != nil && m.Run.ContinuedFrom != "" {
 			ev.ContinuedFromRunID = m.Run.ContinuedFrom
@@ -225,7 +224,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		}
 
 	// v1.8 observe-only lifecycle signals (21 classes). Every case below goes through signalEvent: the agent as the
-	// tool, structural metadata, and no activity fields at all (insight 1) —
+	// tool, structural metadata, and no activity fields at all —
 	// no new case may set ev.Span, ev.StartedAt, ev.EndedAt, ev.TurnIndex,
 	// ev.Status, ev.ActivityType or ev.Tokens.
 
@@ -256,21 +255,21 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		m.signalEvent(&ev, client.EventInstructionsLoaded, meta)
 
 	case HookUserPromptExpansion:
-		// No content line (structural-only, A-04 A1). command_args is unbound,
+		// No content line (structural-only). command_args is unbound,
 		// and the pre-expansion `prompt` is unbound because it duplicates
 		// prompt_submitted under a second key — the reason matters, or
 		// someone re-adds it.
 		m.signalEvent(&ev, client.EventUserPromptExpansion, hookflow.Compact(map[string]any{
 			"expansion_type": hookflow.EnumOr(e.ExpansionType, expansionTypes),
 			"command_name":   capStr(e.CommandName),
-			// command_source: capStr, NOT EnumOr (R1) — only one documented
+			// command_source: capStr, NOT EnumOr — only one documented
 			// value and no confirmed table; an unconfirmed allowlist would
 			// silently discard real data.
 			"command_source": capStr(e.CommandSource),
 		}))
 
 	case HookMessageDisplay:
-		// D1: no content line. delta and displayContent are never bound, and
+		// Structural-only: no content line. delta and displayContent are never bound, and
 		// message_id is not the API msg_… id, so no transcript join exists.
 		meta := hookflow.Compact(map[string]any{
 			"turn_id":    capStr(e.TurnID),
@@ -286,7 +285,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	case HookPermissionRequest:
 		// No tool_use_id exists, so this cannot pair with any tool activity;
-		// permission_suggestions not bound (R3). C7: after phase 07 this key
+		// permission_suggestions not bound. The gated content (toolInputExtract)
 		// carries the whole subagent prompt for an Agent request.
 		m.signalEvent(&ev, client.EventPermissionRequest, hookflow.Compact(map[string]any{
 			"tool_name":       capStr(e.ToolName),
@@ -295,7 +294,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Content = m.gatedSignalDetail(toolInputExtract(e))
 
 	case HookPostToolBatch:
-		// D1: no content line. tool_calls[] is span-shaped and no event
+		// Structural-only: no content line. tool_calls[] is span-shaped and no event
 		// carries spans[].
 		ids := e.batchToolUseIDs()
 		meta := map[string]any{"batch_size": len(ids)}
@@ -316,7 +315,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// Two signals, never an Activity pair: a task can be abandoned or
 		// complete in another session, and core increments `total` on
 		// Started and success/fail only on Completed, so an orphan pair
-		// would depress success rates. R2: teammate_name/team_name are
+		// would depress success rates. teammate_name/team_name are
 		// structural, same capStr treatment as agent_type.
 		et := client.EventTaskCreated
 		if hook == HookTaskCompleted {
@@ -339,7 +338,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	case HookConfigChange:
 		// No content: `reason` is an output field the gate renders locally
-		// (phase 09) and never egresses.
+		// and never egresses.
 		m.signalEvent(&ev, client.EventConfigChange, hookflow.Compact(map[string]any{
 			"source":    hookflow.EnumOr(e.Source, configSources),
 			"file_path": capStr(e.FilePath),
@@ -392,12 +391,12 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		// Same shape as PreModelSwitch, postModelSwitchSources only:
 		// declared in full rather than derived from preModelSwitchSources so
 		// the two constants agreeing today stays a visible coincidence, not
-		// a hidden derivation (phase 09 asserts pre ⊆ post). Never set
+		// a hidden derivation (the mapper tests assert pre ⊆ post). Never set
 		// ev.Model, for the same reason as PreModelSwitch.
 		m.signalEvent(&ev, client.EventPostModelSwitch, modelSwitchMetadata(e, postModelSwitchSources))
 
 	case HookElicitation:
-		// requested_schema not bound (R3).
+		// requested_schema not bound: it can embed a caller-supplied schema shape.
 		m.signalEvent(&ev, client.EventElicitation, hookflow.Compact(map[string]any{
 			"mcp_server_name": capStr(e.MCPServerName),
 			"mode":            hookflow.EnumOr(e.Mode, elicitationModes),
@@ -407,7 +406,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Content = m.gatedSignalDetail(e.Message)
 
 	case HookElicitationResult:
-		// D2: form values are ordinary gated content; the residual risk
+		// Form values are ordinary gated content; the residual risk
 		// lives in docs/data-and-privacy.md.
 		m.signalEvent(&ev, client.EventElicitationResult, hookflow.Compact(map[string]any{
 			"mcp_server_name": capStr(e.MCPServerName),
@@ -633,14 +632,14 @@ var builtinTools = map[string]toolClass{
 
 	// Agent delegates unbounded work to a fresh subagent and, unmapped, reached
 	// core as {"kind":"shell","tool_name":"Agent"} -- name only, zero judgements
-	// on a measured session (phase 07). Kind stays ToolShell so the local
+	// on a measured session. Kind stays ToolShell so the local
 	// enforce gate (which shares classifyTool) is unchanged; the "llm_tool_call"
 	// semantic is what routes toolInputExtract and contentKeyFor away from the
 	// shell-command path, so the spawn's whole tool_input (prompt included)
 	// egresses under `arguments`, never `command`.
 	"Agent": {client.ToolShell, "llm_tool_call", ""},
 
-	// ToolSearch gets the same treatment (ruling 3: query uncapped beyond the
+	// ToolSearch gets the same treatment (query uncapped beyond the
 	// content gate). It does fire PreToolUse -- measured, not assumed: the
 	// provider exempts exactly one tool (EndConversation) from the Pre/PostToolUse
 	// runners, and this machine's transcripts hold 93 PreToolUse:ToolSearch hook
@@ -655,7 +654,7 @@ func sessionStartMetadata(e *HookEvent) map[string]any {
 		"provider":        provider,
 		"source":          hookflow.EnumOr(e.Source, sourceValues), // startup|resume|clear|compact|fork
 		"model":           capStr(e.Model),                         // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                           // structural (blessed by SL-1 testdata); not content
+		"cwd":             capStr(e.Cwd),                           // structural (as in the dev-event schema's testdata); not content
 		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 	})
 }
@@ -684,25 +683,24 @@ var apiErrorTypes = map[string]bool{
 }
 
 var (
-	// sourceValues is SessionStart's `source` enum only (insight 2: EnumOr
+	// sourceValues is SessionStart's `source` enum only (EnumOr
 	// must be per hook, never reused across the four events that carry a
 	// `source` field). isBumpSource reads this list to decide
 	// whether a run continues: ONLY resume bumps the run generation (resume-
 	// only re-scope, live-measured against Claude Code 2.1.263 -- a `/clear`
 	// mints a brand-new session id, so there is no prior run under it to
 	// continue); startup/clear/compact/fork do not — a missing value here is
-	// a wrong run identity, not a cosmetic metadata gap (B-06 R5 added
-	// "fork").
+	// a wrong run identity, not a cosmetic metadata gap.
 	sourceValues = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true, "fork": true}
 	// reasonValues keeps bypass_permissions_disabled even though it is absent
 	// from the vendor docs and the 2.1.260 binary: EnumOr would otherwise
 	// silently drop a real future value, so keeping it is the
-	// forward-compatible choice (B-06 R6).
+	// forward-compatible choice.
 	reasonValues    = map[string]bool{"clear": true, "resume": true, "logout": true, "prompt_input_exit": true, "bypass_permissions_disabled": true, "other": true}
 	permissionModes = map[string]bool{"default": true, "plan": true, "acceptEdits": true, "auto": true, "dontAsk": true, "bypassPermissions": true}
 )
 
-// The 15 v1.8 per-hook allowlists below (phase 06). Each binds exactly one
+// The 15 v1.8 per-hook allowlists below. Each binds exactly one
 // hook's enum field; none is reused across hooks that happen to share a JSON
 // key name (`source`, `trigger`) — see sourceValues' comment for why that
 // matters.

@@ -105,7 +105,7 @@ func TestRedact_Entropy(t *testing.T) {
 	}
 }
 
-// TestRedact_EntropyBlobsNotCorrupted covers G3 Finding 2: on-by-default
+// TestRedact_EntropyBlobsNotCorrupted: on-by-default
 // entropy redaction must NOT corrupt free-floating base64 blobs that are not
 // in a value position; data: URIs, PEM certificate lines, minified/embedded
 // assets.
@@ -124,7 +124,7 @@ func TestRedact_EntropyBlobsNotCorrupted(t *testing.T) {
 }
 
 // TestRedact_NoFalsePositives asserts ordinary prose/code is NOT redacted; the
-// low-false-positive posture (AC-6). Includes a git SHA and a UUID (hex ≤4.0
+// low-false-positive posture. Includes a git SHA and a UUID (hex ≤4.0
 // bits, below the 4.5 entropy floor) that must survive.
 func TestRedact_NoFalsePositives(t *testing.T) {
 	safe := []string{
@@ -274,8 +274,7 @@ func TestRedact_ValueEndingInBackslash(t *testing.T) {
 
 // workloadPrivateKeyFixture generates a real PKCS8 DER key at runtime, never a
 // literal in source: a literal ≥64-char base64 value here would itself be
-// rewritten by the local write-time redactor hook once this rule exists
-// (measured behaviour: see the "local hook redacts your own edits" finding).
+// rewritten by the local write-time redactor hook once this rule exists.
 func workloadPrivateKeyFixture(t *testing.T) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

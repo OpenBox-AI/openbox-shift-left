@@ -7,10 +7,10 @@ the `OpenBox-Session:` trailers the commit-trailer hook wrote) and emits a
 resolved session set. It is the read/resolve counterpart to the write side in
 [`internal/adapters/common/git`](../../adapters/common/git).
 
-## What it guarantees (INV-6)
+## What it guarantees
 
 - **Resolves against the real pushed SHA**, never a pre-push SHA (git hooks are
-  local; SHAs are unstable until push; spike S3 §1).
+  local; SHAs are unstable until push).
 - Dedups to a session **set** (0..N); a squash/merge fans multiple sessions in.
 - **Never a silent wrong attribution.** Every deploy is marked:
   - `attributed`; ≥1 session **verified** as owned by the authenticated pusher;
@@ -28,13 +28,13 @@ not proof. Each resolved id is passed through an `OwnershipVerifier` that must
 confirm it belongs to a session owned by the **authenticated pusher** before it
 is marked `verified` (→ `attributed`).
 
-Phase-1 default is `NoopVerifier` (verifies nothing): a well-formed deploy
+The default is `NoopVerifier` (verifies nothing): a well-formed deploy
 resolves as `inferred` with every claim flagged `verified=false`. Enabling the
 real verifier promotes owned sessions to `attributed` with no change to the
 resolver.
 
 **The real verifier.** `apiVerifier` (in `verifier.go`) reads
-openbox-backend's existing, org-scoped session endpoint and promotes a claim
+the OpenBox backend's existing, org-scoped session endpoint and promotes a claim
 only when a returned session's **`run_id`** equals the trailer value (the field
 a trailer value maps to; *not* the backend session `id` PK):
 
@@ -57,7 +57,7 @@ It is **OFF by default** and gated by:
 | Env | Meaning |
 |---|---|
 | `OPENBOX_OWNERSHIP_VERIFY=1` | enable verification (default: off ⇒ `NoopVerifier`) |
-| `OPENBOX_OWNERSHIP_API_URL`  | openbox-backend origin (https, or http on loopback); **bare, no path prefix** |
+| `OPENBOX_OWNERSHIP_API_URL`  | OpenBox backend origin (https, or http on loopback); **bare, no path prefix** |
 | `OPENBOX_AGENT_ID`           | the deploy agent's UUID (the same one that registered via `openbox init`) |
 | `OPENBOX_ORG_API_KEY`        | org `X-API-Key` (`obx_key_…`) holding `read:agent_session` |
 
@@ -83,14 +83,14 @@ The emitted `metadata` carries the full qualified `sessions` array (each with
 contains **only verified** ids; the collision-free shape a lineage join can bind
 to without ever trusting an unverified/forged claim. Bounds: at most
 `MaxSessions` (default 4096) distinct claims and a 1 MiB per-message read; a hit
-is disclosed in the resolution note, never silent (SEC-6-1).
+is disclosed in the resolution note, never silent.
 
 ## How resolution works
 
 1. **Scope**; a single commit resolves itself; a range resolves `base..target`;
    a merge with no base resolves `<merge> ^<merge>^1` (the reachable originals).
 2. **Read**; authoritative trailing trailer block via
-   `%(trailers:key=OpenBox-Session,…)` (S3 R7). It additionally
+   `%(trailers:key=OpenBox-Session,…)`. It additionally
    full-body-scans for column-0 `OpenBox-Session:` lines to recover ids left
    mid-body by a squash done *before* the commit-trailer hook ran (marked
    `source: body-scan`).
@@ -121,15 +121,15 @@ it must equal `devconfig.AttributionDIDFor(OPENBOX_AGENT_ID)`, or the run
 refuses (exit 2) rather than silently emit under a stale identity from before
 a re-init. Secrets ride only in headers, never logged (INV-1).
 
-**Exit codes:** `0` = resolved (emit success or fail-open drop, INV-3); `2` =
+**Exit codes:** `0` = resolved (emit success or fail-open drop); `2` =
 usage/precondition fault (bad `--sha`, missing creds) the operator must fix. It
 never exits non-zero over a telemetry transport failure.
 
 ## Emission
 
-The `Deploy` event and the resolved session set ride in `metadata` (the S6 §4
-metadata-jsonb stopgap; no external schema needed to *write* the link; the
-queryable session→commit→deploy join is FR-7, external/deferred). `deploy_did`
+The `Deploy` event and the resolved session set ride in `metadata` (no
+external schema is needed to *write* the link; a queryable
+session→commit→deploy join is out of scope here). `deploy_did`
 (`did:aip:deploy-<shortsha>-<unixts>`) is a synthetic lineage label in
 metadata; the workflow's attribution identity stays the agent's own
 `did:aip:<uuid>`, derived in memory from `OPENBOX_AGENT_ID` and never itself a
@@ -137,16 +137,15 @@ credential -- authentication is the API key + exchanged workload bearer,
 never a signature over this label.
 
 No core accept-list patch is needed: `Deploy` maps onto stock `SignalReceived`
-with `signal_name: "deploy"`, which a stock openbox-core already accept-lists
-(INV-8; `wireTypeFor` in `internal/client/payload.go`). The EXT-core dependency
-this section used to describe is retired — see
-[the event contract](../../../docs/dev-event-contract.md). The client stays
+with `signal_name: "deploy"`, which a stock OpenBox core server already
+accept-lists (`wireTypeFor` in `internal/client/payload.go`; see
+[the event contract](../../../docs/dev-event-contract.md)). The client stays
 fail-open regardless, so the action never breaks CI.
 
 ## Requirements
 
 Git **≥ 2.24** (Nov 2019); the resolver passes `--end-of-options` to every git
-invocation so a `-`-leading ref/SHA can never be read as a flag (SEC-6-3). On
+invocation so a `-`-leading ref/SHA can never be read as a flag. On
 older git that guard is absent and `verifyCommit` errors out (fail-closed,
 precondition exit 2) rather than resolving unsafely.
 

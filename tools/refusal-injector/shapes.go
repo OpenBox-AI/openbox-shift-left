@@ -2,12 +2,11 @@ package main
 
 import "net/http"
 
-// Shape is one candidate refusal the probe can inject. That decision is the
-// only thing keeping that decision record in draft, and it asks an empirical
+// Shape is one candidate refusal the injector can serve. It answers an empirical
 // question about a provider we do not control: which refusal shape does Claude
 // Code surface to the developer without retrying around it?
 type Shape struct {
-	// Name is how the runbook and the results table refer to this candidate.
+	// Name is how -shape and -list refer to this candidate.
 	Name string
 
 	// Status is the HTTP status the client receives.

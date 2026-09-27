@@ -108,7 +108,7 @@ func TestGate_RejectedDuringTheHoldDenies(t *testing.T) {
 	}
 }
 
-// TestGate_UndecidedApprovalDenies oD-E9-1: budget exhausted with the request
+// TestGate_UndecidedApprovalDenies budget exhausted with the request
 // still undecided denies; never a silent allow, and never the provider's self-
 // approval prompt.
 func TestGate_UndecidedApprovalDenies(t *testing.T) {

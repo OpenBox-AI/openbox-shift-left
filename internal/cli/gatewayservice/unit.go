@@ -17,11 +17,10 @@ const StopTimeout = laneservice.StopTimeout
 
 const verboseFlag = laneservice.VerboseFlag
 
-// spec carries OPENBOX_SESSION_DIR (phase 08, insight 8): unlike the
-// telemetry/transport lanes, the gateway unit carried NO env block at all
-// before this, yet gatewayemit (the :gateway: and :proxy: lanes' emitter)
-// needs the same resolved directory the hooks use, or its lane disagrees with
-// them about which run a call belongs to. Resolved here rather than passed
+// spec carries OPENBOX_SESSION_DIR: like the telemetry/transport lanes, the
+// gateway unit needs an env block, because gatewayemit (the :gateway: and
+// :proxy: lanes' emitter) needs the same resolved directory the hooks use, or
+// its lane disagrees with them about which run a call belongs to. Resolved here rather than passed
 // in: a daemon has no $HOME, so the value has to be the ANSWER, not a
 // passthrough (cmd/openbox/initlane.go's laneUnitEnv states the same rule).
 func spec(addr, upstream, settingsPath string, verbose bool) laneservice.Spec {

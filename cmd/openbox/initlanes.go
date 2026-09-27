@@ -331,9 +331,9 @@ func (a *app) runRemovals(home string, req removalRequest) removalResult {
 	if req.purge {
 		if res.ok() {
 			// System PAC deactivation (restore scopes, untrust, delete cert by
-			// SHA-1) BEFORE purgeLaneData deletes the CA files: CLAUDE.md's
-			// "trust-before-PAC ordering" requires untrusting a CA before its
-			// files are gone. A machine that never activated it has no record
+			// SHA-1) BEFORE purgeLaneData deletes the CA files: the
+			// trust-before-PAC ordering, reversed on the way out, requires
+			// untrusting a CA before its files are gone. A machine that never activated it has no record
 			// and this is a no-op.
 			keepRecord := a.deactivateSystemPAC(home)
 			if req.uninstall {

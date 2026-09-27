@@ -8,10 +8,10 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 )
 
-// TestEmitStampsRunIdentityFromTheSharedRecord is T4: a lane event's
+// TestEmitStampsRunIdentityFromTheSharedRecord: a lane event's
 // run_id/run_generation must be read from the SAME record a hook event would
-// read (R7) -- and a pair whose observed start precedes the record's own
-// bump timestamp must carry the PREVIOUS run id on BOTH halves (R12), never
+// read -- and a pair whose observed start precedes the record's own
+// bump timestamp must carry the PREVIOUS run id on BOTH halves, never
 // split across them.
 func TestEmitStampsRunIdentityFromTheSharedRecord(t *testing.T) {
 	em, spool, _ := newTestEmitter(t)

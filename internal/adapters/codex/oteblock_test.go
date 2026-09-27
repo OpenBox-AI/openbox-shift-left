@@ -31,8 +31,8 @@ func TestWriteOtelCreatesTheOwnedBlock(t *testing.T) {
 	}
 }
 
-// TestWriteOtelIsByteIdempotent is the phase's explicit success criterion:
-// re-running init produces a byte-identical config.toml.
+// TestWriteOtelIsByteIdempotent: re-running init produces a byte-identical
+// config.toml.
 func TestWriteOtelIsByteIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := WriteOtel(path, testEndpoint); err != nil {
