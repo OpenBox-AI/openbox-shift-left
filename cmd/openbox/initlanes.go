@@ -336,6 +336,9 @@ func (a *app) runRemovals(home string, req removalRequest) removalResult {
 			// files are gone. A machine that never activated it has no record
 			// and this is a no-op.
 			keepRecord := a.deactivateSystemPAC(home)
+			if req.uninstall {
+				traceUninstallStep("system-pac-revert", nil, map[string]any{"kept_record": keepRecord})
+			}
 			a.purgeLaneData(home, req.uninstall, keepRecord)
 		} else {
 			a.row("kept", "the activation record and the CA: a lane is still routed, and")

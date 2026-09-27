@@ -13,6 +13,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -68,24 +69,32 @@ func (a *app) setupLane(in laneInstall) (int, error) {
 	}
 
 	if err := in.installUnit(); err != nil {
+		traceUnit(in.label, "write", err, map[string]any{"unit": in.unitPath})
 		return 0, err
 	}
+	traceUnit(in.label, "write", nil, map[string]any{"unit": in.unitPath})
 
 	if err := a.loadUnit(in.laneIdentity); err != nil {
+		traceUnit(in.label, "start", err, map[string]any{"unit": in.unitPath})
 		a.rollbackLaneUnit(in)
 		return 0, fmt.Errorf("wrote %s but could not start it (%w); %s. Start it by hand with "+
 			"`openbox %s`, then re-run init", in.unitPath, err, in.envNotSet, in.label)
 	}
+	traceUnit(in.label, "start", nil, map[string]any{"unit": in.unitPath})
 
 	// The env keys go in only once something is listening, and that order is a
 	// safety property rather than a nicety: see TestLaneEnvIsWrittenAfterReadiness.
 	if !waitForListenerFn(in.addr, gatewayReadyTimeout) {
+		listenErr := fmt.Errorf("did not start listening on %s within %s", in.addr, gatewayReadyTimeout)
+		traceUnit(in.label, "listen-proof", listenErr, map[string]any{"addr": in.addr})
 		a.rollbackLaneUnit(in)
 		return 0, fmt.Errorf("the %s did not start listening on %s within %s; %s. Check the service logs, "+
 			"or run `openbox %s` in the foreground to see why", in.label, in.addr, gatewayReadyTimeout, in.envNotSet, in.label)
 	}
+	traceUnit(in.label, "listen-proof", nil, map[string]any{"addr": in.addr})
 
 	act, err := in.activate()
+	traceActivation(in.label, err, nil, map[string]any{"replaced": act.replaced})
 	if err != nil {
 		a.rollbackLaneUnit(in)
 		return 0, err
@@ -101,7 +110,9 @@ func (a *app) rollbackLaneUnit(in laneInstall) {
 		return
 	}
 	a.unloadUnit(in.laneIdentity)
-	if err := in.uninstallUnit(); err == nil {
+	err := in.uninstallUnit()
+	traceUnit(in.label, "remove", err, map[string]any{"unit": in.unitPath, "rollback": true})
+	if err == nil {
 		a.row("rolled back", "removed %s", in.unitPath)
 	}
 }
@@ -116,13 +127,17 @@ type laneRemoval struct {
 func (a *app) removeLane(in laneRemoval) error {
 	if in.deactivate != nil {
 		if err := in.deactivate(); err != nil {
+			traceActivation(in.label, err, nil, map[string]any{"action": "deactivate"})
 			return err
 		}
+		traceActivation(in.label, nil, nil, map[string]any{"action": "deactivate"})
 	}
 	a.unloadUnit(in.laneIdentity)
 	if err := in.uninstallUnit(); err != nil {
+		traceUnit(in.label, "remove", err, map[string]any{"unit": in.unitPath})
 		return err
 	}
+	traceUnit(in.label, "remove", nil, map[string]any{"unit": in.unitPath})
 	if in.unitPath != "" {
 		a.row("removed", "%s", in.unitPath)
 	}
@@ -164,8 +179,16 @@ const advisoryFileEnvKey = "OPENBOX_ADVISORY_FILE"
 // hookflow.NewEngine into every LaneQueue's own Engine) would resolve a
 // bogus relative path (".config/openbox/advisories.jsonl") instead of
 // erroring loudly, since a daemon's $HOME is not this process's own.
+//
+// Eight keys now: trace.EnvDir joins the resolved five, for the same reason
+// -- a daemon has no $HOME to derive `devconfig.ConfigDir()/trace` from, and
+// without it a lane daemon would trace into wherever ITS OWN empty-HOME
+// resolution landed instead of this installer's, or discard every record
+// silently if that resolution failed outright. Read from trace.Dir(), which
+// main.go's resolveTraceDir already set for THIS process (env override or
+// the config-dir default) -- resolved once, not re-derived here.
 func (a *app) laneUnitEnv() map[string]string {
-	env := make(map[string]string, 7)
+	env := make(map[string]string, 8)
 	for _, key := range []string{devconfig.EnvHome, devconfig.EnvSpoolDir} {
 		if v := a.getenv(key); v != "" {
 			env[key] = v
@@ -176,6 +199,7 @@ func (a *app) laneUnitEnv() map[string]string {
 	env[devconfig.EnvEnforcementFile] = hookflow.DefaultEnforcementPath()
 	env[devconfig.EnvSpoolRoot] = devconfig.ConfigDir()
 	env[advisoryFileEnvKey] = hookflow.DefaultAdvisoryPath()
+	env[trace.EnvDir] = trace.Dir()
 	return env
 }
 

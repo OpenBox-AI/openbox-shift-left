@@ -77,10 +77,41 @@ type Gateway struct {
 	// mean. See WithRequestAttribution.
 	attribution func(raw []byte) map[string]string
 
+	// rawObserver sees every captured call's RAW bodies -- before
+	// clampAndRedact runs -- alongside the same method/url/status the
+	// (redacted) Captured value carries. Nil ⇒ nobody looks; this package
+	// stays free of any opinion about what a raw observer does with it (the
+	// CLI wires trace.Emit here, never imported directly: see
+	// WithRawObserver).
+	rawObserver func(RawCapture)
+
 	logf func(format string, args ...any)
 }
 
 func (g *Gateway) now() time.Time { return time.Now() }
+
+// observeRaw fires the raw observer, when one is configured, with headers
+// scrubbed exactly as redactHeaders scrubs them for the Captured value
+// (credential headers only) but with bodies left exactly as captured --
+// never passed through clampAndRedact. reqCapture.Headers is already that
+// scrubbed form (CaptureRequest built it via redactHeaders), so this reuses
+// it rather than re-deriving it from raw headers a second time.
+func (g *Gateway) observeRaw(reqCapture RequestCapture, rawReqBody string, status int, respHeaders http.Header, rawRespBody string, start, end time.Time) {
+	if g.rawObserver == nil {
+		return
+	}
+	g.rawObserver(RawCapture{
+		Method:          reqCapture.Method,
+		URL:             reqCapture.URL,
+		Status:          status,
+		RequestHeaders:  reqCapture.Headers,
+		ResponseHeaders: redactHeaders(respHeaders),
+		RequestBody:     rawReqBody,
+		ResponseBody:    rawRespBody,
+		StartedAt:       start,
+		EndedAt:         end,
+	})
+}
 
 // WithCapture turns on evidence emission. Observe-only: it changes what is
 // reported, never what is forwarded.
@@ -111,6 +142,17 @@ func (g *Gateway) WithBodyCapture(capturesBody func(*http.Request) bool) *Gatewa
 // RequestCapture.Attribution, it does not know what the keys mean.
 func (g *Gateway) WithRequestAttribution(parse func(raw []byte) map[string]string) *Gateway {
 	g.attribution = parse
+	return g
+}
+
+// WithRawObserver turns on a raw, pre-redaction view of every captured call:
+// observe fires with RawCapture (redacted headers, RAW bodies) at exactly
+// the same points WithCapture's Emitter fires with the redacted Captured --
+// same call, two views. It changes nothing about what is forwarded, gated,
+// or handed to the Emitter; the local trace package is the one production
+// caller, wired at the CLI layer because this package must never import it.
+func (g *Gateway) WithRawObserver(observe func(RawCapture)) *Gateway {
+	g.rawObserver = observe
 	return g
 }
 
@@ -172,13 +214,19 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var reqCapture RequestCapture
-	capturing := g.emitter != nil || g.evaluator != nil
+	capturing := g.emitter != nil || g.evaluator != nil || g.rawObserver != nil
 	gatedCall := g.evaluator != nil && g.gated != nil && g.gated(r)
 	keepBodies := gatedCall || g.capturesBody == nil || g.capturesBody(r)
+	// rawReqBody is the request body a raw observer sees: the same
+	// decoded-but-unredacted bytes captureRequestBody below is about to
+	// redact, kept around because that redaction happens IN CaptureRequest
+	// and RequestCapture never carries its pre-redaction form.
+	var rawReqBody string
 	if capturing {
 		captured := ""
 		if keepBodies {
 			captured = capturableRequestBody(body, r.Header)
+			rawReqBody = captured
 		}
 		reqCapture = CaptureRequest(r.Method, g.upstream+r.RequestURI, r.Header, captured, start)
 		// Independent of keepBodies, deliberately: this reads the RAW bytes
@@ -196,6 +244,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if g.emitter != nil {
 				g.emitter.Emit(r.Context(), reqCapture.Complete(refusalStatus, nil, "", g.now()))
 			}
+			g.observeRaw(reqCapture, rawReqBody, refusalStatus, nil, "", start, g.now())
 			return
 		}
 	}
@@ -225,9 +274,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := g.client.Do(outbound)
 	if err != nil {
+		unreachableAt := g.now()
 		if g.emitter != nil {
-			g.emitter.Emit(r.Context(), reqCapture.Complete(0, nil, "", g.now()))
+			g.emitter.Emit(r.Context(), reqCapture.Complete(0, nil, "", unreachableAt))
 		}
+		g.observeRaw(reqCapture, rawReqBody, 0, nil, "", start, unreachableAt)
 		if errors.Is(err, context.Canceled) {
 			return
 		}
@@ -245,7 +296,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Bounded by the same rune cap the wire has, so a long stream cannot grow
 	// this without limit.
 	var sink *captureSink
-	if g.emitter != nil && keepBodies {
+	if (g.emitter != nil || g.rawObserver != nil) && keepBodies {
 		sink = &captureSink{}
 	}
 	streamErr := g.streamTo(w, resp.Body, sink)
@@ -265,7 +316,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			end.Sub(start).Round(time.Millisecond), outcome)
 	}
 
-	if g.emitter != nil {
+	if g.emitter != nil || g.rawObserver != nil {
 		respBody := ""
 		decodeCut := false
 		if keepBodies {
@@ -275,16 +326,23 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			decodeCut = strings.HasSuffix(respBody, bodyCutNote)
 			respBody = assembleEventStream(respBody, resp.Header)
 		}
-		captured := reqCapture.Complete(resp.StatusCode, resp.Header, respBody, end)
-		// Set on the returned value rather than threaded through Complete's own
-		// signature: both are response-side facts Complete never had (it only
-		// ever saw the already-computed respBody string), and capture_test.go
-		// already calls Complete directly, so widening its signature would
-		// touch a file this phase does not own for a fact this call site is
-		// the only place that has.
-		captured.ResponseBytesSeen = sink.Seen()
-		captured.ResponseTruncated = decodeCut || responseTruncated(sink, captured.ResponseBody, streamErr)
-		g.emitter.Emit(r.Context(), captured)
+		// respBody, right here, is the raw observer's response body: everything
+		// below this point redacts it (reqCapture.Complete -> captureBody), so a
+		// raw observer must see it BEFORE that call, not derive it from the
+		// (already redacted) Captured value afterward.
+		g.observeRaw(reqCapture, rawReqBody, resp.StatusCode, resp.Header, respBody, start, end)
+		if g.emitter != nil {
+			captured := reqCapture.Complete(resp.StatusCode, resp.Header, respBody, end)
+			// Set on the returned value rather than threaded through Complete's own
+			// signature: both are response-side facts Complete never had (it only
+			// ever saw the already-computed respBody string), and capture_test.go
+			// already calls Complete directly, so widening its signature would
+			// touch a file this phase does not own for a fact this call site is
+			// the only place that has.
+			captured.ResponseBytesSeen = sink.Seen()
+			captured.ResponseTruncated = decodeCut || responseTruncated(sink, captured.ResponseBody, streamErr)
+			g.emitter.Emit(r.Context(), captured)
+		}
 	}
 
 	// After the emit, deliberately: the evidence of a failed call is exactly the

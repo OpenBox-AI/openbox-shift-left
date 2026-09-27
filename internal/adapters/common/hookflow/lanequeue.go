@@ -109,6 +109,7 @@ func (q *LaneQueue) Deliver(ctx context.Context, ev client.DevEvent) bool {
 		q.logf("lanequeue: %s could not be spooled: %v", ev.EventID, err)
 		q.Engine.Spool.recordDiscard(q.Engine.Spool.SessionPath(ev.SessionID), 1,
 			"could not be spooled: "+err.Error())
+		tracePoolDropSubmit(ev, "could_not_be_spooled")
 		HaltOnDeliveryFailure(log.New(logfWriter{logf: q.logf}, "", 0), ev, err)
 		return false
 	}
@@ -161,12 +162,14 @@ func (q *LaneQueue) Kick(sessionID string) {
 func (q *LaneQueue) drain(sessionID string) {
 	defer q.wg.Done()
 	for {
+		passStart := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), LanePassBudget)
-		_, err := q.Engine.DrainSession(ctx, sessionID, q.Client, DrainOptions{
+		n, err := q.Engine.DrainSession(ctx, sessionID, q.Client, DrainOptions{
 			Mode:           Block,
 			AttemptTimeout: DeliveryAttemptTimeout,
 		})
 		cancel()
+		traceLaneDrain(sessionID, passStart, n, err)
 		if err != nil && !errors.Is(err, ErrSessionBusy) {
 			q.logf("lanequeue: %s: drain pass ended early: %v", sessionID, err)
 		}

@@ -81,7 +81,9 @@ func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation)
 	}
 	if err := atomicWriteFile(path, line, 0o600); err != nil {
 		logger.Printf("session halt latch skipped (write): %v", err)
+		return
 	}
+	traceLatchSet(sessionID, info)
 }
 
 // WriteSessionHaltIfAbsent latches a run as halted, but ONLY when it is not
@@ -127,7 +129,9 @@ func WriteSessionHaltIfAbsent(logger *log.Logger, sessionID string, info Session
 	defer f.Close()
 	if _, err := f.Write(line); err != nil {
 		logger.Printf("session halt latch skipped (write): %v", err)
+		return
 	}
+	traceLatchSet(sessionID, info)
 }
 
 // prepareLatchWrite is the marshal-and-mkdir prelude WriteSessionHalt and

@@ -61,7 +61,12 @@ and Linux and unprotected on Windows, and anything running as the developer,
 including the governed agent, can read the key, so attestation proves origin
 of config rather than tamper resistance. No document may imply otherwise. The
 RSA workload private key and the `workload-token.json` bearer cache are
-plaintext the same way, under the same boundary.
+plaintext the same way, under the same boundary. So is the local trace
+(`internal/trace`, `<ConfigDir>/trace/`): owner ruling 2026-09-27, it keeps
+every body both before and after redaction, whatever `content_capture` says,
+for 7 days, and never egresses; only API keys, bearer tokens and private keys
+stay out of it. `content_capture` and the redactor govern egress, not that
+file.
 
 **Privacy posture.** A decision only a human can make (scope, privacy posture,
 priority) is surfaced, never inferred. Content, usage and thinking capture are on

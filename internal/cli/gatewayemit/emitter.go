@@ -15,6 +15,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // sessionHeader named through sessionkey rather than as a
@@ -177,6 +178,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		e.vlog("  capture: DROPPED; this emitter has no lane configured")
 		e.warn("openbox: a model-call emitter was constructed with no lane, so captured calls " +
 			"cannot be attributed to a producer and are being DROPPED. This is a wiring defect, not a setting.")
+		e.traceOutcome("dropped", "no_lane_configured", c)
 		return
 	}
 
@@ -185,6 +187,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		e.warnThrottled(&e.lastNoElectionWarn, "openbox: a model-call emitter was constructed with no election gate, "+
 			"so it cannot know whether it is this machine's producer and captured calls are being DROPPED. "+
 			"This is a wiring defect, not a setting.")
+		e.traceOutcome("dropped", "no_election_gate", c)
 		return
 	}
 	// A claude.ai chat completion has exactly one possible producer, this
@@ -201,6 +204,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 				"being DROPPED -- which is NOT the same as another lane winning. Re-run `openbox "+
 				"init` so the unit carries --settings, or pass --elected. The model calls "+
 				"themselves are unaffected.", problem)
+			e.traceOutcome("dropped", "election_unresolved: "+problem, c)
 			return
 		}
 		if name, known := e.electedName(); known && name == "" {
@@ -216,9 +220,11 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 				"invisible from inside the session. `openbox doctor` names the missing keys and "+
 				"`openbox init --provider claude-code` rewrites them. The model calls "+
 				"themselves are unaffected.")
+			e.traceOutcome("dropped", "no_routed_producer", c)
 			return
 		}
 		e.vlog("  capture: SKIPPED; another lane is this machine's elected model-call producer")
+		e.traceOutcome("skipped", "not_elected", c)
 		return
 	}
 
@@ -226,6 +232,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	if did == "" {
 		e.vlog("  capture: SKIPPED; no developer DID configured (run `openbox init --provider claude-code`)")
 		e.warnThrottled(&e.lastNoDIDWarn, "openbox gateway: no developer DID configured, so relayed model calls are NOT being recorded. Run `openbox init --provider claude-code`; no restart is needed.")
+		e.traceOutcome("skipped", "no_developer_did", c)
 		return
 	}
 
@@ -239,6 +246,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		e.vlog("  capture: SKIPPED; %s is not a usable session id", sessionHeader)
 		e.warnThrottled(&e.lastBadSessionWarn, "openbox gateway: relayed calls carry a %s header that is not a usable session id "+
 			"(too long, or not printable ASCII), so nothing can be attributed to a session. The model calls themselves are unaffected.", sessionHeader)
+		e.traceOutcome("skipped", "unusable_session_id", c)
 		return
 	}
 	if sessionID == "" {
@@ -248,6 +256,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 			e.warnThrottled(e.noSessionWarnClock(class), "openbox gateway: no %s header on %s, so nothing can be attributed to a session and no governance event is being sent. "+
 				"The model calls themselves are unaffected.", sessionHeader, class.Subject(c.HTTPURL))
 		}
+		e.traceOutcome("skipped", "no_session_id", c)
 		return
 	}
 
@@ -255,6 +264,7 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 		n := atomic.AddUint64(&e.probesSkipped, 1)
 		e.vlog("  capture: SKIPPED; %s is a token-count probe, which is classified but never emits a governance event (%d seen so far)",
 			class.Subject(c.HTTPURL), n)
+		e.traceOutcome("skipped", "token_count_probe", c)
 		return
 	}
 
@@ -271,12 +281,40 @@ func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
 	if err != nil {
 		e.vlog("  capture: DROPPED; %v", err)
 		e.warn("openbox: dropped a captured call: %v", err)
+		e.traceOutcome("dropped", "events_for_failed: "+err.Error(), c)
 		return
 	}
 	if !e.deliverAll(ctx, events, requestID) {
+		e.traceOutcome("dropped", "delivery_pool_saturated", c)
 		return
 	}
 	e.recorded(c, sessionID, requestID, len(events))
+	e.traceOutcome("recorded", "", c)
+}
+
+// traceOutcome writes the local, full-fidelity capture.outcome record every
+// Emit path produces -- recorded/skipped/dropped plus why, and the redacted
+// bodies gatewayemit already has in hand (the raw, pre-redaction view is a
+// separate, earlier observer wired at the relay itself; see
+// gateway.WithRawObserver). Best-effort like every trace.Emit: it never
+// blocks and never fails this Emit.
+func (e *Emitter) traceOutcome(outcome, reason string, c gateway.Captured) {
+	detail := map[string]any{
+		"lane":          e.Lane.Name,
+		"method":        c.HTTPMethod,
+		"url":           c.HTTPURL,
+		"status":        c.HTTPStatus,
+		"request_body":  trace.Body(c.RequestBody),
+		"response_body": trace.Body(c.ResponseBody),
+	}
+	if reason != "" {
+		detail["reason"] = reason
+	}
+	trace.Emit(trace.Record{
+		Stage:   trace.StageCapture,
+		Outcome: outcome,
+		Detail:  detail,
+	})
 }
 
 // emitChat records a claude.ai chat completion under its conversation's key,
@@ -288,6 +326,7 @@ func (e *Emitter) emitChat(ctx context.Context, c gateway.Captured, did string) 
 	if !ok {
 		// Unreachable while classifyPath and ResolveChat share one predicate.
 		e.vlog("  capture: SKIPPED; a chat completion with no usable conversation id")
+		e.traceOutcome("skipped", "chat_no_conversation_id", c)
 		return
 	}
 	id := Identity{SessionID: key, DeveloperDID: did, ToolName: chatToolName}
@@ -296,6 +335,7 @@ func (e *Emitter) emitChat(ctx context.Context, c gateway.Captured, did string) 
 	if err != nil {
 		e.vlog("  capture: DROPPED; %v", err)
 		e.warn("openbox: dropped a captured call: %v", err)
+		e.traceOutcome("dropped", "chat_events_for_failed: "+err.Error(), c)
 		return
 	}
 	for i := range events {
@@ -307,12 +347,14 @@ func (e *Emitter) emitChat(ctx context.Context, c gateway.Captured, did string) 
 		events = append([]client.DevEvent{e.chatSessionStarted(id, started, chatMetadata(c))}, events...)
 	}
 	if !e.deliverAll(ctx, events, requestID) {
+		e.traceOutcome("dropped", "chat_delivery_pool_saturated", c)
 		return
 	}
 	if announce {
 		e.markChatAnnounced(key)
 	}
 	e.recorded(c, key, requestID, len(events))
+	e.traceOutcome("recorded", "chat", c)
 }
 
 // deliverAll submits events in order and reports whether every one was

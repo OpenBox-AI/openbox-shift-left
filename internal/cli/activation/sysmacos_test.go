@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // -- test seams --------------------------------------------------------
@@ -1131,6 +1133,63 @@ func TestManualDeactivateCommandsNeverReferenceAFileAboutToBeDeleted(t *testing.
 	}
 	if !sawDelete {
 		t.Error("no delete-certificate command was printed at all")
+	}
+}
+
+// TestActivateTracesCATrustReadbackAndPACWriteSteps closes phase 3's gap for
+// this file: activateSystemPACDarwin ran three privileged steps (trust the
+// CA, read its trust back, write each scope's PAC url/state) and traced none
+// of them. Each must now leave a StageActivation record, in order, carrying
+// its own step name.
+func TestActivateTracesCATrustReadbackAndPACWriteSteps(t *testing.T) {
+	withSeams(t, 501, true)
+	home := t.TempDir()
+	plan := testPlan(t, home)
+	sha1, err := sha1Fingerprint(plan.CAPEM)
+	if err != nil {
+		t.Fatalf("sha1Fingerprint: %v", err)
+	}
+	f := newFixture(t, []string{"Wi-Fi"}, nil, sha1)
+	rec := &recorder{t: t, handle: f.handler()}
+
+	dir := t.TempDir()
+	restore := trace.SetDefault(&trace.Writer{Dir: dir})
+	defer restore()
+
+	outcome, err := ActivateSystemPAC(context.Background(), rec.run, plan)
+	if err != nil {
+		t.Fatalf("ActivateSystemPAC: %v", err)
+	}
+	if outcome.Class != Activated {
+		t.Fatalf("Class = %v, reason=%q", outcome.Class, outcome.Reason)
+	}
+
+	recs, skipped, err := trace.Read(dir, nil)
+	if err != nil {
+		t.Fatalf("trace.Read: %v", err)
+	}
+	if skipped != 0 {
+		t.Fatalf("skipped = %d, want 0", skipped)
+	}
+	var steps []string
+	for _, r := range recs {
+		if r.Stage != trace.StageActivation {
+			continue
+		}
+		if r.Outcome != "ok" {
+			t.Errorf("record outcome = %q, want ok: %+v", r.Outcome, r)
+		}
+		step, _ := r.Detail["step"].(string)
+		steps = append(steps, step)
+	}
+	want := []string{"ca-trust", "ca-trust-readback", "pac-write"}
+	if len(steps) != len(want) {
+		t.Fatalf("steps = %v, want exactly %v", steps, want)
+	}
+	for i, w := range want {
+		if steps[i] != w {
+			t.Errorf("steps[%d] = %q, want %q (full: %v)", i, steps[i], w, steps)
+		}
 	}
 }
 

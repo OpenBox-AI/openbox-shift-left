@@ -313,7 +313,9 @@ func (a *app) reportSystemPAC() {
 		return
 	}
 	fmt.Fprintf(a.stdout, "\nSystem PAC (desktop apps and browsers, macOS only)\n")
-	a.row("record", "%s", systemPACRecordState(*entry))
+	state := systemPACRecordState(*entry)
+	a.row("record", "%s", state)
+	traceDoctorFinding("system-pac:record", state, entry.PACURL)
 	if entry.CATrust != nil {
 		trusted := "unknown (no SHA-1 recorded)"
 		if entry.CATrust.SHA1 != "" {

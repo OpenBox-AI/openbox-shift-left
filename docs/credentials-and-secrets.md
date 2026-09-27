@@ -123,6 +123,11 @@ match is replaced with a placeholder, and only the category (`aws_key`,
 On a gated `Write` or `Edit`, the redaction is applied to the **file itself**:
 the file is written with the placeholder in place of the secret.
 
+Redaction protects what egresses, not what stays on disk: the
+[local trace](data-and-privacy.md#the-local-trace) keeps every body before and
+after redaction, so any secret the scanner saw (and any it missed) is in
+plaintext under the runtime directory's `trace/`, for up to 7 days.
+
 The detector lives in `internal/decision/`. It has two layers:
 
 1. **Format rules**: nine local patterns (`secrets.go`) plus gitleaks' rule set

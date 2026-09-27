@@ -24,6 +24,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -64,7 +65,7 @@ func (a *app) runTransport(args []string) int {
 		}
 	})
 
-	logger := log.New(a.stderr, "", 0)
+	logger := tracedLogger(a.stderr, "", 0)
 
 	home, err := devconfig.Home()
 	if err != nil {
@@ -154,6 +155,7 @@ func (a *app) runTransport(args []string) int {
 	if *verbose {
 		opts = append(opts, transport.WithVerbose(logger.Printf))
 	}
+	opts = append(opts, transport.WithRawObserver(traceRawCapture))
 	p, err := transport.New(transport.Config{Addr: *addr, Providers: providersFromFlag(providersSeen, *providersFlag)}, ca, em, opts...)
 	if err != nil {
 		return a.errorf("%v", err)
@@ -179,6 +181,7 @@ func (a *app) runTransport(args []string) int {
 
 	go ccSweeper.Run(ctx, logger)
 	go codexSweeper.Run(ctx, logger)
+	go runTraceSweeps(ctx, logger)
 	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
 
 	logger.Printf("openbox transport: listening on %s", cfg.Addr)
@@ -330,6 +333,16 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 		}
 		logger.Printf("transport: refused a relayed call for session %s: its run is latched halted", sessionID)
 		hookflow.RecordEnforcement(logger, sessionID, "llm_completion", dec, hookflow.ApplyResult{Decision: "deny", Emitted: true})
+		trace.Emit(trace.Record{
+			Stage:     trace.StageGateVerdict,
+			SessionID: sessionID,
+			Outcome:   string(dec.Evaluation.Verdict),
+			Detail: map[string]any{
+				"method": c.HTTPMethod,
+				"url":    c.HTTPURL,
+				"reason": "run_latched_halted",
+			},
+		})
 		return dec.Evaluation, nil
 	}
 	if h.next == nil {

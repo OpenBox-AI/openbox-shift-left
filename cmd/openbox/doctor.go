@@ -35,6 +35,11 @@ func (a *app) runDoctor(args []string) int {
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
+	// Every line doctor prints is a finding the trace should hold, including
+	// the rows with no structured record of their own.
+	tee := &doctorOutputTee{w: a.stdout}
+	a.stdout = tee
+	defer func() { tee.flush(); a.stdout = tee.w }()
 
 	p := devconfig.EffectivePosture()
 	fmt.Fprintf(a.stdout, "OpenBox developer-runtime posture\n\n")
@@ -279,12 +284,15 @@ func (a *app) reportIdentities() {
 		switch ls, lsErr := devconfig.LegacyStoreFor(name); {
 		case lsErr == nil && ls.Legacy:
 			a.reportLegacyIdentity(name, cfgPath, ls)
+			traceDoctorFinding("identity:"+name, "legacy", "pre-IAMv3 identity; hooks send nothing")
 		case cfg.AgentID != "" && cfg.IdentityMethod == devconfig.IdentityMethodKeycloakWorkload:
 			a.reportV3Identity(name, cfgPath, cfg)
 			a.reportURLDrift(name, orgCfg, cfg)
+			traceDoctorFinding("identity:"+name, "governed", "agent "+cfg.AgentID+" (keycloak_workload)")
 		default:
 			a.row(name, "%s", withPresence(cfgPath))
 			a.row("", "no agent; governing nothing. Run `openbox init --provider %s`", name)
+			traceDoctorFinding("identity:"+name, "ungoverned", cfgPath+": no agent")
 		}
 	}
 	a.reportIdentitySource()
@@ -498,6 +506,7 @@ func (a *app) reportGateway() {
 	if r.SettingsPath == "" {
 		fmt.Fprintf(a.stdout, "\nLocal gateway\n")
 		a.row("configured", "no; ANTHROPIC_BASE_URL is not set in any settings file")
+		traceDoctorFinding("gateway:configured", "no", "ANTHROPIC_BASE_URL is not set in any settings file")
 		a.row("bypass", "%s", map[bool]string{true: "DETECTABLE, not prevented", false: "no exposure found"}[r.BypassCapable])
 		// The reason is the whole of that claim, and this is now the common
 		// machine, so dropping it would make "DETECTABLE" unreachable. Safe to
@@ -528,10 +537,12 @@ func (a *app) reportGateway() {
 		}
 		if r.Alive {
 			a.row("reachable", "yes")
+			traceDoctorFinding("gateway:reachable", "yes", r.ConfiguredAddr)
 		} else {
 			a.row("reachable", "NO; %s", r.AliveErr)
 			a.row("", "model calls will FAIL rather than escape, which is the safe")
 			a.row("", "direction. Start the gateway: `openbox gateway`")
+			traceDoctorFinding("gateway:reachable", "no", fmt.Sprintf("%v", r.AliveErr))
 		}
 		// So a differing env value is reported as information, never as a fault; the
 		// file above is what the tool uses.
@@ -611,6 +622,7 @@ func (a *app) reportLanes() {
 			state = "routed, ELECTED"
 		}
 		a.row(lane.name, "listening on %s; %s", lane.addr, state)
+		traceDoctorFinding("lane:"+lane.name, "healthy", fmt.Sprintf("listening on %s; %s", lane.addr, state))
 	}
 	// One line rather than the three it used to take, because it is a standing
 	// caveat and not a finding: a lane can be up, routed and elected and still
@@ -631,6 +643,8 @@ func (a *app) reportLanes() {
 	}
 
 	for _, lane := range unhealthy {
+		traceDoctorFinding("lane:"+lane.name, "unhealthy",
+			fmt.Sprintf("unit=%v routed=%v listening=%v", lane.unit != "" && fileExists(lane.unit), lane.routed, lane.listening))
 		fmt.Fprintf(a.stdout, "\n%s lane\n", strings.ToUpper(lane.name[:1])+lane.name[1:])
 		switch {
 		case lane.unit == "":
@@ -861,6 +875,7 @@ func (a *app) reportHaltedRuns() {
 	if len(latches) == 0 {
 		return
 	}
+	traceDoctorFinding("halted-runs", "present", fmt.Sprintf("%d run(s) latched", len(latches)))
 
 	// Most recent first; an empty ts (unreadable/mid-write) sorts last.
 	sort.Slice(latches, func(i, j int) bool { return latches[i].ts > latches[j].ts })
@@ -893,14 +908,17 @@ func (a *app) reportSpool() {
 	switch {
 	case backlog == 0:
 		a.row("waiting", "0; delivery is self-triggering, so an empty queue is the healthy state")
+		traceDoctorFinding("spool:waiting", "empty", spool.Dir)
 	default:
 		a.row("waiting", "%d event(s), of which %d are in carry-over files from a failed", backlog, spool.UndeliveredCount())
 		a.row("", "delivery. A lane daemon sweeps every %s; `openbox hook claude-code", hookflow.DefaultSweepInterval)
 		a.row("", "flush` does it now.")
+		traceDoctorFinding("spool:waiting", "backlog", fmt.Sprintf("%d event(s) in %s", backlog, spool.Dir))
 	}
 
 	discarded := spool.DiscardedCount()
 	if discarded > 0 {
+		traceDoctorFinding("spool:discarded", "loss", fmt.Sprintf("%d event(s) discarded in %s", discarded, spool.Dir))
 		a.row("DISCARDED", "at least %d event(s) were given up on and are GONE: core did not", discarded)
 		a.row("", "accept their one delivery attempt, or they passed the %d-day retention", int(hookflow.RetireSpoolAfter.Hours()/24))
 		a.row("", "age unattempted. This is real loss of governance evidence, recorded in")
@@ -971,16 +989,19 @@ func (a *app) reportCoverage() {
 		// Nothing has been un-routed, which is one fact however many lanes
 		// there are. A lane that HAS been changed still gets its own lines.
 		a.row("intact", "every managed key on this machine is still as installed")
+		traceDoctorFinding("coverage", "intact", "every managed key still as installed")
 	default:
 		for _, c := range coverage {
 			if c.Intact() {
 				a.row(string(c.Lane), "intact; all %d managed key(s) still as installed", len(c.Managed))
+				traceDoctorFinding("coverage:"+string(c.Lane), "intact", fmt.Sprintf("%d managed key(s)", len(c.Managed)))
 				continue
 			}
 			label := "CHANGED"
 			if c.Vanished() {
 				label = "UN-ROUTED"
 			}
+			traceDoctorFinding("coverage:"+string(c.Lane), strings.ToLower(label), c.Describe())
 			// Lane-gated: laneCapable is provider.ClaudeCode only (initlanes.go), so
 			// every entry in `coverage` is a Claude Code lane and the literal
 			// "claude-code" below is not a missed provider case -- leave it.
@@ -1051,6 +1072,7 @@ func (a *app) reportHookRegistration() {
 		switch {
 		case err != nil:
 			a.row(level.label, "%s: could not be read; %v", level.path, err)
+			traceDoctorFinding("hooks:"+level.label, "unreadable", fmt.Sprintf("%s: %v", level.path, err))
 			continue
 		case !audit.Present, len(audit.Engines) == 0:
 			note := "(present, no OpenBox hooks)"
@@ -1058,6 +1080,7 @@ func (a *app) reportHookRegistration() {
 				note = "(absent)"
 			}
 			a.row(level.label, "%s  %s", level.path, note)
+			traceDoctorFinding("hooks:"+level.label, "absent", level.path+" "+note)
 			if level.label == "user-wide" {
 				if codexPath, present := codexHooksPresent(); present {
 					fmt.Fprintf(a.stdout, "    Codex is governed; Claude Code is not. Codex hooks: %s\n", codexPath)
@@ -1069,6 +1092,7 @@ func (a *app) reportHookRegistration() {
 			continue
 		}
 		a.row(level.label, "%s  (present)", level.path)
+		traceDoctorFinding("hooks:"+level.label, "present", level.path)
 		for _, engine := range audit.Engines {
 			// Kept even for a single engine: which binary is governing this
 			// machine is a coordinate, not commentary, and
@@ -1184,6 +1208,7 @@ func (a *app) reportStoreReachability(tool string) {
 	// repeated rather than a second fact.
 	if ls, err := devconfig.LegacyStoreFor(tool); err == nil && ls.Legacy {
 		a.row(tool, "NOT CHECKED; legacy (pre-IAMv3) identity -- see the Identity section above")
+		traceDoctorFinding("reachability:"+tool, "not-checked", "legacy identity")
 		return
 	}
 
@@ -1192,6 +1217,7 @@ func (a *app) reportStoreReachability(tool string) {
 		a.row(tool, "NOT CHECKED; %v", err)
 		a.row("", "Run `openbox init --provider %s`. Until then its hooks fire, fail", tool)
 		a.row("", "to resolve credentials, and every gated call is DENIED (fail-closed).")
+		traceDoctorFinding("reachability:"+tool, "not-checked", fmt.Sprintf("%v", err))
 		return
 	}
 
@@ -1206,6 +1232,7 @@ func (a *app) reportStoreReachability(tool string) {
 	})
 	if err != nil {
 		a.row(tool, "NOT CHECKED; the local credentials are unusable: %v", err)
+		traceDoctorFinding("reachability:"+tool, "not-checked", fmt.Sprintf("unusable credentials: %v", err))
 		return
 	}
 
@@ -1219,9 +1246,11 @@ func (a *app) reportStoreReachability(tool string) {
 		a.row(tool, "NO; %v", err)
 		a.row("", "Events spool locally and deliver when this clears, so a short")
 		a.row("", "outage costs nothing. `openbox doctor` re-checks.")
+		traceDoctorFinding("reachability:"+tool, "no", fmt.Sprintf("%v", err))
 		return
 	}
 	a.row(tool, "reachable; authenticated as agent %s @ %s", result.AgentName, creds.BaseURL)
+	traceDoctorFinding("reachability:"+tool, "yes", fmt.Sprintf("agent %s @ %s", result.AgentName, creds.BaseURL))
 }
 
 // doctorReachTimeout keeps the check short. Doctor is a report, and a report

@@ -17,6 +17,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // uninstall is the full reversal of `openbox init`, in the reverse of install
@@ -66,12 +67,19 @@ type uninstallState struct {
 
 func (a *app) runUninstall(args []string) int {
 	fs := a.newFlagSet("uninstall")
+	purgeTrace := fs.Bool("purge-trace", false,
+		"also delete the local trace directory: every raw request/response body and every "+
+			"secret it ever recorded, for every tool. Irreversible; everything else uninstall "+
+			"removes leaves the trace directory alone, on purpose, so it survives a re-init")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
 	if fs.NArg() > 0 {
 		return a.errorf("`openbox uninstall` takes no arguments: it removes whatever is installed on this "+
 			"machine, for every provider. Got %q", fs.Arg(0))
+	}
+	if *purgeTrace {
+		defer a.purgeTraceDir()
 	}
 	// A home this process cannot name is not a home it may guess: every deletion
 	// below would otherwise resolve against the current directory.
@@ -114,6 +122,24 @@ func (a *app) runUninstall(args []string) int {
 		return exitError
 	}
 	return exitOK
+}
+
+// purgeTraceDir removes the local trace directory entirely -- the one piece
+// of `uninstall`'s reversal an ordinary run deliberately skips (the trace
+// survives uninstall, so a developer who reinstalls keeps their own history).
+// Best-effort and reported, never fatal: a trace directory this process
+// cannot remove is a much smaller problem than the credentials uninstall
+// already handled by the time this runs last.
+func (a *app) purgeTraceDir() {
+	dir := trace.Dir()
+	if dir == "" {
+		return
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		fmt.Fprintf(a.stderr, "warning: could not remove the trace directory at %s: %v\n", dir, err)
+		return
+	}
+	fmt.Fprintf(a.stdout, "purged the local trace directory at %s\n", dir)
 }
 
 // uninstallInventory is every path this command owns, resolved once. Resolving
@@ -483,6 +509,7 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 		a.note(fmt.Sprintf("%d undelivered event(s) will be DESTROYED with the spool below. Run", st.backlog),
 			"`openbox init --provider <tool>` and `openbox hook <tool> flush` first if that",
 			"evidence matters.")
+		traceUninstallStep("spool-flush", nil, map[string]any{"skipped": true, "queued": queued})
 		return
 	}
 	for _, name := range provider.Supported() {
@@ -509,6 +536,7 @@ func (a *app) flushSpools(st *uninstallState, inv uninstallInventory) {
 	if remaining > 0 {
 		a.note(fmt.Sprintf("those %d event(s) could not be delivered and will be DESTROYED with the spool.", remaining))
 	}
+	traceUninstallStep("spool-flush", nil, map[string]any{"queued": queued, "remaining": remaining})
 }
 
 func sumBacklog(inv uninstallInventory) int {
@@ -556,6 +584,7 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 	fmt.Fprintf(a.stdout, "\nRemoving hook registrations\n")
 	for _, s := range inv.hookSurfaces {
 		removed, err := providers.RemoveProviderHooks(s.provider, s.path)
+		traceUninstallStep("hook-remove", err, map[string]any{"provider": s.provider, "path": s.path})
 		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: could not clean %s: %v\n", s.path, err)
 			st.hookFailed = append(st.hookFailed, hookFailure{
@@ -583,6 +612,7 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 	}
 	if inv.codexOtelPresent {
 		removed, err := providers.RemoveCodexOtel(inv.codexOtelPath)
+		traceUninstallStep("hook-remove", err, map[string]any{"provider": string(provider.Codex), "path": inv.codexOtelPath, "kind": "otel"})
 		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: could not clean %s: %v\n", inv.codexOtelPath, err)
 			st.hookFailed = append(st.hookFailed, hookFailure{path: inv.codexOtelPath})
@@ -617,6 +647,9 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 // place to overwrite a value someone deliberately changed.
 func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSurface) {
 	res, err := providers.RestoreProviderSettings(s.provider, s.path, home)
+	defer func() {
+		traceUninstallStep("settings-restore", err, map[string]any{"provider": s.provider, "path": s.path})
+	}()
 	if err != nil {
 		// The failure can be s.path itself, or the internal prior-settings
 		// record RestoreProviderSettings reads before ever touching s.path --
@@ -747,10 +780,12 @@ func (a *app) deletePath(st *uninstallState, path string, remove func(string) er
 		fmt.Fprintf(a.stderr, "warning: could not delete %s: %v\n", path, err)
 		st.failed = true
 		st.undeleted = appendUnique(st.undeleted, path)
+		traceUninstallStep("artifact-remove", err, map[string]any{"path": path})
 		return
 	}
 	a.row("deleted", "%s", path)
 	st.deleted++
+	traceUninstallStep("artifact-remove", nil, map[string]any{"path": path})
 }
 
 // removeCredentials is last, and unconditional even after a partial failure.

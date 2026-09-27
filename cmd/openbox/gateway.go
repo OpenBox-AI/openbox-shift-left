@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -61,7 +60,7 @@ func (a *app) runGateway(args []string) int {
 
 	// Probe-A mode replaces the handler wholesale below, so `g`; and the emitter
 	// wired onto it; would never be served.
-	logger := log.New(a.stderr, "", 0)
+	logger := tracedLogger(a.stderr, "", 0)
 	settingsPath := a.laneSettingsPath(*settings)
 	spool := hookflow.Spool{Dir: devconfig.SpoolDir(gatewaySpoolSubdir)}
 	// The completeness net (see Sweeper); out here because probe-A mode still spools.
@@ -108,6 +107,11 @@ func (a *app) runGateway(args []string) int {
 	if *verbose {
 		g = g.WithVerbose(logger.Printf)
 	}
+	// The raw, pre-redaction view of every relayed call -- the local trace's
+	// own promise ("everything", raw bodies included, regardless of
+	// content_capture) -- independent of *verbose and of whether an
+	// Emitter is even wired (probe-A mode has none).
+	g = g.WithRawObserver(traceRawCapture)
 
 	var handler http.Handler = g
 	if *refuseAll {
@@ -156,6 +160,7 @@ func (a *app) runGateway(args []string) int {
 		a.gatewayReady(listener.Addr())
 	}
 	go sweeper.Run(ctx, logger)
+	go runTraceSweeps(ctx, logger)
 	if !*refuseAll {
 		reportElection(logger, "gateway", settingsPath, activation.LaneGateway, *elected)
 	}

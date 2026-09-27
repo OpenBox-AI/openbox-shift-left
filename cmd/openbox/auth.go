@@ -7,6 +7,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // `openbox auth` connects this machine to an organization, and nothing else.
@@ -139,13 +140,28 @@ func (a *app) writeSecrets(envPath string, f authFields) int {
 		fmt.Fprintf(a.stdout, "- no organization control token given; %s was not written.\n"+
 			"  `openbox init --provider <tool>` needs one to register that tool's agent,\n"+
 			"  and will say so if it is still missing.\n", envPath)
+		traceAuthStep("skipped", "no_control_token")
 		return exitOK
 	}
 	if err := devconfig.WriteEnvFile(envPath, map[string]string{devconfig.EnvControlToken: token}); err != nil {
+		traceAuthStep("failed", "write_env_file: "+err.Error())
 		return a.errorf("write credentials: %v", err)
 	}
 	fmt.Fprintf(a.stdout, "✓ wrote %s (0600; plaintext;)\n", envPath)
+	traceAuthStep("written", "")
 	return exitOK
+}
+
+// traceAuthStep is auth's ONE local trace point: it never carries the
+// control token or any other credential, only whether one was written and
+// why not when it wasn't -- the same "kid/exp/status, never the token"
+// boundary the workload token exchange itself holds.
+func traceAuthStep(outcome, reason string) {
+	detail := map[string]any{}
+	if reason != "" {
+		detail["reason"] = reason
+	}
+	trace.Emit(trace.Record{Stage: trace.StageAuth, Outcome: outcome, Detail: detail})
 }
 
 // writeCoordinates deliberately not provider.ConfigUpdate: that always sets

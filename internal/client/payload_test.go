@@ -324,3 +324,33 @@ func decodeJSON(t *testing.T, raw json.RawMessage) map[string]any {
 	}
 	return m
 }
+
+// TestWireActivityIDMatchesThePayload: the trace names an event's activity
+// by client.WireActivityID, so it must be exactly the id the wire payload
+// carries for every event type, or a local record and its core row never
+// join.
+func TestWireActivityIDMatchesThePayload(t *testing.T) {
+	idx := 3
+	for _, ev := range []DevEvent{
+		{EventType: EventToolCall, SessionID: "s", Tool: Tool{Name: "Bash"}},
+		{EventType: EventToolResult, SessionID: "s", Tool: Tool{Name: "Bash"}},
+		{EventType: EventTurnStarted, SessionID: "s", ProxyRequestID: "req_1"},
+		{EventType: EventTurnCompleted, SessionID: "s", TurnIndex: &idx},
+		{EventType: EventPromptSubmitted, SessionID: "s"},
+	} {
+		ev.EventID, ev.Timestamp = "e", "2026-09-27T00:00:00Z"
+		raw, err := buildPayload(ev)
+		if err != nil {
+			t.Fatalf("%s: buildPayload: %v", ev.EventType, err)
+		}
+		var p struct {
+			ActivityID string `json:"activity_id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("%s: %v", ev.EventType, err)
+		}
+		if got := WireActivityID(ev); got != p.ActivityID {
+			t.Errorf("%s: WireActivityID = %q, payload activity_id = %q", ev.EventType, got, p.ActivityID)
+		}
+	}
+}

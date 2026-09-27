@@ -532,3 +532,36 @@ func TestWithRequestAttributionIsOptional(t *testing.T) {
 		t.Fatalf("relay status = %d, want 200", rec.Code)
 	}
 }
+
+// TestRawObserverOptionReachesThePerHostRelay: the transport lane is the one
+// relaying claude.ai chats, so a raw observer passed to transport.New must
+// reach every per-host relay and see the body before redaction.
+func TestRawObserverOptionReachesThePerHostRelay(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	var seen []gateway.RawCapture
+	p, err := New(Config{Upstream: upstream.URL}, testCA(t), &stubEmitter{},
+		WithBodyCapture(func(*http.Request) bool { return true }),
+		WithRawObserver(func(c gateway.RawCapture) { seen = append(seen, c) }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+
+	const body = `{"model":"claude-opus-4","messages":[]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)))
+
+	if len(seen) != 1 {
+		t.Fatalf("raw observer ran %d times through the transport-built relay, want 1", len(seen))
+	}
+	if seen[0].RequestBody != body {
+		t.Errorf("raw observer saw request body %q, want %q", seen[0].RequestBody, body)
+	}
+}

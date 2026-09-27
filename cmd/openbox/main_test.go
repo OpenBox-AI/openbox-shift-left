@@ -527,6 +527,7 @@ func TestUnifiedBinaryHookObserveOnlyContract(t *testing.T) {
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		"OPENBOX_HOME="+dir,
+		"OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"),
 		devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
 		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
@@ -714,6 +715,7 @@ func TestHookRealtimeDelivery(t *testing.T) {
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		"OPENBOX_HOME="+dir,
+		"OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"),
 		devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
 		devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
@@ -841,6 +843,7 @@ func TestSessionStartReachesCoreFirstWithALiveFlusher(t *testing.T) {
 			"OPENBOX_SPOOL_DIR="+spool,
 			"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 			"OPENBOX_HOME="+dir,
+			"OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"),
 			devconfig.EnvEnforcementFile+"="+filepath.Join(dir, "enforcements.jsonl"),
 			devconfig.EnvPendingApprovalDir+"="+filepath.Join(dir, "pending-approvals"),
 			devconfig.EnvHaltDir+"="+filepath.Join(dir, "halts"),
@@ -936,6 +939,12 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 
 	ic := exec.Command(bin, "hook", "git", "install")
 	ic.Dir = repo
+	// Isolated the same way gitEnv is: with no Env override this subprocess
+	// inherits the test binary's own (sentinel) HOME, and the real openbox
+	// binary it runs resolves its trace directory from it (main.go's
+	// resolveTraceDir), leaking a file outside every test's own temp dir and
+	// tripping TestMain's hermeticity guard.
+	ic.Env = append(os.Environ(), "HOME="+dir, "OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"))
 	if out, err := ic.CombinedOutput(); err != nil {
 		t.Fatalf("openbox hook git install: %v\n%s", err, out)
 	}
@@ -1179,6 +1188,7 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 		"OPENBOX_SPOOL_DIR="+spool,
 		"OPENBOX_CONFIG="+filepath.Join(dir, "none.json"),
 		"OPENBOX_HOME="+dir,
+		"OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"),
 		"CODEX_HOME="+filepath.Join(dir, "codex-home"),
 		"OPENBOX_ADVISORY_FILE="+filepath.Join(dir, "advisories.jsonl"),
 		"OPENBOX_FINDINGS_CURSOR="+filepath.Join(dir, "findings.cursor"),

@@ -29,6 +29,7 @@ func (s Spool) recordDiscard(basePath string, events int, reason string) {
 
 	s.logf("spool: DISCARDED %d event(s) for %s, and they are gone: %s. "+
 		"Recorded in %s.", events, name, reason, s.DiscardPath())
+	traceSpoolDiscard(name, events, reason)
 
 	f := s.openCappedLog(s.DiscardPath(), maxDiscardLogBytes)
 	if f == nil {

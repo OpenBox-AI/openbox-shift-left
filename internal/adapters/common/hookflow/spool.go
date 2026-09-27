@@ -103,6 +103,7 @@ func (s Spool) Append(ev client.DevEvent) error {
 	if _, err := f.Write(line); err != nil {
 		return fmt.Errorf("spool write: %w", err)
 	}
+	traceSpoolAppend(ev)
 	return nil
 }
 
@@ -463,7 +464,7 @@ func (s Spool) attemptLines(ctx context.Context, lines [][]byte, fn FlushFunc, o
 				return delivered, corrupt, lines[i:], true
 			}
 			s.logf("spool: %s for %s not accepted (%s); retrying once", ev.EventType, ev.SessionID, client.FailureClass(derr))
-			derr, unanswered = attemptOne(ctx, fn, ev, opts.AttemptTimeout)
+			derr, unanswered = attemptOne(WithDeliveryAttempt(ctx, 2), fn, ev, opts.AttemptTimeout)
 		}
 		if derr != nil {
 			if opts.RequeueUnanswered && unanswered {

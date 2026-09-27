@@ -91,6 +91,15 @@ func RecordPath(homeDir string) string {
 
 // Activate writes desired into the settings env block on behalf of lane.
 func Activate(homeDir, settingsPath string, lane Lane, desired map[string]string) (Applied, error) {
+	applied, err := activateSettings(homeDir, settingsPath, lane, desired)
+	traceEnvChange(lane, settingsPath, "env-activate", err, map[string]any{
+		"set":      maskEnv(desired),
+		"replaced": maskReplaced(applied.Replaced),
+	})
+	return applied, err
+}
+
+func activateSettings(homeDir, settingsPath string, lane Lane, desired map[string]string) (Applied, error) {
 	var applied Applied
 
 	beforeRaw, err := readSettings(settingsPath)
@@ -153,6 +162,17 @@ func Activate(homeDir, settingsPath string, lane Lane, desired map[string]string
 // removal at all; and removal must not require the thing being removed to
 // still be in the state we left it in.
 func Deactivate(homeDir, settingsPath string, lane Lane, force bool) (Reverted, error) {
+	out, err := deactivateSettings(homeDir, settingsPath, lane, force)
+	traceEnvChange(lane, settingsPath, "env-deactivate", err, map[string]any{
+		"removed":   out.Removed,
+		"restored":  maskEnv(out.Restored),
+		"conflicts": out.Conflicts,
+		"force":     force,
+	})
+	return out, err
+}
+
+func deactivateSettings(homeDir, settingsPath string, lane Lane, force bool) (Reverted, error) {
 	out := Reverted{Restored: map[string]string{}}
 
 	record, err := loadRecord(homeDir)

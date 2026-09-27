@@ -379,7 +379,9 @@ func (b *budgetedBackOff) NextBackOff() time.Duration {
 // evict. Either way retryable is false here, which is what stops post's retry
 // loop from resending.
 func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
+	tokenStart := time.Now()
 	token, fromCache, terr := c.tokens.Token(ctx)
+	observeToken(fromCache, tokenStart, terr)
 	if terr != nil {
 		var werr *workloadauth.Error
 		retryable = errors.As(terr, &werr) && werr.Transient

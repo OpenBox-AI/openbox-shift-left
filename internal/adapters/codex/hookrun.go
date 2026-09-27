@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log"
@@ -81,11 +82,28 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		logger.Printf("no identity, dropping %s event: %v", hook, err)
 		return
 	}
-	ev, err := ParseHookEvent(stdin)
+
+	// Read the whole payload BEFORE it is parsed, bounded the same way
+	// ParseHookEvent's own decoder is (maxHookPayload): the trace records raw
+	// stdin even when parsing fails, and a stream decoder consumed on a
+	// failed parse cannot be replayed to build that record afterward.
+	rawStdin, _ := io.ReadAll(io.LimitReader(stdin, maxHookPayload))
+	ev, err := ParseHookEvent(bytes.NewReader(rawStdin))
+	sessionID := ""
+	if ev != nil {
+		sessionID = ev.SessionID
+	}
+	hookflow.TraceHookIn(provider, string(hook), sessionID, rawStdin, err)
 	if err != nil {
 		logger.Printf("dropping %s event: %v", hook, err)
 		return
 	}
+
+	var hookOut hookflow.HookOutputBuffer
+	stdout = io.MultiWriter(stdout, &hookOut)
+	defer func() {
+		hookflow.TraceHookOut(provider, string(hook), ev.SessionID, hookStart, &hookOut)
+	}()
 
 	ad := New(id, DefaultSpoolDir())
 	ad.Mapper.CaptureContent = ResolveContentCapture()

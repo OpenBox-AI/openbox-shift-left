@@ -7,7 +7,33 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
+
+// traceActivationStep is this package's own copy of cmd/openbox's
+// stepsrecord.go shape: internal/trace has zero repo imports on purpose (see
+// its package doc), so a caller injects rather than this package importing
+// anything back into cmd/openbox. Kept minimal -- Stage/Outcome/Detail is all
+// a reconciler needs -- and named distinctly from cmd/openbox's traceActivation
+// so a reader never mistakes this for a shared symbol across packages.
+func traceActivationStep(step string, err error, prior any, detail map[string]any) {
+	d := map[string]any{"step": step}
+	for k, v := range detail {
+		d[k] = v
+	}
+	if prior != nil {
+		d["prior"] = prior
+	}
+	rec := trace.Record{Stage: trace.StageActivation, Detail: d}
+	if err != nil {
+		rec.Outcome = "failed"
+		rec.Err = err.Error()
+	} else {
+		rec.Outcome = "ok"
+	}
+	trace.Emit(rec)
+}
 
 // systemKeychainPath is where every write and read-back in this file targets
 // trust: a root shell with no GUI session cannot change trust settings
@@ -105,26 +131,44 @@ func activateSystemPACDarwin(ctx context.Context, run Runner, plan Plan) (Outcom
 		}
 	}
 
+	var priorCASHA1 any
+	if existing != nil && existing.CATrust != nil {
+		priorCASHA1 = existing.CATrust.SHA1
+	}
 	if _, err := runWrite(ctx, run, "security", "add-trusted-cert", "-d", "-r", "trustRoot",
 		"-k", systemKeychainPath, plan.CAPath); err != nil {
+		traceActivationStep("ca-trust", err, priorCASHA1, map[string]any{"sha1": sha1})
 		return finalizeFailedDarwin(plan, entry, fmt.Sprintf("trusting the CA: %v", err))
 	}
+	traceActivationStep("ca-trust", nil, priorCASHA1, map[string]any{"sha1": sha1})
 
 	out, err := run(ctx, "security", "find-certificate", "-a", "-Z", "-c", caCommonName, systemKeychainPath)
 	if err != nil || !findCertificateHasSHA1(out, sha1) {
+		verifyErr := err
+		if verifyErr == nil {
+			verifyErr = fmt.Errorf("trust did not verify: SHA-1 %s not found in the System keychain", sha1)
+		}
+		traceActivationStep("ca-trust-readback", verifyErr, nil, map[string]any{"sha1": sha1})
 		_, _ = runWrite(ctx, run, "security", "remove-trusted-cert", "-d", plan.CAPath)
 		return finalizeFailedDarwin(plan, entry,
 			"trust did not verify: the System keychain's SHA-1 does not match the CA just trusted")
 	}
+	traceActivationStep("ca-trust-readback", nil, nil, map[string]any{"sha1": sha1})
 
 	applied := make([]ProxyScope, 0, len(scopes))
 	for _, sc := range scopes {
+		var priorURL any
+		if sc.PriorURLPresent {
+			priorURL = sc.PriorURL
+		}
 		if err := applyScopeDarwin(ctx, run, sc, plan.PACURL); err != nil {
+			traceActivationStep("pac-write", err, priorURL, map[string]any{"service": sc.Service, "pac_url": plan.PACURL})
 			rollbackScopesDarwin(ctx, run, applied)
 			_, _ = runWrite(ctx, run, "security", "remove-trusted-cert", "-d", plan.CAPath)
 			return finalizeFailedDarwin(plan, entry,
 				fmt.Sprintf("activating the PAC for %s: %v", sc.Service, err))
 		}
+		traceActivationStep("pac-write", nil, priorURL, map[string]any{"service": sc.Service, "pac_url": plan.PACURL})
 		applied = append(applied, sc)
 	}
 
@@ -159,16 +203,24 @@ func deactivateSystemPACDarwin(ctx context.Context, run Runner, entry SystemEntr
 			drift = append(drift, sc.Service)
 			continue
 		}
+		var priorURL any
+		if sc.PriorURLPresent {
+			priorURL = sc.PriorURL
+		}
 		if err := restoreScopeDarwin(ctx, run, sc); err != nil {
+			traceActivationStep("pac-restore", err, priorURL, map[string]any{"service": sc.Service})
 			return Report{Restored: restored, Drift: drift}, fmt.Errorf("activation: restoring %s: %w", sc.Service, err)
 		}
+		traceActivationStep("pac-restore", nil, priorURL, map[string]any{"service": sc.Service})
 		restored = append(restored, sc.Service)
 	}
 
 	if entry.CATrust != nil {
 		if err := untrustOldCADarwin(ctx, run, *entry.CATrust); err != nil {
+			traceActivationStep("ca-untrust", err, entry.CATrust.SHA1, nil)
 			return Report{Restored: restored, Drift: drift}, fmt.Errorf("activation: removing the CA trust: %w", err)
 		}
+		traceActivationStep("ca-untrust", nil, entry.CATrust.SHA1, nil)
 	}
 
 	return Report{Restored: restored, Drift: drift}, nil

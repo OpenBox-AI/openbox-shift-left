@@ -208,6 +208,7 @@ in an old shell from silently overriding what `auth` just saved.
 | `~/.openbox/<tool>/workload-token.json` | short-lived access token cache (deletable) |
 | `~/.openbox/transport-ca.*`, `activation.json`, `*.log` | model-call lane files |
 | `~/Library/Application Support/openbox/` (macOS), `~/.config/openbox/` (Linux) | runtime state: the event queue, enforcement log, halted-session markers |
+| `<runtime dir>/trace/` | the local trace, 7 days, including raw bodies and secrets ([details](data-and-privacy.md#the-local-trace)) |
 
 `init` copies the URLs from `~/.openbox/dev.json` into each tool's `dev.json`.
 If you change a URL with `auth`, re-run `init` for each tool to apply it;
@@ -337,7 +338,8 @@ openbox uninstall
 ```
 
 This removes everything: hooks, lanes, the CA and its key, settings, the event
-queue and all credentials, including the organization key. It prints the full
+queue and all credentials, including the organization key. The local trace is
+kept as the record of the uninstall; add `--purge-trace` to delete it. It prints the full
 list first, tries to deliver queued events, and restores every setting it
 changed. It works even if credentials are already gone.
 
@@ -349,6 +351,13 @@ registers a new agent. To keep the same agent on a new machine, answer yes to
 the adopt prompt; that needs the agent's original workload private key.
 
 ## Troubleshooting
+
+Start with the local trace: `openbox trace --list` shows recent sessions,
+`openbox trace <session-id>` prints what happened in one (add `--bodies` for
+content), and `openbox trace <session-id> --against-core --agent <agent-id>`
+(with `OPENBOX_API_KEY` set) checks it against what the platform stored.
+Point `OPENBOX_BACKEND_URL` or `--backend` at your environment's backend.
+
 
 | Symptom | Fix |
 |---|---|

@@ -394,6 +394,7 @@ func RecordEnforcement(logger *log.Logger, sessionID, toolKind string, dec decis
 		rec.Redacted = true
 		rec.RedactionCategories = dec.RedactionCategories // category names only (INV-2)
 	}
+	traceGateVerdict(sessionID, toolKind, rec.Verdict, rec.Source, rec.FailOpen, rec.AppliedDecision, rec.Redacted, rec.RedactionCategories, rec.PolicyID)
 	line, err := json.Marshal(rec)
 	if err != nil {
 		logger.Printf("enforcement record skipped (marshal): %v", err)

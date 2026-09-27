@@ -45,6 +45,7 @@ type Proxy struct {
 	// package's import guard excludes the package that would otherwise supply
 	// it directly (see cmd/openbox/transport.go).
 	attribution func(raw []byte) map[string]string
+	rawObserver func(gateway.RawCapture)
 
 	// evaluator and gated forward to gateway.Gateway.WithGate on every
 	// per-host relay newRelay builds. Both nil (the zero value) is the
@@ -111,6 +112,12 @@ func WithBodyCapture(capturesBody func(*http.Request) bool) Option {
 // per-host relay newRelay builds.
 func WithRequestAttribution(parse func(raw []byte) map[string]string) Option {
 	return func(p *Proxy) { p.attribution = parse }
+}
+
+// WithRawObserver forwards gateway.WithRawObserver to every per-host relay:
+// the local trace's one view of a relayed call's bodies before redaction.
+func WithRawObserver(observe func(gateway.RawCapture)) Option {
+	return func(p *Proxy) { p.rawObserver = observe }
 }
 
 // WithVerbose turns on per-connection commentary.
@@ -274,6 +281,9 @@ func (p *Proxy) newRelay(host string) (http.Handler, error) {
 	}
 	if p.attribution != nil {
 		g = g.WithRequestAttribution(p.attribution)
+	}
+	if p.rawObserver != nil {
+		g = g.WithRawObserver(p.rawObserver)
 	}
 	if p.evaluator != nil {
 		g = g.WithGate(p.evaluator, p.gated)

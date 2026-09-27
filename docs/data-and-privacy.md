@@ -216,6 +216,7 @@ Linux, `%AppData%\openbox\` on Windows (move the queue with
 | `advisories.jsonl` | runtime dir | guardrail findings |
 | `halted-sessions/` | runtime dir | one small file per halted run: the reason and a timestamp. It keeps that run refused |
 | `pending-approvals/` | runtime dir | content-free approval markers |
+| `trace/trace-YYYY-MM-DD.jsonl[.gz]` | runtime dir (move with `OPENBOX_TRACE_DIR`) | **the local trace: everything, including raw bodies before redaction and any secrets in them.** See [The local trace](#the-local-trace) |
 
 On macOS, `init` also adds the transport CA to the System keychain and sets a
 proxy auto-config URL on each enabled network service. `openbox uninstall`
@@ -224,10 +225,39 @@ reverses both.
 A queued event nothing has attempted yet is deleted after 30 days, and the
 count is logged in `.discarded` in the queue directory.
 
+## The local trace
+
+Every `openbox` process (`init`, `auth`, each hook, the lane daemons,
+`doctor`, `uninstall`) appends a record of what it does to
+`trace/trace-YYYY-MM-DD.jsonl` in the runtime directory: process start and
+exit, each hook's raw input and output, local decisions and redactions, what
+each lane captured and why it skipped or dropped a call, every delivery
+attempt and core's answer, queue drops, halts, and each install and uninstall
+step.
+
+**It holds content both before and after redaction, whatever
+`content_capture` says.** A secret in a prompt, a command, a file or a model
+call is in this file in plaintext, next to its redacted form. It is never sent
+anywhere: `content_capture` and managed config govern only what egresses. It
+is protected the same way `.env` is: readable only by you (`0600`) on macOS
+and Linux, unprotected on Windows, and readable by anything running as you,
+including the agent being governed. Treat the directory as a credential.
+
+API keys, bearer tokens and private keys are never written to it. A body over
+512 KiB is stored as its first 512 KiB plus its length and SHA-256.
+
+Files are per UTC day. Today's file stays plain; the lane daemons compress
+earlier days to `.gz` and delete anything older than 7 days (and older days
+first if the directory passes 512 MiB). `openbox trace <session>` prints one
+session's timeline; `openbox trace --against-core --agent <id>` compares it
+with what the platform stored and flags events it is missing, events it filed
+with no session, and activities with only one half.
+
 ## Uninstall
 
 `openbox uninstall` deletes all of the above except your organization's
-managed config files. It restores every setting it changed, tries to deliver
+managed config files and the local trace, which is the record of the
+uninstall itself; `openbox uninstall --purge-trace` deletes that too. It restores every setting it changed, tries to deliver
 queued events first, and reports what could not be delivered. Deletion is an
 ordinary unlink, not a secure erase. Details in
 [Getting started](getting-started.md#uninstall).

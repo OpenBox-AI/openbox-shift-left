@@ -221,6 +221,7 @@ fails if a top-level directory has no row here.
 | `conformance/` | the event contract's conformance suite |
 | `actions/openbox-git-action/` | commit-to-deploy lineage for CI |
 | `depguard/` | dependency and layering guards |
+| `trace/` | the local trace: per-day JSONL of everything every `openbox` process does, rotation and the reader behind `openbox trace`. Imports no repo package; the guarded subtrees never import it |
 
 `internal/gateway/internal/dialhook` keeps a nested `internal/` on purpose: it
 limits importers to the `internal/gateway` subtree.

@@ -140,7 +140,13 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 
 	localRedaction := devconfig.ResolveSecretDetection() || devconfig.ResolveContentCapture()
 
-	local := NewDecider().Decide(ctx, t.DecisionRequest(localRedaction))
+	req := t.DecisionRequest(localRedaction)
+	local := NewDecider().Decide(ctx, req)
+	before := ""
+	if req.Content != nil {
+		before = req.Content.FileText
+	}
+	traceLocalRedaction(sessionID, req.EventType, before, local.RedactedContent, local.RedactionCategories)
 
 	// One client for this whole run -- drain, escalation, approval hold
 	// (whichever of those three actually run) -- built once here rather

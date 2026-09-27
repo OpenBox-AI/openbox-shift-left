@@ -12,8 +12,42 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
+
+// TestLaneUnitEnvCarriesTraceDirAndLeavesArgsUnchanged is phase 3's own
+// contract: the trace directory rides the unit's Env (rendered separately by
+// LaunchdPlist/SystemdUnit), never Args -- so a machine with tracing off
+// (trace.Dir() == "") gets byte-identical argv to one with it on, and every
+// existing Args-shaped assertion (laneunitargv_test.go) stays true unchanged.
+func TestLaneUnitEnvCarriesTraceDirAndLeavesArgsUnchanged(t *testing.T) {
+	traceDir := t.TempDir()
+	restore := trace.SetDefault(&trace.Writer{Dir: traceDir})
+	defer restore()
+
+	a, _, _ := testApp(nil)
+	bare := laneservice.Telemetry(telemetry.DefaultAddr, "settings.json", true)
+	traced := bare.WithEnv(a.laneUnitEnv())
+
+	if len(traced.Args) != len(bare.Args) {
+		t.Fatalf("WithEnv changed Args length: %v vs %v", traced.Args, bare.Args)
+	}
+	for i := range bare.Args {
+		if traced.Args[i] != bare.Args[i] {
+			t.Fatalf("WithEnv changed Args[%d]: %v vs %v", i, traced.Args[i], bare.Args[i])
+		}
+	}
+
+	plist := traced.LaunchdPlist("/home/dev", "/usr/local/bin/openbox")
+	if !strings.Contains(plist, trace.EnvDir) || !strings.Contains(plist, traceDir) {
+		t.Fatalf("launchd plist does not carry %s=%s:\n%s", trace.EnvDir, traceDir, plist)
+	}
+	unit := traced.SystemdUnit("/usr/local/bin/openbox")
+	if !strings.Contains(unit, trace.EnvDir) || !strings.Contains(unit, traceDir) {
+		t.Fatalf("systemd unit does not carry %s=%s:\n%s", trace.EnvDir, traceDir, unit)
+	}
+}
 
 // TestLaneUnitsCarryTheInstallersCoordinates is the regression test for a
 // shipped defect: a developer who set OPENBOX_HOME — which README.md documents
@@ -145,6 +179,9 @@ func TestLaneUnitsCarryNoConditionalEnvironmentWhenTheInstallerHadNone(t *testin
 func TestLaneUnitEnvCarriesOnlyCoordinates(t *testing.T) {
 	dir := t.TempDir()
 	haltDir := t.TempDir()
+	traceDir := t.TempDir()
+	restore := trace.SetDefault(&trace.Writer{Dir: traceDir})
+	defer restore()
 	t.Setenv(obgit.EnvSessionDir, dir)
 	t.Setenv(devconfig.EnvHaltDir, haltDir)
 	enforcementFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
@@ -157,11 +194,12 @@ func TestLaneUnitEnvCarriesOnlyCoordinates(t *testing.T) {
 		devconfig.EnvControlToken:    "token",
 	})
 	env := a.laneUnitEnv()
-	if len(env) != 7 || env[devconfig.EnvHome] != "/h" || env[devconfig.EnvSpoolDir] != "/s" ||
+	if len(env) != 8 || env[devconfig.EnvHome] != "/h" || env[devconfig.EnvSpoolDir] != "/s" ||
 		env[obgit.EnvSessionDir] != dir || env[devconfig.EnvHaltDir] != haltDir ||
 		env[devconfig.EnvEnforcementFile] != enforcementFile ||
-		env[devconfig.EnvSpoolRoot] == "" || env[advisoryFileEnvKey] == "" {
-		t.Fatalf("laneUnitEnv carried %v; want exactly the seven path coordinates", env)
+		env[devconfig.EnvSpoolRoot] == "" || env[advisoryFileEnvKey] == "" ||
+		env[trace.EnvDir] != traceDir {
+		t.Fatalf("laneUnitEnv carried %v; want exactly the eight path coordinates", env)
 	}
 	for _, v := range env {
 		for _, secret := range []string{"obx_secret", "seed", "token"} {

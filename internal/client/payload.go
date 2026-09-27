@@ -255,6 +255,20 @@ func runIDFor(ev DevEvent) string {
 	return ev.SessionID
 }
 
+// WireActivityID is the activity_id buildPayload puts on ev's wire payload,
+// "" for an event type that carries none. It exists for the local trace,
+// whose records must join the core rows they describe; the payload switch
+// below and this one are pinned together by TestWireActivityIDMatchesThePayload.
+func WireActivityID(ev DevEvent) string {
+	switch ev.EventType {
+	case EventToolCall, EventToolResult:
+		return activityIDFor(ev)
+	case EventTurnStarted, EventTurnCompleted:
+		return turnActivityIDFor(ev)
+	}
+	return ""
+}
+
 func activityIDFor(ev DevEvent) string {
 	sum := sha256.Sum256([]byte("act\x1f" + activityPairKey(ev)))
 	return "cc-act-" + hex.EncodeToString(sum[:16])

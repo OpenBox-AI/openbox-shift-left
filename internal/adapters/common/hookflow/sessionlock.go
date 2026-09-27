@@ -66,6 +66,28 @@ func (s Spool) sessionStripePath(sessionID string) string {
 // ordinary cut (ctx.Err(), or ErrSessionBusy when it was lockWait rather
 // than ctx that ran out), never a locking fault.
 func (s Spool) lockSession(ctx context.Context, sessionID string, mode DrainMode, lockWait time.Duration) (release func(), err error) {
+	start := time.Now()
+	release, err = s.lockSessionUntraced(ctx, sessionID, mode, lockWait)
+	traceStripeWait(sessionID, mode, start, stripeWaitOutcome(release, err), err)
+	return release, err
+}
+
+// stripeWaitOutcome classifies a lockSession result for the trace, without
+// relying on error identity alone: a nil release paired with a nil err never
+// happens in this function's own contract, but reads as "unlocked" (the
+// fail-open filesystem case) rather than crash the trace path over it.
+func stripeWaitOutcome(release func(), err error) string {
+	switch {
+	case err == nil:
+		return "acquired"
+	case errors.Is(err, ErrSessionBusy):
+		return "busy"
+	default:
+		return "ctx_done"
+	}
+}
+
+func (s Spool) lockSessionUntraced(ctx context.Context, sessionID string, mode DrainMode, lockWait time.Duration) (release func(), err error) {
 	path := s.sessionStripePath(sessionID)
 	fl := flock.New(path)
 	noop := func() {}

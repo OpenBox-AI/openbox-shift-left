@@ -276,16 +276,16 @@ func newChatPool(identities map[string]providerIdentity, advisory *hookflow.Advi
 					"and every record queued behind it in its conversation", ev.EventID)
 				return errNoChatIdentity
 			}
-			attempt := func() error {
-				actx, cancel := context.WithTimeout(ctx, hookflow.DeliveryAttemptTimeout)
+			attempt := func(n int) error {
+				actx, cancel := context.WithTimeout(hookflow.WithDeliveryAttempt(ctx, n), hookflow.DeliveryAttemptTimeout)
 				defer cancel()
 				_, err := hookflow.Deliver(actx, id.Client, advisory, ev, logger)
 				return err
 			}
-			err := attempt()
+			err := attempt(1)
 			if err != nil && client.RetryableDelivery(err) && ctx.Err() == nil {
 				logger.Printf("openbox transport: chat event %s not accepted (%s); retrying once", ev.EventID, client.FailureClass(err))
-				err = attempt()
+				err = attempt(2)
 			}
 			if err != nil {
 				logger.Printf("openbox transport: chat delivery failed for %s: %v", ev.EventID, err)

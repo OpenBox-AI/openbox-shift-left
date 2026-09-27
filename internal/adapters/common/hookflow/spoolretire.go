@@ -104,6 +104,7 @@ func (s Spool) RetireStale(ctx context.Context, now time.Time, age time.Duration
 		}
 		s.recordDiscard(path, events,
 			fmt.Sprintf("past the %d-day retention age, never delivered", int(age.Hours()/24)))
+		traceSpoolRetire(strings.TrimSuffix(name, ".jsonl"), events, int(elapsed.Hours()/24))
 		out = append(out, Retired{Name: name, Events: events, Age: elapsed})
 	}
 	return out, errors.Join(errs...)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // Emitter is the production caller the mapper was missing.
@@ -55,6 +56,7 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 	events, outcome := e.Mapper.EventsFor(rec)
 	if outcome != Emitted || len(events) == 0 {
 		e.record(outcome, rec)
+		e.traceOutcome(traceOutcomeName(outcome), reasonName(outcome), rec)
 		return nil
 	}
 
@@ -64,6 +66,7 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 	}
 	if did == "" {
 		e.record(dropNoDID, rec)
+		e.traceOutcome("dropped", reasonName(dropNoDID), rec)
 		return nil
 	}
 
@@ -72,6 +75,7 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 		e.warnThrottled("openbox telemetry: this emitter has no Deliver seam configured, so a model-call "+
 			"turn (%s) for activity %s cannot reach core. This is a wiring defect, not a setting.",
 			events[0].EventType, events[0].OtelRequestID)
+		e.traceOutcome("dropped", "no_deliver_seam", rec)
 		return nil
 	}
 
@@ -87,6 +91,7 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 			e.record(dropSpoolFailed, rec)
 			e.warnThrottled("openbox telemetry: dropped a model-call turn (%s) for activity %s: "+
 				"the delivery pool is saturated. %s", events[i].EventType, events[i].OtelRequestID, abandonNote(accepted))
+			e.traceOutcome("dropped", "delivery_pool_saturated", rec)
 			break
 		}
 		accepted++
@@ -102,7 +107,46 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 		e.Verbose("  telemetry: recorded %s turn %s as %d event(s)",
 			rec.EventName, events[0].OtelRequestID, len(events))
 	}
+	e.traceOutcome("recorded", "", rec)
 	return nil
+}
+
+// traceOutcomeName folds a Mapper Outcome into the three-way capture.outcome
+// vocabulary trace.Read/openbox trace group on: SkipNotElected is the one
+// healthy non-emission (another lane owns this session), IsDrop is a real
+// loss, and everything else this switch does not name is unreachable today
+// but still falls to "dropped" rather than silently miscounting as recorded.
+func traceOutcomeName(o Outcome) string {
+	switch {
+	case o == Emitted:
+		return "recorded"
+	case o == SkipNotElected:
+		return "skipped"
+	default:
+		return "dropped"
+	}
+}
+
+// traceOutcome is telemetryemit's own capture.outcome record -- the OTLP
+// lane's twin of gatewayemit's, with the raw record body this receiver
+// already has (it is raw at the receiver by construction: OTLP is not
+// redacted client-side the way a relayed HTTP body is). Best-effort like
+// every trace.Emit.
+func (e *Emitter) traceOutcome(outcome, reason string, rec telemetry.Record) {
+	detail := map[string]any{
+		"signal":     string(rec.Signal),
+		"event_name": rec.EventName,
+		"attrs":      trace.JSON(rec.Attrs),
+	}
+	if reason != "" {
+		detail["reason"] = reason
+	}
+	trace.Emit(trace.Record{
+		Stage:   trace.StageCapture,
+		Lane:    "telemetry",
+		Outcome: outcome,
+		Detail:  detail,
+	})
 }
 
 const (

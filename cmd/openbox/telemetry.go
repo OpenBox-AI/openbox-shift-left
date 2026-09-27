@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -93,7 +92,7 @@ func (a *app) runTelemetry(args []string) int {
 		return a.errorf("%v", err)
 	}
 
-	logger := log.New(a.stderr, "", 0)
+	logger := tracedLogger(a.stderr, "", 0)
 
 	// Pre-resolved ONCE at startup, never per record: this daemon serves every
 	// configured tool for its whole life, so there is no BindProvider dance on
@@ -189,6 +188,7 @@ func (a *app) runTelemetry(args []string) int {
 
 	go ccSweeper.Run(ctx, logger)
 	go codexSweeper.Run(ctx, logger)
+	go runTraceSweeps(ctx, logger)
 	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
 
 	if err := rec.StartStandalone(ctx); err != nil {

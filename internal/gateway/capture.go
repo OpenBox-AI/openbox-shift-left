@@ -304,6 +304,27 @@ func (r RequestCapture) ForGate() Captured {
 	}
 }
 
+// RawCapture is one relayed call's evidence BEFORE clampAndRedact touches its
+// bodies -- request/response headers still have credentialHeaders scrubbed
+// (redactHeaders), because a header value is a bearer token or a session
+// cookie outright and never belongs in any observer's hands, raw or not, but
+// RequestBody/ResponseBody are exactly what was read off the wire. It exists
+// so a caller wanting full-fidelity local capture (see WithRawObserver) never
+// has to reach past the redaction step that produces the client-facing
+// Captured value -- this package still redacts every body it hands to an
+// Emitter; RawCapture is an ADDITIONAL, earlier view, not a replacement.
+type RawCapture struct {
+	Method          string
+	URL             string
+	Status          int
+	RequestHeaders  map[string]string
+	ResponseHeaders map[string]string
+	RequestBody     string
+	ResponseBody    string
+	StartedAt       time.Time
+	EndedAt         time.Time
+}
+
 func stripQuery(url string) string {
 	if i := strings.IndexAny(url, "?#"); i >= 0 {
 		return url[:i]

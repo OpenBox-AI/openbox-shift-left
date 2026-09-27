@@ -12,7 +12,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
@@ -22,12 +25,25 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/devinit"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/prompt"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
 var version = "0.1.0-dev"
+
+// resolveTraceDir is trace.SetDir's argument, computed exactly once at
+// process start: the env var wins (a daemon carries it because it has no
+// $HOME; see laneUnitEnv), else the same per-machine config directory every
+// other coordinate resolves under.
+func resolveTraceDir(getenv func(string) string) string {
+	if dir := getenv(trace.EnvDir); dir != "" {
+		return dir
+	}
+	return filepath.Join(devconfig.ConfigDir(), "trace")
+}
 
 const (
 	exitOK    = 0
@@ -92,18 +108,52 @@ func defaultApp() *app {
 	}
 }
 
-func main() { os.Exit(defaultApp().run(os.Args[1:])) }
+func main() {
+	trace.SetDir(resolveTraceDir(os.Getenv))
+	client.SetTokenObserver(traceTokenAcquisition)
+	os.Exit(defaultApp().run(os.Args[1:]))
+}
 
 func (a *app) errorf(format string, args ...any) int {
 	fmt.Fprintf(a.stderr, "error: "+format+"\n", args...)
 	return exitError
 }
 
-func (a *app) run(args []string) int {
+// run is every command's one entry point, and the one place a proc.start /
+// proc.exit pair can be emitted for ALL of them, hook included: it stamps
+// argv (already secret-free -- the control token is an env var, never a
+// flag, per README), version and os/arch on the way in, and the exit code
+// and wall-clock duration on the way out, however dispatch returns.
+func (a *app) run(args []string) (code int) {
 	if len(args) == 0 {
 		a.usage()
 		return exitError
 	}
+	trace.SetProcess(args[0])
+	start := time.Now()
+	trace.Emit(trace.Record{
+		Stage: trace.StageProcStart,
+		Detail: map[string]any{
+			"argv":    args,
+			"version": version,
+			"os":      runtime.GOOS,
+			"arch":    runtime.GOARCH,
+		},
+	})
+	defer func() {
+		trace.Emit(trace.Record{
+			Stage: trace.StageProcExit,
+			DurMS: float64(time.Since(start)) / float64(time.Millisecond),
+			Detail: map[string]any{
+				"exit_code": code,
+			},
+		})
+	}()
+	code = a.dispatch(args)
+	return code
+}
+
+func (a *app) dispatch(args []string) int {
 	switch args[0] {
 	case "auth":
 		return a.runAuth(args[1:])
@@ -117,6 +167,8 @@ func (a *app) run(args []string) int {
 		return a.runDoctor(args[1:])
 	case "uninstall":
 		return a.runUninstall(args[1:])
+	case "trace":
+		return a.runTrace(args[1:])
 	case "gateway":
 		return a.runGateway(args[1:])
 	case "telemetry":
@@ -144,7 +196,10 @@ func (a *app) runHook(args []string) (code int) {
 			fmt.Fprintf(a.stderr, "openbox hook: recovered from panic: %v\n", r)
 		}
 	}()
-	logger := log.New(a.stderr, "openbox hook: ", 0)
+	// Teed into the trace: a hook exiting 0 has its stderr discarded by the
+	// tool, so an early return (no identity, unknown provider) would
+	// otherwise leave no reason anywhere.
+	logger := tracedLogger(a.stderr, "openbox hook: ", 0)
 	if len(args) < 1 {
 		logger.Printf("usage: openbox hook <provider> <event...>  (providers: %s, git)", strings.Join(provider.Supported(), ", "))
 		return exitOK
@@ -430,6 +485,7 @@ Usage:
   openbox init --provider <claude-code|codex>
   openbox doctor
   openbox uninstall
+  openbox trace <session-id|run-id> | --list | --against-core --agent <id>
   openbox version
 
 One install governs EVERY session on this machine, in any directory, and takes

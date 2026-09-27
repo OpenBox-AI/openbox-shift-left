@@ -311,7 +311,10 @@ func (e *Engine) emitFunc(em Emitter) FlushFunc {
 // governs. Removing this write silently un-halts every halted run on every
 // lane but the hook path's own narrow prompt-contract write (gate.go).
 func Deliver(ctx context.Context, em Emitter, advisory *Advisory, ev client.DevEvent, logger *log.Logger) (client.Evaluation, error) {
+	start := time.Now()
+	traceDeliverAttempt(ev, deliveryAttempt(ctx))
 	eval, err := em.Emit(ctx, ev)
+	traceDeliverResult(ev, deliveryAttempt(ctx), eval, err, time.Since(start))
 	// On success, a real verdict is recorded. Either way this cannot block the
 	// tool call.
 	if advisory != nil {

@@ -114,8 +114,13 @@ func (p *DeliverPool) Submit(ev client.DevEvent) bool {
 	// Counted the same as a saturation drop: either way the record never
 	// reached core.
 	if p.closed || p.outstanding >= p.size {
+		reason := "saturated"
+		if p.closed {
+			reason = "closed"
+		}
 		p.mu.Unlock()
 		atomic.AddUint64(&p.dropped, 1)
+		tracePoolDropSubmit(ev, reason)
 		return false
 	}
 	p.outstanding++
@@ -163,6 +168,7 @@ func (p *DeliverPool) drain(session string) {
 		delete(p.queues, session)
 		p.mu.Unlock()
 		atomic.AddUint64(&p.dropped, uint64(rest))
+		tracePoolDropTail(session, rest)
 		return
 	}
 }
@@ -226,6 +232,9 @@ func (p *DeliverPool) Close(ctx context.Context) (abandoned int) {
 
 	if abandoned > 0 {
 		atomic.AddUint64(&p.dropped, uint64(abandoned))
+	}
+	for _, ev := range never {
+		traceQueueAbandon(ev)
 	}
 	if p.OnAbandon != nil {
 		for _, ev := range never {
