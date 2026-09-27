@@ -20,8 +20,8 @@ type DeliverStatus struct {
 	// moment: every LaneQueue's own Dropped() (an append that never reached
 	// the spool, plus every event a drain attempted that core did not
 	// accept) plus, on the transport lane, its chat DeliverPool's own
-	// Dropped() (a saturation drop, or a delivery a shutdown drain gave up
-	// on) -- added together, since a single status file reports one number
+	// Dropped() (a saturation drop, a record queued behind one core did not
+	// accept, or a delivery a shutdown drain gave up on) -- added together, since a single status file reports one number
 	// per daemon, not a breakdown by source.
 	Dropped uint64 `json:"dropped"`
 	// Since is when this persister -- and so this daemon's counting -- started.

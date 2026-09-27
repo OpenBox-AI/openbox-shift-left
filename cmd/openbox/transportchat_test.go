@@ -165,9 +165,10 @@ func TestChatPoolSaturationDropLatchesTheConversation(t *testing.T) {
 	defer close(release)
 	var once sync.Once
 	started := make(chan struct{})
-	pool := hookflow.NewDeliverPool(1, time.Minute, func(ctx context.Context, ev client.DevEvent) {
+	pool := hookflow.NewDeliverPool(1, time.Minute, func(ctx context.Context, ev client.DevEvent) error {
 		once.Do(func() { close(started) })
 		<-release
+		return nil
 	})
 	logger := log.New(io.Discard, "", 0)
 	deliver := func(ev client.DevEvent) bool {
@@ -221,5 +222,92 @@ func TestChatLatchFilenameHasNoColon(t *testing.T) {
 	}
 	if strings.Contains(entries[0].Name(), ":") {
 		t.Errorf("latch filename %q contains ':', not Windows-legal", entries[0].Name())
+	}
+}
+
+// TestChatFirstCallStopsAtAnUnacceptedSessionStart pins the ordering a new
+// conversation's first call depends on: core files an activity event that
+// reaches it before its session exists with no session at all, so the pool
+// must not send the call's halves until SessionStarted is accepted -- and
+// when it never is, must not send them at all.
+func TestChatFirstCallStopsAtAnUnacceptedSessionStart(t *testing.T) {
+	memhttptest.RequireBind(t)
+
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "enforcements.jsonl"))
+
+	fake := fakecore.New(t, fakecore.Script{AlwaysStatus: 503})
+	t.Setenv(devconfig.EnvBaseURL, fake.URL())
+	seedV3EnvIdentity(t)
+
+	logger := log.New(io.Discard, "", 0)
+	identities := resolveProviderIdentities(logger.Printf)
+	pool, chatDeliver := newChatPool(identities, &hookflow.Advisory{}, logger)
+
+	em := &gatewayemit.Emitter{
+		Lane:    gatewayemit.LaneProxy,
+		Elected: func() bool { return true },
+		Deliver: routeLaneRecord(nil, chatDeliver, logger, "transport"),
+		DID:     devconfig.ResolveDIDOrEmpty,
+		Warn:    logger.Printf,
+	}
+	em.Emit(context.Background(), chatCapturedCall(testChatConv))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if abandoned := pool.Close(ctx); abandoned != 0 {
+		t.Fatalf("Close abandoned %d event(s); the pool should have finished", abandoned)
+	}
+
+	if _, halted := hookflow.SessionHalted(testChatKey(testChatConv)); !halted {
+		t.Error("the unaccepted SessionStarted must latch the conversation")
+	}
+	attempts := fake.AttemptsByKey()
+	if len(attempts) != 1 {
+		t.Fatalf("core saw %d distinct events, want 1: nothing may follow an unaccepted SessionStarted (%v)", len(attempts), attempts)
+	}
+	if got := pool.Dropped(); got != 2 {
+		t.Errorf("Dropped() = %d, want 2 (the call's two halves)", got)
+	}
+}
+
+// TestChatPoolSendsNothingForALatchedConversation: a conversation already
+// latched halted sends no more records. Its drainer can have stopped at the
+// refused record before the rest of that call was even submitted, and a
+// record submitted after that would otherwise start a fresh drainer and go
+// out behind the refusal.
+func TestChatPoolSendsNothingForALatchedConversation(t *testing.T) {
+	memhttptest.RequireBind(t)
+
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "enforcements.jsonl"))
+
+	fake := fakecore.New(t, fakecore.Script{})
+	t.Setenv(devconfig.EnvBaseURL, fake.URL())
+	seedV3EnvIdentity(t)
+
+	logger := log.New(io.Discard, "", 0)
+	key := testChatKey(testChatConv)
+	hookflow.HaltOnDeliveryFailure(logger, client.DevEvent{EventID: "earlier", SessionID: key}, errors.New("core did not accept"))
+
+	identities := resolveProviderIdentities(logger.Printf)
+	pool, chatDeliver := newChatPool(identities, &hookflow.Advisory{}, logger)
+	em := &gatewayemit.Emitter{
+		Lane:    gatewayemit.LaneProxy,
+		Elected: func() bool { return true },
+		Deliver: routeLaneRecord(nil, chatDeliver, logger, "transport"),
+		DID:     devconfig.ResolveDIDOrEmpty,
+		Warn:    logger.Printf,
+	}
+	em.Emit(context.Background(), chatCapturedCall(testChatConv))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool.Close(ctx)
+
+	if attempts := fake.AttemptsByKey(); len(attempts) != 0 {
+		t.Fatalf("core saw %v for a latched conversation, want nothing", attempts)
 	}
 }

@@ -124,7 +124,10 @@ executed and no `PostToolUse*` could fire -- produces the started row only, and
 so does ANY producer's own record whose Completed half was never accepted
 (core outage, timeout, 401, any explicit non-acceptance): delivery rules are
 the same everywhere, never only the lane daemons' `hookflow.DeliverPool`
-(chat's own delivery path, unchanged). Fabricating a
+(chat's own delivery path, which sends one conversation's records one at a
+time in submit order and stops that conversation at its first unaccepted
+record: core files an activity that beats its `WorkflowStarted` with a NULL
+session). Fabricating a
 completion would be worse than either asymmetry. Check per `activity_id`,
 never by parity.
 

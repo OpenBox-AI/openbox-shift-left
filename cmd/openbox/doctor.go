@@ -676,8 +676,8 @@ func (a *app) reportLanes() {
 // (hookflow.LaneQueue.Dropped() for every provider's own lane records, plus
 // -- on the transport lane -- its chat DeliverPool.Dropped()): an append
 // that never reached the spool, an event a drain attempted that core did not
-// accept, a chat record the pool could not accept, or one abandoned by a
-// shutdown drain. `doctor` runs as a separate process with no channel into a
+// accept, a chat record the pool could not accept, one queued behind a chat
+// record core did not accept, or one abandoned by a shutdown drain. `doctor` runs as a separate process with no channel into a
 // running daemon's memory, so this reads a small status file the daemon
 // itself persists (hookflow.StatusPersister) -- no IPC, no port. Renders
 // nothing for a lane whose status file is absent, which is what keeps a

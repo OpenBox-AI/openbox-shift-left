@@ -246,7 +246,8 @@ func closeAllConcurrently(ctx context.Context, closers ...shutdownCloser) int {
 }
 
 // newChatPool builds the transport lane's own claude.ai chat delivery: a
-// bounded, spool-less DeliverPool (a chat conversation has no tool session
+// bounded, spool-less DeliverPool that sends one conversation's records
+// in order, each after the one before it was accepted (a chat conversation has no tool session
 // spool to append into, so this is the one place a lane record still uses
 // the pool rather than LaneQueue), signed by the claude-code identity (the
 // one that governs Anthropic's hosts on this machine). Each attempt is
@@ -260,11 +261,20 @@ func closeAllConcurrently(ctx context.Context, closers ...shutdownCloser) int {
 // rather than silently counted only as a pool drop.
 func newChatPool(identities map[string]providerIdentity, advisory *hookflow.Advisory, logger *log.Logger) (*hookflow.DeliverPool, func(client.DevEvent) bool) {
 	pool := hookflow.NewDeliverPool(hookflow.DefaultPoolSize, 2*hookflow.DeliveryAttemptTimeout,
-		func(ctx context.Context, ev client.DevEvent) {
+		func(ctx context.Context, ev client.DevEvent) error {
+			// A refused record stops its conversation's drainer, but a record
+			// of the same call submitted after that stop starts a fresh one:
+			// the latch, not the queue, is what keeps it from going out
+			// behind the refusal.
+			if _, halted := hookflow.SessionHalted(ev.SessionID); halted {
+				logger.Printf("openbox transport: not sending chat event %s: its conversation is latched halted", ev.EventID)
+				return errChatLatched
+			}
 			id, ok := identities[string(provider.ClaudeCode)]
 			if !ok {
-				logger.Printf("openbox transport: no resolved claude-code identity; dropping chat event %s", ev.EventID)
-				return
+				logger.Printf("openbox transport: no resolved claude-code identity; dropping chat event %s "+
+					"and every record queued behind it in its conversation", ev.EventID)
+				return errNoChatIdentity
 			}
 			attempt := func() error {
 				actx, cancel := context.WithTimeout(ctx, hookflow.DeliveryAttemptTimeout)
@@ -281,7 +291,13 @@ func newChatPool(identities map[string]providerIdentity, advisory *hookflow.Advi
 				logger.Printf("openbox transport: chat delivery failed for %s: %v", ev.EventID, err)
 				hookflow.HaltOnDeliveryFailure(logger, ev, err)
 			}
+			return err
 		})
+	// A record accepted but abandoned at shutdown before its first attempt
+	// never reached core: latched like one the pool could not accept.
+	pool.OnAbandon = func(ev client.DevEvent) {
+		hookflow.HaltOnDeliveryFailure(logger, ev, errChatPoolUnavailable)
+	}
 	deliver := func(ev client.DevEvent) bool {
 		if pool.Submit(ev) {
 			return true

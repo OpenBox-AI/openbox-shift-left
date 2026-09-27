@@ -250,6 +250,17 @@ func (a *app) runTransport(args []string) int {
 // for "never even attempted" as any other unclassified failure.
 var errChatPoolUnavailable = errors.New("the delivery pool could not accept this chat event (saturated, or shutting down)")
 
+// errNoChatIdentity tells the chat pool a record was not sent because no
+// claude-code identity resolved, so the rest of its conversation's queue is
+// not sent either. Nothing is latched: without a signer nothing can be
+// attributed to a run in the first place.
+var errNoChatIdentity = errors.New("no resolved claude-code identity for a chat event")
+
+// errChatLatched tells the chat pool a record was not sent because its
+// conversation is already latched halted: the refusal that latched it has
+// been recorded, and nothing of the run may follow it.
+var errChatLatched = errors.New("the chat conversation is latched halted")
+
 // providersFromFlag turns --providers' raw value into transport.Config's own
 // nil/present-but-empty distinction: seen is false when the flag never
 // appeared on argv (nil, so Config.Validate applies its claude-code
