@@ -222,10 +222,16 @@ turn sits at the end of its `messages` array, not the start — a plain
 byte-offset cut would keep old, unchanging boilerplate and drop the turn a
 reader actually wants. `internal/gateway` therefore builds a synthetic
 document instead: `model` verbatim, a capped `system`, `tools` dropped
-entirely, and `messages` kept from the end backward until the budget.
-`metadata.openbox_capture.truncated_paths` (or, on a response,
+entirely, and `messages` kept from the end backward until the budget. A
+claude.ai body has no `messages`; its turn is a top-level `prompt`, which is
+kept instead. `metadata.openbox_capture.truncated_paths` (or, on a response,
 `activity_output.openbox_capture.truncated`) names what was cut; its absence
 means nothing was.
+
+A streamed Anthropic-format reply is stored as the one message it assembles
+into (text, tool input and citations), not as its pings and per-token deltas,
+which would spend the cap on framing. Any other response format is stored
+verbatim.
 
 ---
 

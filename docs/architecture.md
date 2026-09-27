@@ -133,7 +133,13 @@ To call the platform, the engine:
 3. exchanges it at Keycloak for a bearer token.
 
 The token is cached on disk for at most 270 seconds and reused by later hooks.
-A cached token that gets a 401 is deleted, not retried. A failure anywhere in
+It is renewed while still valid, inside its last two minutes, so a gated hook
+does not spend its evaluation budget on a bootstrap and a Keycloak exchange:
+a slow renewal is cut short and the old token keeps serving, and each running
+lane daemon renews every configured tool's cache in the background
+(`cmd/openbox/tokenwarmer.go`; timings in
+`internal/client/workloadauth/cache.go`). A cached token that gets a 401 is
+deleted, not retried. A failure anywhere in
 this exchange counts as a delivery failure: the call is denied and the run
 halts.
 

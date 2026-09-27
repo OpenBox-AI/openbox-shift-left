@@ -375,6 +375,7 @@ Point `OPENBOX_BACKEND_URL` or `--backend` at your environment's backend.
 | Every prompt and tool call is refused | The session is halted: a delivery failed or a policy returned HALT. `doctor` shows why. Fix connectivity and start a new session. |
 | `Session is no longer active` with no `(policy: …)` suffix | The platform's record of this session ended early (a known platform issue). Start a new session. |
 | A tool call hangs | An approval is pending in the dashboard. |
+| `doctor` warns a hook was `installed with a shorter timeout` | Your settings predate a timeout increase; Claude Code can kill the hook and let the tool call through ungoverned. Re-run `init`. |
 | Every tool call appears twice | An OpenBox hook is registered twice. `doctor` reports it; re-running `init` fixes it. |
 | Every model call fails after install | The lane is not running. Check `doctor` and `~/.openbox/transport.log`. `openbox uninstall` restores a working state immediately. |
 | `… is already in use; refusing to continue` | Another program holds the lane's port. Stop it and re-run `init`. |
