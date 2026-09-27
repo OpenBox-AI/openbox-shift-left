@@ -83,6 +83,17 @@ func (s Spool) defaultOnFailure(ev client.DevEvent, err error) {
 // The lock is a sidecar, never the JSONL file: a drain opens that path too,
 // and locking it would deadlock against it.
 func (s Spool) Append(ev client.DevEvent) error {
+	if err := s.appendLine(s.SessionPath(ev.SessionID), "", ev); err != nil {
+		return err
+	}
+	traceSpoolAppend(ev)
+	return nil
+}
+
+// appendLine writes ev as one JSON line to path under the spool's directory
+// lock. label names the file in the open and write errors ("" for the
+// session's tail, " head" for its head file).
+func (s Spool) appendLine(path, label string, ev client.DevEvent) error {
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("spool mkdir: %w", err)
 	}
@@ -95,15 +106,14 @@ func (s Spool) Append(ev client.DevEvent) error {
 	unlock := s.lockSpool()
 	defer unlock()
 
-	f, err := os.OpenFile(s.SessionPath(ev.SessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return fmt.Errorf("spool open: %w", err)
+		return fmt.Errorf("spool open%s: %w", label, err)
 	}
 	defer f.Close()
 	if _, err := f.Write(line); err != nil {
-		return fmt.Errorf("spool write: %w", err)
+		return fmt.Errorf("spool write%s: %w", label, err)
 	}
-	traceSpoolAppend(ev)
 	return nil
 }
 
@@ -404,27 +414,7 @@ func (s Spool) writeHead(sessionID string, remainder [][]byte) {
 // whichever holds the lock first completes atomically before the other
 // proceeds.
 func (s Spool) SpoolObserveHead(ev client.DevEvent) error {
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return fmt.Errorf("spool mkdir: %w", err)
-	}
-	line, err := json.Marshal(ev)
-	if err != nil {
-		return fmt.Errorf("spool marshal: %w", err)
-	}
-	line = append(line, '\n')
-
-	unlock := s.lockSpool()
-	defer unlock()
-
-	f, err := os.OpenFile(s.headPath(ev.SessionID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return fmt.Errorf("spool open head: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(line); err != nil {
-		return fmt.Errorf("spool write head: %w", err)
-	}
-	return nil
+	return s.appendLine(s.headPath(ev.SessionID), " head", ev)
 }
 
 // attemptLines gives each line one delivery attempt, in order, plus exactly
