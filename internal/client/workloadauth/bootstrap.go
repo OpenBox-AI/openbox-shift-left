@@ -56,7 +56,7 @@ func Bootstrap(ctx context.Context, hc *http.Client, baseURL, apiKey, sdkVersion
 
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, &Error{Stage: StageBootstrap, Reason: "network fault", Transient: true}
+		return nil, &Error{Stage: StageBootstrap, Reason: "network fault", Detail: netCause(err), Transient: true}
 	}
 	defer resp.Body.Close()
 

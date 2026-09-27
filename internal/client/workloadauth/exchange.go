@@ -47,7 +47,7 @@ func Exchange(ctx context.Context, hc *http.Client, doc *BootstrapDocument, asse
 
 	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, &Error{Stage: StageExchange, Reason: "network fault", Transient: true}
+		return nil, &Error{Stage: StageExchange, Reason: "network fault", Detail: netCause(err), Transient: true}
 	}
 	defer resp.Body.Close()
 

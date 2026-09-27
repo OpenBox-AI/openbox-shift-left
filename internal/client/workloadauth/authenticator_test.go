@@ -25,6 +25,10 @@ type countingWorkloadServer struct {
 
 	mu            sync.Mutex
 	bootstrapCode int
+	// exchangeCode overrides the token response when non-zero; exchangeHang
+	// makes the token endpoint stall until the request is abandoned.
+	exchangeCode int
+	exchangeHang bool
 }
 
 func newCountingWorkloadServer(t *testing.T) *countingWorkloadServer {
@@ -48,6 +52,20 @@ func newCountingWorkloadServer(t *testing.T) *countingWorkloadServer {
 			_ = json.NewEncoder(w).Encode(doc)
 		case strings.HasSuffix(r.URL.Path, "/protocol/openid-connect/token"):
 			c.exchangeHits.Add(1)
+			c.mu.Lock()
+			code, hang := c.exchangeCode, c.exchangeHang
+			c.mu.Unlock()
+			if hang {
+				select {
+				case <-r.Context().Done():
+				case <-time.After(5 * time.Second):
+				}
+				return
+			}
+			if code != 0 {
+				w.WriteHeader(code)
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"access_token": "atk-" + strconv.FormatInt(c.exchangeHits.Load(), 10),
@@ -65,6 +83,12 @@ func (c *countingWorkloadServer) setBootstrapCode(code int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bootstrapCode = code
+}
+
+func (c *countingWorkloadServer) setExchange(code int, hang bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.exchangeCode, c.exchangeHang = code, hang
 }
 
 func newTestAuthenticator(t *testing.T, cachePath string, srv *countingWorkloadServer) *Authenticator {

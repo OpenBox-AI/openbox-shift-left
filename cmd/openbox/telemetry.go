@@ -190,6 +190,7 @@ func (a *app) runTelemetry(args []string) int {
 	go codexSweeper.Run(ctx, logger)
 	go runTraceSweeps(ctx, logger)
 	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
+	go startTokenWarmers(ctx, logger)
 
 	if err := rec.StartStandalone(ctx); err != nil {
 		return a.errorf("starting the telemetry receiver: %v", err)

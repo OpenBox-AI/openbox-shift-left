@@ -14,6 +14,23 @@ import (
 // mid-flight.
 const refreshSkew = 30 * time.Second
 
+// refreshAhead is how far before expiry a token is renewed while it is still
+// usable. Inside this window a failed renewal is not an outage: the old token
+// keeps being handed out until refreshSkew, so a slow or briefly unreachable
+// token endpoint costs a gated hook at most refreshAheadTimeout rather than
+// its whole evaluation budget. The lane daemons' warmer (Warm) renews at the
+// same threshold, so while a daemon runs a hook rarely renews at all.
+const refreshAhead = 120 * time.Second
+
+// refreshAheadTimeout bounds one renewal attempt made while the old token is
+// still usable. A cold fetch (no usable token) keeps the caller's own deadline.
+const refreshAheadTimeout = 3 * time.Second
+
+// refreshRetryBackoff is how long after a failed early renewal every process
+// sharing the cache keeps using the old token without trying again, so a hung
+// token endpoint is paid for once per window, not once per hook.
+const refreshRetryBackoff = 15 * time.Second
+
 // maxCacheLifetime is the ceiling on how long a fetched token is cached,
 // regardless of what the server's expires_in claims: min(expires_in, 300)s.
 const maxCacheLifetime = 300 * time.Second
@@ -35,6 +52,9 @@ type Entry struct {
 	KeyThumbprint     string    `json:"key_thumbprint,omitempty"`
 	NegUntil          time.Time `json:"neg_until,omitempty"`
 	NegReason         string    `json:"neg_reason,omitempty"`
+	// RefreshRetryAt is set after an early renewal failed: until then the
+	// still-usable token is handed out with no network call.
+	RefreshRetryAt time.Time `json:"refresh_retry_at,omitempty"`
 }
 
 // fresh reports whether e is a usable, live token for thumbprint as of now:
@@ -44,6 +64,15 @@ func (e Entry) fresh(now time.Time, thumbprint string) bool {
 		return false
 	}
 	return now.Before(e.ExpiresAt.Add(-refreshSkew))
+}
+
+// dueForRefresh reports whether a fresh e is inside the refreshAhead window
+// and not held back by a recent failed renewal.
+func (e Entry) dueForRefresh(now time.Time) bool {
+	if now.Before(e.ExpiresAt.Add(-refreshAhead)) {
+		return false
+	}
+	return e.RefreshRetryAt.IsZero() || !now.Before(e.RefreshRetryAt)
 }
 
 // negative reports whether e is a live negative-cache entry as of now.

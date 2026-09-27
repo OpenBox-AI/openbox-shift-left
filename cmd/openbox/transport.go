@@ -183,6 +183,7 @@ func (a *app) runTransport(args []string) int {
 	go codexSweeper.Run(ctx, logger)
 	go runTraceSweeps(ctx, logger)
 	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
+	go startTokenWarmers(ctx, logger)
 
 	logger.Printf("openbox transport: listening on %s", cfg.Addr)
 	logger.Printf("openbox transport: intercepting %s; every other host is tunnelled uninspected",

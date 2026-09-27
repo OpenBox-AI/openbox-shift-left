@@ -6,8 +6,15 @@
 package workloadauth
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"net"
+	"os"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 )
 
@@ -25,7 +32,8 @@ const (
 // Error is workloadauth's one error shape. Reason is the bootstrap
 // reason_code or Keycloak's "error" field, bounded to maxReasonLen bytes.
 // Detail is Keycloak's "error_description", bounded to maxDetailLen bytes and
-// never carried verbatim beyond that. Hint is a fixed, package-authored
+// never carried verbatim beyond that, or on a network fault the fixed class
+// netCause names. Hint is a fixed, package-authored
 // string (the clock-skew guidance on an exchange rejection); it never echoes
 // server text. None of Reason, Detail or Hint is ever populated from the
 // token, the assertion or the private key, and Error() never accepts an
@@ -96,4 +104,33 @@ func boundString(s string, max int) string {
 // verifier_unavailable included) or 429.
 func isTransientStatus(status int) bool {
 	return status >= 500 || status == 429
+}
+
+// netCause names the class of a transport failure with a fixed,
+// package-authored string -- timeout, DNS, refused, reset, TLS -- so a
+// "network fault" says which failure it was without echoing the error text.
+func netCause(err error) string {
+	var dnsErr *net.DNSError
+	var certErr *tls.CertificateVerificationError
+	var unknownAuth x509.UnknownAuthorityError
+	var recordErr tls.RecordHeaderError
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, os.ErrDeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.As(err, &dnsErr):
+		return "dns lookup failed"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection refused"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection reset"
+	case errors.As(err, &certErr), errors.As(err, &unknownAuth), errors.As(err, &recordErr):
+		return "tls handshake failed"
+	}
+	var nerr net.Error
+	if errors.As(err, &nerr) && nerr.Timeout() {
+		return "timeout"
+	}
+	return "network error"
 }
