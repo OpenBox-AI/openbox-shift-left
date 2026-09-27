@@ -16,11 +16,10 @@ import (
 )
 
 // defaultTraceBackendURL is used when neither --backend nor devconfig's own
-// resolver names one -- phase-04's literal default.
+// resolver names one.
 const defaultTraceBackendURL = "https://openbox-api.node.lat"
 
-// corePerPage is the page size `openbox trace --against-core` requests;
-// phase-04 fixes it at 100.
+// corePerPage is the page size `openbox trace --against-core` requests.
 const corePerPage = 100
 
 // coreLogRow is one row of GET /agent/{id}/logs's data.data[]. SessionID is a
@@ -191,7 +190,7 @@ func fetchCoreLogs(client *http.Client, backendURL, agentID, apiKey string) ([]c
 	return all, nil
 }
 
-// reconcileAgainstCore is the pure comparison phase-04 specifies: NULL
+// reconcileAgainstCore is a pure comparison flagging: NULL
 // session_id, an activity_id core recorded only one half of, a row created
 // before this run's own WorkflowStarted, and a local deliver.result the local
 // trace marked accepted but whose event_id core never recorded. Findings are

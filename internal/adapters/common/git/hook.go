@@ -83,8 +83,8 @@ func InstallHook(hooksDir string, cfg HookConfig) error {
 }
 
 // InstallPostCommitHook installs the `post-commit` hook, which runs after a
-// commit exists and writes the two artifacts that need its sha: the non-
-// authoritative notes mirror and the signed attestation (E8-S10). Installing
+// commit exists and does the two things that need its sha: the
+// non-authoritative notes mirror and the `commit_created` event. Installing
 // it is additive; the same never-overwrite-a-foreign-hook rule applies.
 func InstallPostCommitHook(hooksDir string, cfg HookConfig) error {
 	post := cfg

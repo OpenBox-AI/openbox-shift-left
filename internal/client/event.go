@@ -44,8 +44,7 @@ const (
 	// than an answer (rate limit, billing, auth, overload).
 	EventAPIError EventType = "APIError"
 
-	// v1.8 observe-only lifecycle signals (21 classes, table B of the phase-04
-	// plan). Each rides stock SignalReceived with a unique signal_name, is
+	// v1.8 observe-only lifecycle signals (21 classes). Each rides stock SignalReceived with a unique signal_name, is
 	// never paired as an Activity, and never sets ev.Tokens. Since v1.9 each
 	// DOES carry signal_args -- its metadata projected into the one field a
 	// policy engine reads on a signal; only prompt_submitted's is the goal. Naming rule, no exceptions: EventType is the Claude Code hook

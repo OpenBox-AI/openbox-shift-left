@@ -57,8 +57,7 @@ func codexDir() (dir, warning string) {
 }
 
 // ProviderState reports whether a provider's managed configuration is deployed
-// on this machine, for `openbox doctor` and for posture.provider_managed
-// (E8-S8).
+// on this machine, for `openbox doctor` and for posture.provider_managed.
 func ProviderState(p Provider) string {
 	var dir, file string
 	switch p {

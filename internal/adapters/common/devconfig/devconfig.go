@@ -52,7 +52,7 @@ const (
 	// signing key: PKCS8 DER, base64 std.
 	EnvWorkloadPrivateKey = "OPENBOX_WORKLOAD_PRIVATE_KEY"
 	EnvConfigPath         = "OPENBOX_CONFIG"
-	// EnvOrgSigningPubKey policy-bundle signing key pins (E8-S6).
+	// EnvOrgSigningPubKey policy-bundle signing key pins.
 	EnvOrgSigningPubKey = "OPENBOX_ORG_SIGNING_PUBKEY"
 	EnvOrgSigningKeyID  = "OPENBOX_ORG_SIGNING_KEY_ID"
 	EnvAgentID          = "OPENBOX_AGENT_ID"
@@ -153,7 +153,7 @@ type DevConfig struct {
 	// BaseURL, the core data-plane base).
 	BackendURL string `json:"backend_url,omitempty"`
 	// OrgSigningKeyID and OrgSigningPubKey pin the org's policy-bundle signing
-	// key (E8-S6 /).
+	// key.
 	OrgSigningKeyID  string `json:"org_signing_key_id,omitempty"`
 	OrgSigningPubKey string `json:"org_signing_pubkey,omitempty"` // base64 raw Ed25519
 	// IdentityMethod is "keycloak_workload" for a v3 store; empty or any other

@@ -287,7 +287,7 @@ func traceGateVerdict(sessionID, toolKind string, verdict string, source string,
 }
 
 // TraceHookIn records a hook's raw stdin -- BEFORE the payload is parsed, and
-// even when parsing fails: the phase-2 contract is that a malformed payload
+// even when parsing fails: the contract is that a malformed payload
 // is still fully traced. sessionID is "" when parsing failed before a session
 // id could be read.
 func TraceHookIn(providerName, hook, sessionID string, raw []byte, err error) {

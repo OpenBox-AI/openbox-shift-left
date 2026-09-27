@@ -61,7 +61,7 @@ func TestCommitEventID_DeterministicAndDistinct(t *testing.T) {
 		t.Fatalf("commitEventID length = %d, want 32", len(base))
 	}
 	for _, tc := range []struct {
-		name             string
+		name              string
 		session, run, sha string
 	}{
 		{"different session", "sess-2", "run-1", "abc123"},

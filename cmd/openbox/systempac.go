@@ -13,7 +13,7 @@ import (
 )
 
 // This file is the WIRING half of the system PAC/CA-trust activation
-// (phase-03-system-pac-activation-and-ca-trust.md, macOS arm): the library
+// (macOS): the library
 // itself (internal/cli/activation) never decides WHEN to run, only HOW. Every
 // call into it goes through the four seams below, so a test can make the
 // whole step a no-op (fakeSupervisor, newLaneHarness) or drive it against a

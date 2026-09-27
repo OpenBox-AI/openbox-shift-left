@@ -30,11 +30,11 @@ type Posture struct {
 	// reached: "fail_open" (the default; the call proceeds ungoverned) or
 	// "fail_closed" (it is denied).
 	FailurePolicy string
-	// ConfigSource names where each posture flag came from (E8-S9): default,
+	// ConfigSource names where each posture flag came from: default,
 	// user, env, managed_default, or managed.
 	ConfigSource map[string]string
 	// ProviderManaged reports whether the provider's own managed configuration is
-	// deployed (E8-S8): "true", "false", or "unknown" when it cannot be
+	// deployed: "true", "false", or "unknown" when it cannot be
 	// determined. A string rather than a bool so unknown is not silently false.
 	ProviderManaged string
 }

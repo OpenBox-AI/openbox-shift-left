@@ -113,8 +113,9 @@ Then it installs:
 - the tool's settings and identity, in `~/.openbox/<tool>/dev.json`;
 - the model-call lanes, if the tool supports them (see
   [below](#model-call-lanes-claude-code));
-- a git `prepare-commit-msg` hook that stamps commits for
-  [lineage](lineage.md). Set `OPENBOX_INSTALL_GIT_HOOK=false` to skip it;
+- git `prepare-commit-msg` and `post-commit` hooks that stamp and report
+  commits for [lineage](lineage.md). Set `OPENBOX_INSTALL_GIT_HOOK=false` to
+  skip them;
 - on Claude Code, `showThinkingSummaries: true`, so thinking blocks arrive
   with content. `openbox uninstall` restores the previous value.
 

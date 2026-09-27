@@ -228,7 +228,7 @@ type Policy struct {
 	PolicyBuilder json.RawMessage // config.policy_builder, or nil when absent
 	HasRawRego    bool            // rego_code present but no policy_builder → unlocalized
 	// Signed is the backend's signature over the authoritative policy, when it
-	// serves one (E8-S6 /). Nil from a backend that does not sign yet, which `dev
+	// serves one. Nil from a backend that does not sign yet, which `dev
 	// sync` treats as the compatibility path rather than an error.
 	Signed *SignedPolicy
 }

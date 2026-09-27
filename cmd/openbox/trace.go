@@ -103,7 +103,7 @@ func (a *app) runTrace(args []string) int {
 // `openbox trace <target> --dir D` parses the same as
 // `openbox trace --dir D <target>`. Go's flag package stops scanning at the
 // first non-flag token, which would otherwise make the positional
-// session-or-run-id argument (documented first in phase-04's usage) swallow
+// session-or-run-id argument (documented first in the usage) swallow
 // every flag that follows it into fs.Args() unparsed. A token this scan does
 // not recognize as a defined flag is left as positional -- including a
 // bare "--", which flag.Parse itself still treats as the args terminator.
@@ -237,7 +237,7 @@ func (a *app) traceList(dir string, since time.Time, jsonOut bool) int {
 
 // printTraceRecord writes one record either as a single JSON line or as a
 // compact formatted line; Detail (bodies) is elided from both forms unless
-// bodies is set, per phase-04 ("bodies elided unless --bodies").
+// bodies is set.
 func printTraceRecord(w io.Writer, r trace.Record, jsonOut, bodies bool) {
 	if !bodies {
 		r.Detail = nil

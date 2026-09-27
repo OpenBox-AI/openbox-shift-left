@@ -16,8 +16,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
-// newCommitSink builds the post-commit hook's CommitCreated producer
-// (phase-02 plan, R1-R8): for each session the git package resolved, it
+// newCommitSink builds the post-commit hook's CommitCreated producer:
+// for each session the git package resolved, it
 // decides whether an agent tool's own marker actually produced this commit
 // (R2), resolves that tool's identity (R3), reads its current run and skips a
 // halted one (R4), and appends one event into that tool's own spool before
