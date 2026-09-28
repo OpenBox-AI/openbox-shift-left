@@ -6,11 +6,11 @@ contract and emits them through the shared AIP-signed transport.
 
 It has **two legs, and they are not the same posture.** The telemetry leg is
 observe-only: it spools and never renders a verdict, so it never denies the
-current tool call. It is not fail-open any more in the sense that once mattered:
-delivery is single-attempt and unconditionally fail-closed, so an event this
-leg cannot deliver halts the *run* (every later gated call and prompt denies)
-even though it never touched the call that produced it. The enforce leg gates
-a call synchronously and can deny it, unconditionally now (there is no
+current tool call. Delivery to core is single-attempt (plus one retry for a
+transient failure): if an event this leg produced is never accepted, that
+event is lost, but nothing about the run is stopped — the next hook event and
+the next gated call each get their own fresh attempt. The enforce leg gates a
+call synchronously and can deny it, unconditionally now (there is no
 observe-only opt-out for a gated hook). Content capture is on by default on
 both. `capabilities.go` is the authority on which is which — every capability
 key carries what it does and what it deliberately does not.
@@ -47,23 +47,25 @@ attempt spawns only when its own window runs out before every queued event
 was attempted, or that a periodic `Sweeper` spawns for a session nothing else
 has touched in a while.
 
-Delivery is **single-attempt and unconditionally fail-closed**, not
-best-effort: every event -- a hook's own, or a lane daemon's, since
-`telemetry`/`transport` drain this same per-session spool too -- gets exactly
-one delivery attempt, in append order, through one striped per-session
-drainer. If core does not accept it (a proven refusal, a 5xx, a timeout, a
-401, or a network fault at the request itself, as opposed to the drain's own
-budget simply running out before an answer arrived), the event is ledgered
-and gone, and **the run halts**: every later gated call and prompt in it is
-refused until a new session starts. There is no recovery file, no retry
-count, and no permanent-loss threshold any more -- an attempted-and-refused
-event is never resent, on any later flush. What a spool file still holds
-between drains is only what has not been **attempted** yet: a backlog with no
-further hook activity to trigger a drain, or a crash-orphaned file waiting
-past its 5-minute reclaim window; a periodic sweep picks those up, and a file
-untouched for 30 days is deleted with its count recorded (`.discarded`),
-never silently. A cut-short drain pass is not a failure either: whatever it
-could not get to stays queued, unchanged, for the next drain.
+Delivery is a bounded number of attempts, not best-effort: every event -- a
+hook's own, or a lane daemon's, since `telemetry`/`transport` drain this same
+per-session spool too -- gets one delivery attempt (plus one retry for a
+timeout, network fault, or 5xx; a 401 gets one further retry with a
+force-refreshed token), in append order, through one striped per-session
+drainer. If core still does not accept it after that, the event is ledgered
+and gone — that event alone is lost, but the run itself is not stopped: the
+next gated call and the next hook event each get their own fresh attempt.
+Only a real HALT verdict *from core* (as opposed to a delivery failure) stops
+the run, by writing a run-scoped latch every later gated call in that run
+checks. There is no recovery file or retry count beyond that: an
+attempted-and-refused event is never resent, on any later flush. What a spool
+file still holds between drains is only what has not been **attempted** yet: a
+backlog with no further hook activity to trigger a drain, or a crash-orphaned
+file waiting past its 5-minute reclaim window; a periodic sweep picks those
+up, and a file untouched for 30 days is deleted with its count recorded
+(`.discarded`), never silently. A cut-short drain pass is not a failure
+either: whatever it could not get to stays queued, unchanged, for the next
+drain.
 
 Each event's `event_id` is derived deterministically from its structural fields
 (`deriveID` in `mapper.go`): the same logical event always hashes to the same id
@@ -143,25 +145,26 @@ capture-OFF half.
   is never derived here. The numbers come from reading `transcript_path`, off
   the hot path. `capabilities.go`'s `telemetry.tokens` and `telemetry.model`
   state the bound exactly.
-- **At-most-once delivery, by design, not as an interim limitation.** The
-  client's `Emit` return (its error, classified by `client.FailureClass`) is
-  exactly what decides one attempt's outcome: an explicit non-acceptance halts
-  the run rather than being retried, because a durable retry risks a
-  double-send core cannot always dedupe. (An **unattempted** remainder of a
-  budget-bounded drain -- as opposed to an attempted-and-refused one -- IS
-  preserved and picked up by the next drain; that is not a retry of a failure,
-  since nothing was attempted yet.)
+- **At-most-once delivery per event, by design.** The client's `Emit` return
+  (its error, classified by `client.FailureClass`) decides one attempt's
+  outcome: an explicit non-acceptance, after its retry budget, denies that
+  event alone rather than being retried further, because a durable retry
+  risks a double-send core cannot always dedupe. It does not stop the run —
+  only a real HALT verdict from core does that. (An **unattempted** remainder
+  of a budget-bounded drain -- as opposed to an attempted-and-refused one --
+  IS preserved and picked up by the next drain; that is not a retry of a
+  failure, since nothing was attempted yet.)
 - **A new hook needs `openbox init` re-run.** Registration happens at install
   time, so a machine that upgrades this binary keeps observing its pre-upgrade
   hook set until a human re-runs `init`. Nothing schedules that.
 
 ## Credentials (INV-1)
 
-Identity is minted by `openbox auth`. Secrets live in `~/.openbox/.env`, in
+Identity is minted by `openbox init --provider claude-code` (a `keycloak_workload`
+agent; RS256 client-assertion key). Secrets live in `~/.openbox/.env`, in
 **plaintext** — `0600` on macOS and Linux, unprotected on Windows. Anything
 running as the developer, the governed agent included, can read the signing key,
-so attestation proves the origin of config rather than tamper resistance. An
-earlier build kept these in the OS keychain; those entries are not migrated.
+so attestation proves the origin of config rather than tamper resistance.
 
 The hook reads the **DID only** on the hot path (no secret I/O). The obx_ key +
 workload private key are read at flush (from `.env`, or `OPENBOX_API_KEY` /

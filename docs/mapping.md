@@ -142,16 +142,17 @@ A model turn rides the same `ActivityStarted`/`ActivityCompleted` pair a tool
 call does, tagged `activity_type: llm_completion`; both halves fire from one
 observation, so the pair is always complete. `activity_id` is
 `<session_id>:turn:<index>` (or `<session_id>:agent:<agent_id>:turn:<index>`
-for a subagent), except for the three in-path/telemetry producers, which key
+for a subagent), except for the lane producers, which key
 on their own request id instead (`turnActivityIDFor` in
 `internal/client/payload.go`).
 
 Up to three producers can observe a turn, in disjoint `activity_id`
 namespaces so core's dedupe never absorbs one producer's evidence as a
-duplicate of another's: the hook lane (Claude Code/Codex's own `Stop`), the
-local gateway (`gateway_request_id`, namespace `:gateway:`), and either the
-local telemetry receiver (`otel_request_id`, `:otel:`) or the transport relay
-(`proxy_request_id`, `:proxy:`). An in-path lane classifies the call by its
+duplicate of another's: the hook lane (Claude Code/Codex's own `Stop`), and either the local
+telemetry receiver (`otel_request_id`, `:otel:`) or the transport relay
+(`proxy_request_id`, `:proxy:`). The older gateway relay
+(`gateway_request_id`, `:gateway:`) keeps its own namespace but is no longer
+installed. An in-path lane classifies the call by its
 captured path, not its HTTP method — method alone would file a token-count
 probe as a real completion:
 
@@ -250,10 +251,9 @@ unrecognized resolves to an empty, non-blocking verdict.
 | `BLOCK` | `block` | `stop` |
 | `HALT` | `halt` | `stop` |
 
-Observe mode treats every verdict as advisory: a verdict from `/evaluate`
-never blocks a call by itself (INV-3 in
-[dev-event-contract.md](dev-event-contract.md#invariants)). Enforcement is a
-separate, local, tighten-only decision that does not read this response.
+For a gated call the parsed verdict is enforced, tighten-only (INV-3 in
+[dev-event-contract.md](dev-event-contract.md#invariants)): it can deny,
+hold or halt a call but never turns a provider's own deny into an allow.
 
 `parseEvaluation` also carries, when core sends them: `risk_score`,
 `alignment_score`, `trust_tier`, `behavioral_violations`, `constraints`,

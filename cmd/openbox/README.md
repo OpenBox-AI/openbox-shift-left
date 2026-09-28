@@ -36,19 +36,20 @@ their absence fails in ways that are hard to attribute to this package:
   because what these commands print *is* most of what they do, and a test has to
   be able to assert it.
 
-## Registration is not idempotent, and that shapes `auth`
+## `auth` is org-level only; registration lives in `init`
 
-The control plane shows the `obx_` API key and the Ed25519 seed exactly once,
-and `agent/create` has no upsert. Local credential presence is therefore the
-idempotency key: an agent that exists remotely but whose credentials were never
-written here cannot be recovered at all. So `auth` refuses to duplicate a name
-and states the cost rather than offering a flag past it — deleting that agent to
-re-register mints a new DID and leaves the old lineage attached to the old one.
+`auth` connects this machine to an org — two URLs and the control token — and
+registers no agent. Identity is per tool: `openbox init --provider <tool>` is
+what registers that tool's `keycloak_workload` agent (`agent/create`) and
+writes its runtime credentials. `agent/create` has no upsert, so a name
+collision at `init` time is handled there (auto-suffix, or an offer to adopt an
+existing agent's workload key if this machine still holds it) rather than by
+`auth`.
 
-For the same reason the control-plane token is read only from
-`OPENBOX_CONTROL_TOKEN` and is never a flag: a flag puts a credential in `argv`,
-where `ps` and shell history can read it. What `auth` writes is nonetheless a
-plaintext file, on purpose; see [where credentials
+The control-plane token is read only from `OPENBOX_CONTROL_TOKEN` and is never
+a flag: a flag puts a credential in `argv`, where `ps` and shell history can
+read it. What `auth`/`init` write is nonetheless a plaintext file, on purpose;
+see [where credentials
 live](../../docs/credentials-and-secrets.md#where-credentials-live).
 
 ## Build & test

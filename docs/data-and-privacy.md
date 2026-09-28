@@ -42,6 +42,14 @@ input (see [below](#what-an-enforced-call-sends)).
 
 Every body goes through three steps, in this order:
 
+```mermaid
+flowchart LR
+  B["body<br/>(prompt, command,<br/>file, output)"] --> R["1. redact secrets<br/>on this machine"]
+  R --> G{"2. content_capture<br/>on?"}
+  G -- yes --> C["3. cap at 64KB"] --> W(["sent to platform"])
+  G -- no --> X(["not sent;<br/>metadata only"])
+```
+
 1. **Local secret redaction** (`secret_detection`, on by default). Anything
    that looks like a credential is replaced with `${OPENBOX_REDACTED_…}`.
 2. **Attachment** to the event, only if `content_capture` is on.
@@ -93,7 +101,9 @@ other field with markers and checks none of them reach the wire.
 is never opened. Because reply text and thinking ride the turn event, turning
 `finops` off removes them too.
 
-Claude Code reports usage per turn. Codex reports it once per session.
+Both tools report usage per turn. Codex derives each turn's counts from its
+own rollout file; a Codex session that ends with no completed turn sends one
+per-session total instead.
 
 ## Thinking
 

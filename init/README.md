@@ -38,20 +38,23 @@ edit it into agreement, and do not add a `go:embed` that reads it.
 
 | file | lane | platform |
 |---|---|---|
-| `ai.openbox.gateway.plist` | model-call gateway | launchd (macOS) |
 | `ai.openbox.telemetry.plist` | OTLP receiver | launchd (macOS) |
 | `ai.openbox.transport.plist` | in-path CONNECT relay | launchd (macOS) |
-| `openbox-gateway.service` | model-call gateway | systemd (Linux) |
 | `openbox-telemetry.service` | OTLP receiver | systemd (Linux) |
 | `openbox-transport.service` | in-path CONNECT relay | systemd (Linux) |
+
+`ai.openbox.gateway.plist` / `openbox-gateway.service` are legacy: `openbox
+init` no longer installs the gateway lane (the transport relay superseded it),
+but the code that removes a pre-existing one is still here, so the shape stays
+for reference.
 
 Windows is refused rather than silently skipped; there is no unit to show.
 
 ## Installing a lane
 
-Not from here. `openbox init --provider claude-code` installs every lane the
-provider supports, in proof order (write the unit, start it, prove it is
-listening, only then point the tool at it); `openbox uninstall` reverses it.
-`openbox doctor` reports which lane is routed, which can see a call, and; the
-failure that is otherwise invisible - whether the elected lane is actually
-running.
+Not from here. `openbox init --provider claude-code` installs the lanes that
+provider supports (telemetry and transport), in proof order (write the unit,
+start it, prove it is listening, only then point the tool at it); `openbox
+uninstall` reverses it. `openbox doctor` reports which lane is routed, which
+can see a call, and; the failure that is otherwise invisible - whether the
+elected lane is actually running.

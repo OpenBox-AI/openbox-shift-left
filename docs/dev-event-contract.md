@@ -8,6 +8,13 @@ Read this if you are writing a new adapter or consuming these events
 downstream. See [Architecture](architecture.md) for how the adapter, client,
 and core fit together.
 
+```mermaid
+flowchart LR
+  N["native hook payload<br/>(Claude Code, Codex)"] -- "adapter mapper" --> D["dev event<br/>api/dev-event.schema.json<br/>(checked by internal/conformance)"]
+  D -- "internal/client<br/>buildPayload" --> W["core wire event<br/>Workflow* / Activity* /<br/>SignalReceived"]
+  W -- "POST" --> E["/api/v3/governance/evaluate"]
+```
+
 The schema is the field list. This doc explains what the contract is for and
 why it works the way it does; it does not repeat the schema's fields.
 

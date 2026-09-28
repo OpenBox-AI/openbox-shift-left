@@ -102,7 +102,7 @@ coverage.
 | Refuses a call on a local HALT latch | yes, latch-only, no `/evaluate` round trip | no — receive-only, out of path |
 | Suppressible by the governed tool | no — it observes bytes in path | yes — the tool reports its own calls, so it can under-report |
 | Terminal CLI | covered | covered |
-| Desktop app / browser | on macOS, routed through a system-wide PAC to this relay, but not yet recorded — the capture path keys on a session header the desktop and browser never send; not implemented on Linux or Windows | unconfirmed against a real desktop client |
+| Desktop app / browser | macOS only, through the system-wide PAC: claude.ai chat completions are recorded, one session per conversation (`chat:claude-ai:<uuid>`); other desktop and browser traffic is passed through unrecorded. Not implemented on Linux or Windows | unconfirmed against a real desktop client |
 | Subscription-OAuth session | unconfirmed | unconfirmed |
 
 See [Architecture](architecture.md) for the CA and PAC design this depends on.
@@ -134,12 +134,11 @@ pricing table).
   tool output. Claude Code: `PostToolUse` → `completed`, `PostToolUseFailure`
   → `failed` (the two hooks are mutually exclusive per call). Codex: not
   reported — see §1.
-- **Assistant turn text → `activity_output.content`**: Claude Code only,
-  from the `Stop`/`SubagentStop` payload's `last_assistant_message`, gated on
+- **Assistant turn text → `activity_output.content`**: both providers, from
+  the `Stop`/`SubagentStop` payload's `last_assistant_message`, gated on
   `content_capture` (on by default) and `finops`, redacted for secrets before
-  attachment, then capped at 64KB. Codex's hook payload carries the same
-  field, but nothing wires `Stop` yet, so Codex sessions do not feed this
-  event and do not carry a goal-alignment signal from turn text today.
+  attachment, then capped at 64KB. Thinking rides the same turn under
+  `activity_output.thinking`.
 - **`error_type`**: passed through an allowlist of the provider's own error
   values — never free text, since the underlying JSON key also carries a
   tool's own error string on a different hook.
@@ -165,12 +164,11 @@ These are documented gaps, not missing work:
    because it already has a job: closing a turn.
 3. **Compaction internals stay out of scope.** `PreCompact`/`PostCompact` are
    wired as boundary signals; what compaction actually drops is not modeled.
-4. **Content parity between providers is not a goal.** Claude Code egresses
-   the final turn's text, tool input/output, the failure detail, and the
-   model's thinking, all under `content_capture`. Codex egresses only the
-   redacted prompt today — no tool output, no thinking. A session on one
-   provider sends materially more content than the same session on the
-   other; state the asymmetry rather than average across it.
+4. **Content parity between providers is not a goal.** Both egress the
+   prompt, the turn's reply text and thinking under `content_capture`. Only
+   Claude Code also egresses tool input/output and failure detail: Codex hooks
+   do not carry them (a gated Codex call still sends its tool input for the
+   decision). State the asymmetry rather than average across it.
 5. **Non-session telemetry is dropped, not synthesized.** Every event needs a
    resolvable `openbox_session_id`; a signal that has none is not emitted.
 6. **One `ToolCall` per invocation**, even where a hook surface offers both a
@@ -209,8 +207,8 @@ approval decides, and the adapter renders only its outcome (allow, deny, or a
 denial naming the approval reference if it went unanswered). On Claude Code
 this avoids asking the developer to approve their own filed request; on
 Codex there is no "ask" verb to render at all, and a fallthrough would run
-the tool ungoverned, so deny is the safe mapping. The deny-and-retry design
-behind this is described in [Architecture](architecture.md) under Approvals.
+the tool ungoverned, so deny is the safe mapping. What the developer sees is
+described in [Getting started § Approvals](getting-started.md#approvals).
 
 **Assurance caveat.** This is all enforced by a user-local hook. Until a
 centrally managed provider config is deployed, a developer can remove the

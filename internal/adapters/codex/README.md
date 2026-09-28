@@ -9,8 +9,10 @@ never block, deny, or slow a Codex tool call (INV-3). The **enforce leg**
 (`enforce.go`, `outputcontract.go`, `promptgate.go`, `permissiongate.go`) is a
 separate path and does deny — three gate classes (`PreToolUse`,
 `UserPromptSubmit`, `PermissionRequest`), each evaluated by `/evaluate`, on by
-default. A session-terminating HALT on the prompt gate latches, and every later
-gated call in that session replays it locally. See `capabilities.go`'s
+default. A HALT verdict from any of the three latches the run, and every later
+gated call in it is denied locally without a further round trip. A delivery
+failure (an outage, a timeout) is different: it denies only the call it
+happened on and never latches. See `capabilities.go`'s
 `verdict.apply` and `enforce.rewrite` for what each may do, **and for the limits
 that bound every enforcement claim here** — hooks are a guardrail, not a complete
 boundary.
@@ -286,10 +288,13 @@ for a gated hook to fall back to (`TestObserveByteParity_EnforceOff` is gone;
 `TestObserveByteParity_NeverGatedHooks` covers only the hook classes that were
 never gated in the first place). Enforcement gates **three** hook classes --
 `PreToolUse`, `PermissionRequest`, `UserPromptSubmit` -- each pre-execution,
-hard-bounded, single-attempt and unconditionally fail-closed: an outage
-denies the call and, once an attempt is actually sent and explicitly refused,
-halts the run. Exit code is always 0; we speak Codex's
-output JSON, never the exit-2 block signal.
+hard-bounded and fail-closed: an outage, or an explicit refusal, denies that
+call. That denial never stops the run by itself: a transient failure (or a
+401/429) requeues the call's record for a later drain, and the next gated call
+gets its own fresh attempt. Only a real
+HALT verdict from core stops the run, by latching it for every later gated
+call. Exit code is always 0; we speak Codex's output JSON, never the exit-2
+block signal.
 
 The cascade is the shipped Claude Code enforcement stack (`decision/` consumed
 unchanged, an in-process decider; no socket, no daemon, microseconds, no network
@@ -307,12 +312,14 @@ loop. Only the two provider edges differ from CC; the middle is shared.
   (measured live: a failed/timed-out PreToolUse hook fails **open**). So the only
   usable levers are **`deny` + reason** (block) and **`allow` + `updatedInput`**
   (redact-and-proceed).
-- **REQUIRE_APPROVAL → `deny`**. CC maps it to `ask`;
-  Codex rejects `ask`, and a no-decision fallthrough under
-  `approval_policy=never` **auto-runs** the tool ungoverned (measured live).
-  No approval-policy mode could be *proven* to surface a native prompt
-  within the harness (`codex exec` is non-interactive), so
-  **every** REQUIRE_APPROVAL quadrant emits a content-free DENY; strictly
+- **REQUIRE_APPROVAL → `deny`**. Neither adapter ever renders the provider's
+  own native "ask" prompt for this — CC holds it for a real decision and
+  denies/blocks if unanswered, never the `ask` verb. Codex's PreToolUse enum
+  even has an `ask` literal, but the runtime output parser rejects it outright,
+  and a no-decision fallthrough under `approval_policy=never` **auto-runs** the
+  tool ungoverned (measured live). No approval-policy mode could be *proven* to
+  surface a native prompt within the harness (`codex exec` is non-interactive),
+  so **every** REQUIRE_APPROVAL quadrant emits a content-free DENY; strictly
   tighter, never a silent proceed. *(The approval hold narrows when that fires. A high-risk
   REQUIRE_APPROVAL now escalates rather than being answered locally, so the deny
   is what an undecided approval degrades to after the bounded hold, not the
