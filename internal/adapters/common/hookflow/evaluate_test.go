@@ -9,6 +9,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
 
@@ -51,12 +52,14 @@ func (explicitFailGovernor) PollApproval(context.Context, client.ApprovalKey) (c
 
 // TestEscalate_ExplicitFailureOutcomeSurvivesALateUnansweredReport pins the
 // first-wins guarantee an escalation's outcome report needs: run's own
-// goroutine can report an explicit failure (having already latched the run)
-// strictly before Escalate's own timeout branch gets a chance to report
-// Unanswered for the very same call -- run reports before its result ever
+// goroutine can report an explicit failure (already recorded through
+// RecordDeliveryFailure, never latched) strictly before Escalate's own
+// timeout branch gets a chance to report Unanswered for the very same
+// call -- run reports before its result ever
 // reaches the channel Escalate selects on, so a naive last-write callback
 // would let the later, stale Unanswered overwrite the correct Settled and
-// wrongly requeue an event whose one attempt already failed and latched.
+// wrongly requeue an event whose one attempt already failed and was
+// recorded.
 //
 // Deterministic: no timing race. run() is called directly with a long-lived
 // ctx (so its own unanswered check reads false, exactly as it would for a
@@ -87,10 +90,10 @@ func TestEscalate_ExplicitFailureOutcomeSurvivesALateUnansweredReport(t *testing
 	rep.report(EscalationUnanswered)
 
 	if got != EscalationSettled {
-		t.Fatalf("reported outcome = %v, want EscalationSettled: an explicit failure that already latched the run must win over a later, stale Unanswered report", got)
+		t.Fatalf("reported outcome = %v, want EscalationSettled: an explicit failure that already reported must win over a later, stale Unanswered report", got)
 	}
-	if _, halted := SessionHalted("run-first-wins"); !halted {
-		t.Fatal("the explicit failure must have latched the run")
+	if _, halted := SessionHalted("run-first-wins"); halted {
+		t.Fatal("the explicit failure must never latch the run")
 	}
 }
 
@@ -115,8 +118,8 @@ func TestEscalate_ExplicitFailureReportsSettledThroughTheRealPath(t *testing.T) 
 	if got != EscalationSettled {
 		t.Fatalf("reported outcome = %v, want EscalationSettled", got)
 	}
-	if _, halted := SessionHalted("run-through-escalate"); !halted {
-		t.Fatal("the explicit failure must have latched the run")
+	if _, halted := SessionHalted("run-through-escalate"); halted {
+		t.Fatal("the explicit failure must never latch the run")
 	}
 }
 
@@ -146,4 +149,57 @@ func TestEscalationReport_FirstCallWinsEitherOrder(t *testing.T) {
 		rep := newEscalationReport(nil)
 		rep.report(EscalationSettled) // must not panic
 	})
+}
+
+// TestRunWith_401And429AreUnansweredOtherRefusalsAreSettledAndUnlatched pins
+// the exact classification evaluate.go's implementation depends on,
+// through a REAL client against a real HTTP status
+// (client.FailureClass/isRefusal's own contract, not a fake error): 401 and
+// 429 are neither of them a proven, event-specific refusal (core maps a
+// datastore hiccup to 401, and 429 is merely exhausted, per
+// client.ErrRefused's own doc comment), so both are EscalationUnanswered,
+// same as silence -- never recorded, never latched. A proven 4xx refusal
+// (400) is EscalationSettled and recorded via RecordDeliveryFailure, but
+// never latches the run either; only a real HALT verdict still does.
+func TestRunWith_401And429AreUnansweredOtherRefusalsAreSettledAndUnlatched(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		wantOutcome EscalationOutcome
+	}{
+		{"401 identity or datastore fault", 401, EscalationUnanswered},
+		{"429 exhausted, not refused", 429, EscalationUnanswered},
+		{"400 a proven refusal", 400, EscalationSettled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+			fc := fakecore.New(t, fakecore.Script{AlwaysStatus: tc.status})
+			zero := 0
+			key := fakecore.APIKey()
+			cl, err := client.New(client.Config{
+				BaseURL:            fc.URL(),
+				APIKey:             key,
+				WorkloadPrivateKey: fakecore.WorkloadPrivateKey(),
+				MaxRetries:         &zero,
+			})
+			if err != nil {
+				t.Fatalf("client.New: %v", err)
+			}
+
+			var got EscalationOutcome = -1
+			ev := client.DevEvent{
+				SchemaVersion: client.SchemaVersion, EventID: "e-" + tc.name, EventType: client.EventToolCall,
+				SessionID: "sess-" + tc.name, DeveloperDID: "did:aip:dev", Timestamp: "2026-08-01T12:00:00Z",
+			}
+			evaluator := Evaluator{OnOutcome: func(o EscalationOutcome) { got = o }}
+			evaluator.runWith(context.Background(), nopLogger(), ev, cl)
+
+			if got != tc.wantOutcome {
+				t.Errorf("outcome = %v, want %v", got, tc.wantOutcome)
+			}
+			if _, halted := SessionHalted(ev.SessionID); halted {
+				t.Error("no failure class reaching runWith may ever latch the run")
+			}
+		})
+	}
 }

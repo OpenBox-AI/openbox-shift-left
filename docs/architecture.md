@@ -69,25 +69,43 @@ at most the first 64KB.
   all go through **one ordered queue per session**. There is one drainer per
   session, and events are delivered in the order they were appended.
 - Every event gets **one delivery attempt**, plus **exactly one retry** when
-  that attempt failed transiently: a timeout, a network error or a 5xx. A 401,
-  a 429 or any other 4xx is not retried.
-- If the platform still does not accept an event, the client **halts that
-  session's current run**: it writes a local latch that refuses every later
-  gated call, prompt and relayed model call in that run. A new session starts
-  clean.
+  that attempt failed transiently: a timeout, a network error or a 5xx. A 401
+  gets its own separate handling (below); any other 4xx is not retried.
+- A 401 is treated as transient rather than a proven refusal: the client
+  retries it exactly once with a force-refreshed token (the cached or
+  just-issued token is invalidated and a fresh one fetched cold before the
+  retry). In a gate's own live evaluation, a 401 or 429 that still fails after
+  that requeues the call's own observe copy for a later drain instead of
+  ledgering it, so it still gets another attempt once the platform (or the
+  agent's own standing) recovers.
+- **A delivery failure no longer halts the run.** If the platform still does
+  not accept an event -- including after the 401 retry and the one ordinary
+  retry above -- the client denies only the call that event belongs to and
+  records a content-free finding; it writes no latch. The run's NEXT gated
+  call, prompt or relayed model call gets its own fresh attempt, independent
+  of the failure before it. A new session is, as ever, unaffected either way.
+- **Only a real HALT verdict from the platform halts a run.** That writes a
+  local latch that refuses every later gated call, prompt and relayed model
+  call in that run, with no further round trip, until a new session starts.
 - When the gate's own evaluation fails transiently, the call is still denied,
   but the run is not halted on the spot: the call's record goes back to the
   queue, and its delivery attempt and retry decide.
 - `WorkflowStarted` (session start) always reaches the platform before any
-  other event of the run. Beyond that, ordering is best effort: a gate may
-  send its own evaluation before older queued events if the queue is busy.
+  other event of the run. A gate's own drain step normally waits up to 5s for
+  a busy session's queue lock before falling back to its own evaluation, but
+  once that run's `WorkflowStarted` has actually been accepted, a per-run
+  marker lets a later gate skip that wait entirely (a try-lock instead) --
+  the ordering guarantee, not the wait, is what a gate actually needs. Beyond
+  `WorkflowStarted`-first, ordering is best effort: a gate may send its own
+  evaluation before older queued events if the queue is busy.
 
 Why only one retry: a platform hiccup retried without limit by every tool call
 of every session turns into a flood. One retry lets a long session survive a
-brief blip, and a real outage still ends in a visible, bounded halt. The cost:
-the platform only deduplicates a resend once it has finished processing the
-first attempt, so a retry that races an attempt still in flight can store the
-event twice.
+brief blip, and a real, ongoing outage still ends in every affected call being
+denied on its own account, without needing a persistent, unrecoverable latch
+to say so. The cost: the platform only deduplicates a resend once it has
+finished processing the first attempt, so a retry that races an attempt still
+in flight can store the event twice.
 
 The implementation lives in `internal/adapters/common/hookflow/`.
 
@@ -139,9 +157,11 @@ a slow renewal is cut short and the old token keeps serving, and each running
 lane daemon renews every configured tool's cache in the background
 (`cmd/openbox/tokenwarmer.go`; timings in
 `internal/client/workloadauth/cache.go`). A cached token that gets a 401 is
-deleted, not retried. A failure anywhere in
-this exchange counts as a delivery failure: the call is denied and the run
-halts.
+invalidated, and the client retries once with a freshly fetched token before
+giving up (see "Delivery and halts" above) -- a cached-but-stale token no
+longer ends the call on its own. A failure anywhere in this exchange -- the
+401 retry included -- counts as a delivery failure: the call is denied, but
+the run itself is not halted.
 
 A `did:aip:…` attribution label is derived from the agent id in memory. It is
 never stored.

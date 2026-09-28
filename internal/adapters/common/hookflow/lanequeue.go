@@ -64,7 +64,7 @@ type LaneQueue struct {
 
 // NewLaneQueue builds a LaneQueue draining through engine using cl. It wraps
 // engine's own Spool.OnFailure (already wired by NewEngine to the discard
-// ledger line plus HaltOnDeliveryFailure) so this queue's own Dropped()
+// ledger line plus RecordDeliveryFailure) so this queue's own Dropped()
 // count -- what a lane daemon's status file discloses to `doctor` -- covers
 // every event a drain attempted and core did not accept, not only an append
 // failure counted directly in Deliver. engine must belong to this queue
@@ -79,10 +79,10 @@ func NewLaneQueue(engine *Engine, cl Emitter, logf func(format string, args ...a
 			return
 		}
 		// Defensive only: every production caller builds engine via NewEngine,
-		// which always wires a non-nil OnFailure (ledger + halt) before a
+		// which always wires a non-nil OnFailure (ledger + finding) before a
 		// LaneQueue is ever built over it.
 		engine.speaking().defaultOnFailure(ev, err)
-		HaltOnDeliveryFailure(log.New(logfWriter{logf: logf}, "", 0), ev, err)
+		RecordDeliveryFailure(log.New(logfWriter{logf: logf}, "", 0), ev, err)
 	}
 	return q
 }
@@ -101,8 +101,8 @@ func (q *LaneQueue) logf(format string, args ...any) {
 // waiting for a hook of the same session to trigger one. An append failure
 // means the record never reached even the spool it would have been
 // delivered from -- counted (Dropped) and, since there is nothing else to
-// retry it with, latched exactly like an unaccepted event
-// (HaltOnDeliveryFailure).
+// retry it with, recorded as a delivery-failure finding exactly like an
+// unaccepted event (RecordDeliveryFailure) -- never a run latch.
 func (q *LaneQueue) Deliver(ctx context.Context, ev client.DevEvent) bool {
 	if err := q.Engine.Spool.Append(ev); err != nil {
 		atomic.AddUint64(&q.dropped, 1)
@@ -110,7 +110,7 @@ func (q *LaneQueue) Deliver(ctx context.Context, ev client.DevEvent) bool {
 		q.Engine.Spool.recordDiscard(q.Engine.Spool.SessionPath(ev.SessionID), 1,
 			"could not be spooled: "+err.Error())
 		tracePoolDropSubmit(ev, "could_not_be_spooled")
-		HaltOnDeliveryFailure(log.New(logfWriter{logf: q.logf}, "", 0), ev, err)
+		RecordDeliveryFailure(log.New(logfWriter{logf: q.logf}, "", 0), ev, err)
 		return false
 	}
 	q.Kick(ev.SessionID)
@@ -189,8 +189,9 @@ func (q *LaneQueue) drain(sessionID string) {
 
 // Dropped is every record this queue could not deliver: an append that never
 // reached the spool, plus every event a drain pass attempted and core did
-// not accept. Both already latch their own run through HaltOnDeliveryFailure;
-// this is `doctor`'s disclosure count, not a second decision.
+// not accept. Both already recorded their own delivery-failure finding
+// through RecordDeliveryFailure (never a run latch); this is `doctor`'s
+// disclosure count, not a second decision.
 func (q *LaneQueue) Dropped() uint64 { return atomic.LoadUint64(&q.dropped) }
 
 // Close stops Kick starting any new drain and waits for every in-flight one

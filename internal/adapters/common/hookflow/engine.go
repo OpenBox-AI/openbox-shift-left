@@ -47,12 +47,13 @@ func (e *Engine) logf(format string, args ...any) {
 // NewEngine builds an Engine spooling under dir and writing Advisory records
 // to the default developer-scoped sink.
 //
-// Its Spool.OnFailure is wired here, once, to the delivery-failure halt: the
-// ledger line every drainer already wrote (defaultOnFailure, unchanged),
-// plus HaltOnDeliveryFailure's write-if-absent run latch. Every drainer built
-// on this Engine (the hook flusher, the periodic sweep, a lane daemon's own
-// queue, a gate's own future drain) inherits it from this one place; nothing
-// downstream sets Spool.OnFailure again.
+// Its Spool.OnFailure is wired here, once, to the delivery-failure finding:
+// the ledger line every drainer already wrote (defaultOnFailure, unchanged),
+// plus RecordDeliveryFailure's own log line and trace record -- never a run
+// latch. Every drainer built on this Engine
+// (the hook flusher, the periodic sweep, a lane daemon's own queue, a gate's
+// own drain) inherits it from this one place; nothing downstream sets
+// Spool.OnFailure again.
 func NewEngine(spoolDir string) *Engine {
 	e := &Engine{
 		Spool:     Spool{Dir: spoolDir},
@@ -66,7 +67,7 @@ func NewEngine(spoolDir string) *Engine {
 		// NewEngine returns), the same copy every drain path already logs
 		// through.
 		e.speaking().defaultOnFailure(ev, err)
-		HaltOnDeliveryFailure(log.New(logfWriter{logf: e.logf}, "", 0), ev, err)
+		RecordDeliveryFailure(log.New(logfWriter{logf: e.logf}, "", 0), ev, err)
 	}
 	return e
 }

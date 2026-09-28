@@ -261,7 +261,8 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | A secret is rewritten before it reaches either the disk or the wire | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalRedactionRunsBeforeAttachment` (`redaction`) |
 | A session's first core row is `WorkflowStarted` | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`start-first`) |
 | Every delivery-failure class is exactly one attempt | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalOneAttemptPerFailureClass` (`one-attempt`) |
-| An unaccepted event halts the rest of its run | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers` (`halted-after-failure`) |
+| An unaccepted event denies only its own call, never latches the rest of the run | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalCoreDownAtSessionStartDeniesAndRecovers` |
+| Once a REAL HALT verdict latches a run, every later gated call of it also denies | E2 | `cmd/openbox/governanceeval_graders_test.go` · `TestGovernanceEvalGraders` (`halted-after-failure`) |
 | A HALT refuses the rest of the run without asking again | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalHaltLatchesTheRestOfTheRun` |
 | An approval unanswered denies, rejected denies, granted proceeds | E2 | `cmd/openbox/governanceeval_verdicts_test.go` · `TestGovernanceEvalApproval` |
 | Every grader can actually fail | E2 | `cmd/openbox/governanceeval_scenarios_test.go` · `TestGovernanceEvalMutations` |

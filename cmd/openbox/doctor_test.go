@@ -411,9 +411,10 @@ func TestDoctorReportsOfflineAlwaysDeniesAndFailClosed(t *testing.T) {
 	}
 }
 
-// TestDoctorReportsHaltedRuns covers the latch row: doctor shows the latch
-// count and, per latched run, the preserved cause -- never the reason text
-// (INV-2 content-free), which a delivery failure's own latch also carries.
+// TestDoctorReportsHaltedRuns covers the latch row: only a live HALT verdict
+// (Cause == "") counts as a halted run; doctor shows the latch count and,
+// per latched run, "verdict" and the event type -- never the reason text
+// (INV-2 content-free).
 func TestDoctorReportsHaltedRuns(t *testing.T) {
 	isolateHomeUnbound(t)
 
@@ -425,9 +426,9 @@ func TestDoctorReportsHaltedRuns(t *testing.T) {
 		t.Errorf("an unlatched machine must not render the halted-runs section:\n%s", out)
 	}
 
-	hookflow.HaltOnDeliveryFailure(discardMainLogger(), client.DevEvent{
-		EventID: "e1", EventType: client.EventToolCall, SessionID: "sess-doctor-halt",
-	}, client.ErrDelivery)
+	hookflow.WriteSessionHalt(discardMainLogger(), "sess-doctor-halt", client.Evaluation{
+		Verdict: client.VerdictHalt, Reason: "policy says stop", PolicyID: "pol-1",
+	})
 
 	out, code = runDoctorHere(t)
 	if code != exitOK {
@@ -439,19 +440,67 @@ func TestDoctorReportsHaltedRuns(t *testing.T) {
 	if !strings.Contains(out, "1 run(s) total") {
 		t.Errorf("doctor does not report the latch count:\n%s", out)
 	}
-	if !strings.Contains(out, client.FailureClass(client.ErrDelivery)) || !strings.Contains(out, "ToolCall") {
-		t.Errorf("doctor does not name the preserved cause and event type:\n%s", out)
+	if !strings.Contains(out, "verdict") {
+		t.Errorf("doctor does not name a policy latch's cause as \"verdict\":\n%s", out)
 	}
 	if !strings.Contains(out, "never expire") {
-		t.Errorf("doctor does not say latches never expire on their own:\n%s", out)
+		t.Errorf("doctor does not say a policy latch never expires on its own:\n%s", out)
 	}
 }
 
-// TestDoctorRendersAnEmptyLatchAsUnreadableNotBlank: WriteSessionHaltIfAbsent's
-// create-then-write leaves a brief window where a concurrent reader can see
-// a present but empty (0-byte) file; doctor must still count and report it,
-// with a generic "(unreadable)" row rather than a blank line or a panic --
-// the same treatment a corrupt (non-JSON) latch already gets.
+// TestDoctorReportsLegacyDeliveryFailureLatchesAsIgnored: a delivery failure
+// no longer writes a latch at all (RecordDeliveryFailure). What this test
+// exercises is the on-disk artifact an OLDER binary left behind before that
+// ruling -- a latch file with Cause != "" -- which SessionHalted now
+// ignores. Doctor must not count it toward "halted"; it reports it
+// separately, named ignored/legacy, so an operator can still see and clear
+// the stale file. Written directly as a raw file (no writer in the current
+// binary produces one with a non-empty Cause anymore): doctor's own
+// reportHaltedRuns reads every "*.json" file under the halt dir, so the
+// exact filename does not need to match haltPath's own hash scheme.
+func TestDoctorReportsLegacyDeliveryFailureLatchesAsIgnored(t *testing.T) {
+	isolateHomeUnbound(t)
+
+	haltDir := hookflow.DefaultHaltDir()
+	if err := os.MkdirAll(haltDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := json.Marshal(hookflow.SessionHaltInfo{
+		Cause:     client.FailureClass(client.ErrDelivery),
+		EventType: string(client.EventToolCall),
+		TS:        "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(haltDir, "sess-doctor-legacy-abcd1234.json"), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runDoctorHere(t)
+	if code != exitOK {
+		t.Fatalf("doctor exit = %d, want %d:\n%s", code, exitOK, out)
+	}
+	if strings.Contains(out, "Halted runs") {
+		t.Errorf("a delivery-failure record must not be counted as a halted run:\n%s", out)
+	}
+	if !strings.Contains(out, "Ignored legacy delivery-failure latches") {
+		t.Fatalf("doctor does not report the ignored legacy latch:\n%s", out)
+	}
+	if !strings.Contains(out, "1 file(s) total") {
+		t.Errorf("doctor does not report the ignored-latch count:\n%s", out)
+	}
+	if !strings.Contains(out, client.FailureClass(client.ErrDelivery)) || !strings.Contains(out, "ToolCall") {
+		t.Errorf("doctor does not name the preserved cause and event type for the ignored latch:\n%s", out)
+	}
+}
+
+// TestDoctorRendersAnEmptyLatchAsUnreadableNotBlank: an empty (0-byte) latch
+// file -- the shape an older binary's own create-then-write window could
+// leave a concurrent reader mid-write, before RecordDeliveryFailure stopped
+// writing latches at all -- must still be counted and reported, with a
+// generic "(unreadable)" row rather than a blank line or a panic -- the same
+// treatment a corrupt (non-JSON) latch already gets.
 func TestDoctorRendersAnEmptyLatchAsUnreadableNotBlank(t *testing.T) {
 	isolateHomeUnbound(t)
 
@@ -484,9 +533,9 @@ func TestDoctorCapsHaltedRunsListAt10(t *testing.T) {
 
 	const total = 13
 	for i := 0; i < total; i++ {
-		hookflow.HaltOnDeliveryFailure(discardMainLogger(), client.DevEvent{
-			EventID: "e", EventType: client.EventToolCall, SessionID: fmt.Sprintf("sess-cap-%02d", i),
-		}, client.ErrDelivery)
+		hookflow.WriteSessionHalt(discardMainLogger(), fmt.Sprintf("sess-cap-%02d", i), client.Evaluation{
+			Verdict: client.VerdictHalt, Reason: "policy says stop", PolicyID: "pol-1",
+		})
 	}
 
 	out, code := runDoctorHere(t)
@@ -496,7 +545,7 @@ func TestDoctorCapsHaltedRunsListAt10(t *testing.T) {
 	if !strings.Contains(out, fmt.Sprintf("%d run(s) total", total)) {
 		t.Errorf("doctor does not report the true total count (%d):\n%s", total, out)
 	}
-	row := fmt.Sprintf("%s (%s) at", client.FailureClass(client.ErrDelivery), client.EventToolCall)
+	row := "verdict at"
 	if got := strings.Count(out, row); got != 10 {
 		t.Errorf("doctor rendered %d latch row(s), want exactly the 10 most recent:\n%s", got, out)
 	}

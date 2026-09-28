@@ -216,14 +216,11 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 
 	// sc.AlwaysStatus applies to EVERY /evaluate POST, including SessionStart's
 	// own inline WorkflowStarted delivery -- which now runs, and fails,
-	// BEFORE the gated call ever escalates (SessionStart delivers inline,
-	// and a failed WorkflowStarted halts the run like any other failure). So the run is already latched by the time the gated
-	// call's own gate runs, and it denies via the latch replay without
-	// asking /evaluate again -- not via its own failed escalation. This
-	// supersedes the old ordering pin (the gated call's OWN escalation
-	// failing, evidenced by source=evaluate:fail-open and hits>=1): the
-	// FIRST failure a run hits, whichever event it belongs to, is now what
-	// halts it.
+	// BEFORE the gated call ever escalates. That failure is recorded
+	// (RecordDeliveryFailure) but never latches the run, so the gated
+	// call's own gate still escalates to
+	// /evaluate on its own account, and denies from ITS OWN failed
+	// escalation (source=evaluate:fail-open), never from a latch replay.
 	t.Run("fail-closed-plus-an-outage-denies", func(t *testing.T) {
 		sc := oneCallSession("fail-closed-outage", allowVerdict, true)
 		sc.Posture.FailClosed = "1"
@@ -235,9 +232,9 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 			t.Error("nothing ever reached /evaluate at all")
 		}
 		rec := requireLedgerRow(t, run)
-		if src, _ := rec["source"].(string); src != hookflow.SourceSessionHalt {
-			t.Errorf("the ledger records source %q, want %q; SessionStart's own inline delivery failure "+
-				"should have latched the run before the gated call ever escalated", src, hookflow.SourceSessionHalt)
+		if src, _ := rec["source"].(string); src != hookflow.SourceEvaluateFailOpen {
+			t.Errorf("the ledger records source %q, want %q: the gated call's own escalation failed on its "+
+				"own account, since SessionStart's earlier delivery failure no longer latches the run", src, hookflow.SourceEvaluateFailOpen)
 		}
 		if d.Reason == "" {
 			t.Error("a fail-closed deny gave the coding agent no reason at all")
@@ -247,10 +244,10 @@ func TestGovernanceEvalFailClosed(t *testing.T) {
 				t.Errorf("the fail-closed reason quoted the tool content (%q); it must be content-free: %q", leak, d.Reason)
 			}
 		}
-		// An outage now IS a run-halting condition, the
-		// opposite of the old "an outage is not a kill switch" pin.
-		if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
-			t.Errorf("%d session halt latch(es) were written, want exactly 1", n)
+		// An outage no longer latches the run: no session-halt file is ever
+		// written, only each independently-failing call's own finding.
+		if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 0 {
+			t.Errorf("%d session halt latch(es) were written, want 0: a delivery failure no longer latches the run", n)
 		}
 	})
 }

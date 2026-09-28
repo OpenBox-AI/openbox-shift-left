@@ -118,27 +118,44 @@ non-acceptance): delivery rules are the same for every producer. Fabricating a
 completion would be worse than either asymmetry. Check per `activity_id`, never
 by parity.
 
-**Delivery is all-or-nothing; ordering beyond `WorkflowStarted`-first is
-best-effort.** One drainer per session, append order == delivery order, one
+**A delivery failure denies only its own call and never latches the run;
+ordering beyond `WorkflowStarted`-first is best-effort.** One drainer per session, append order == delivery order, one
 attempt per event plus exactly one retry for a transient failure
-(`client.RetryableDelivery`: timeout, network, 5xx; never 401, 429 or other
-4xx), made only if the pass has a full attempt left, else the event stays
-queued unscored and the next pass starts it over. A gate's own transient
-escalation failure requeues the observe copy instead of latching. An event
-still unaccepted ledgers and latches its run (write-if-absent: whichever cause
-reaches a run's first failure wins); appenders never wait on the drain lock. A
-gate drains its own session's backlog within the slack its escalation budget
-leaves, waiting at most `MaxStripeWait` (5s) for the session's stripe if
-another drainer holds it; once it holds the stripe, the drain gets the FULL
-remaining slack -- the cap bounds the wait for contention, not an uncontended
-drain. An event the drain could not start stays queued, and this call's own
-escalation may still reach core before it: **`WorkflowStarted` reaching core
-before anything else of the run is the one guaranteed invariant.** An event the
-drain sent but never heard back from within its budget is requeued for the 30s
-drainers; core dedupes that resend on its idempotency key only if it finished
-processing the first attempt before the resend arrives, so a resend racing a
-still-in-flight first attempt can produce two rows. `enforce`/`fail_closed` are
-parsed so `openbox doctor` can warn, not honoured
+(`client.RetryableDelivery`: timeout, network, 5xx; a 401 is retried too, but
+separately -- see below; any other 4xx is never retried), made only if the
+pass has a full attempt left, else the event stays queued unscored and the
+next pass starts it over. A 401 gets one further, out-of-budget retry inside
+`client.Client.post` with a force-refreshed token (`Invalidate` then one more
+attempt) before it counts as failed at all -- a spurious 401 (core mapping a
+transient datastore error during agent lookup) recovers silently; a durably
+rejected identity still fails after it. A gate's own live escalation treats
+BOTH a transient failure and a 401/429 the same way: the call is denied, but
+its own record requeues (`SpoolObserveHead`) for a later drain instead of
+being ledgered, so it still gets another attempt once the condition clears.
+An event that exhausts its attempt and retry outside a gate's own escalation
+(a lane drain, a detached flusher) is recorded (`hookflow.RecordDeliveryFailure`:
+a content-free trace/log finding, trace stage `delivery.failed`) and
+ledgered-and-discarded -- it writes NO latch, and the run's next gated call,
+prompt or relayed model call gets its own fresh attempt regardless of this
+one's outcome; appenders never wait on the drain lock. Only a REAL HALT
+verdict from core still writes a latch (`WriteSessionHalt`), and
+`SessionHalted` ignores any pre-existing latch file whose `Cause != ""` (an
+old, now-inert delivery-failure latch from before this ruling), so a session
+stuck behind one of those recovers too. A gate drains its own session's
+backlog within the slack its escalation budget leaves; once that run's
+`WorkflowStarted` has been accepted, a per-run marker
+(`<spoolDir>/started/…`, `Spool.markWorkflowStarted`/`WorkflowStartedAccepted`,
+written the moment a drain actually delivers that event) switches the gate's
+own stripe acquisition to Try mode -- give up on a busy stripe at once
+instead of waiting `MaxStripeWait` (5s) for it -- the wait is only for a run
+that has not yet proven it can reach core at all. An event the drain could not start stays queued, and this call's
+own escalation may still reach core before it: **`WorkflowStarted` reaching
+core before anything else of the run is the one guaranteed invariant.** An
+event the drain sent but never heard back from within its budget is requeued
+for the 30s drainers; core dedupes that resend on its idempotency key only if
+it finished processing the first attempt before the resend arrives, so a
+resend racing a still-in-flight first attempt can produce two rows.
+`enforce`/`fail_closed` are parsed so `openbox doctor` can warn, not honoured
 (`devconfig.ResolveEnforce()`/`ResolveFailurePolicy()` are hardcoded).
 
 **Bounds have owners.** `MaxCommandLen` bounds a local decision request, never
@@ -182,7 +199,8 @@ writing the PAC** (a distrusted leaf makes `; DIRECT` meaningless), and **record
 every prior value before the first privileged write**, with a `Pending` marker,
 so a killed run leaves something the next `init` can reconcile rather than
 stranding a half-applied trust/PAC pair. Both orderings are invariants, not
-preferences. The relay's cross-lane HALT latch resolves a session off
+preferences. The relay's cross-lane HALT latch -- a real HALT verdict only; a
+delivery failure no longer writes one at all -- resolves a session off
 `sessionkey.ResolveProxy`'s carrier header (Claude Code's
 `X-Claude-Code-Session-Id`; Codex's thread id off `x-client-request-id`, never
 its `session-id` header, which is a prompt-cache key), so that header must stay

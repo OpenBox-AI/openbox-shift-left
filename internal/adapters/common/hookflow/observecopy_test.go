@@ -53,19 +53,20 @@ func TestGate_ObserveCopySkippedWhenEscalationDelivered(t *testing.T) {
 	}
 }
 
-// TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy a
-// non-transient failure of the escalation (401, 429, other 4xx, or an event
-// that could not be built) earns no retry: it halts the run
-// (HaltOnDeliveryFailure) rather than re-spooling a local copy. A transient
-// failure instead requeues the copy for the drainers
+// TestGate_ExplicitDeliveryFailureRecordsAFindingAndSkipsTheObserveCopy a
+// non-transient, proven refusal of the escalation (other 4xx, or an event
+// that could not be built) earns no retry: it is recorded as a finding
+// (RecordDeliveryFailure) rather than re-spooling a local copy, but never
+// latches the run. A transient failure instead requeues the copy for the
+// drainers
 // (TestGate_TransientEscalationFailureRequeuesTheObserveCopy).
-func TestGate_ExplicitDeliveryFailureLatchesAndSkipsTheObserveCopy(t *testing.T) {
+func TestGate_ExplicitDeliveryFailureRecordsAFindingAndSkipsTheObserveCopy(t *testing.T) {
 	gov := degradedGovernor{fakeGovernor: &fakeGovernor{}}
 	if deliveringGate(t, gov, "1") {
-		t.Error("an explicit delivery failure must not re-spool the observe copy; it is already latched and the event already had its one attempt")
+		t.Error("an explicit delivery failure must not re-spool the observe copy; it is already recorded and the event already had its one attempt")
 	}
-	if _, halted := SessionHalted("sess-1"); !halted {
-		t.Error("an explicit, proven non-acceptance must halt the run")
+	if _, halted := SessionHalted("sess-1"); halted {
+		t.Error("an explicit, proven non-acceptance must never latch the run")
 	}
 }
 

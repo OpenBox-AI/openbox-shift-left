@@ -219,10 +219,10 @@ func traceStripeWait(sessionID string, mode DrainMode, start time.Time, outcome 
 	})
 }
 
-// traceLatchSet records a run being latched -- halted, either by a live HALT
-// verdict (WriteSessionHalt) or by an unaccepted event/orphaned drain
-// (WriteSessionHaltIfAbsent, HaltOnDeliveryFailure) -- the moment the latch
-// file was actually (newly) written. runID is the run this Reason/Cause now
+// traceLatchSet records a run being latched -- halted by a live HALT verdict
+// (WriteSessionHalt; an unaccepted event never latches --
+// RecordDeliveryFailure never writes this) -- the moment the latch file
+// was actually (newly) written. runID is the run this Reason/Cause now
 // answers every later gated call for.
 func traceLatchSet(runID string, info SessionHaltInfo) {
 	trace.Emit(trace.Record{

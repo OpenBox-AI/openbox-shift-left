@@ -191,9 +191,12 @@ func (f *Server) HeldByKey() map[string]int {
 	return out
 }
 
-// TransientByKey narrows AttemptsByKey to the attempts answered with a 5xx:
-// the transient failures a drainer retries once. With HeldByKey it is what
-// OneAttempt accepts as the reason an event was sent again.
+// TransientByKey narrows AttemptsByKey to the attempts answered with a 5xx
+// or a 401 (a gate's own escalation requeues the observe copy on either):
+// the failures that can earn an event a LATER resend, at a subsequent
+// gated call's own drain, not merely the drainer's own single immediate
+// retry. With HeldByKey it is what OneAttempt accepts as the reason an
+// event was sent again.
 func (f *Server) TransientByKey() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -386,10 +389,27 @@ func (f *Server) v3AuthOK(r *http.Request) bool {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.v3SpuriousUnauthorizedRemaining > 0 {
+		f.v3SpuriousUnauthorizedRemaining--
+		return false
+	}
 	if f.v3Revoked {
 		return false
 	}
 	return f.v3IssuedTokens[tok]
+}
+
+// SpuriousUnauthorizedOnce makes the NEXT v3 runtime-route request (evaluate,
+// approval or validate) answer 401 regardless of an otherwise-valid workload
+// token, exactly once, then behave normally again -- modeling the spurious
+// 401 client.go's own doc comment describes core producing when it maps a
+// transient datastore error during agent lookup to 401 on an agent that was
+// never actually revoked. A caller's own single further cold retry
+// (client.Client.post) is what is expected to absorb this and still succeed.
+func (f *Server) SpuriousUnauthorizedOnce() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.v3SpuriousUnauthorizedRemaining = 1
 }
 
 // writeV3Unauthorized answers the flat v3 401 core sends for evaluate,
@@ -412,6 +432,14 @@ func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []b
 	f.mu.Unlock()
 
 	if !f.v3AuthOK(r) {
+		// A 401 in a gate's own escalation now requeues the observe copy
+		// rather than ledgering it after one
+		// retry, so the SAME idempotency key can legitimately reach this
+		// route again on a LATER gated call's own drain -- tracked here
+		// exactly like a 5xx, so OneAttempt's own budget accounts for it.
+		f.mu.Lock()
+		f.v3EvaluateTransientKeys = append(f.v3EvaluateTransientKeys, idemKey)
+		f.mu.Unlock()
 		f.writeV3Unauthorized(w)
 		return
 	}

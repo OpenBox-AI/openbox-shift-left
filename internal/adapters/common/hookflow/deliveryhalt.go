@@ -2,46 +2,51 @@ package hookflow
 
 import (
 	"errors"
-	"fmt"
 	"log"
-	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
-// HaltOnDeliveryFailure is the one writer for "core did not accept this
+// RecordDeliveryFailure is the one writer for "core did not accept this
 // event", shared by every drainer (wired as the Engine's default
 // Spool.OnFailure -- see NewEngine, which also records the caller's own
 // discard-ledger line alongside this) and a gate's own escalation, for an
-// explicit, proven non-acceptance (Evaluator.run): a write-if-absent halt
-// latch on the event's own run (runIDFor), naming the event and the failure
-// class (client.FailureClass), content-free (INV-2). Every later gated call,
-// prompt and relayed model call of that run is refused with this reason until
-// a new session starts.
+// explicit, proven non-acceptance (Evaluator.runWith): a content-free finding
+// (INV-2), naming the event and the failure class (client.FailureClass), both
+// logged and traced (trace.StageDeliveryFailed).
 //
-// Write-if-absent (WriteSessionHaltIfAbsent): an existing latch, whichever
-// cause reached it first -- a live HALT verdict, or an earlier delivery
-// failure -- is left exactly as it is. A crash-orphan reclaim (a drainer that
-// died mid-delivery, its outcome unprovable) reaches this the same way,
-// classified "orphaned" rather than misreported as a network fault.
+// It deliberately writes NO latch: the event that failed to deliver is
+// denied on its own account (the caller's own fail-closed
+// EvaluationFailOpen already does that), but the run itself is never
+// stopped -- the next gated call, and the next hook event, get their own
+// fresh attempt. Only a REAL HALT verdict from core (WriteSessionHalt,
+// through Deliver) still stops a run.
 //
 // It never touches a spool's own discard ledger: a caller holding a spooled
 // copy of ev records that separately (its own Spool.defaultOnFailure), since
 // only it knows where its ledger lives; a gate's own escalation has nothing
 // spooled to discard in the first place.
-func HaltOnDeliveryFailure(logger *log.Logger, ev client.DevEvent, err error) {
+func RecordDeliveryFailure(logger *log.Logger, ev client.DevEvent, err error) {
 	class := client.FailureClass(err)
 	if errors.Is(err, errOrphanedDrain) {
 		class = "orphaned"
 	}
-	reason := fmt.Sprintf(
-		"OpenBox could not record %s for this session (%s); the run is halted so nothing it does goes unrecorded. Start a new session to continue.",
-		ev.EventType, class,
-	)
-	WriteSessionHaltIfAbsent(logger, runIDFor(ev), SessionHaltInfo{
-		Reason:    reason,
-		Cause:     class,
+	if logger != nil {
+		logger.Printf("openbox: %s for %s not accepted by core (%s); the run continues, only this event is lost",
+			ev.EventType, ev.SessionID, class)
+	}
+	trace.Emit(trace.Record{
+		SessionID: ev.SessionID,
+		RunID:     ev.RunID,
+		EventID:   ev.EventID,
 		EventType: string(ev.EventType),
-		TS:        time.Now().UTC().Format(time.RFC3339Nano),
+		Stage:     trace.StageDeliveryFailed,
+		Outcome:   "not_accepted",
+		ErrClass:  class,
+		Detail: map[string]any{
+			"class":      class,
+			"event_type": string(ev.EventType),
+		},
 	})
 }

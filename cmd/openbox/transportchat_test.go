@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log"
 	"net/http/httptest"
@@ -79,26 +78,14 @@ func testChatKey(conv string) string {
 	return key
 }
 
-func waitUntilChatHalted(t *testing.T, key string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, halted := hookflow.SessionHalted(key); halted {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("conversation %s was never latched within %s", key, timeout)
-}
-
-// TestChatEventCoreDoesNotAcceptLatchesTheConversation pins: a chat event
-// core answers with a 503 gets one attempt and exactly one retry (fakecore's
-// own AttemptsByKey), the
-// conversation is latched (HaltOnDeliveryFailure, through newChatPool's own
-// deliver closure), and the NEXT completion of that SAME conversation is
-// then refused by haltDecorator naming the event -- while a DIFFERENT
-// conversation is untouched.
-func TestChatEventCoreDoesNotAcceptLatchesTheConversation(t *testing.T) {
+// TestChatEventCoreDoesNotAcceptDoesNotLatchTheConversation proves that a
+// chat event core answers with a 503 gets one attempt and exactly one
+// retry (fakecore's own AttemptsByKey), and the failure is only
+// recorded (hookflow.RecordDeliveryFailure, through newChatPool's own deliver
+// closure) -- it no longer latches the conversation. The NEXT completion of
+// that SAME conversation is therefore resolved ALLOW by haltDecorator, same
+// as a DIFFERENT, unrelated conversation.
+func TestChatEventCoreDoesNotAcceptDoesNotLatchTheConversation(t *testing.T) {
 	memhttptest.RequireBind(t)
 
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
@@ -111,7 +98,7 @@ func TestChatEventCoreDoesNotAcceptLatchesTheConversation(t *testing.T) {
 
 	logger := log.New(io.Discard, "", 0)
 	identities := resolveProviderIdentities(logger.Printf)
-	_, chatDeliver := newChatPool(identities, &hookflow.Advisory{}, logger)
+	pool, chatDeliver := newChatPool(identities, &hookflow.Advisory{}, logger)
 
 	em := &gatewayemit.Emitter{
 		Lane:    gatewayemit.LaneProxy,
@@ -123,8 +110,14 @@ func TestChatEventCoreDoesNotAcceptLatchesTheConversation(t *testing.T) {
 
 	em.Emit(context.Background(), chatCapturedCall(testChatConv))
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool.Close(ctx)
+
 	key := testChatKey(testChatConv)
-	waitUntilChatHalted(t, key, 5*time.Second)
+	if _, halted := hookflow.SessionHalted(key); halted {
+		t.Fatalf("a recorded delivery failure must not latch the conversation")
+	}
 
 	for k, n := range fake.AttemptsByKey() {
 		if n != 2 {
@@ -132,19 +125,16 @@ func TestChatEventCoreDoesNotAcceptLatchesTheConversation(t *testing.T) {
 		}
 	}
 
-	// The run's next completion for the SAME conversation is refused.
+	// The run's next completion for the SAME conversation is still allowed.
 	eval, err := (haltDecorator{logger: logger}).Evaluate(context.Background(), chatCapturedCall(testChatConv))
 	if err != nil {
-		t.Fatalf("Evaluate (latched conversation): %v", err)
+		t.Fatalf("Evaluate (unlatched conversation): %v", err)
 	}
-	if eval.Verdict != client.VerdictHalt {
-		t.Fatalf("a completion for the latched conversation resolved verdict %q, want HALT", eval.Verdict)
-	}
-	if !strings.Contains(eval.Reason, "could not record") {
-		t.Errorf("refusal reason does not name the delivery failure: %q", eval.Reason)
+	if eval.Verdict != client.VerdictAllow {
+		t.Fatalf("a completion for the same conversation resolved verdict %q, want ALLOW", eval.Verdict)
 	}
 
-	// A DIFFERENT conversation is untouched.
+	// A DIFFERENT conversation is untouched either way.
 	otherConv := "7a3c9e1f-2d4b-4f6a-8c0e-5b7d9f1a3c5e"
 	eval, err = (haltDecorator{logger: logger}).Evaluate(context.Background(), chatCapturedCall(otherConv))
 	if err != nil {
@@ -155,10 +145,11 @@ func TestChatEventCoreDoesNotAcceptLatchesTheConversation(t *testing.T) {
 	}
 }
 
-// TestChatPoolSaturationDropLatchesTheConversation pins: a chat event the
-// pool could not even ACCEPT (saturated) never reached core either, so it
-// latches the conversation exactly like an attempted-and-refused one.
-func TestChatPoolSaturationDropLatchesTheConversation(t *testing.T) {
+// TestChatPoolSaturationDropDoesNotLatchTheConversation pins: a chat event the
+// pool could not even ACCEPT (saturated) never reached core either, so it is
+// recorded (hookflow.RecordDeliveryFailure) exactly like an
+// attempted-and-refused one, but that no longer latches the conversation.
+func TestChatPoolSaturationDropDoesNotLatchTheConversation(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	release := make(chan struct{})
@@ -175,7 +166,7 @@ func TestChatPoolSaturationDropLatchesTheConversation(t *testing.T) {
 		if pool.Submit(ev) {
 			return true
 		}
-		hookflow.HaltOnDeliveryFailure(logger, ev, errChatPoolUnavailable)
+		hookflow.RecordDeliveryFailure(logger, ev, errChatPoolUnavailable)
 		return false
 	}
 
@@ -193,14 +184,16 @@ func TestChatPoolSaturationDropLatchesTheConversation(t *testing.T) {
 		t.Fatal("a saturated pool must refuse the second Submit")
 	}
 
-	if _, halted := hookflow.SessionHalted(testChatKey(testChatConv)); !halted {
-		t.Fatal("a chat event the pool could not accept must still latch the conversation")
+	if _, halted := hookflow.SessionHalted(testChatKey(testChatConv)); halted {
+		t.Fatal("a recorded delivery failure (saturation) must not latch the conversation")
 	}
 }
 
 // TestChatLatchFilenameHasNoColon pins: the latch filename for a
 // chat:claude-ai:<uuid> key contains no ':' -- Windows-legal -- through the
-// EXISTING haltPath sanitize+hash mechanism, not a chat-specific one.
+// EXISTING haltPath sanitize+hash mechanism, not a chat-specific one. Latched
+// through a real HALT verdict (WriteSessionHalt): a delivery failure no
+// longer writes a latch file at all, so it cannot exercise this path.
 func TestChatLatchFilenameHasNoColon(t *testing.T) {
 	haltDir := t.TempDir()
 	t.Setenv(devconfig.EnvHaltDir, haltDir)
@@ -209,9 +202,9 @@ func TestChatLatchFilenameHasNoColon(t *testing.T) {
 	if !strings.Contains(key, ":") {
 		t.Fatalf("fixture key %q does not even contain a ':' to prove sanitized away", key)
 	}
-	hookflow.HaltOnDeliveryFailure(log.New(io.Discard, "", 0), client.DevEvent{
-		EventID: "e1", EventType: client.EventTurnStarted, SessionID: key,
-	}, errors.New("503 service unavailable"))
+	hookflow.WriteSessionHalt(log.New(io.Discard, "", 0), key, client.Evaluation{
+		Verdict: client.VerdictHalt, Reason: "policy says stop",
+	})
 
 	entries, err := os.ReadDir(haltDir)
 	if err != nil {
@@ -260,8 +253,8 @@ func TestChatFirstCallStopsAtAnUnacceptedSessionStart(t *testing.T) {
 		t.Fatalf("Close abandoned %d event(s); the pool should have finished", abandoned)
 	}
 
-	if _, halted := hookflow.SessionHalted(testChatKey(testChatConv)); !halted {
-		t.Error("the unaccepted SessionStarted must latch the conversation")
+	if _, halted := hookflow.SessionHalted(testChatKey(testChatConv)); halted {
+		t.Error("an unaccepted SessionStarted must no longer latch the conversation")
 	}
 	attempts := fake.AttemptsByKey()
 	if len(attempts) != 1 {
@@ -273,7 +266,8 @@ func TestChatFirstCallStopsAtAnUnacceptedSessionStart(t *testing.T) {
 }
 
 // TestChatPoolSendsNothingForALatchedConversation: a conversation already
-// latched halted sends no more records. Its drainer can have stopped at the
+// latched halted (by a real HALT verdict; a delivery failure no longer
+// latches) sends no more records. Its drainer can have stopped at the
 // refused record before the rest of that call was even submitted, and a
 // record submitted after that would otherwise start a fresh drainer and go
 // out behind the refusal.
@@ -290,7 +284,9 @@ func TestChatPoolSendsNothingForALatchedConversation(t *testing.T) {
 
 	logger := log.New(io.Discard, "", 0)
 	key := testChatKey(testChatConv)
-	hookflow.HaltOnDeliveryFailure(logger, client.DevEvent{EventID: "earlier", SessionID: key}, errors.New("core did not accept"))
+	hookflow.WriteSessionHalt(logger, key, client.Evaluation{
+		Verdict: client.VerdictHalt, Reason: "policy says stop",
+	})
 
 	identities := resolveProviderIdentities(logger.Printf)
 	pool, chatDeliver := newChatPool(identities, &hookflow.Advisory{}, logger)

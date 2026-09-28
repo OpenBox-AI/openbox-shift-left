@@ -831,11 +831,15 @@ const maxHaltedRunsShown = 10
 
 // reportHaltedRuns lists currently-latched runs: presence is the decided
 // state (sessionhalt.go), so this is a plain directory listing, never a live
-// check. It shows the true total count and, for up to the maxHaltedRunsShown
-// most recent, the preserved cause -- the delivery failure class, or
-// "verdict" for a live HALT -- and the event type it could not record, never
-// the reason text a policy or the event carries, keeping this row inside
-// INV-2's content-free boundary. A latch never expires on its own: it says
+// check. Only a live HALT verdict (Cause == "") still halts a run; a latch
+// file with Cause != "" is a legacy delivery-failure latch from before
+// delivery failures stopped latching runs (SessionHalted itself now ignores
+// these, so a stuck session recovers on its own), and doctor reports it
+// separately, ignored, rather than counting it toward "halted". It shows the
+// true total of each and, for up to the maxHaltedRunsShown most recent
+// halted runs, "verdict" and the event type it could not record, never the
+// reason text a policy or the event carries, keeping this row inside INV-2's
+// content-free boundary. A policy latch never expires on its own: it says
 // so, so an operator does not read a long-unlatched-looking list as "these
 // cleared themselves" -- only a new session (a fresh run id) is ever
 // unhalted, and only `openbox uninstall` removes the latches themselves.
@@ -848,6 +852,7 @@ func (a *app) reportHaltedRuns() {
 
 	type latch struct{ cause, eventType, ts string }
 	var latches []latch
+	var ignored []latch
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -858,40 +863,68 @@ func (a *app) reportHaltedRuns() {
 		}
 		var info hookflow.SessionHaltInfo
 		if len(raw) == 0 || json.Unmarshal(raw, &info) != nil {
-			// A latch that will not parse (or was caught mid-write: the
-			// create-then-write window WriteSessionHaltIfAbsent leaves,
-			// sessionhalt.go) still halts its run (presence is the decided
-			// state); doctor still counts it, just with nothing further to
-			// show, and sorts last (no ts to sort by).
+			// A latch that will not parse (corrupt, or an empty/0-byte file
+			// an older binary's own create-then-write window could leave
+			// mid-write, before RecordDeliveryFailure stopped writing latches
+			// at all) still halts its run (presence is the decided state,
+			// and its Cause is undecidable); doctor still counts it, just
+			// with nothing further to show, and sorts last (no ts to sort
+			// by).
 			latches = append(latches, latch{cause: "(unreadable)"})
 			continue
 		}
-		cause := info.Cause
-		if cause == "" {
-			cause = "verdict"
+		if info.Cause != "" {
+			// A legacy delivery-failure latch: SessionHalted ignores it, so
+			// this run is NOT halted. Reported separately so an operator can
+			// still see (and, via `openbox uninstall`, clear) the stale file.
+			ignored = append(ignored, latch{cause: info.Cause, eventType: info.EventType, ts: info.TS})
+			continue
 		}
-		latches = append(latches, latch{cause: cause, eventType: info.EventType, ts: info.TS})
+		latches = append(latches, latch{cause: "verdict", eventType: info.EventType, ts: info.TS})
 	}
-	if len(latches) == 0 {
+	if len(latches) == 0 && len(ignored) == 0 {
 		return
 	}
-	traceDoctorFinding("halted-runs", "present", fmt.Sprintf("%d run(s) latched", len(latches)))
+	if len(latches) > 0 {
+		traceDoctorFinding("halted-runs", "present", fmt.Sprintf("%d run(s) latched", len(latches)))
+	}
 
 	// Most recent first; an empty ts (unreadable/mid-write) sorts last.
 	sort.Slice(latches, func(i, j int) bool { return latches[i].ts > latches[j].ts })
-	fmt.Fprintf(a.stdout, "\nHalted runs (presence is the decided state; latches never expire on their own -- "+
-		"only a new session starts unhalted; `openbox uninstall` removes them)\n")
-	a.row("latched", "%d run(s) total", len(latches))
-	shown := latches
-	if len(shown) > maxHaltedRunsShown {
-		shown = shown[:maxHaltedRunsShown]
-		a.row("", "showing the %d most recent", maxHaltedRunsShown)
+	sort.Slice(ignored, func(i, j int) bool { return ignored[i].ts > ignored[j].ts })
+
+	if len(latches) > 0 {
+		fmt.Fprintf(a.stdout, "\nHalted runs (presence is the decided state; a policy latch never expires on its own -- "+
+			"only a new session starts unhalted; `openbox uninstall` removes them)\n")
+		a.row("latched", "%d run(s) total", len(latches))
+		shown := latches
+		if len(shown) > maxHaltedRunsShown {
+			shown = shown[:maxHaltedRunsShown]
+			a.row("", "showing the %d most recent", maxHaltedRunsShown)
+		}
+		for _, l := range shown {
+			if l.eventType != "" {
+				a.row("", "%s (%s) at %s", l.cause, l.eventType, l.ts)
+			} else {
+				a.row("", "%s at %s", l.cause, l.ts)
+			}
+		}
 	}
-	for _, l := range shown {
-		if l.eventType != "" {
-			a.row("", "%s (%s) at %s", l.cause, l.eventType, l.ts)
-		} else {
-			a.row("", "%s at %s", l.cause, l.ts)
+	if len(ignored) > 0 {
+		fmt.Fprintf(a.stdout, "\nIgnored legacy delivery-failure latches (a delivery failure no longer halts a "+
+			"run; these predate that change and are no longer honored -- `openbox uninstall` removes the files)\n")
+		a.row("ignored", "%d file(s) total", len(ignored))
+		shown := ignored
+		if len(shown) > maxHaltedRunsShown {
+			shown = shown[:maxHaltedRunsShown]
+			a.row("", "showing the %d most recent", maxHaltedRunsShown)
+		}
+		for _, l := range shown {
+			if l.eventType != "" {
+				a.row("", "%s (%s) at %s", l.cause, l.eventType, l.ts)
+			} else {
+				a.row("", "%s at %s", l.cause, l.ts)
+			}
 		}
 	}
 }

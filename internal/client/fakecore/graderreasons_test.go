@@ -212,11 +212,11 @@ func TestEveryGraderReasonIsReachable(t *testing.T) {
 			"a double delivery",
 		},
 		{
-			"halted-after-failure: a later gated call rendered nothing at all (a silent allow) after the run was already halted",
+			"halted-after-failure: a later gated call rendered nothing at all (a silent allow) after a REPLAYED halt (corrupt latch, no reason) already halted the run",
 			HaltedAfterFailure(), Scenario{},
 			Run{Decisions: []Decision{
 				{Payload: 0, Event: "PreToolUse", ToolUseID: id, Verb: "deny",
-					Reason: "OpenBox could not record ToolCall for this session (network); the run is halted so nothing it does goes unrecorded. Start a new session to continue."},
+					Reason: "session halted; the run cannot continue. Start a new session to continue."},
 				// The REAL shape a silent ALLOW takes: Verb == "" (decodeDecision's
 				// own contract for a call that stayed silent), never the literal
 				// word "allow".

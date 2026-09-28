@@ -68,14 +68,14 @@ type Evaluator struct {
 
 // EscalationOutcome classifies what one Escalate call did with its own
 // escalation POST. It never distinguishes "delivered" from "explicitly
-// refused and latched": both mean the caller's own local copy of the event
-// needs nothing further, since either core has it or HaltOnDeliveryFailure
-// already recorded that it does not.
+// refused and recorded": both mean the caller's own local copy of the event
+// needs nothing further, since either core has it or RecordDeliveryFailure
+// already recorded that it does not (never latching the run either way).
 type EscalationOutcome int32
 
 const (
 	// EscalationSettled: core answered, or an explicit non-acceptance was
-	// already latched by HaltOnDeliveryFailure. Nothing further to spool.
+	// already recorded by RecordDeliveryFailure. Nothing further to spool.
 	EscalationSettled EscalationOutcome = iota
 	// EscalationNotAttempted: no POST was ever sent (no client configured, a
 	// client failed to build, or no budget was left to even try). The
@@ -96,8 +96,8 @@ func (t Evaluator) reportOutcome(o EscalationOutcome) {
 }
 
 // escalationReport is a first-wins guard around one Escalate call's outcome:
-// run's own goroutine (an explicit failure, already latched by
-// HaltOnDeliveryFailure) and Escalate's own cctx.Done() branch can each try
+// run's own goroutine (an explicit failure, already recorded by
+// RecordDeliveryFailure) and Escalate's own cctx.Done() branch can each try
 // to report, and run's own report can reach here strictly before its result
 // ever reaches the channel Escalate selects on -- a scheduling delay between
 // "run finished and reported" and "the send Escalate is waiting on actually
@@ -105,8 +105,8 @@ func (t Evaluator) reportOutcome(o EscalationOutcome) {
 // first is the one the caller (the gate's own re-spool dispatch) ever sees;
 // a later call is silently dropped rather than allowed to overwrite it,
 // which would otherwise let a stale Unanswered re-queue an event whose one
-// attempt already failed and latched (a second attempt, in spirit, at the
-// caller's own local copy of it).
+// attempt already failed and was recorded (a second attempt, in spirit, at
+// the caller's own local copy of it).
 type escalationReport struct {
 	done atomic.Bool
 	fn   func(EscalationOutcome)
@@ -227,8 +227,8 @@ func (t Evaluator) EscalateWith(ctx context.Context, logger *log.Logger, cl Gove
 	// between "run finished and reported" and "the send below actually
 	// runs" is enough), and without this, a stale Unanswered report reaching
 	// the guard after an explicit failure already reported Settled -- and
-	// already latched the run via HaltOnDeliveryFailure -- would wrongly
-	// requeue an event whose one attempt already failed.
+	// already recorded via RecordDeliveryFailure -- would wrongly requeue an
+	// event whose one attempt already failed.
 	rep := newEscalationReport(t.OnOutcome)
 	runner := t
 	runner.OnOutcome = rep.report
@@ -281,17 +281,24 @@ func (t Evaluator) runWith(cctx context.Context, logger *log.Logger, ev client.D
 		// unanswered attempt from a proven one.
 		unanswered := cctx.Err() != nil
 		logger.Printf("inline evaluation degrading (emit): %v", err)
+		class := client.FailureClass(err)
 		// A transient failure (timeout, network, 5xx) is treated like
-		// silence: the call is still denied, but the run is not latched here.
-		// The gated call's recorded copy goes back to the drainers, whose
-		// attempt and one retry decide whether the run halts.
-		if unanswered || client.RetryableDelivery(err) {
+		// silence: the call is still denied, but nothing is recorded here.
+		// A 401 or 429 is treated the same way -- neither is a proven,
+		// event-specific refusal (client.ErrRefused's own contract; see
+		// client.isRefusal) -- a datastore hiccup or an exhausted rate limit
+		// must not be misreported as this event's own fault. Either way, the
+		// gated call's own recorded copy goes back to the drainers, whose
+		// attempt and one retry decide what happens to it.
+		if unanswered || client.RetryableDelivery(err) || class == "401" || class == "429" {
 			t.reportOutcome(EscalationUnanswered)
 			return EvaluationFailOpen("evaluation undelivered")
 		}
-		// A non-transient non-acceptance (401, 429, other 4xx): latch the run
-		// at once so nothing later in it goes unrecorded either.
-		HaltOnDeliveryFailure(logger, ev, err)
+		// A proven non-acceptance (ErrRefused's other 4xx classes, or an
+		// unbuildable event): recorded as a delivery-failure finding, but
+		// never latches the run -- a delivery failure denies only this
+		// call; the run itself continues.
+		RecordDeliveryFailure(logger, ev, err)
 		t.reportOutcome(EscalationSettled)
 		return EvaluationFailOpen("evaluation undelivered")
 	}

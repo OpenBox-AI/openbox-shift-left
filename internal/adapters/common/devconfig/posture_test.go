@@ -160,7 +160,7 @@ func TestEffectivePosture_MatchesResolvers(t *testing.T) {
 	t.Setenv(EnvConfigPath, "/nonexistent/dev.json") // defaults only
 	p := EffectivePosture()
 	// FailClosed excluded from the drift check: delivery is always
-	// fail-closed now (HaltOnDeliveryFailure), so the posture no longer
+	// fail-closed per call now, so the posture no longer
 	// tracks ResolveFailClosed's own (now-ignored) resolved value -- see the
 	// dedicated assertion below.
 	if p.Enforce != ResolveEnforce() ||

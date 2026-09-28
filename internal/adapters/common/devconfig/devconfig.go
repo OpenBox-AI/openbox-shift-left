@@ -114,8 +114,8 @@ type DevConfig struct {
 	// so an existing dev.json does not become an error, and so an explicit
 	// value can still be named in the deprecated-key warning.
 	Enforce *bool `json:"enforce,omitempty"`
-	// FailClosed is deprecated and inert: delivery is always fail-closed now
-	// (HaltOnDeliveryFailure). A *bool, not a plain bool, so an explicit
+	// FailClosed is deprecated and inert: a gated call is always fail-closed now
+	// (an undelivered evaluation denies that call). A *bool, not a plain bool, so an explicit
 	// `"fail_closed": false` in a file is distinguishable from the key being
 	// absent altogether -- the same reason Tier2 is a *bool.
 	FailClosed *bool `json:"fail_closed,omitempty"`
@@ -427,7 +427,8 @@ func ResolveEnforce() bool {
 }
 
 // ResolveFailClosed reports the enforce failure policy. Deprecated and inert:
-// delivery is always fail-closed now (HaltOnDeliveryFailure); the key still
+// a gated call is always fail-closed now (an undelivered evaluation denies
+// that call); the key still
 // parses so it can warn.
 func ResolveFailClosed() bool {
 	return resolveBool("fail_closed", func(c DevConfig) *bool { return c.FailClosed }, false, EnvFailClosed)

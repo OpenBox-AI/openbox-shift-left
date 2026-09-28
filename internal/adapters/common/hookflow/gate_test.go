@@ -353,7 +353,13 @@ func TestGate_EscalationBudgetUnchangedByAnEmptyDrain(t *testing.T) {
 
 // (c) a delivery failure this call's own drain step finds denies the
 // draining call itself, through OnHalted, with zero escalation POSTs.
-func TestGate_DrainedDeliveryFailureDeniesWithoutEscalating(t *testing.T) {
+// TestGate_DrainedDeliveryFailureNeverHaltsAndStillEscalates proves that a
+// delivery failure found while draining a backlog event is recorded as a
+// finding, but never halts the run and never renders through OnHalted --
+// only a REAL HALT verdict still does (TestGate_DrainedHaltVerdictDenies
+// WithoutEscalating, unchanged). This call's own escalation runs normally
+// right behind the drained (and failed) backlog event.
+func TestGate_DrainedDeliveryFailureNeverHaltsAndStillEscalates(t *testing.T) {
 	gateDrainEnv(t)
 	defer devconfig.Pin()()
 
@@ -362,7 +368,6 @@ func TestGate_DrainedDeliveryFailureDeniesWithoutEscalating(t *testing.T) {
 
 	gov := &orderedGovernor{fakeGovernor: &fakeGovernor{}, errFor: map[string]error{"seed-started": client.ErrDelivery}}
 	var onHaltedCalled bool
-	var onHaltedInfo SessionHaltInfo
 	var out bytes.Buffer
 	gate := EnforceGate{
 		Contract: testContract{approval: "ask"},
@@ -375,25 +380,22 @@ func TestGate_DrainedDeliveryFailureDeniesWithoutEscalating(t *testing.T) {
 		Queue:  engine,
 		OnHalted: func(info SessionHaltInfo) ApplyResult {
 			onHaltedCalled = true
-			onHaltedInfo = info
 			return ApplyResult{Decision: DecisionDeny, Emitted: true}
 		},
 	}
-	res := gate.Run(context.Background(), discard(), &out, shellTarget{})
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
 
-	if !onHaltedCalled {
-		t.Fatal("a delivery failure found while draining must render through OnHalted")
+	if onHaltedCalled {
+		t.Error("a delivery failure found while draining must never render through OnHalted (never latches)")
 	}
-	if res.Decision != DecisionDeny {
-		t.Errorf("Run's own return = %+v, want the OnHalted render", res)
+	if _, halted := SessionHalted("sess-1"); halted {
+		t.Error("a delivery failure found while draining must never latch the run")
 	}
 	// A bare ErrDelivery is a transient (network) failure: the drain sends the
-	// backlog event once and retries it once, then halts.
-	if got := gov.Order(); !reflect.DeepEqual(got, []string{"seed-started", "seed-started"}) {
-		t.Errorf("emit order = %v, want the drained backlog event and its one retry; the gate's own escalation must never run", got)
-	}
-	if onHaltedInfo.EventType != string(client.EventSessionStarted) {
-		t.Errorf("latch EventType = %q, want %q", onHaltedInfo.EventType, client.EventSessionStarted)
+	// backlog event once and retries it once (recording a finding, never a
+	// latch), and this call's own escalation still runs right behind it.
+	if got := gov.Order(); !reflect.DeepEqual(got, []string{"seed-started", "seed-started", "evt-1"}) {
+		t.Errorf("emit order = %v, want the drained backlog event, its one retry, then the gate's own escalation", got)
 	}
 }
 
@@ -544,11 +546,15 @@ func (e *stripeHoldingEmitter) Emit(ctx context.Context, _ client.DevEvent) (cli
 }
 
 // TestGate_StripeHeldPastMaxStripeWaitSkipsTheDrainAndEscalatesPromptly pins
-// MaxStripeWait's own bound directly: a background drainer holds this
-// session's stripe for 8s (a live detached flusher or lane daemon mid-
-// delivery on one slow event), well past MaxStripeWait (5s). The gate's own
-// drain step must give up on the LOCK within ~MaxStripeWait and proceed to
-// its own escalation, never waited on for anywhere near the full 8s hold.
+// MaxStripeWait's own bound directly, for a run whose WorkflowStarted event
+// carries NO marker yet (Spool.WorkflowStartedAccepted reports false, the
+// ordinary case): a background drainer holds this session's stripe for 8s
+// (a live detached flusher or lane daemon mid-delivery on one slow
+// event), well past MaxStripeWait (5s). The
+// gate's own drain step must give up on the LOCK within ~MaxStripeWait and
+// proceed to its own escalation, never waited on for anywhere near the
+// full 8s hold. TestGate_MarkerPresentSkipsTheStripeWaitEntirely is the
+// marker-present counterpart, which never waits at all.
 func TestGate_StripeHeldPastMaxStripeWaitSkipsTheDrainAndEscalatesPromptly(t *testing.T) {
 	gateDrainEnv(t)
 	defer devconfig.Pin()()
@@ -595,6 +601,67 @@ func TestGate_StripeHeldPastMaxStripeWaitSkipsTheDrainAndEscalatesPromptly(t *te
 	// EMPTY during this exact window even though nothing has been
 	// delivered yet -- gov.Order() above is what actually proves the gate's
 	// own client never touched it.
+}
+
+// TestGate_MarkerPresentSkipsTheStripeWaitEntirely: once this run's own
+// WorkflowStarted event is already known delivered (a marker exists,
+// written the moment an earlier drain actually accepted it), the gate's
+// own drain step never waits for a busy stripe at all -- it switches to
+// Try mode, sees the stripe held, and
+// escalates at once, not merely within ~MaxStripeWait as the marker-absent
+// case above still does.
+func TestGate_MarkerPresentSkipsTheStripeWaitEntirely(t *testing.T) {
+	gateDrainEnv(t)
+	defer devconfig.Pin()()
+
+	engine := NewEngine(t.TempDir())
+	// Deliver a WorkflowStarted event through this session so its own
+	// marker is written (spool.go's markWorkflowStarted, from
+	// attemptLines' delivered path) before the stripe-holding drainer ever
+	// takes the lock.
+	seedQueued(t, engine, "sess-1", "start-1", client.EventSessionStarted)
+	if n, err := engine.DrainSession(context.Background(), "sess-1", &orderedGovernor{fakeGovernor: &fakeGovernor{}}, DrainOptions{
+		Mode: Block, AttemptTimeout: 5 * time.Second,
+	}); err != nil || n != 1 {
+		t.Fatalf("seed drain: n=%d err=%v, want 1 delivered event (so the marker is written)", n, err)
+	}
+	if !engine.Spool.WorkflowStartedAccepted("sess-1") {
+		t.Fatal("the marker must exist after the WorkflowStarted event was delivered")
+	}
+
+	seedQueued(t, engine, "sess-1", "seed-1", client.EventToolCall)
+	be := &stripeHoldingEmitter{started: make(chan struct{}), hold: 8 * time.Second}
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		_, _ = engine.DrainSession(context.Background(), "sess-1", be, DrainOptions{
+			Mode: Block, AttemptTimeout: 10 * time.Second,
+		})
+	}()
+	<-be.started // the background drainer now genuinely holds the stripe
+	defer func() { <-drainDone }()
+
+	gov := &orderedGovernor{fakeGovernor: &fakeGovernor{}}
+	var out bytes.Buffer
+	gate := EnforceGate{
+		Contract: testContract{approval: "ask"},
+		Evaluator: Evaluator{
+			Ceiling:    provider.HookCeiling{Gating: 30 * time.Second},
+			MaxTimeout: 4 * time.Second,
+			NewClient:  func(*log.Logger) (Governor, error) { return gov, nil },
+		},
+		Record: func(decision.Decision, ApplyResult) {},
+		Queue:  engine,
+	}
+	start := time.Now()
+	gate.Run(context.Background(), discard(), &out, shellTarget{})
+	if elapsed := time.Since(start); elapsed >= 1*time.Second {
+		t.Errorf("gate.Run took %v, want well under 1s: a marker-present run must never wait for a busy stripe at all", elapsed)
+	}
+
+	if got := gov.Order(); !reflect.DeepEqual(got, []string{"evt-1"}) {
+		t.Errorf("emit order = %v, want only the gate's own escalation; a busy stripe with a marker present must not attempt the backlog", got)
+	}
 }
 
 // TestGate_UncontendedBacklogStillDrainsPastMaxStripeWaitWhenSlackAllows is

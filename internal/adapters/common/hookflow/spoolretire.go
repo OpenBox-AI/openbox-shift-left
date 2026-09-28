@@ -106,7 +106,33 @@ func (s Spool) RetireStale(ctx context.Context, now time.Time, age time.Duration
 		traceSpoolRetire(strings.TrimSuffix(name, ".jsonl"), events, int(elapsed.Hours()/24))
 		out = append(out, Retired{Name: name, Events: events, Age: elapsed})
 	}
+	s.retireStaleStartedMarkers(now, age)
 	return out, errors.Join(errs...)
+}
+
+// retireStaleStartedMarkers sweeps the WorkflowStarted-accepted markers
+// (spool.go's markWorkflowStarted/WorkflowStartedAccepted) past age: cheap
+// (a ReadDir plus a Stat and an unlink per stale marker, no line-counting,
+// no discard ledger -- a marker is not delivery evidence) and best-effort,
+// piggybacked on the same retirement pass rather than a separate sweep. A
+// marker this misses simply falls back to "unproven"
+// (WorkflowStartedAccepted reports false), the same as if it had never been
+// written.
+func (s Spool) retireStaleStartedMarkers(now time.Time, age time.Duration) {
+	entries, err := os.ReadDir(s.startedDir())
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || now.Sub(info.ModTime()) < age {
+			continue
+		}
+		_ = os.Remove(filepath.Join(s.startedDir(), e.Name()))
+	}
 }
 
 // retireOne re-checks the age and unlinks under the SPOOL LOCK every other

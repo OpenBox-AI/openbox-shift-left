@@ -18,6 +18,12 @@ type Scenario struct {
 	Payloads []HookPayload
 	// Verdicts is what core answers, keyed by tool_use_id.
 	Verdicts map[string]string
+	// Default overrides the verdict answered for any call with no matching
+	// Verdicts entry (including one with no tool_use_id to key on at all,
+	// e.g. a UserPromptSubmit): "" (the common case) leaves Script's own
+	// allowVerdict fallback in place. A scenario proving a HALT on a call
+	// that carries no tool_use_id has no other way to script it.
+	Default string
 	// Denied names the tool calls that were blocked BEFORE they ran, so no
 	// completion could fire. It is the pairing grader's witness, and it lives
 	// here rather than being read off the wire because EnforcementRecord
@@ -76,7 +82,7 @@ type Posture struct {
 
 // Script projects the scenario onto what the fake should answer.
 func (s Scenario) Script() Script {
-	return Script{Verdicts: s.Verdicts, AlwaysStatus: s.AlwaysStatus}
+	return Script{Verdicts: s.Verdicts, AlwaysStatus: s.AlwaysStatus, Default: s.Default}
 }
 
 // Grader is a predicate over (scenario, inbox) returning reasons, not a

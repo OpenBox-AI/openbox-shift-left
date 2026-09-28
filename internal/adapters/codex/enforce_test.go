@@ -25,9 +25,9 @@ func isolateConfig(t *testing.T) {
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 	// DefaultHaltDir falls back to the REAL OS $HOME (os.UserConfigDir), not
 	// devconfig.EnvHome above: without this, a test that hits a real explicit
-	// delivery failure (HaltOnDeliveryFailure) latches into the process-wide
-	// sentinel HOME (testmain_test.go) and a LATER test reusing the same
-	// session/run id reads back an unrelated latch from an earlier test.
+	// HALT verdict latches into the process-wide sentinel HOME
+	// (testmain_test.go) and a LATER test reusing the same session/run id
+	// reads back an unrelated latch from an earlier test.
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	bindForTest(t, "codex")
 }

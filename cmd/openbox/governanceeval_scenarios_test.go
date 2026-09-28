@@ -237,15 +237,18 @@ func TestGovernanceEvalCodexTwinOrdersTheSameWay(t *testing.T) {
 	gradeOrdering(t, sc, run.Run, true)
 }
 
-// TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers: SessionStart's
+// TestGovernanceEvalCoreDownAtSessionStartDeniesAndRecovers: SessionStart's
 // own inline WorkflowStarted attempt fails while core is down, so the first
-// gated call of that run denies with the delivery reason and every later
-// gated call of the SAME run stays denied too -- OneAttempt (graded generically
-// below) proves there is no redelivery once core recovers, because
-// single-attempt delivery has no carry-over. A brand NEW session, started
-// only after recovery, is unaffected: a different session id is a different
-// (unlatched) run.
-func TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers(t *testing.T) {
+// gated call of that run denies with the delivery reason; the second gated
+// call of the SAME run denies too, but independently -- core is STILL down
+// for it (OutageDuring covers the whole halted session), never because a
+// latch from the first call's failure persisted (a delivery failure never
+// latches the run). OneAttempt (graded
+// generically below) proves there is no redelivery of the SAME event once
+// core recovers, because single-attempt delivery has no carry-over. A brand
+// NEW session, started only after recovery, is unaffected either way: a
+// different session id is a different run.
+func TestGovernanceEvalCoreDownAtSessionStartDeniesAndRecovers(t *testing.T) {
 	const haltedSession = "recovery-halted-session"
 	const recoveredSession = "recovery-new-session"
 	haltedStart := hook("SessionStart", `{"hook_event_name":"SessionStart","session_id":"`+haltedSession+`","cwd":"/repo","source":"startup"}`)
@@ -266,8 +269,8 @@ func TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers(t *testing.T) {
 		Denied: map[string]bool{"toolu_before_halt_first": true, "toolu_before_halt_second": true},
 		// Down for the halted session's own three payloads (index 0-2; its
 		// SessionEnd at index 3 is deliberately left down too, so its own
-		// WorkflowCompleted attempt fails the same way and never un-halts
-		// anything), back up from the new session's SessionStart onward.
+		// WorkflowCompleted attempt fails the same way too), back up from
+		// the new session's SessionStart onward.
 		OutageDuring: func(i int, _ string) bool { return i <= 3 },
 		Provenance:   authoredProvenance,
 	}
@@ -277,12 +280,12 @@ func TestGovernanceEvalCoreDownAtSessionStartHaltsAndRecovers(t *testing.T) {
 	if !ok || first.Verb != "deny" {
 		t.Fatalf("the first gated call of the halted session = %+v, want a deny", first)
 	}
-	if !strings.Contains(first.Reason, "OpenBox could not record") {
+	if !strings.Contains(first.Reason, "no governance decision could be obtained") {
 		t.Errorf("the first call's deny reason does not name the delivery failure: %q", first.Reason)
 	}
 	second, ok := run.DecisionFor("toolu_before_halt_second")
 	if !ok || second.Verb != "deny" {
-		t.Fatalf("the second gated call of the SAME halted run = %+v, want a deny too", second)
+		t.Fatalf("the second gated call of the SAME still-down session = %+v, want a deny too (core is still down for it too, independently)", second)
 	}
 
 	recovered, ok := run.DecisionFor("toolu_after_recovery")
@@ -318,10 +321,14 @@ type deliveryFailureClass struct {
 	verify func(t *testing.T, fake *fakecore.Server)
 }
 
-// TestGovernanceEvalOneAttemptPerFailureClass: for every failure class
-// this client can hit trying to reach /evaluate, the gated call is denied,
-// the run is latched, and the NEXT gated call of the same run is denied too
-// -- naming the same delivery failure -- all in exactly one attempt.
+// TestGovernanceEvalOneAttemptPerFailureClass: for every failure class this
+// client can hit trying to reach /evaluate, the gated call is denied naming
+// the delivery failure, in exactly one attempt (plus, for 401, the client's
+// own one further cold retry, and for 5xx, the drainer's own one retry). The
+// run is NEVER latched: the NEXT gated call of
+// the same run denies too only because the SAME underlying condition this
+// test scripts (the outage, the revocation, the closed listener, ...) is
+// still active for it independently, never because of a persisted latch.
 func TestGovernanceEvalOneAttemptPerFailureClass(t *testing.T) {
 	const firstCall, secondCall = "toolu_before_halt", "toolu_after_halt"
 	for _, tc := range []deliveryFailureClass{
@@ -352,14 +359,12 @@ func TestGovernanceEvalOneAttemptPerFailureClass(t *testing.T) {
 			name:  "token-exchange-failure",
 			setup: func(_ fakecore.TB, fake *fakecore.Server) { fake.SetExchangeFailure(400, "invalid_client") },
 			verify: func(t *testing.T, fake *fakecore.Server) {
-				// A halted run's remaining events -- here, the two denied
-				// calls' own observe copies plus SessionEnd's own
-				// WorkflowCompleted -- still each get their own one
-				// delivery attempt (failures there do not change the
-				// latch), and every one of THOSE independently
-				// re-attempts the exchange too (nothing ever caches a
-				// valid token), so ExchangeHits is not pinned to 1 here;
-				// what IS pinned is that a failure at this stage never
+				// The run is never latched, so every one of this run's own
+				// events -- the two denied calls plus SessionEnd's own
+				// WorkflowCompleted -- independently hits the SAME durably
+				// broken exchange and re-attempts it too (nothing ever
+				// caches a valid token), so ExchangeHits is not pinned to 1
+				// here; what IS pinned is that a failure at this stage never
 				// reaches /evaluate at all.
 				if n := fake.ExchangeHits(); n == 0 {
 					t.Error("the token exchange was never attempted at all, so this class was never actually exercised")
@@ -372,7 +377,7 @@ func TestGovernanceEvalOneAttemptPerFailureClass(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sc := fakecore.Scenario{
-				Name: "the-" + tc.name + "-class-halts-the-run-in-exactly-one-attempt",
+				Name: "the-" + tc.name + "-class-denies-in-exactly-one-attempt-never-latches",
 				Payloads: []fakecore.HookPayload{
 					sessionStart(),
 					preBash(firstCall, "ls"),
@@ -390,15 +395,15 @@ func TestGovernanceEvalOneAttemptPerFailureClass(t *testing.T) {
 			if !ok || first.Verb != "deny" {
 				t.Fatalf("first call = %+v, want a deny", first)
 			}
-			if !strings.Contains(first.Reason, "OpenBox could not record") {
+			if !strings.Contains(first.Reason, "no governance decision could be obtained") {
 				t.Errorf("the deny reason does not name the delivery failure: %q", first.Reason)
 			}
 			second, ok := run.DecisionFor(secondCall)
 			if !ok || second.Verb != "deny" {
-				t.Fatalf("second call of the SAME (now halted) run = %+v, want a deny too", second)
+				t.Fatalf("second call of the SAME run (still under the same scripted failure) = %+v, want a deny too", second)
 			}
-			if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
-				t.Errorf("%d session halt latch(es), want exactly 1", n)
+			if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 0 {
+				t.Errorf("%d session halt latch(es), want 0: a delivery failure no longer latches the run", n)
 			}
 			grade(t, fakecore.HaltedAfterFailure(), sc, run.Run)
 			grade(t, fakecore.OneAttempt(), sc, run.Run)

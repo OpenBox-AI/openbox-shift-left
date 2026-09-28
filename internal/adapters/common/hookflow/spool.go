@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -152,6 +154,63 @@ const HeadSuffix = ".head.jsonl"
 
 func (s Spool) headPath(sessionID string) string {
 	return filepath.Join(s.Dir, sanitizeSessionID(sessionID)+HeadSuffix)
+}
+
+// startedDir holds one marker per run whose WorkflowStarted event has been
+// accepted by core: a sibling of this spool's own tail/head files, under
+// THIS spool dir (not the halt latch's own DefaultHaltDir), because it is
+// scoped to what this spool has actually drained rather than to the
+// process-wide halt namespace.
+func (s Spool) startedDir() string {
+	return filepath.Join(s.Dir, "started")
+}
+
+// startedPath names runID's own marker file, the same
+// sanitize-then-hash-suffix scheme haltPath uses (sessionhalt.go), so two
+// run ids that sanitize to the same filename component still never collide.
+func (s Spool) startedPath(runID string) string {
+	sum := sha256.Sum256([]byte(runID))
+	return filepath.Join(s.startedDir(), sanitizeSessionID(runID)+"-"+hex.EncodeToString(sum[:4])+".marker")
+}
+
+// markWorkflowStarted durably records that ev's WorkflowStarted event (the
+// client.EventSessionStarted wire type; see client/payload.go's
+// wireTypeFor) reached and was accepted by core, so a LATER gated call for
+// this run does not need to wait behind a busy stripe just to learn that
+// (EnforceGate's own drain step, gate.go). Called only from attemptLines'
+// own delivered path -- never for a failed or requeued attempt -- so
+// presence here means "core has this run's WorkflowStarted", never a guess.
+//
+// Best-effort, off the blocking path: a write failure costs a later gated
+// call nothing beyond falling back to its ordinary MaxStripeWait bound, the
+// same behavior every gate had before this marker existed.
+func (s Spool) markWorkflowStarted(ev client.DevEvent) {
+	if ev.EventType != client.EventSessionStarted {
+		return
+	}
+	runID := runIDFor(ev)
+	if runID == "" {
+		return
+	}
+	if err := os.MkdirAll(s.startedDir(), 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(s.startedPath(runID), []byte(time.Now().UTC().Format(time.RFC3339Nano)), 0o600)
+}
+
+// WorkflowStartedAccepted reports whether runID's own WorkflowStarted event
+// is already known, by THIS spool, to have reached and been accepted by
+// core. Presence is a positive signal only: absence means "unproven", never
+// "not yet started" -- a run whose marker was never written (an older
+// binary, a marker write that failed, a spool this run's WorkflowStarted
+// never actually drained through) behaves exactly like every gate before
+// this marker existed.
+func (s Spool) WorkflowStartedAccepted(runID string) bool {
+	if runID == "" {
+		return false
+	}
+	_, err := os.Stat(s.startedPath(runID))
+	return err == nil
 }
 
 // ReclaimOrphanAfter bounds "no drain could still hold this"; drains take
@@ -463,6 +522,7 @@ func (s Spool) attemptLines(ctx context.Context, lines [][]byte, fn FlushFunc, o
 			s.onFailure(ev, derr)
 			continue
 		}
+		s.markWorkflowStarted(ev)
 		delivered++
 	}
 	return delivered, corrupt, nil, false

@@ -34,9 +34,8 @@ func setHookEnv(t *testing.T) string {
 	// with no reachable core (nothing flushes away what they want to
 	// inspect). DefaultHaltDir falls back to the real OS $HOME
 	// (os.UserConfigDir), not devconfig.EnvHome above: with no reachable
-	// control plane, delivery is always fail-closed now
-	// (HaltOnDeliveryFailure), so a caller here that DOES exercise a gated
-	// hook would otherwise latch into the process-wide sentinel HOME
+	// control plane, a gated hook is denied per call and a HALT verdict would
+	// otherwise latch into the process-wide sentinel HOME
 	// (testmain_test.go).
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	return spool

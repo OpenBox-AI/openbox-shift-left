@@ -3,6 +3,7 @@ package hookflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"sync/atomic"
@@ -52,8 +53,9 @@ type EnforceGate struct {
 	// SpoolObserve is used instead, so this call's own event never overtakes
 	// an undrained predecessor still waiting ahead of it in the same
 	// session. Never invoked alongside SpoolObserve for the same call; an
-	// explicit non-acceptance (EscalationSettled, already latched by
-	// HaltOnDeliveryFailure) invokes neither.
+	// explicit non-acceptance (EscalationSettled, already recorded as a
+	// delivery-failure finding by RecordDeliveryFailure -- never latched)
+	// invokes neither.
 	SpoolObserveHead func()
 	// RunID is the run this call belongs to: what
 	// WriteSessionHalt latches on. "" (the zero value) falls back to
@@ -162,7 +164,7 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 		// job.
 		runID := g.runID(t)
 		if clientErr == nil {
-			g.drain(ctx, logger, sessionID, cl, enforceStart)
+			g.drain(ctx, logger, sessionID, runID, cl, enforceStart)
 		}
 		if g.Queue.Spool.PendingCount(sessionID) > 0 && g.ForceFlush != nil {
 			g.ForceFlush()
@@ -240,6 +242,15 @@ func (g EnforceGate) Run(ctx context.Context, logger *log.Logger, stdout io.Writ
 // still gets the full slack to clear a real backlog (the "try hardest not to
 // let an event slip through" governing principle), never cut short at this
 // same 5s regardless of how large that backlog is.
+//
+// Once this run's own WorkflowStarted event is already known to have
+// reached core (Spool.WorkflowStartedAccepted, a marker written the
+// moment a drain actually delivers it -- 77% of PreToolUse hooks measured
+// waiting the full 5s here behind the lane daemon's own drain of exactly
+// that one record), this bound is never exercised at all: drain switches
+// to Try mode (below) and gives up on a busy stripe at once rather than
+// waiting for it. It still governs the ordinary case -- a run whose
+// WorkflowStarted has no marker yet -- exactly as before.
 const MaxStripeWait = 5 * time.Second
 
 // GateDrainAttemptTimeout bounds ONE drain attempt inside a gated call's own
@@ -276,7 +287,19 @@ const GateDrainAttemptTimeout = 3500 * time.Millisecond
 // (see GateDrainAttemptTimeout's own comment) -- a short, disposable drain
 // attempt inside this call's own slack, versus the full budget this call's
 // own escalation gets afterward.
-func (g EnforceGate) drain(ctx context.Context, logger *log.Logger, sessionID string, cl Governor, enforceStart time.Time) {
+//
+// When runID's own WorkflowStarted event is already known delivered
+// (g.Queue.Spool.WorkflowStartedAccepted), this call's own stripe
+// acquisition switches to Try mode -- no wait at all, give up on a busy
+// stripe at once -- instead of Block with LockWait: MaxStripeWait.
+// A busy stripe then behaves exactly like ErrSessionBusy already does for
+// every other Try caller (FlushAll, the sweep): the backlog stays queued,
+// untouched, for whoever holds the stripe to finish, and this call proceeds
+// straight to its own escalation. An uncontended stripe is unaffected either
+// way -- Try acquires it at once, same as Block would -- so a run with a
+// marker still gets its own backlog drained whenever nothing else is
+// actively delivering for it.
+func (g EnforceGate) drain(ctx context.Context, logger *log.Logger, sessionID, runID string, cl Governor, enforceStart time.Time) {
 	slack := g.Evaluator.remaining(enforceStart) - g.Evaluator.Budget(enforceStart, DefaultEvaluationTimeout)
 	// AttemptTimeout is NEVER clamped down to slack: a pass never starts an
 	// attempt it cannot finish (DrainSession's own contract), so if slack
@@ -292,18 +315,23 @@ func (g EnforceGate) drain(ctx context.Context, logger *log.Logger, sessionID st
 	if slack < GateDrainAttemptTimeout {
 		return
 	}
-	dctx, cancel := context.WithTimeout(ctx, slack)
-	defer cancel()
-	n, err := g.Queue.DrainSession(dctx, sessionID, cl, DrainOptions{
+	opts := DrainOptions{
 		Mode:              Block,
 		AttemptTimeout:    GateDrainAttemptTimeout,
 		RequeueUnanswered: true,
 		LockWait:          MaxStripeWait,
-	})
+	}
+	if g.Queue.Spool.WorkflowStartedAccepted(runID) {
+		opts.Mode = Try
+		opts.LockWait = 0
+	}
+	dctx, cancel := context.WithTimeout(ctx, slack)
+	defer cancel()
+	n, err := g.Queue.DrainSession(dctx, sessionID, cl, opts)
 	if n > 0 {
 		logger.Printf("gate drain: drained %d event(s) in %v", n, time.Since(enforceStart))
 	}
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrSessionBusy) {
 		logger.Printf("gate drain ended early: %v", err)
 	}
 }

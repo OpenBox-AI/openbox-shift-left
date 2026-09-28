@@ -350,13 +350,15 @@ func TestSessionOrder_TryOnBusyStripeReportsBusy(t *testing.T) {
 
 // A client built with MaxRetries 0 (the same setting claude-code/codex
 // creds.go use) never retries at the HTTP layer, so what core sees is the
-// drainer's own rule: a 5xx is sent once and retried once, while 401, 429
-// and any other 4xx are sent exactly once.
+// drainer's own rule: a 5xx is sent once and retried once, a 401 is sent once
+// and resent once with a force-refreshed token (the client's own cold retry,
+// independent of MaxRetries), while 429 and any other 4xx are sent exactly
+// once.
 func TestSessionOrder_CoreSeesOneRetryOnlyForTransientStatuses(t *testing.T) {
 	for _, tc := range []struct {
 		status int
 		want   int
-	}{{503, 2}, {520, 2}, {401, 1}, {429, 1}, {400, 1}} {
+	}{{503, 2}, {520, 2}, {401, 2}, {429, 1}, {400, 1}} {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
 			fc := fakecore.New(t, fakecore.Script{AlwaysStatus: tc.status})
 			zero := 0
@@ -462,14 +464,15 @@ func eventIDs(evs []client.DevEvent) []string {
 }
 
 // A SessionStart that core rejects: OnFailure fires once (the ledger line),
-// after one retry for a 5xx and none for a 401; the run-halt latch itself is
-// a later caller's own OnFailure, wired onto this same seam.
+// after one drainer retry for a 5xx and one cold-token client retry for a 401.
+// Neither latches the run: a later caller's own OnFailure, wired onto this
+// same seam, records the failure as a finding.
 func TestSessionOrder_RejectedStartCallsOnFailureOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		status int
 		want   int
-	}{{"5xx", 503, 2}, {"401", 401, 1}} {
+	}{{"5xx", 503, 2}, {"401", 401, 2}} {
 		t.Run(tc.name, func(t *testing.T) {
 			fc := fakecore.New(t, fakecore.Script{AlwaysStatus: tc.status})
 			zero := 0

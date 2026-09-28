@@ -86,57 +86,8 @@ func WriteSessionHalt(logger *log.Logger, sessionID string, e client.Evaluation)
 	traceLatchSet(sessionID, info)
 }
 
-// WriteSessionHaltIfAbsent latches a run as halted, but ONLY when it is not
-// already latched: an existing latch -- whichever cause reached it first, a
-// live HALT verdict (WriteSessionHalt) or an earlier delivery failure -- is
-// left exactly as it is. A run's first cause is the one every later call
-// sees, never replaced by a second, unrelated one.
-//
-// O_CREATE|O_EXCL makes "is it latched, then write" one atomic filesystem
-// step, closing the race two drainers (or a drainer and a gate escalation)
-// hitting the same run's very first failure concurrently would otherwise
-// have: each observing no latch, then both writing. Deliberately not
-// atomicWriteFile (rename-into-place): that mechanism always replaces
-// whatever is at the destination, which is the one thing this function must
-// never do.
-//
-// This create-then-write is NOT the same guarantee WriteSessionHalt's doc
-// comment describes: between the O_CREATE|O_EXCL and the Write call below, a
-// concurrent reader can observe a present but EMPTY (0-byte) file. "Never
-// observed partially written" is WriteSessionHalt's own property (rename-
-// into-place), not this function's. This is accepted, not a bug: presence is
-// still the decided state (SessionHalted's own contract), an empty file
-// fails json.Unmarshal exactly like a corrupt one, and every reader already
-// treats that the same way -- SessionHalted still reports halted=true (with
-// a zero-value SessionHaltInfo), SessionHaltDecision still renders a
-// generic, non-empty reason, and doctor still counts and shows it as
-// "(unreadable)" rather than a blank line or a crash.
-//
-// Best-effort and off the blocking path, same as WriteSessionHalt: a write
-// fault here costs only a later call's local refusal (INV-3).
-func WriteSessionHaltIfAbsent(logger *log.Logger, sessionID string, info SessionHaltInfo) {
-	path, line, ok := prepareLatchWrite(logger, sessionID, info)
-	if !ok {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		if !os.IsExist(err) {
-			logger.Printf("session halt latch skipped (write): %v", err)
-		}
-		return // already latched, by this cause or an earlier one: first wins
-	}
-	defer f.Close()
-	if _, err := f.Write(line); err != nil {
-		logger.Printf("session halt latch skipped (write): %v", err)
-		return
-	}
-	traceLatchSet(sessionID, info)
-}
-
-// prepareLatchWrite is the marshal-and-mkdir prelude WriteSessionHalt and
-// WriteSessionHaltIfAbsent share; only the final write step (rename-into-
-// place vs. O_CREATE|O_EXCL) differs between them, and stays with each.
+// prepareLatchWrite is the marshal-and-mkdir prelude WriteSessionHalt takes
+// before its own rename-into-place write.
 func prepareLatchWrite(logger *log.Logger, sessionID string, info SessionHaltInfo) (path string, line []byte, ok bool) {
 	if sessionID == "" {
 		logger.Printf("session halt latch skipped: empty session id")
@@ -159,6 +110,15 @@ func prepareLatchWrite(logger *log.Logger, sessionID string, info SessionHaltInf
 // preserved. A latch that exists but will not parse still halts, with a
 // generic reason: presence is the decided state, and a corrupt file must not
 // quietly un-halt a session the control plane terminated.
+//
+// A latch that DOES parse but carries a non-empty Cause is a pre-existing
+// delivery-failure latch -- written by an older binary, before
+// RecordDeliveryFailure stopped writing this file. Such a latch is
+// deliberately ignored (reported not halted): removing the write applies
+// retroactively to what it already wrote, so a session already stuck
+// behind an old delivery-failure latch recovers rather than staying
+// halted forever. A latch with an empty Cause (a real HALT verdict,
+// WriteSessionHalt's own writes) is unaffected.
 func SessionHalted(sessionID string) (SessionHaltInfo, bool) {
 	if sessionID == "" {
 		return SessionHaltInfo{}, false
@@ -170,6 +130,9 @@ func SessionHalted(sessionID string) (SessionHaltInfo, bool) {
 	var info SessionHaltInfo
 	if err := json.Unmarshal(raw, &info); err != nil {
 		return SessionHaltInfo{}, true
+	}
+	if info.Cause != "" {
+		return SessionHaltInfo{}, false
 	}
 	return info, true
 }
@@ -194,12 +157,12 @@ func SessionHaltDecision(info SessionHaltInfo) decision.Decision {
 	reason := info.Reason
 	if reason == "" {
 		// Generic and origin-agnostic on purpose: an empty Reason reaches
-		// here for BOTH a latch this process cannot parse (corrupt, or
-		// caught mid-write in WriteSessionHaltIfAbsent's own create-then-
-		// write window -- see its doc comment) and, in principle, any future
-		// writer that latched without one; the origin (a HALT verdict, or an
-		// unaccepted event) cannot be recovered here either way, and must
-		// never be guessed at.
+		// here for a latch this process cannot parse (corrupt or empty) and,
+		// in principle, any future writer that latched without one; only a
+		// real HALT verdict (WriteSessionHalt) reaches this function at all
+		// now (SessionHalted ignores any parseable Cause != "" latch), so the
+		// origin is never guessed at even though it cannot be recovered from
+		// a corrupt file either way.
 		reason = "session halted; the run cannot continue. Start a new session to continue."
 	}
 	return decision.Decision{

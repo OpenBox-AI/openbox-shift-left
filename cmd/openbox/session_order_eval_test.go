@@ -9,34 +9,35 @@ package main
 // Cited rather than duplicated (already proven at unit/integration level,
 // so this file does not re-prove what a lower layer already pins):
 //   - A failed WorkflowStarted, or a HALT verdict, found while a gate drains
-//     denies that gated call without ever escalating: hookflow's own
-//     TestGate_DrainedDeliveryFailureDeniesWithoutEscalating and
+//     denies that gated call without ever escalating -- and, for a plain
+//     delivery failure (never a real HALT verdict), never latches the run
+//     either: hookflow's own
+//     TestGate_DrainedDeliveryFailureNeverHaltsAndStillEscalates and
 //     TestGate_DrainedHaltVerdictDeniesWithoutEscalating, and end to end
 //     against a real fakecore, claude-code's own
-//     TestGateDrain_ExplicitRejectionInsideTheWindowHaltsAndDeniesThatCall.
+//     TestGateDrain_ExplicitRejectionInsideTheWindowNeverHaltsAndStillEscalates.
 //   - A slow core never halts a run from inside a gate's own drain step,
 //     and the eventual redelivery is deduped by core's own idempotency key:
 //     claude-code's own TestGateDrain_SlowCoreNeverHaltsTheRun.
-//   - A chat event core does not accept latches that conversation, and the
-//     next completion of that SAME conversation is refused: already proven
-//     end to end through the transport relay's own emitter and haltDecorator
-//     by TestChatEventCoreDoesNotAcceptLatchesTheConversation
+//   - A chat event core does not accept is only recorded, never latched, so
+//     the next completion of that SAME conversation still allows: already
+//     proven end to end through the transport relay's own emitter and
+//     haltDecorator by
+//     TestChatEventCoreDoesNotAcceptDoesNotLatchTheConversation
 //     (transportchat_test.go) -- it drives gatewayemit.Emitter ->
-//     routeLaneRecord -> the chat pool -> HaltOnDeliveryFailure, then reads
+//     routeLaneRecord -> the chat pool -> RecordDeliveryFailure, then reads
 //     haltDecorator.Evaluate for the SAME conversation, exactly the path
 //     this file would otherwise have to reproduce.
 //
-//   - The timeout failure class -- one attempt, and the run latched through
-//     the SAME Engine.NewEngine wiring the real 30s flusher/lane-drain path
-//     uses -- is proven at hookflow level without paying the real 30s bound:
-//     hookflow's own TestNewEngine_TimeoutClassLatchesInExactlyOneAttempt
-//     (a short AttemptTimeout stands in for DeliveryAttemptTimeout) and
-//     TestSessionOrder_OneAttemptPerFailureClass's own "timeout" row (one
-//     attempt, the next line still attempted). A gate's own LIVE escalation
-//     treats an unanswered attempt as EscalationUnanswered instead (never a
-//     halt, by design), so only the detached-flusher/lane-drain path can
-//     ever halt on a timeout, and that is exactly the wiring these two
-//     hookflow tests exercise.
+//   - The timeout failure class -- one attempt, and never latching the run
+//     even after its own retry, through the SAME Engine.NewEngine wiring the
+//     real 30s flusher/lane-drain path uses -- is proven at hookflow level
+//     without paying the real 30s bound: hookflow's own
+//     TestNewEngine_TimeoutClassNeverLatchesAfterOneRetry (a short
+//     AttemptTimeout stands in for DeliveryAttemptTimeout). A gate's own LIVE
+//     escalation treats an unanswered attempt as EscalationUnanswered
+//     instead (never a halt, by design; unaffected by this file's own
+//     ruling either way).
 //
 // The other five failure classes this client can hit trying to reach
 // /evaluate (network, 5xx, 401, token-exchange-failure, 4xx) are covered in
@@ -192,6 +193,12 @@ func TestLaneRecordAndAGatedHookOrderThroughTheSameSpool(t *testing.T) {
 // every hook keys on the raw session id (its own gate sets no RunID) -- so a
 // Codex session that fires SessionStart again under the SAME session id
 // stays halted.
+//
+// Each subtest halts its first call with a REAL server HALT verdict
+// (fakecore's own scripted haltVerdict), never a delivery failure: a
+// delivery failure no longer latches ANY run,
+// so it could no longer exercise the run-vs-session keying this test exists
+// to pin at all -- only a real verdict still does.
 func TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted(t *testing.T) {
 	t.Run("claude-code-clear-mints-a-new-session-unhalted", func(t *testing.T) {
 		const oldSession, newSession = "clear-old-session", "clear-new-session"
@@ -205,14 +212,14 @@ func TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted(t *te
 				hook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"`+newSession+`","cwd":"/repo","tool_name":"Bash","tool_use_id":"toolu_after_clear","tool_input":{"command":"ls"}}`),
 				hook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"`+newSession+`","cwd":"/repo","reason":"other"}`),
 			},
-			Denied:       map[string]bool{"toolu_before_clear": true},
-			OutageDuring: func(i int, _ string) bool { return i == 0 },
-			Provenance:   authoredProvenance,
+			Verdicts:   map[string]string{"toolu_before_clear": haltVerdict},
+			Denied:     map[string]bool{"toolu_before_clear": true},
+			Provenance: authoredProvenance,
 		}
 		run := runScenario(t, sc)
 		old, ok := run.DecisionFor("toolu_before_clear")
 		if !ok || old.Verb != "deny" {
-			t.Fatalf("the old session's gated call = %+v, want a deny (its own session start failed)", old)
+			t.Fatalf("the old session's gated call = %+v, want a deny (a real HALT verdict)", old)
 		}
 		fresh, ok := run.DecisionFor("toolu_after_clear")
 		if !ok || fresh.Verb != "" {
@@ -232,14 +239,14 @@ func TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted(t *te
 				hook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"`+sessionID+`","cwd":"/repo","tool_name":"Bash","tool_use_id":"toolu_after_resume","tool_input":{"command":"ls"}}`),
 				hook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"`+sessionID+`","cwd":"/repo","reason":"other"}`),
 			},
-			Denied:       map[string]bool{"toolu_before_resume": true},
-			OutageDuring: func(i int, _ string) bool { return i == 0 },
-			Provenance:   authoredProvenance,
+			Verdicts:   map[string]string{"toolu_before_resume": haltVerdict},
+			Denied:     map[string]bool{"toolu_before_resume": true},
+			Provenance: authoredProvenance,
 		}
 		run := runScenario(t, sc)
 		before, ok := run.DecisionFor("toolu_before_resume")
 		if !ok || before.Verb != "deny" {
-			t.Fatalf("before resume = %+v, want a deny", before)
+			t.Fatalf("before resume = %+v, want a deny (a real HALT verdict)", before)
 		}
 		after, ok := run.DecisionFor("toolu_after_resume")
 		if !ok || after.Verb != "" {
@@ -249,12 +256,25 @@ func TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted(t *te
 
 	t.Run("codex-resume-of-a-halted-session-stays-halted", func(t *testing.T) {
 		const sessionID = "codex-resume-session"
+		// Codex's PreToolUse/PermissionRequest contracts fold a HALT into an
+		// ordinary per-call deny with no stop lever, so a HALT verdict on
+		// THOSE never writes the latch at all (gate.go: "only a contract
+		// that RENDERS a session stop... latches"; Codex has exactly one
+		// such contract, UserPromptSubmit). So the halting call here must be
+		// a prompt, not a tool call, or nothing would ever persist to prove
+		// the no-bump claim below. Default answers HALT (a UserPromptSubmit
+		// payload carries no tool_use_id to key a per-call Verdicts entry
+		// on), overridden back to an explicit ALLOW for the AFTER-resume
+		// tool call specifically: if the latch failed to persist, that
+		// override would surface as a live silent-allow instead of
+		// coincidentally matching Default, so this proves the latch itself,
+		// not just that Default says halt twice.
 		sc := fakecore.Scenario{
 			Name:     "codex-resuming-a-halted-session-stays-halted-no-bump-mechanism-exists",
 			Provider: "codex",
 			Payloads: []fakecore.HookPayload{
 				hook("SessionStart", `{"hook_event_name":"SessionStart","session_id":"`+sessionID+`","cwd":"/repo","model":"gpt-5.3-codex","permission_mode":"default","source":"startup"}`),
-				hook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"`+sessionID+`","turn_id":"turn-1","cwd":"/repo","model":"gpt-5.3-codex","permission_mode":"default","tool_name":"Bash","tool_use_id":"toolu_codex_before_resume","tool_input":{"command":"ls"}}`),
+				hook("UserPromptSubmit", `{"hook_event_name":"UserPromptSubmit","session_id":"`+sessionID+`","turn_id":"turn-1","cwd":"/repo","model":"gpt-5.3-codex","permission_mode":"default","prompt":"halt me"}`),
 				hook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"`+sessionID+`","cwd":"/repo","reason":"other"}`),
 				// Codex's own "resume": SessionStart fires again for the SAME
 				// session id. No bump mechanism exists for it at all.
@@ -262,18 +282,26 @@ func TestGovernanceEvalNewRunAfterAHaltIsUnhaltedButCodexResumeStaysHalted(t *te
 				hook("PreToolUse", `{"hook_event_name":"PreToolUse","session_id":"`+sessionID+`","turn_id":"turn-2","cwd":"/repo","model":"gpt-5.3-codex","permission_mode":"default","tool_name":"Bash","tool_use_id":"toolu_codex_after_resume","tool_input":{"command":"pwd"}}`),
 				hook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"`+sessionID+`","cwd":"/repo","reason":"other"}`),
 			},
-			Denied:       map[string]bool{"toolu_codex_before_resume": true, "toolu_codex_after_resume": true},
-			OutageDuring: func(i int, _ string) bool { return i == 0 },
-			Provenance:   authoredProvenance,
+			Verdicts:   map[string]string{"toolu_codex_after_resume": allowVerdict},
+			Default:    haltVerdict,
+			Denied:     map[string]bool{"toolu_codex_after_resume": true},
+			Provenance: authoredProvenance,
 		}
 		run := runScenario(t, sc)
-		before, ok := run.DecisionFor("toolu_codex_before_resume")
-		if !ok || before.Verb != "deny" {
-			t.Fatalf("before resume = %+v, want a deny", before)
+		var prompt fakecore.Decision
+		var found bool
+		for _, d := range run.Decisions {
+			if d.Payload == 1 {
+				prompt, found = d, true
+				break
+			}
+		}
+		if !found || !prompt.Stop {
+			t.Fatalf("the prompt call = %+v, want the session-stop lever rendered (a real HALT verdict on Codex's own prompt contract)", prompt)
 		}
 		after, ok := run.DecisionFor("toolu_codex_after_resume")
 		if !ok || after.Verb != "deny" {
-			t.Fatalf("after resume = %+v, want STILL a deny: Codex has no run-bump mechanism", after)
+			t.Fatalf("after resume = %+v, want STILL a deny: Codex has no run-bump mechanism, so the prompt's own latch is still read", after)
 		}
 		grade(t, fakecore.HaltedAfterFailure(), sc, run.Run)
 	})

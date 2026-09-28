@@ -130,10 +130,17 @@ func TestColdEmitBootstrapsAndExchangesOnce(t *testing.T) {
 	}
 }
 
-// TestCached401InvalidatesWithoutResend: a cached token that a runtime
-// route now rejects is never resent. It deletes the cache file so the next
-// call goes cold, and it costs the retry loop exactly one POST, not two.
-func TestCached401InvalidatesWithoutResend(t *testing.T) {
+// TestCached401InvalidatesThenColdRetry: a cached token that a runtime route
+// now rejects gets exactly one further cold retry before Emit gives up -- the
+// owner decision that replaced "401 is never resent" (3 parallel hooks each
+// fetching a fresh token once saw core answer a spurious 401 on the first,
+// then 200 twice more moments later with an identical identity). While the
+// identity stays revoked, both the original attempt (cached token) and its
+// cold retry (a freshly bootstrapped+exchanged token) fail, so one Emit call
+// now costs two evaluate attempts and one more bootstrap+exchange pair; once
+// the identity is unrevoked, the token the failed cold retry just cached is
+// still good, so the next Emit succeeds without bootstrapping again.
+func TestCached401InvalidatesThenColdRetry(t *testing.T) {
 	fc := fakecore.New(t, fakecore.Script{})
 	cachePath := filepath.Join(t.TempDir(), "workload-token.json")
 	c, _ := newV3TestClient(t, fc.URL(), cachePath)
@@ -157,15 +164,21 @@ func TestCached401InvalidatesWithoutResend(t *testing.T) {
 		t.Errorf("err = %v, want ErrDelivery", err)
 	}
 	if errors.Is(err, ErrRefused) {
-		t.Error("a 401 on a cached token must be held, never a refusal (it would spend the spool's one attempt on a datastore hiccup indistinguishable from a real rejection)")
+		t.Error("a 401 held after its one cold retry must still not be a refusal (it would spend the spool's one attempt on a datastore hiccup indistinguishable from a real rejection)")
 	}
-	if got := fc.V3EvaluateAttempts(); got != 2 {
-		t.Fatalf("evaluate attempts = %d, want 2 (one per Emit; the 401 must not be resent)", got)
+	if got := fc.V3EvaluateAttempts(); got != 3 {
+		t.Fatalf("evaluate attempts = %d, want 3 (1 for the warming Emit, 2 for evt-2: the cached-token 401 earns exactly one cold retry)", got)
 	}
-	if _, statErr := os.Stat(cachePath); !os.IsNotExist(statErr) {
-		t.Errorf("cache file still present after a cached-token 401; Invalidate should have deleted it (err=%v)", statErr)
+	if got := fc.BootstrapHits(); got != 2 {
+		t.Errorf("BootstrapHits = %d, want 2 (1 warming + 1 for evt-2's cold retry)", got)
+	}
+	if got := fc.ExchangeHits(); got != 2 {
+		t.Errorf("ExchangeHits = %d, want 2", got)
 	}
 
+	// The cold retry's own freshly exchanged token is still cached even though
+	// it too was rejected; unrevoking makes that same token good, so the next
+	// Emit succeeds without another bootstrap+exchange round trip.
 	fc.Unrevoke()
 	ev3 := sampleEvent()
 	ev3.EventID = "evt-3"
@@ -173,17 +186,19 @@ func TestCached401InvalidatesWithoutResend(t *testing.T) {
 		t.Fatalf("Emit after Unrevoke: %v", err)
 	}
 	if got := fc.BootstrapHits(); got != 2 {
-		t.Errorf("BootstrapHits = %d, want 2 (the post-invalidate Emit must go cold)", got)
+		t.Errorf("BootstrapHits = %d, want 2 (Emit after Unrevoke reuses the cached token)", got)
 	}
 	if got := fc.ExchangeHits(); got != 2 {
 		t.Errorf("ExchangeHits = %d, want 2", got)
 	}
 }
 
-// TestFresh401IsHeldNotRefused covers the fromCache=false half of the same
-// rule: a just-acquired token a runtime route rejects is also held, not refused, and
-// also not resent.
-func TestFresh401IsHeldNotRefused(t *testing.T) {
+// TestFresh401StillGetsOneColdRetryThenHeldNotRefused covers the
+// fromCache=false half of the same rule: a just-acquired token a runtime
+// route rejects still earns the one cold retry; when the identity stays
+// revoked throughout, the failure is held (ErrDelivery), never refused
+// (ErrRefused), and costs exactly two evaluate attempts.
+func TestFresh401StillGetsOneColdRetryThenHeldNotRefused(t *testing.T) {
 	fc := fakecore.New(t, fakecore.Script{})
 	fc.Revoke()
 	c, _ := newV3TestClient(t, fc.URL(), "")
@@ -196,10 +211,10 @@ func TestFresh401IsHeldNotRefused(t *testing.T) {
 		t.Errorf("err = %v, want ErrDelivery", err)
 	}
 	if errors.Is(err, ErrRefused) {
-		t.Error("a fresh 401 must be held, not refused")
+		t.Error("a 401 held after its one cold retry must still not be a refusal")
 	}
-	if got := fc.V3EvaluateAttempts(); got != 1 {
-		t.Errorf("evaluate attempts = %d, want 1 (no resend)", got)
+	if got := fc.V3EvaluateAttempts(); got != 2 {
+		t.Errorf("evaluate attempts = %d, want 2 (the one cold retry, still rejected)", got)
 	}
 }
 

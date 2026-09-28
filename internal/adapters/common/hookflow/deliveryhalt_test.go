@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,102 +16,66 @@ func devEventFor(sessionID string, eventType client.EventType) client.DevEvent {
 	return client.DevEvent{EventID: "e-" + sessionID, EventType: eventType, SessionID: sessionID}
 }
 
-// TestHaltOnDeliveryFailure_LatchesAndNamesTheClass: a single
-// explicit failure both latches the run (write-if-absent) and names the
-// event and the failure class in the preserved reason, content-free.
-func TestHaltOnDeliveryFailure_LatchesAndNamesTheClass(t *testing.T) {
+// TestRecordDeliveryFailure_NeverLatchesTheRun: an unaccepted event is a
+// finding, not a latch. Every failure class this exercises must leave the
+// run entirely unhalted.
+func TestRecordDeliveryFailure_NeverLatchesTheRun(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	ev := devEventFor("run-explicit", client.EventToolCall)
 	err := fmt.Errorf("%w: dial tcp: connection refused", client.ErrDelivery)
 
-	HaltOnDeliveryFailure(nopLogger(), ev, err)
+	RecordDeliveryFailure(nopLogger(), ev, err)
 
-	info, halted := SessionHalted("run-explicit")
-	if !halted {
-		t.Fatal("an explicit delivery failure must latch the run")
-	}
-	if info.Cause != client.FailureClass(err) {
-		t.Errorf("latch Cause = %q, want %q", info.Cause, client.FailureClass(err))
-	}
-	if info.EventType != string(client.EventToolCall) {
-		t.Errorf("latch EventType = %q, want %q", info.EventType, client.EventToolCall)
-	}
-	if info.TS == "" {
-		t.Error("latch carries no timestamp")
-	}
-	wantSubstrings := []string{"ToolCall", client.FailureClass(err), "halted", "new session"}
-	for _, s := range wantSubstrings {
-		if !strings.Contains(info.Reason, s) {
-			t.Errorf("reason %q missing %q", info.Reason, s)
-		}
+	if _, halted := SessionHalted("run-explicit"); halted {
+		t.Fatal("a delivery failure must never latch the run")
 	}
 }
 
-// TestHaltOnDeliveryFailure_OrphanedDrainNamedDistinctly a drainer that died
-// mid-delivery is not misreported as a network fault: its own class,
-// "orphaned", is what the latch preserves.
-func TestHaltOnDeliveryFailure_OrphanedDrainNamedDistinctly(t *testing.T) {
+// TestRecordDeliveryFailure_OrphanedDrainNeverLatchesEither pins the same
+// non-latching contract for a reclaimed crash orphan, whose outcome cannot
+// be proven at all.
+func TestRecordDeliveryFailure_OrphanedDrainNeverLatchesEither(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	ev := devEventFor("run-orphan", client.EventSessionEnded)
-	HaltOnDeliveryFailure(nopLogger(), ev, errOrphanedDrain)
+	RecordDeliveryFailure(nopLogger(), ev, errOrphanedDrain)
 
-	info, halted := SessionHalted("run-orphan")
-	if !halted {
-		t.Fatal("a reclaimed orphan must latch the run")
-	}
-	if info.Cause != "orphaned" {
-		t.Errorf("Cause = %q, want %q (never a misleading network/timeout guess)", info.Cause, "orphaned")
+	if _, halted := SessionHalted("run-orphan"); halted {
+		t.Error("a reclaimed orphan must not latch the run either")
 	}
 }
 
-// TestHaltOnDeliveryFailure_RunIDPreferredOverSessionID mirrors Deliver's own
-// selection: a continued run latches on RunID, not SessionID.
-func TestHaltOnDeliveryFailure_RunIDPreferredOverSessionID(t *testing.T) {
-	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
-
-	ev := client.DevEvent{EventID: "e1", EventType: client.EventToolCall, SessionID: "sess-continued", RunID: "run-xyz"}
-	HaltOnDeliveryFailure(nopLogger(), ev, errors.New("boom"))
-
-	if _, halted := SessionHalted("run-xyz"); !halted {
-		t.Error("a record carrying RunID must latch the RUN, not the session id")
-	}
-	if _, halted := SessionHalted("sess-continued"); halted {
-		t.Error("the bare session id must not read halted; only the run id was latched")
-	}
-}
-
-// TestHaltOnDeliveryFailure_NeverOverwritesAnExistingLatch is the write-if-
-// absent guarantee from the OTHER direction: a live HALT verdict (an
-// entirely different origin, WriteSessionHalt) already latched this run;
-// a LATER delivery failure for the same run must leave it exactly as it
-// was -- the run's first cause is what every later call sees.
-func TestHaltOnDeliveryFailure_NeverOverwritesAnExistingLatch(t *testing.T) {
+// TestRecordDeliveryFailure_NeverDisturbsAPreexistingRealHaltLatch: a live
+// HALT verdict (WriteSessionHalt, an entirely different origin) already
+// latched this run; a LATER delivery failure for the same run must leave
+// that latch exactly as it was -- RecordDeliveryFailure writes nothing at
+// all, so there is nothing for it to disturb.
+func TestRecordDeliveryFailure_NeverDisturbsAPreexistingRealHaltLatch(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	WriteSessionHalt(nopLogger(), "run-preexisting", client.Evaluation{Reason: "org kill switch", PolicyID: "p-1"})
 
 	ev := devEventFor("run-preexisting", client.EventToolCall)
-	HaltOnDeliveryFailure(nopLogger(), ev, errors.New("boom"))
+	RecordDeliveryFailure(nopLogger(), ev, errors.New("boom"))
 
 	info, halted := SessionHalted("run-preexisting")
 	if !halted {
-		t.Fatal("must still read halted")
+		t.Fatal("must still read halted: the real verdict latch")
 	}
 	if info.Reason != "org kill switch" || info.PolicyID != "p-1" {
-		t.Errorf("the verdict latch was overwritten by a later delivery failure: %+v", info)
+		t.Errorf("the verdict latch was disturbed by a later delivery failure: %+v", info)
 	}
 	if info.Cause != "" {
 		t.Errorf("Cause = %q, want empty (this latch's origin is a verdict, not a delivery failure)", info.Cause)
 	}
 }
 
-// TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch is the
-// write-if-absent guarantee under real concurrency (run with -race): many
-// goroutines racing to latch the SAME run, each with a DIFFERENT failure
-// class, must leave exactly one latch, whichever cause got there first.
-func TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch(t *testing.T) {
+// TestRecordDeliveryFailure_ConcurrentFailuresNeverLatch is the write-if-
+// absent test's negative-space successor under real concurrency (run with
+// -race): many goroutines racing to record the SAME run's failures, each
+// with a DIFFERENT failure class, must leave the run entirely unlatched.
+func TestRecordDeliveryFailure_ConcurrentFailuresNeverLatch(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	const runID = "run-concurrent"
@@ -122,10 +85,6 @@ func TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch(t *testing
 		client.ErrUnbuildable,
 		fmt.Errorf("%w", client.ErrDelivery),
 	}
-	classes := make(map[string]bool, len(errs))
-	for _, e := range errs {
-		classes[client.FailureClass(e)] = true
-	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
@@ -133,25 +92,21 @@ func TestHaltOnDeliveryFailure_ConcurrentFailuresWriteExactlyOneLatch(t *testing
 		wg.Add(1)
 		go func(err error) {
 			defer wg.Done()
-			HaltOnDeliveryFailure(nopLogger(), devEventFor(runID, client.EventToolCall), err)
+			RecordDeliveryFailure(nopLogger(), devEventFor(runID, client.EventToolCall), err)
 		}(err)
 	}
 	wg.Wait()
 
-	info, halted := SessionHalted(runID)
-	if !halted {
-		t.Fatal("the run must be latched")
-	}
-	if !classes[info.Cause] {
-		t.Errorf("latch Cause = %q, want one of the attempted classes %v", info.Cause, classes)
+	if _, halted := SessionHalted(runID); halted {
+		t.Error("no combination of concurrent delivery failures may latch the run")
 	}
 }
 
-// TestNewEngine_OnFailureLedgersAndLatches is the wiring: Engine's default
-// Spool.OnFailure (set once in NewEngine) both records the ledger line a
-// drain has always written and, additively, the halt latch -- for any
-// caller that never overrides Spool.OnFailure itself.
-func TestNewEngine_OnFailureLedgersAndLatches(t *testing.T) {
+// TestNewEngine_OnFailureLedgersButNeverLatches is the wiring: Engine's
+// default Spool.OnFailure (set once in NewEngine) records the ledger line a
+// drain has always written, but never latches the run, for any caller
+// that never overrides Spool.OnFailure itself.
+func TestNewEngine_OnFailureLedgersButNeverLatches(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	e := NewEngine(t.TempDir())
@@ -168,23 +123,21 @@ func TestNewEngine_OnFailureLedgersAndLatches(t *testing.T) {
 	if got := e.Spool.DiscardedCount(); got != 1 {
 		t.Errorf("DiscardedCount = %d, want 1 (the ledger line every drain has always written)", got)
 	}
-	if _, halted := SessionHalted("sess-engine-default"); !halted {
-		t.Error("the failed drain must also latch the run (additive to the ledger line)")
+	if _, halted := SessionHalted("sess-engine-default"); halted {
+		t.Error("a failed drain must never latch the run")
 	}
 }
 
-// TestNewEngine_TimeoutClassLatchesAfterOneRetry proves the timeout
+// TestNewEngine_TimeoutClassNeverLatchesAfterOneRetry proves the timeout
 // failure class through the SAME wiring the real 30s flusher/lane-drain
 // path uses (Engine.NewEngine's own default Spool.OnFailure ->
-// HaltOnDeliveryFailure), without waiting out the real 30s bound: a short
+// RecordDeliveryFailure), without waiting out the real 30s bound: a short
 // AttemptTimeout stands in for it. RequeueUnanswered is left false (the
 // zero value, matching every non-inline drainer -- the detached flusher,
 // the sweep, a lane daemon's own queue), so an attempt whose own ctx expires
 // before the emitter returns is scored as an ordinary failure, not
-// requeued -- exactly the "gate timeouts requeue, never halt; only the
-// flusher/drain path's own fixed 30s bound can" distinction this repo's own
-// gate.go documents.
-func TestNewEngine_TimeoutClassLatchesAfterOneRetry(t *testing.T) {
+// requeued.
+func TestNewEngine_TimeoutClassNeverLatchesAfterOneRetry(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	e := NewEngine(t.TempDir())
@@ -217,12 +170,8 @@ func TestNewEngine_TimeoutClassLatchesAfterOneRetry(t *testing.T) {
 	if attempts != 2 {
 		t.Errorf("attempts = %d, want exactly 2 (one attempt, one retry)", attempts)
 	}
-	info, halted := SessionHalted(sessionID)
-	if !halted {
-		t.Fatal("a timed-out delivery must latch the run, exactly like any other explicit failure")
-	}
-	if info.Cause != "timeout" {
-		t.Errorf("latch Cause = %q, want %q", info.Cause, "timeout")
+	if _, halted := SessionHalted(sessionID); halted {
+		t.Error("a timed-out delivery must never latch the run")
 	}
 	if got := e.Spool.DiscardedCount(); got != 1 {
 		t.Errorf("DiscardedCount = %d, want 1 (the ledger line every drain has always written)", got)

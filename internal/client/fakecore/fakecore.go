@@ -118,16 +118,21 @@ type Server struct {
 
 	// Workload-identity state: a fake Keycloak (bootstrap doc + token
 	// exchange) plus the runtime routes' auth bookkeeping.
-	v3BootstrapHits       int
-	v3ExchangeHits        int
-	v3EvaluateAttempts    int
-	v3TokenEndpointDown   bool
-	v3Revoked             bool
-	v3IssuedTokens        map[string]bool
-	v3BootstrapFailStatus int
-	v3BootstrapFailReason string
-	v3ExchangeFailStatus  int
-	v3ExchangeFailError   string
+	v3BootstrapHits     int
+	v3ExchangeHits      int
+	v3EvaluateAttempts  int
+	v3TokenEndpointDown bool
+	v3Revoked           bool
+	// v3SpuriousUnauthorizedRemaining, when > 0, fails the next v3AuthOK
+	// check (decrementing to 0) regardless of an otherwise-valid token: a
+	// transient, self-clearing 401, distinct from v3Revoked's durable one.
+	// SpuriousUnauthorizedOnce is the only writer.
+	v3SpuriousUnauthorizedRemaining int
+	v3IssuedTokens                  map[string]bool
+	v3BootstrapFailStatus           int
+	v3BootstrapFailReason           string
+	v3ExchangeFailStatus            int
+	v3ExchangeFailError             string
 	// v3EvaluateKeys is every v3 evaluate request's own Idempotency-Key
 	// header, in arrival order, over EVERY request (accepted or not, an
 	// outage included) -- AttemptsByKey's own backing store.

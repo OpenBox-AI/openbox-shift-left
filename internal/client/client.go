@@ -207,8 +207,9 @@ var ErrUnbuildable = errors.New("client: event could not be built")
 // identity" for a genuinely rejected identity AND for any datastore failure
 // while looking the token up, so the two are indistinguishable on the wire.
 // Burning attempts on 401 would let a database hiccup delete governance
-// evidence; a permanently rejected identity instead costs one cheap request per
-// event per sweep, bounded by the retention age.
+// evidence; a permanently rejected identity instead costs two cheap requests
+// per event per sweep (the one cold retry post makes below), bounded by the
+// retention age.
 var ErrRefused = errors.New("client: control plane refused the event")
 
 // isRefusal reports whether err is a proven, event-specific refusal. Anything
@@ -302,6 +303,18 @@ func (c *Client) retryBudget() time.Duration {
 // gets what the server actually wants -- no more requests -- while ErrDelivery
 // re-spools the event. Waiting inline buys nothing the spool does not, and
 // a hook must not hold the tool call open.
+//
+// A 401 gets exactly one further cold retry after the backoff loop above gives
+// up, spent outside its delay budget: three parallel hooks each fetching a
+// fresh token once saw core answer a spurious 401 on the first (core maps any
+// datastore error during agent lookup to 401), then 200 twice more with an
+// identical identity moments later. The retry forces the token cold
+// (Invalidate, then one more attempt) rather than resending the same token
+// verbatim, and it reuses the same idempotency key, since core rejects a 401
+// before ever processing the event -- so a resend can never create a
+// duplicate row. It is skipped once the caller's own ctx has already expired,
+// since that retry could add nothing attempt's own ctx.Err() path does not
+// already produce.
 func (c *Client) post(ctx context.Context, path string, body []byte, idemKey string) ([]byte, error) {
 	// Each delay is drawn from [0, 2*interval], and the intervals are
 	// retryBase/2 then retryBase thereafter, so the worst-case sum is
@@ -313,7 +326,7 @@ func (c *Client) post(ctx context.Context, path string, body []byte, idemKey str
 	b.inner.Multiplier = 2
 	b.inner.MaxInterval = c.retryBase
 
-	return backoff.Retry(ctx, func() ([]byte, error) {
+	respBody, err := backoff.Retry(ctx, func() ([]byte, error) {
 		respBody, retryable, err := c.attempt(ctx, path, body, idemKey)
 		switch {
 		case err == nil:
@@ -341,6 +354,24 @@ func (c *Client) post(ctx context.Context, path string, body []byte, idemKey str
 		// worth having. The budget below bounds the delays and nothing else.
 		backoff.WithMaxElapsedTime(0),
 	)
+	if err == nil {
+		return respBody, nil
+	}
+
+	// One cold retry on a 401, outside the backoff budget: 3 parallel hooks
+	// each fetching a fresh token once saw core answer a spurious 401 (core
+	// maps any datastore error during agent lookup to 401) on the first, then
+	// 200 twice more 0.3s later with an identical identity. Only when the
+	// caller's own context is still alive -- a retry into an already-canceled
+	// ctx would just re-derive the same "context canceled" failure attempt
+	// already produces, spending a token invalidation for nothing.
+	var he *httpError
+	if errors.As(err, &he) && he.status == http.StatusUnauthorized && ctx.Err() == nil {
+		_ = c.tokens.Invalidate()
+		respBody2, _, err2 := c.attempt(ctx, path, body, idemKey)
+		return respBody2, err2
+	}
+	return nil, err
 }
 
 // budgetedBackOff spends a fixed delay budget and then stops. The clamp has to
@@ -372,11 +403,15 @@ func (b *budgetedBackOff) NextBackOff() time.Duration {
 // refusal (it is not one: the control plane never saw the event). It is
 // retryable iff the *workloadauth.Error says Transient.
 //
-// A 401 is never resent, cached token or not. A cached token's 401
-// invalidates the cache (file and memory) so the next attempt goes cold; a
-// fresh token's 401 invalidates nothing, since there is nothing stale to
-// evict. Either way retryable is false here, which is what stops post's retry
-// loop from resending.
+// A 401 is never resent from inside this function's own retry classification:
+// retryable is false here, cached token or not, which is what stops post's
+// backoff loop from resending it on the same (possibly still-stale) token. A
+// cached token's 401 invalidates the cache (file and memory) here so a
+// resend, if any, goes cold; a fresh token's 401 invalidates nothing yet,
+// since there is nothing stale to evict at this point. post itself still owns
+// one further cold retry outside the backoff budget (see post's doc comment):
+// it invalidates unconditionally and calls attempt a second time with a
+// forced-cold token.
 func (c *Client) attempt(ctx context.Context, path string, body []byte, idemKey string) (respBody []byte, retryable bool, err error) {
 	tokenStart := time.Now()
 	token, fromCache, terr := c.tokens.Token(ctx)

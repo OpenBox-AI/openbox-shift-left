@@ -290,12 +290,16 @@ runs. The verdict decides what happens:
 | halt | the session stops; every later prompt and tool call in it is refused |
 
 If an event cannot be delivered (platform down, timeout, 5xx, 401), the action
-is denied. If the platform explicitly refused or failed it, the session is
-also halted. There is no setting to proceed instead.
+is denied. There is no setting to proceed instead. The run itself is not
+halted by this: your next action gets its own fresh attempt, whether or not
+the earlier one reached the platform. A 401 is retried once automatically
+with a freshly fetched credential before it counts as a failure at all.
 
-A halted session stays halted until you start a new one. On Claude Code,
-`/clear` and `--resume` start a fresh run and are not halted. On Codex,
-`resume` continues the same run and stays halted.
+Only an explicit HALT verdict from the platform halts the session: every
+later prompt and tool call in it is refused locally, with no further round
+trip, until you start a new one. On Claude Code, `/clear` and `--resume`
+start a fresh run and are not halted. On Codex, `resume` continues the same
+run and stays halted.
 
 ## Approvals
 

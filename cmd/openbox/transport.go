@@ -247,7 +247,7 @@ func (a *app) runTransport(args []string) int {
 	return exitOK
 }
 
-// errChatPoolUnavailable is what chatDeliver reports to HaltOnDeliveryFailure
+// errChatPoolUnavailable is what chatDeliver reports to RecordDeliveryFailure
 // when the chat pool itself could not accept a record (saturated, or already
 // shutting down): the record never reached core either way, and
 // client.FailureClass's own catch-all ("network") is an honest enough class
@@ -365,7 +365,7 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 // sessionkey.ResolveProxy always misses for one; ResolveChat is tried next,
 // keyed directly on the conversation -- a chat has no runs (git.RunStore
 // never sees one), so its latch key IS the chat key itself, the same
-// resolution HaltOnDeliveryFailure/runIDFor already fall back to for a chat
+// resolution RecordDeliveryFailure/runIDFor already fall back to for a chat
 // event carrying no RunID (gatewayemit/emitter.go's own emitChat never sets
 // one).
 func (h haltDecorator) haltedRun(c gateway.Captured) (string, hookflow.SessionHaltInfo, bool) {

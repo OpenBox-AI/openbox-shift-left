@@ -59,11 +59,10 @@ func TestSessionHaltCorruptLatchStillHalts(t *testing.T) {
 	}
 }
 
-// TestSessionHaltEmptyLatchStillHaltsWithAGenericReason: WriteSessionHaltIfAbsent's
-// create-then-write (O_CREATE|O_EXCL, then a separate Write) leaves a brief
-// window where a concurrent reader can observe a present but EMPTY (0-byte)
-// file -- unlike WriteSessionHalt's own rename-into-place, which a reader
-// never observes mid-write. Presence must still halt, and the replayed
+// TestSessionHaltEmptyLatchStillHaltsWithAGenericReason: a present but EMPTY
+// (0-byte) latch -- what an older binary's create-then-write left behind in
+// the window before its Write, or a truncated file -- carries no Cause to
+// prove it was a delivery failure. Presence must still halt, and the replayed
 // reason must still be generic and non-empty, exactly as for a corrupt
 // latch: an operator (or the next gated call) must never see a blank reason.
 func TestSessionHaltEmptyLatchStillHaltsWithAGenericReason(t *testing.T) {
@@ -86,6 +85,48 @@ func TestSessionHaltEmptyLatchStillHaltsWithAGenericReason(t *testing.T) {
 	}
 	if dec.Evaluation.Reason == "" {
 		t.Error("an empty latch must replay with the generic reason, not a blank one")
+	}
+}
+
+// TestSessionHaltIgnoresADeliveryFailureLatchButHonorsARealOne pins the
+// read-side change: a pre-existing latch written by an OLDER binary
+// (before RecordDeliveryFailure stopped writing this file) carries a
+// non-empty Cause and must now be ignored (reported not halted),
+// so an already-stuck session recovers on its own; a real HALT verdict
+// (Cause == "", WriteSessionHalt's own shape) is unaffected, and a corrupt
+// file still halts exactly as before (presence-without-Cause).
+func TestSessionHaltIgnoresADeliveryFailureLatchButHonorsARealOne(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(devconfig.EnvHaltDir, dir)
+
+	// A pre-existing delivery-failure latch (Cause set), the exact shape an
+	// older binary wrote for an unaccepted event.
+	raw, err := json.Marshal(SessionHaltInfo{
+		Reason: "OpenBox could not record ToolCall for this session (network)",
+		Cause:  "network", EventType: "ToolCall", TS: "2026-08-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(haltPath("s-old-delivery-latch"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, halted := SessionHalted("s-old-delivery-latch"); halted {
+		t.Error("a pre-existing delivery-failure latch (Cause != \"\") must now read as NOT halted")
+	}
+
+	// A real HALT verdict latch (Cause == "") is unaffected.
+	WriteSessionHalt(nopLogger(), "s-real-verdict", client.Evaluation{Reason: "org kill switch"})
+	if _, halted := SessionHalted("s-real-verdict"); !halted {
+		t.Error("a real HALT verdict latch (Cause == \"\") must still read halted")
+	}
+
+	// A corrupt file still halts (unrelated to Cause, which never parsed).
+	if err := os.WriteFile(haltPath("s-still-corrupt"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, halted := SessionHalted("s-still-corrupt"); !halted {
+		t.Error("a corrupt latch must still halt regardless of this change")
 	}
 }
 

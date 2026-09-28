@@ -477,17 +477,21 @@ var gatedHookEvents = map[string]bool{
 	"PermissionRequest": true,
 }
 
-// isHaltReplyReason reports whether a rendered deny's own reason text is one
-// of the two FIXED phrases this codebase ever writes for a run that cannot
-// continue on its own: a delivery failure (HaltOnDeliveryFailure) or a HALT
-// verdict replayed from an unreadable/corrupt latch (SessionHaltDecision's
-// own generic fallback, used only when the latch carries no reason at all).
-// This alone is NOT sufficient to detect every halt: a live HALT verdict
-// carries the POLICY's own reason text verbatim (e.g. "org kill switch"),
-// never this fixed wording, so HaltedAfterFailure's own Check also reads
-// run.Ledger and the rendered Stop lever -- see its own doc comment.
+// isHaltReplyReason reports whether a rendered deny's own reason text is the
+// ONE fixed phrase this codebase still writes for a run that cannot continue
+// on its own: a HALT verdict replayed from an unreadable/corrupt latch
+// (SessionHaltDecision's own generic fallback, used only when the latch
+// carries no reason at all). A delivery failure (RecordDeliveryFailure) no
+// longer latches a run at all, so it never
+// reaches this fixed wording either -- it denies only the call it belongs
+// to, with EvaluationFailOpen's own "evaluation undelivered"-class reason,
+// never mistaken for a halt reply here. This alone is NOT sufficient to
+// detect every halt: a live HALT verdict carries the POLICY's own reason
+// text verbatim (e.g. "org kill switch"), never this fixed wording, so
+// HaltedAfterFailure's own Check also reads run.Ledger and the rendered Stop
+// lever -- see its own doc comment.
 func isHaltReplyReason(reason string) bool {
-	return strings.Contains(reason, "OpenBox could not record") || strings.Contains(reason, "session halted")
+	return strings.Contains(reason, "session halted")
 }
 
 // ledgerAppliedHalt reports whether one decoded enforcement-ledger row is
@@ -507,14 +511,25 @@ func ledgerAppliedHalt(rec map[string]any) bool {
 	return ad == "halt"
 }
 
-// HaltedAfterFailure: once a run's own gated decision halts -- a delivery
-// failure, or ANY HALT verdict, whether replayed from the latch with the
-// fixed generic reason this codebase writes for an unreadable latch, or a
-// live evaluation naming its own policy-authored reason -- EVERY later
-// GATED decision of that same run must also deny, including one that
-// rendered NOTHING at all (Verb == "", a silent ALLOW slipping through is
-// exactly the failure mode a halt exists to prevent). An ungated event
-// carries no verdict to check and is skipped in both directions.
+// HaltedAfterFailure: once a run's own gated decision is a REAL HALT verdict
+// -- whether replayed from the latch with the fixed generic reason this
+// codebase writes for an unreadable latch, or a live evaluation naming its
+// own policy-authored reason -- EVERY later GATED decision of that same run
+// must also deny, including one that rendered NOTHING at all (Verb == "", a
+// silent ALLOW slipping through is exactly the failure mode a halt exists to
+// prevent). An ungated event carries no verdict to check and is skipped in
+// both directions.
+//
+// A plain delivery failure (RecordDeliveryFailure) no longer marks a run
+// halted at all: it denies only the call it
+// belongs to, and the run's NEXT gated call is free to allow again. None of
+// the three signals below fire for it (its own reason is
+// EvaluationFailOpen's "evaluation undelivered"-class text, never the fixed
+// halt-reply phrase; its ledger row is not "halt"; it renders no Stop
+// lever), so this grader is correctly a no-op across a scenario whose only
+// failure is a delivery one -- it exists to catch a run that IS halted
+// (by a real verdict) silently un-halting itself later, not to assert that a
+// delivery failure ever halts anything.
 //
 // Halted is detected from three independent signals, ORed together, because
 // no single one covers every shape: run.Ledger's own applied_decision field

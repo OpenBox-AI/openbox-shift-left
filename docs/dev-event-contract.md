@@ -94,7 +94,8 @@ posture per provider.
 A handful of deprecated posture keys (`enforce`, `fail_closed`, and an older
 timeout/verification pair) are still parsed, only so `openbox doctor` can warn
 when one is set. None of them changes behavior: every gated call is
-evaluated, and any event the client can't get delivered halts the run.
+evaluated, and any event the client can't get delivered denies that call,
+without latching the run -- only a real HALT verdict does that.
 
 ## Validate
 

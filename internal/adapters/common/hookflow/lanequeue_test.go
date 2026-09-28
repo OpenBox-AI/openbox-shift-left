@@ -97,12 +97,13 @@ func TestLaneQueueSingleFlightNoConcurrentDrainOfOneSession(t *testing.T) {
 	}
 }
 
-// TestLaneQueueUnacceptedEventLatchesRunThenNextEventStillAttemptedOnce
-// pins: an event core refuses gets exactly one attempt and halts the run
-// (HaltOnDeliveryFailure, wired through Engine's own Spool.OnFailure); a
-// LATER event of the SAME session is still attempted -- once, never skipped
-// or retried -- exactly like a halted run's remaining hook events.
-func TestLaneQueueUnacceptedEventLatchesRunThenNextEventStillAttemptedOnce(t *testing.T) {
+// TestLaneQueueUnacceptedEventRecordsAFindingThenNextEventStillAttemptedOnce
+// proves that an event core refuses gets exactly one attempt and is
+// recorded as a finding (RecordDeliveryFailure, wired through
+// Engine's own Spool.OnFailure) but never latches the run; a LATER event of
+// the SAME session is still attempted -- once, never skipped or retried --
+// exactly as before.
+func TestLaneQueueUnacceptedEventRecordsAFindingThenNextEventStillAttemptedOnce(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	em := &countingEmitter{script: map[string]error{"e-refused": errors.New("503 service unavailable")}}
@@ -112,19 +113,16 @@ func TestLaneQueueUnacceptedEventLatchesRunThenNextEventStillAttemptedOnce(t *te
 		t.Fatal("Deliver must accept the append even though delivery will fail")
 	}
 
-	waitUntil(t, 2*time.Second, func() bool {
-		_, halted := SessionHalted("sess-halt")
-		return halted
-	})
+	waitUntil(t, 2*time.Second, func() bool { return q.Dropped() == 1 })
 	if got := em.attemptsFor("e-refused"); got != 1 {
 		t.Errorf("attempts for the refused event = %d, want exactly 1", got)
 	}
-	if got := q.Dropped(); got != 1 {
-		t.Errorf("Dropped() = %d, want 1 after one unaccepted event", got)
+	if _, halted := SessionHalted("sess-halt"); halted {
+		t.Error("an unaccepted event must never latch the run")
 	}
 
 	if !q.Deliver(context.Background(), sessEv("sess-halt", "e-after")) {
-		t.Fatal("Deliver for a later event of the same (now-halted) run must still be accepted")
+		t.Fatal("Deliver for a later event of the same run must still be accepted")
 	}
 	waitUntil(t, 2*time.Second, func() bool { return em.attemptsFor("e-after") == 1 })
 	if got := em.attemptsFor("e-after"); got != 1 {
@@ -137,11 +135,11 @@ func TestLaneQueueUnacceptedEventLatchesRunThenNextEventStillAttemptedOnce(t *te
 	}
 }
 
-// TestLaneQueueDeliverAppendFailureCountsAndLatches pins Deliver's own
+// TestLaneQueueDeliverAppendFailureCountsButNeverLatches pins Deliver's own
 // append-failure branch: a spool write that never even lands counts the
-// same as an unaccepted event and halts the run, since there is nothing
-// left to retry it with.
-func TestLaneQueueDeliverAppendFailureCountsAndLatches(t *testing.T) {
+// same as an unaccepted event (RecordDeliveryFailure), but never latches
+// the run.
+func TestLaneQueueDeliverAppendFailureCountsButNeverLatches(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
 	// A spool Dir that is actually a FILE, not a directory, makes every
@@ -161,8 +159,8 @@ func TestLaneQueueDeliverAppendFailureCountsAndLatches(t *testing.T) {
 	if got := q.Dropped(); got != 1 {
 		t.Errorf("Dropped() = %d, want 1 for an append failure", got)
 	}
-	if _, halted := SessionHalted("sess-append-fail"); !halted {
-		t.Error("an append failure must latch the run: nothing else will ever retry it")
+	if _, halted := SessionHalted("sess-append-fail"); halted {
+		t.Error("an append failure must never latch the run")
 	}
 }
 

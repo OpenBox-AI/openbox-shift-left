@@ -52,8 +52,9 @@ func EffectivePosture() Posture {
 	warnDeprecatedKeys()
 
 	p.DecisionAuthority = DecisionAuthorityControlPlane
-	// Delivery is always fail-closed now: any event core does not accept
-	// halts the run (HaltOnDeliveryFailure), regardless of what
+	// Delivery is always fail-closed now: a gated call whose evaluation
+	// core does not accept is denied (RecordDeliveryFailure records the
+	// finding; the run is not latched), regardless of what
 	// `fail_closed`/OPENBOX_FAIL_CLOSED say. The key is still resolved above
 	// (ConfigSource["fail_closed"] still names where a now-ignored value
 	// came from, for the doctor label), but the wire posture and this

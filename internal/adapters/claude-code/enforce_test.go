@@ -183,8 +183,8 @@ func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
 
 // The surviving local step decides nothing and cannot block; the block
 // property moved to the server and is asserted end to end by C1 and C12
-// against a real /evaluate. Delivery is always fail-closed now
-// (HaltOnDeliveryFailure): a gated call with no reachable control plane
+// against a real /evaluate. Delivery is always fail-closed per call
+// now (RecordDeliveryFailure): a gated call with no reachable control plane
 // denies rather than silently proceeding. Enforcement itself is unconditional
 // now too (ResolveEnforce always reports true), so there is no "enforce off"
 // case left to prove takes a different path -- PreToolUse always runs the

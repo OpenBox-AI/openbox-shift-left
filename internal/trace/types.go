@@ -49,6 +49,7 @@ const (
 	StagePoolDrop       = "pool.drop"
 	StageQueueAbandon   = "queue.abandon"
 	StageLatchSet       = "latch.set"
+	StageDeliveryFailed = "delivery.failed"
 	StageStripeWait     = "stripe.wait"
 	StageUnit           = "unit"
 	StageActivation     = "activation"

@@ -253,9 +253,11 @@ func closeAllConcurrently(ctx context.Context, closers ...shutdownCloser) int {
 // one that governs Anthropic's hosts on this machine). Each attempt is
 // bounded at DeliveryAttemptTimeout (30s, the bound every other drainer
 // uses), and a transient failure (client.RetryableDelivery) gets exactly one
-// retry before the conversation is latched, so the pool's own timeout covers
-// two attempts. The returned deliver closure additionally latches a chat
-// event the pool could
+// retry before the failure is recorded, so the pool's own timeout covers
+// two attempts. A recorded failure no longer latches the run: this call is
+// denied, and the next chat event for the same conversation tries again from
+// scratch (only a real server HALT verdict latches). The returned deliver
+// closure additionally records a chat event the pool could
 // not even ACCEPT (saturated, or shutting down): it never reached core
 // either, so it is treated exactly like an attempted-and-refused one (R4a)
 // rather than silently counted only as a pool drop.
@@ -289,20 +291,21 @@ func newChatPool(identities map[string]providerIdentity, advisory *hookflow.Advi
 			}
 			if err != nil {
 				logger.Printf("openbox transport: chat delivery failed for %s: %v", ev.EventID, err)
-				hookflow.HaltOnDeliveryFailure(logger, ev, err)
+				hookflow.RecordDeliveryFailure(logger, ev, err)
 			}
 			return err
 		})
 	// A record accepted but abandoned at shutdown before its first attempt
-	// never reached core: latched like one the pool could not accept.
+	// never reached core: recorded like one the pool could not accept, but no
+	// longer latches the run -- the next call for this session tries again.
 	pool.OnAbandon = func(ev client.DevEvent) {
-		hookflow.HaltOnDeliveryFailure(logger, ev, errChatPoolUnavailable)
+		hookflow.RecordDeliveryFailure(logger, ev, errChatPoolUnavailable)
 	}
 	deliver := func(ev client.DevEvent) bool {
 		if pool.Submit(ev) {
 			return true
 		}
-		hookflow.HaltOnDeliveryFailure(logger, ev, errChatPoolUnavailable)
+		hookflow.RecordDeliveryFailure(logger, ev, errChatPoolUnavailable)
 		return false
 	}
 	return pool, deliver

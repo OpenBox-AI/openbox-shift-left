@@ -73,7 +73,7 @@ func TestEnforcementConformance_Codex(t *testing.T) {
 	})
 
 	// CDX-C2 pinned "fail_closed=0 => outage proceeds". Delivery is now
-	// always fail-closed (HaltOnDeliveryFailure): the
+	// always fail-closed per call: the
 	// `fail_closed` key is deprecated, parsed only so it can warn, and no
 	// longer selects a policy, so this now asserts the same outage-denies
 	// behaviour CDX-C4 pins, kept separate for its timing bound.

@@ -40,8 +40,8 @@ const (
 // The first record deliver reports unaccepted stops its session: every
 // record still queued behind it is dropped and counted, never sent, because
 // a Completed sent after its Started was refused files exactly the orphan
-// half this pool exists to prevent, and the refused record has already
-// latched the run.
+// half this pool exists to prevent -- the refused record is recorded as a
+// delivery-failure finding, never a run latch.
 //
 // Its one production caller today is the transport lane's own claude.ai
 // CHAT records (a conversation has no tool session, so it has no per-session
@@ -60,9 +60,10 @@ type DeliverPool struct {
 
 	// OnAbandon is called for each record Submit accepted that Close's
 	// deadline then abandoned before a single attempt was made: it never
-	// reached core, so a caller latches it like any other unaccepted record.
-	// A record abandoned mid-attempt is counted only, as it always was. Set
-	// it before the first Submit; nil ⇒ count only.
+	// reached core, so a caller records it like any other unaccepted record
+	// (RecordDeliveryFailure -- a finding, never a run latch). A record
+	// abandoned mid-attempt is counted only, as it always was. Set it before
+	// the first Submit; nil ⇒ count only.
 	OnAbandon func(ev client.DevEvent)
 
 	mu sync.Mutex

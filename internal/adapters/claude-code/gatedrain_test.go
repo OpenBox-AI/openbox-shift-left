@@ -109,16 +109,19 @@ func TestGateDrain_SlowCoreNeverHaltsTheRun(t *testing.T) {
 	}
 }
 
-// TestGateDrain_ExplicitRejectionInsideTheWindowHaltsAndDeniesThatCall is the
-// other half of the same tie-breaker: an EXPLICIT non-acceptance found
-// while draining (core answered, and the answer was a refusal, not silence)
-// denies the draining call itself and halts the run -- unlike a slow core,
-// which never does either. AlwaysStatus makes every wire hit a flat 401,
-// the exact shape a rejected workload identity or a rejected credential
-// produces, and it answers well inside this call's own drain window (no
-// delay at all), so this is unambiguously an explicit rejection, not
-// silence.
-func TestGateDrain_ExplicitRejectionInsideTheWindowHaltsAndDeniesThatCall(t *testing.T) {
+// TestGateDrain_ExplicitRejectionInsideTheWindowNeverHaltsAndStillEscalates
+// proves that an EXPLICIT non-acceptance found while draining (core
+// answered, and the answer was a refusal, not silence) is recorded as a
+// finding but never halts the run -- only a REAL HALT verdict from core
+// still does. The
+// drained backlog event is denied on its own account and gone; this call's
+// own gate proceeds to its own escalation exactly as if the backlog had
+// never been there, and that escalation -- hitting the same AlwaysStatus:401
+// -- is itself treated as unanswered (401 is not a proven, event-specific
+// refusal; client.ErrRefused's own contract), so it still denies
+// fail-closed, for a different reason than before (a failed evaluation, not
+// a halt).
+func TestGateDrain_ExplicitRejectionInsideTheWindowNeverHaltsAndStillEscalates(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv(envEnforce, "1")
 	t.Setenv(envFailClosed, "1")
@@ -151,12 +154,18 @@ func TestGateDrain_ExplicitRejectionInsideTheWindowHaltsAndDeniesThatCall(t *tes
 
 	d, _ := parsePermissionDecision(t, stdout.Bytes())
 	if d != ccDecisionDeny {
-		t.Fatalf("permissionDecision = %q, want deny; an explicit 401 found while draining must deny this call", d)
+		t.Fatalf("permissionDecision = %q, want deny; a failed-closed escalation still denies", d)
 	}
-	if _, halted := hookflow.SessionHalted(sessionID); !halted {
-		t.Error("an explicit 401 found while draining must halt the run")
+	if _, halted := hookflow.SessionHalted(sessionID); halted {
+		t.Error("a delivery failure found while draining must never halt the run")
 	}
-	if n := f.V3EvaluateAttempts(); n != 1 {
-		t.Errorf("/evaluate attempts = %d, want exactly 1 (the drained backlog event); the gate's own escalation must never run once the drain latched the run", n)
+	// >= 2, not == 2: the client's own wire-level retry policy for a 401
+	// (e.g. a single cold retry outside the backoff budget) is orthogonal to
+	// what this test pins -- that the drain never halts the run and this
+	// call's own escalation always runs right behind it -- so at least one
+	// attempt for the backlog event and one for this call's own escalation
+	// is the invariant, not an exact wire count.
+	if n := f.V3EvaluateAttempts(); n < 2 {
+		t.Errorf("/evaluate attempts = %d, want at least 2 (the drained backlog event, then this call's own escalation, which now always runs)", n)
 	}
 }

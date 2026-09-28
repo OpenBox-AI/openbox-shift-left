@@ -14,7 +14,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -221,58 +220,66 @@ func TestHaltDecoratorRefusesALatchedRun(t *testing.T) {
 	}
 }
 
-// TestHaltDecoratorRefusesARunLatchedByADeliveryFailure: a run latched
-// by an unaccepted event (HaltOnDeliveryFailure, not a HALT verdict) refuses
-// the run's NEXT relayed call exactly like a verdict-originated latch does --
-// the relay's own read side (haltDecorator) does not distinguish the two
-// origins -- while an unrelated, unlatched run is untouched.
-func TestHaltDecoratorRefusesARunLatchedByADeliveryFailure(t *testing.T) {
+// TestHaltDecoratorDoesNotLatchAfterADeliveryFailureIsRecorded: an unaccepted
+// event (hookflow.RecordDeliveryFailure, not a HALT verdict) no longer
+// latches the run -- it only writes a trace/log finding -- so the run's NEXT
+// relayed call is still resolved ALLOW by haltDecorator, for both the
+// session the failure was recorded against and an unrelated one. Only a real
+// server HALT verdict (WriteSessionHalt) latches; that half is pinned by
+// TestHaltDecoratorRefusesALatchedRun above.
+func TestHaltDecoratorDoesNotLatchAfterADeliveryFailureIsRecorded(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "enforcements.jsonl"))
 	t.Setenv(obgit.EnvSessionDir, t.TempDir())
-	const latchedSession = "sess-delivery-halt-1"
-	const unlatchedSession = "sess-delivery-halt-unrelated"
+	const recordedSession = "sess-delivery-failure-1"
+	const unrelatedSession = "sess-delivery-failure-unrelated"
 
-	latchedCall := gateway.Captured{
+	recordedCall := gateway.Captured{
 		HTTPURL:        "https://api.anthropic.com/v1/messages",
-		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": latchedSession},
+		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": recordedSession},
 	}
-	unlatchedCall := gateway.Captured{
+	unrelatedCall := gateway.Captured{
 		HTTPURL:        "https://api.anthropic.com/v1/messages",
-		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": unlatchedSession},
+		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": unrelatedSession},
 	}
 
-	if eval, err := (haltDecorator{}).Evaluate(context.Background(), latchedCall); err != nil || eval.Verdict != client.VerdictAllow {
-		t.Fatalf("Evaluate (unlatched): verdict=%q err=%v, want ALLOW", eval.Verdict, err)
+	if eval, err := (haltDecorator{}).Evaluate(context.Background(), recordedCall); err != nil || eval.Verdict != client.VerdictAllow {
+		t.Fatalf("Evaluate (before any failure): verdict=%q err=%v, want ALLOW", eval.Verdict, err)
 	}
 
 	// Stand in for a hook drainer or a lane daemon's own OnFailure, the same
 	// writer every one of them shares (hookflow.NewEngine wires it as the
-	// default Spool.OnFailure): core did not accept this event, so the run
-	// halts.
-	hookflow.HaltOnDeliveryFailure(discardMainLogger(), client.DevEvent{
-		EventID: "e1", EventType: client.EventToolCall, SessionID: latchedSession,
+	// default Spool.OnFailure): core did not accept this event, but that no
+	// longer latches the run -- only a trace/log finding is written.
+	hookflow.RecordDeliveryFailure(discardMainLogger(), client.DevEvent{
+		EventID: "e1", EventType: client.EventToolCall, SessionID: recordedSession,
 	}, client.ErrDelivery)
 
-	eval, err := (haltDecorator{}).Evaluate(context.Background(), latchedCall)
-	if err != nil {
-		t.Fatalf("Evaluate (latched): %v", err)
-	}
-	if eval.Verdict != client.VerdictHalt {
-		t.Fatalf("latched session resolved verdict %q, want HALT", eval.Verdict)
-	}
-	if !strings.Contains(eval.Reason, "ToolCall") {
-		t.Errorf("resolved reason %q does not name the event the latch preserved", eval.Reason)
+	if _, halted := hookflow.SessionHalted(recordedSession); halted {
+		t.Fatalf("a recorded delivery failure must not latch the run")
 	}
 
-	eval, err = (haltDecorator{}).Evaluate(context.Background(), unlatchedCall)
+	eval, err := (haltDecorator{}).Evaluate(context.Background(), recordedCall)
+	if err != nil {
+		t.Fatalf("Evaluate (after recorded failure): %v", err)
+	}
+	if eval.Verdict != client.VerdictAllow {
+		t.Fatalf("the run's next relayed call resolved verdict %q, want ALLOW (the next call tries again)", eval.Verdict)
+	}
+
+	eval, err = (haltDecorator{}).Evaluate(context.Background(), unrelatedCall)
 	if err != nil {
 		t.Fatalf("Evaluate (unrelated session): %v", err)
 	}
 	if eval.Verdict != client.VerdictAllow {
-		t.Fatalf("an unrelated, unlatched session resolved verdict %q, want ALLOW", eval.Verdict)
+		t.Fatalf("an unrelated session resolved verdict %q, want ALLOW", eval.Verdict)
 	}
 }
+
+// The other half of the contract -- a real server HALT verdict
+// (WriteSessionHalt), unlike a recorded delivery failure, still refuses the
+// run's next relayed call -- is already pinned above by
+// TestHaltDecoratorRefusesALatchedRun.
 
 // TestHaltDecoratorDoesNotRefuseAContinuedRunThatDidNotHalt pins the run
 // keying: the run a session CURRENTLY
@@ -404,6 +411,37 @@ func TestCrossLaneHaltAllowsAnUnlatchedSessionThroughANilDelegate(t *testing.T) 
 // about the latch file WriteSessionHalt writes, not its own diagnostics.
 func discardMainLogger() *log.Logger { return log.New(io.Discard, "", 0) }
 
+// waitUntilAttempted polls fake.AttemptsByKey() until every key it has seen
+// so far reached exactly want attempts, or timeout passes -- a LaneQueue's
+// own drain is asynchronous (Kick starts a goroutine), and unlike Close this
+// never stops the queue from accepting further work, so a caller that still
+// needs the queue for a LATER call (unlike a plain drain-to-completion at
+// the end of a test) can use this instead of Close to wait out one drain
+// pass.
+func waitUntilAttempted(t *testing.T, fake *fakecore.Server, want int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		attempts := fake.AttemptsByKey()
+		if len(attempts) > 0 {
+			done := true
+			for _, n := range attempts {
+				if n < want {
+					done = false
+					break
+				}
+			}
+			if done {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("attempts never reached %d within %s: %v", want, timeout, attempts)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // TestHaltDecoratorRecordsALatchedRefusal: a latched relayed refusal must leave
 // a trace even when this lane is not the elected producer, where the relay's
 // own event is skipped by the election and core never hears of the call. The
@@ -447,18 +485,16 @@ func TestHaltDecoratorRecordsALatchedRefusal(t *testing.T) {
 	}
 }
 
-// TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery pins:
-// core refusing a lane record (a 503 on every v3 evaluate
-// request) gives that record exactly one attempt each -- through a REAL
-// LaneQueue drain, not a hand-called HaltOnDeliveryFailure -- and latches the
-// run through the same writer every drainer shares (LaneQueue's own wired
-// Spool.OnFailure); the run's next relayed call is then refused by
-// haltDecorator (proven directly, the same way
-// TestHaltDecoratorRefusesARunLatchedByADeliveryFailure already does, since
-// that half of the contract is already pinned there); and recovery (the fake
-// would answer normally from here on, though nothing calls it again for this
-// session) does not resend anything -- fakecore.AttemptsByKey's own count per
-// event_id (its Idempotency-Key) is unchanged after the refusal.
+// TestLaneRecordCoreOutageDoesNotLatchAndTheNextCallTriesAgain proves that
+// core refusing a lane record (a 503 on every v3 evaluate request) gives
+// that record exactly one attempt and one retry --
+// through a REAL LaneQueue drain, not a hand-called RecordDeliveryFailure --
+// but no longer latches the run: that gated call is denied (nothing reaches
+// core for it beyond its one retry), while the run's NEXT relayed call is
+// resolved ALLOW by haltDecorator (no persisted latch to read) and, once
+// core recovers, the run's next lane record actually reaches and is accepted
+// by core -- proving "the next one tries again" rather than staying stuck
+// denying forever.
 //
 // The relay's own capture records g.upstream+RequestURI as HTTPURL (gateway/
 // proxy.go), not the intercepted TLS host, so a test pinning Upstream to a
@@ -469,7 +505,7 @@ func TestHaltDecoratorRecordsALatchedRefusal(t *testing.T) {
 // host). Proving the refusal itself through the real relay would therefore
 // prove an artifact of this test's own plumbing, not the daemon's; the direct
 // call below is what the existing test already established is equivalent.
-func TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery(t *testing.T) {
+func TestLaneRecordCoreOutageDoesNotLatchAndTheNextCallTriesAgain(t *testing.T) {
 	memhttptest.RequireBind(t)
 
 	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())
@@ -478,7 +514,8 @@ func TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery(t *te
 	t.Setenv(obgit.EnvSessionDir, t.TempDir())
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 
-	fake := fakecore.New(t, fakecore.Script{AlwaysStatus: http.StatusServiceUnavailable})
+	fake := fakecore.New(t, fakecore.Script{})
+	fake.SetOutage(true)
 	t.Setenv(devconfig.EnvBaseURL, fake.URL())
 	seedV3EnvIdentity(t)
 
@@ -502,25 +539,21 @@ func TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery(t *te
 		t.Fatalf("transport.New: %v", err)
 	}
 
-	const sessionID = "sess-lane-outage-halt-1"
+	const sessionID = "sess-lane-outage-nolatch-1"
 	serveOneCall(t, p, ca, sessionID)
 
 	// Wait for the queue's own drain to go fully idle -- BOTH halves of the
 	// captured call attempted, not merely the first -- before snapshotting
-	// anything. The halt latch already exists the instant the FIRST event's
-	// own failure lands, but its paired event (e.g. Completed behind
-	// Started) is still draining right behind it in the SAME pass; a
-	// snapshot taken as soon as the latch appears can race that second
-	// attempt landing at the fake core moments later, which is exactly what
-	// made this test flaky under a full -race run. Close blocks until the
-	// in-flight drain genuinely finishes (or its own generous deadline), so
-	// nothing is still in flight by the time AttemptsByKey is read.
-	idleCtx, idleCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	queues["claude-code"].Close(idleCtx)
-	idleCancel()
+	// anything: a snapshot taken too early can race the paired event's own
+	// attempt landing at the fake core moments later. Polled rather than
+	// closed: this queue is reused for a second call below, and Close is a
+	// one-shot shutdown that would silently stop it from ever draining that
+	// second call's own append (Kick's own doc: a Deliver landing after
+	// Close leaves the record spooled, undrained).
+	waitUntilAttempted(t, fake, 2, 5*time.Second)
 
-	if _, halted := hookflow.SessionHalted(sessionID); !halted {
-		t.Fatalf("the run was never latched after core refused its lane record; fake evaluate attempts=%d",
+	if _, halted := hookflow.SessionHalted(sessionID); halted {
+		t.Fatalf("a delivery failure must no longer latch the run; fake evaluate attempts=%d",
 			fake.V3EvaluateAttempts())
 	}
 
@@ -528,36 +561,39 @@ func TestLaneRecordCoreOutageHaltsRunAndRefusesTheNextCallWithNoRedelivery(t *te
 	if len(attemptsAfterFirst) == 0 {
 		t.Fatal("no v3 evaluate attempt reached the fake core for the first call")
 	}
-	// A 503 is transient: each record gets one attempt and exactly one retry
-	// before the run halts.
+	// A 503 is transient: each record gets one attempt and exactly one retry.
 	for key, n := range attemptsAfterFirst {
 		if n != 2 {
 			t.Errorf("event (idempotency key %s) was attempted %d time(s), want exactly 2 (one attempt, one retry)", key, n)
 		}
 	}
 
-	// The run's own next relayed call: haltDecorator's own resolution
-	// (already the exact same seam TestHaltDecoratorRefusesARunLatchedByADeliveryFailure
-	// pins) reads the latch LaneQueue's real drain just wrote above and
-	// refuses, with no further /evaluate round trip.
+	// The run's own next relayed call: haltDecorator finds no persisted
+	// latch (a recorded delivery failure never wrote one) and allows it.
 	c := gateway.Captured{
 		HTTPURL:        "https://api.anthropic.com/v1/messages",
 		RequestHeaders: map[string]string{"X-Claude-Code-Session-Id": sessionID},
 	}
 	eval, err := (haltDecorator{logger: logger}).Evaluate(context.Background(), c)
 	if err != nil {
-		t.Fatalf("Evaluate (should be latched): %v", err)
+		t.Fatalf("Evaluate (should not be latched): %v", err)
 	}
-	if eval.Verdict != client.VerdictHalt {
-		t.Fatalf("the run's next relayed call resolved verdict %q, want HALT", eval.Verdict)
-	}
-	if !strings.Contains(eval.Reason, "could not record") {
-		t.Errorf("refusal reason does not carry the delivery-failure latch's own text: %q", eval.Reason)
+	if eval.Verdict != client.VerdictAllow {
+		t.Fatalf("the run's next relayed call resolved verdict %q, want ALLOW", eval.Verdict)
 	}
 
-	attemptsAfterSecond := fake.AttemptsByKey()
-	if !reflect.DeepEqual(attemptsAfterFirst, attemptsAfterSecond) {
-		t.Errorf("attempt counts changed after the refused call (nothing should have reached core again): "+
-			"before=%v after=%v", attemptsAfterFirst, attemptsAfterSecond)
+	// Core recovers; the run's next lane record must actually try again and
+	// be accepted, not stay stuck denying forever.
+	fake.SetOutage(false)
+	serveOneCall(t, p, ca, sessionID)
+	idleCtx2, idleCancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	queues["claude-code"].Close(idleCtx2)
+	idleCancel2()
+
+	if len(fake.Inbox()) == 0 {
+		t.Fatalf("no event was accepted by core after recovery: the next call did not try again")
+	}
+	if _, halted := hookflow.SessionHalted(sessionID); halted {
+		t.Fatalf("the run must still be unlatched after a successful delivery")
 	}
 }

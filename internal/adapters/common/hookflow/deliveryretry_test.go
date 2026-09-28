@@ -62,9 +62,10 @@ func TestDrain_RetriesOnceAndDeliversAfterATransientFault(t *testing.T) {
 	}
 }
 
-// TestDrain_HaltsWhenTheOneRetryAlsoFails: exactly one retry, then the
-// ordinary halt, classified by the retry's own failure.
-func TestDrain_HaltsWhenTheOneRetryAlsoFails(t *testing.T) {
+// TestDrain_RecordsAFindingWhenTheOneRetryAlsoFails: exactly one retry, then
+// an ordinary finding (classified by the retry's own failure class) --
+// never a run latch.
+func TestDrain_RecordsAFindingWhenTheOneRetryAlsoFails(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	e := NewEngine(t.TempDir())
 
@@ -81,12 +82,8 @@ func TestDrain_HaltsWhenTheOneRetryAlsoFails(t *testing.T) {
 	if attempts != 2 {
 		t.Errorf("attempts = %d, want exactly 2 (one attempt, one retry)", attempts)
 	}
-	info, halted := SessionHalted("sess-retry-fail")
-	if !halted {
-		t.Fatal("a failed retry must halt the run")
-	}
-	if info.Cause != "timeout" {
-		t.Errorf("latch Cause = %q, want the retry's own class %q", info.Cause, "timeout")
+	if _, halted := SessionHalted("sess-retry-fail"); halted {
+		t.Error("a failed retry must never latch the run")
 	}
 	if got := e.Spool.DiscardedCount(); got != 1 {
 		t.Errorf("DiscardedCount = %d, want 1", got)
@@ -95,7 +92,8 @@ func TestDrain_HaltsWhenTheOneRetryAlsoFails(t *testing.T) {
 
 // TestDrain_NeverRetriesANonTransientFailure: a failure that is not a
 // transient delivery fault (here, one that is not an ErrDelivery at all,
-// the shape a refused or unbuildable event takes) halts on the first attempt.
+// the shape a refused or unbuildable event takes) is recorded as a finding
+// on the first attempt, without a retry, and never latches the run.
 func TestDrain_NeverRetriesANonTransientFailure(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	e := NewEngine(t.TempDir())
@@ -109,8 +107,8 @@ func TestDrain_NeverRetriesANonTransientFailure(t *testing.T) {
 	if attempts != 1 {
 		t.Errorf("attempts = %d, want 1 (no retry for a non-transient failure)", attempts)
 	}
-	if _, halted := SessionHalted("sess-no-retry"); !halted {
-		t.Error("a non-transient failure must halt on its first attempt")
+	if _, halted := SessionHalted("sess-no-retry"); halted {
+		t.Error("a non-transient failure must never latch the run")
 	}
 }
 
@@ -149,9 +147,11 @@ func TestDrain_LeavesTheEventQueuedWhenThePassCannotFitTheRetry(t *testing.T) {
 }
 
 // TestEscalation_TransientFailureRequeuesInsteadOfHalting: the gate's own
-// escalation POST failing transiently no longer latches the run; like an
+// escalation POST failing transiently never latches the run; like an
 // unanswered escalation, its recorded copy goes back to the drainers, whose
-// attempt and one retry decide.
+// attempt and one retry decide. A proven, non-transient refusal is settled
+// and recorded (RecordDeliveryFailure) but never latches either; only a
+// real HALT verdict from core still does.
 func TestEscalation_TransientFailureRequeuesInsteadOfHalting(t *testing.T) {
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 
@@ -167,16 +167,17 @@ func TestEscalation_TransientFailureRequeuesInsteadOfHalting(t *testing.T) {
 		t.Error("a transient escalation failure must not latch the run by itself")
 	}
 
-	// 401, 429 and other 4xx classes are pinned by client.TestRetryableDelivery;
-	// here any non-transient failure stands in for them.
+	// 401 and 429 are also treated as Unanswered (neither is a proven,
+	// event-specific refusal); an ErrUnbuildable event stands in for a
+	// proven 4xx refusal, which IS EscalationSettled.
 	got = -1
 	ev.SessionID = "sess-escalate-refused"
 	ev2.runWith(context.Background(), nopLogger(), ev, retryGovernor{err: fmt.Errorf("%w: bad payload", client.ErrUnbuildable)})
 	if got != EscalationSettled {
 		t.Errorf("refused outcome = %v, want EscalationSettled", got)
 	}
-	if _, halted := SessionHalted("sess-escalate-refused"); !halted {
-		t.Error("a non-transient escalation failure still latches the run at once")
+	if _, halted := SessionHalted("sess-escalate-refused"); halted {
+		t.Error("a non-transient escalation failure must never latch the run")
 	}
 }
 

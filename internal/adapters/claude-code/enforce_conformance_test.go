@@ -73,7 +73,7 @@ func TestEnforcementConformance(t *testing.T) {
 	})
 
 	// C2/C3 pinned "fail_closed=0 => outage proceeds". Delivery is now
-	// always fail-closed (HaltOnDeliveryFailure): the
+	// always fail-closed per call: the
 	// `fail_closed` key is deprecated, parsed only so it can warn, and no
 	// longer selects a policy. Both now assert the SAME outage-denies
 	// behaviour C4 pins, kept separate because they exercise a different
