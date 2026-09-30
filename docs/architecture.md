@@ -14,7 +14,7 @@ session is a child record of that agent, and events go to the same
 | Term | Meaning |
 |---|---|
 | **Platform** | The OpenBox service `openbox` talks to. Two parts: **core** (data plane: receives events, evaluates policy) and **backend** (control plane: agents, policies, approvals, dashboard). |
-| **Provider** / **tool** | A supported coding tool: `claude-code` or `codex`. |
+| **Provider** / **tool** | A supported coding tool: `claude-code`, `codex` or `muse` (Muse Code). |
 | **Adapter** | The per-tool code that reads the tool's native hook payload, maps it to the common event, and writes the tool's expected hook response. |
 | **Engine** | The tool-independent code every adapter runs on (`hookflow`): queueing, delivery, enforcement, approvals, halts. |
 | **Agent** | The identity one tool install has on the platform. One per tool per machine. |
@@ -35,9 +35,9 @@ itself, grey is outside this repo.
 flowchart LR
   dev(["<b>Developer</b>"]):::person
   admin(["<b>Admin / approver</b><br/>writes policy, approves"]):::person
-  tool["<b>Claude Code / Codex</b><br/>AI coding tool"]:::external
+  tool["<b>Claude Code / Codex / Muse Code</b><br/>AI coding tool"]:::external
   ob["<b>openbox</b><br/>governs the coding tools<br/>on one machine"]:::system
-  model["<b>Model provider</b><br/>api.anthropic.com, claude.ai,<br/>OpenAI"]:::external
+  model["<b>Model provider</b><br/>api.anthropic.com, claude.ai,<br/>OpenAI, api.meta.ai"]:::external
   platform["<b>OpenBox platform</b><br/>core + backend + Keycloak"]:::external
   ci["<b>CI pipeline</b><br/>runs openbox-git-action"]:::external
   dev -- "works with" --> tool
@@ -61,7 +61,7 @@ reach.
 
 ```mermaid
 flowchart LR
-  tool["<b>Claude Code / Codex</b><br/>runs hooks, sends model calls"]:::external
+  tool["<b>Claude Code / Codex / Muse Code</b><br/>runs hooks, sends model calls"]:::external
   subgraph machine["Developer machine"]
     hook["<b>openbox hook</b><br/>short-lived process per hook call:<br/>map, redact, gate, queue"]:::container
     transport["<b>transport lane</b><br/>background service: HTTPS proxy,<br/>records model-call bodies"]:::container
@@ -107,7 +107,7 @@ What happens inside one `openbox hook` process.
 
 ```mermaid
 flowchart LR
-  tool["<b>Claude Code / Codex</b>"]:::external
+  tool["<b>Claude Code / Codex / Muse Code</b>"]:::external
   subgraph bin["openbox hook process"]
     adapter["<b>Adapter</b><br/>internal/adapters/&lt;tool&gt;<br/>native payload ⇄ common event"]:::component
     engine["<b>Engine</b><br/>internal/adapters/common/hookflow<br/>queue, delivery, enforcement,<br/>approvals, halts"]:::component
@@ -135,7 +135,7 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-  participant T as Claude Code / Codex
+  participant T as Claude Code / Codex / Muse Code
   participant H as openbox hook
   participant C as OpenBox core
   T->>H: PreToolUse (tool name, input)
@@ -223,6 +223,7 @@ Rules that keep this correct:
   from paths in their unit (`--codex-settings`, `--pac-record`), per record.
 - **Each lane has its own `activity_id` namespace** (`:proxy:`, `:otel:`), so
   the platform's deduplication never merges one lane's record into another's.
+  The model-call gate (`:llmgate:`, Muse's pre-send hook) has its own too.
 - **Install order is a safety property:** write the service unit, start it,
   confirm it listens, and only then point the tool at it. Pointing the tool at
   a dead port would break every model call while `init` reported success.
@@ -234,6 +235,15 @@ Rules that keep this correct:
 
 The code also contains a third, older lane, `gateway` (a base-URL relay),
 which `init` no longer installs.
+
+**Muse Code has no lane.** Nothing in Meta's documentation shows that it trusts
+a locally issued CA, follows the system PAC, carries a session header or
+exports OTLP, so `init --provider muse` installs hooks only and `doctor` says
+its model calls are not recorded. Its pre-send hook is evaluated as a
+`model_call_gate` activity instead: a policy check, not a record of the call
+(see [Coverage](coverage.md#1b-model-call-coverage-matrix)). `api.meta.ai` is a
+host row of all three tools, so a relayed call on it is attributed by its
+carrier header and skipped when none or several match.
 
 ## Layout
 
@@ -261,7 +271,7 @@ needs a stable URL and GitHub requires its own path.
 |---|---|
 | `provider/` | the adapter interface: `Installer` (install time) and `HookEngine` (runtime) |
 | `adapters/common/hookflow/` | **the engine**: queue, delivery, enforcement, approvals, halts |
-| `adapters/claude-code/`, `adapters/codex/` | one thin adapter each |
+| `adapters/claude-code/`, `adapters/codex/`, `adapters/muse/` | one thin adapter each |
 | `adapters/common/devconfig/` | settings and where each value comes from |
 | `adapters/common/git/` | commit trailer, notes mirror, commit event |
 | `client/` | the core client: auth, wire payload, verdict parsing |
@@ -300,6 +310,15 @@ provider credential. Do not widen an allowlist just to make an import pass.
 - **Without managed settings, the developer can remove the hooks.** For Codex,
   hooks cannot be mandated at all; the shipped managed config pins approval
   and sandbox modes instead ([`deployments/managed/`](../deployments/managed/)).
+- **Muse Code's hooks are doc-derived, and its runtime fails open.** No Muse
+  binary was available when the adapter was written, so its payload and answer
+  shapes are unverified on a live session. A hook that crashes, times out or
+  answers invalidly lets the action proceed; a deny-only `onFailure` successor
+  and a non-zero exit on a gated crash backstop that. A payload over 256 KiB
+  is never delivered to a hook: that gap is detected from Muse's own session
+  log (a local finding, `doctor` count), not prevented. A local administrator
+  can remove the hooks; an org-deployed managed hooks file is the only
+  stronger option, and its policy keys are unverified.
 - **The lanes detect bypass; they do not prevent it.** Unsetting one
   environment variable routes around them, which shows as a gap in the record.
   Prevention needs managed settings plus network egress control.

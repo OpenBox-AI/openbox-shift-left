@@ -19,10 +19,16 @@ normalized event contract, so adding a provider is an adapter rather than an
 engine change. Identity is per tool and data-driven off `provider.Supported()`
 -- the store, the agent, `doctor`'s rows, `uninstall`'s sweep -- but do not
 overread that into the rest: `laneCapable` (`cmd/openbox/initlanes.go`),
-`printGovernedScope` (`scope.go`), the two provider switches in
-`cmd/openbox/main.go`, `doctor.go`'s managed-config loop and `uninstall.go`'s
-hook-surface list still name their providers, deliberately, and a third tool
-needs each of them read. An adapter is four things: its native hook shape, its
+`hasTransportArm` and `derivedTransportProviders`
+(`cmd/openbox/derivedproviders.go`), `printGovernedScope` (`scope.go`), the
+provider branches in `cmd/openbox/main.go` (Codex's trust note, the
+hooks-only lane line), `attestProvider` (`attest.go`), `doctor.go`'s
+managed-config loop and `uninstall.go`'s hook-surface list still name their
+providers, deliberately, and a fourth tool needs each of them read. Three
+tools exist (Claude Code, Codex, Muse Code) and they differ on purpose: Muse is
+hooks-only with an evaluated model-call gate, so it has no lane arm and no
+commit-marker arm, and `doctor` reports it in its own `reportMuse` rather than
+the managed-config loop. An adapter is four things: its native hook shape, its
 mapper, an `OutputContract`, its installer; everything else is the engine's.
 
 ## Where things live
@@ -33,7 +39,7 @@ not make this file a second one. Inside `internal/`:
 | Path | What |
 |---|---|
 | `provider/`, `adapters/common/hookflow/` | the SPI, and the engine every adapter runs on |
-| `adapters/common/devconfig/`, `adapters/common/git/`, `adapters/claude-code/`, `adapters/codex/` | shared config and posture; trailer, notes mirror, commit event; one thin adapter each |
+| `adapters/common/devconfig/`, `adapters/common/git/`, `adapters/claude-code/`, `adapters/codex/`, `adapters/muse/` | shared config and posture; trailer, notes mirror, commit event; one thin adapter each |
 | `client/`, `decision/` | core client (workload auth: Keycloak client assertion -> token; wire payload; verdict parsing); local secret detection |
 | `gateway/`, `telemetry/`, `transport/` | the three model-call lanes. `gateway/internal/dialhook` keeps a nested `internal/` on purpose |
 | `cli/` | behind the `openbox` commands: `activation`, `laneservice`, `atomicfile`. The command layer itself is `cmd/openbox/` |

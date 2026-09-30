@@ -28,7 +28,7 @@ flowchart LR
 - [ ] An OpenBox admin has initialized your organization's identity provider
       (once per organization). If not, `init` stops with "your org's identity
       provider is not initialized".
-- [ ] You are on macOS or Linux, with Claude Code or Codex installed.
+- [ ] You are on macOS or Linux, with Claude Code, Codex or Muse Code installed.
 
 ## 1. Install
 
@@ -120,8 +120,9 @@ Then it installs:
 - on Claude Code, `showThinkingSummaries: true`, so thinking arrives with
   content. `openbox uninstall` restores the previous value.
 
-The hooks take effect immediately, in every session on the machine, including
-open ones. `init` prints what it changed.
+On Claude Code the hooks take effect immediately, in every session on the
+machine, including open ones. Codex needs its trust step and Muse needs a
+restart (below). `init` prints what it changed.
 
 ### Codex differences
 
@@ -137,13 +138,29 @@ Same command with `--provider codex`. The agent lives in `~/.openbox/codex/`.
 
 ### Muse Code differences
 
-Same command with `--provider muse`; it needs Muse Code 1.4.0 or newer and
-refuses an older one before anything is written. The agent lives in
+```bash
+openbox init --provider muse
+```
+
+It needs Muse Code 1.4.0 or newer and refuses an older one, or one whose
+version it cannot read, before anything is written. The agent lives in
 `~/.openbox/muse/`, and the hooks go into `~/.config/muse/settings.json`.
+A Muse that is not on your `PATH` installs with a warning.
+
+- **Restart open Muse sessions.** Muse reads its settings at session start, and
+  whether an edit reaches a running session is not documented, so `init` tells
+  you to restart rather than promise it.
 
 - Hooks only: Muse's model calls are **not recorded**, because no proxy or
-  telemetry lane can see them. Prompts, tool calls and model calls are still
-  gated.
+  telemetry lane can see them (`doctor` says why). Prompts, tool calls and
+  model calls are still gated: every model call is checked before it is sent.
+- A HALT verdict, a block and an unanswered approval all come back to Muse as
+  a plain refusal.
+- Muse's hooks are built from its documentation and have not been run against
+  a Muse binary. A hook payload over 256 KiB is never delivered to any hook,
+  so that action is not gated; `doctor` counts such actions from Muse's own
+  session log, it cannot stop them.
+- A commit made by Muse keeps its trailer, but no commit event is sent.
 - Muse drops every hook in a settings file it cannot parse, so `init` refuses
   to touch one, and `openbox doctor` says so when it finds one.
 - Every Muse handler also carries a deny-only fallback that runs if the gate
@@ -290,8 +307,19 @@ Codex's hosts (and your browser's `chatgpt.com` and `api.meta.ai`) through the
 relay; see [Data and privacy](data-and-privacy.md). Codex's model calls stay
 with the telemetry lane until the relay has seen one.
 
+Codex's model calls stay with the telemetry lane until **both** are true: the
+PAC is committed and lists Codex, and the relay has seen a real Codex request
+(one carrying Codex's own `Originator` header). After that the relay records
+them and telemetry stands down; `openbox doctor` names which lane is producing.
+An existing Codex install gets the relay only when `init --provider codex` is
+re-run on the upgraded binary (an upgrade alone changes nothing). If `init`
+warns that the system PAC was not activated because the telemetry lane did not
+come up, fix that and run `init` again. A Codex that ignores the PAC never
+silences telemetry.
+
 Linux and Windows do not get this yet; `init` says so and changes nothing at
-the OS level. Codex there stays telemetry-only.
+the OS level. Codex there stays telemetry-only, and Muse has no lane on any
+platform.
 
 ## Enforcement in practice
 

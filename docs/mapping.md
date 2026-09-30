@@ -16,7 +16,7 @@ decisions and then discards it (persistence needs a `hook_trigger` this client
 never sets), so nothing sent there was ever stored, and this client stopped
 sending it.
 
-**Contract versions:** `schema_version` (currently `"1.9"`) is a `const` in
+**Contract versions:** `schema_version` (currently `"1.10"`) is a `const` in
 the schema and is the authority on the adapter-facing shape; see the schema's
 own `x-changelog` for what each version added. This document describes the
 current wire shape only.
@@ -95,6 +95,30 @@ Built by `wireTypeFor` in `internal/client/payload.go`.
 | `APIError` | `SignalReceived` | `api_error` | `error_type` is a closed provider enum; `error_details` is gated free text |
 | 21 observe-only lifecycle signals (`Setup`, `InstructionsLoaded`, `UserPromptExpansion`, `MessageDisplay`, `PermissionRequest`, `PostToolBatch`, `Notification`, `TaskCreated`, `TaskCompleted`, `TeammateIdle`, `ConfigChange`, `CwdChanged`, `DirectoryAdded`, `FileChanged`, `WorktreeRemove`, `PreCompact`, `PostCompact`, `PreModelSwitch`, `PostModelSwitch`, `Elicitation`, `ElicitationResult`) | `SignalReceived` | `signal_name` = the type's own snake_case | none is paired as an activity; several carry one gated content key — see `signalDetailKeyFor` in `internal/client/payload.go` for the exact key per type |
 
+### Muse Code hooks
+
+Muse's hook stdin is Claude Code-shaped; `internal/adapters/muse/mapper.go`
+maps it onto the same contract. The shapes are doc-derived and unverified on a
+Muse binary (see [coverage.md](coverage.md)).
+
+| Muse hook | Dev `event_type` | Gated | Note |
+|---|---|---|---|
+| `SessionStart` | `SessionStarted` | no | `source` `resume` or `clear` opens a new run |
+| `UserPromptSubmit` | `PromptSubmitted` | yes | refusal is `decision: block` |
+| `PreToolUse` | `ToolCall` | yes | `mcp__<server>__<tool>` names are MCP tools; paired by `tool_use_id` |
+| `PostToolUse` / `PostToolUseFailure` | `ToolResult` | no | `completed` / `failed` |
+| `PermissionRequest` | `PermissionRequest` | yes | evaluated to refuse only; no `tool_use_id` |
+| `SubagentStart` | `SubagentStarted` | no | |
+| `StopFailure` | `APIError` | no | no error text bound |
+| `SessionEnd` | `SessionEnded` | no | |
+| `PreLLMCall` | `ModelCallRequested` | yes | a model-call gate, see below |
+| `PostLLMCall` | `ModelCallFinished` | no | metadata only |
+| `Stop` | none | no | runs the session-log reconciler; no turn, no usage |
+| `SubagentStop`, `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | none | no | not installed |
+
+Muse sends no `TurnStarted`/`TurnCompleted`: no hook payload's usage reaches
+the wire, so a Muse session has no `llm_completion` rows.
+
 ### Correlation metadata keys
 
 `metadata` is a free-form object; every key below is optional, and a provider
@@ -109,7 +133,7 @@ stored row.
 
 | Key | Providers | Meaning |
 |---|---|---|
-| `tool_use_id` | Claude Code, Codex | per-invocation id for a `ToolCall`/`ToolResult` pair |
+| `tool_use_id` | Claude Code, Codex, Muse | per-invocation id for a `ToolCall`/`ToolResult` pair |
 | `pair_recovered` | Claude Code, Codex | `true` when the two hook processes reported different local ids for the same call and the client reconciled them onto one `activity_id`; absent, never `false`, otherwise |
 | `prompt_id` | Claude Code (all lanes) | the active prompt's id, once known |
 | `previous_request_id` | Claude Code (gateway/proxy lanes) | the prior call's upstream request id |

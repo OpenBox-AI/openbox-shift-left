@@ -252,4 +252,5 @@ Guessed by the installer and doctor (Muse documents none of them by name):
 | `sessionlog.go`, `reconcile.go` | the session-journal reader with its cursor, the gate ledger, the join and the `evidence.gap` findings |
 | `engine.go` | `Engine`, `FaultExitCode`, the ceilings (Gating 30s, Other 5s) |
 | `capabilities.go`, `posture.go`, `creds.go`, `adapter.go`, `paths.go` | profile, posture, credentials, spool |
-| `installer.go` | refuses until the installer phase |
+| `installer.go`, `hookremove.go`, `audit.go`, `invocation.go`, `version.go`, `runner.go` | install, uninstall, settings audit, the invocation parser, the version gate and the `muse` subprocess seam |
+| `failclosed.go` | the deny-only `onFailure` successor |

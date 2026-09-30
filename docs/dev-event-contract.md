@@ -1,7 +1,7 @@
 # Developer-runtime event contract
 
 This is the reference for the normalized event every coding-tool adapter
-(Claude Code, Codex, …) emits. It is the shape adapters map their native
+(Claude Code, Codex, Muse Code, …) emits. It is the shape adapters map their native
 hook payloads onto (SPI `emit`), before the client re-expresses it onto
 openbox-core's own wire model and sends it to `/api/v3/governance/evaluate`.
 Read this if you are writing a new adapter or consuming these events
@@ -10,7 +10,7 @@ and core fit together.
 
 ```mermaid
 flowchart LR
-  N["native hook payload<br/>(Claude Code, Codex)"] -- "adapter mapper" --> D["dev event<br/>api/dev-event.schema.json<br/>(checked by internal/conformance)"]
+  N["native hook payload<br/>(Claude Code, Codex, Muse Code)"] -- "adapter mapper" --> D["dev event<br/>api/dev-event.schema.json<br/>(checked by internal/conformance)"]
   D -- "internal/client<br/>buildPayload" --> W["core wire event<br/>Workflow* / Activity* /<br/>SignalReceived"]
   W -- "POST" --> E["/api/v3/governance/evaluate"]
 ```

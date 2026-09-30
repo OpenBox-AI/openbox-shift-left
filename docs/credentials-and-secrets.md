@@ -30,6 +30,16 @@ nothing encrypts them at rest either.
     backend_url, base_url              # copied into each tool's dev.json by `init`
 ```
 
+For Muse Code the tool is `muse`: `~/.openbox/muse/` holds the same three
+files under the same plaintext boundary, so a signed Muse event proves origin
+of config, not tamper resistance. **Muse's own Meta Model API key is Muse's to
+store.** OpenBox never reads, copies or writes it, and puts nothing of it in
+`~/.openbox/`. A copy that reaches a prompt, a command or a model-call preview
+is redacted by shape before it leaves the machine (see the scanner table
+below), but the [local trace](data-and-privacy.md#the-local-trace) keeps bodies
+as they were before redaction, so a key pasted into one can sit there in
+plaintext for up to 7 days.
+
 A file holds either secrets (`.env`) or coordinates (`dev.json`), never both,
 and no value is stored in two places. An old install once kept the same value
 in two stores, and a stale copy kept silently overwriting a corrected one.

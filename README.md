@@ -2,9 +2,9 @@
 
 Governance for the AI coding tools your developers already use.
 
-If your team uses [Claude Code](https://claude.com/claude-code) or [OpenAI
-Codex](https://openai.com/codex), `openbox` lets your organization see and
-control what those tools do: the prompts sent, the commands run, the files
+If your team uses [Claude Code](https://claude.com/claude-code), [OpenAI
+Codex](https://openai.com/codex) or Meta's Muse Code, `openbox` lets your
+organization see and control what those tools do: the prompts sent, the commands run, the files
 changed, the tokens spent, and whether each action was allowed.
 
 `openbox` is one small binary installed on each developer machine. It is a
@@ -13,13 +13,13 @@ client: it connects to an **OpenBox platform** your organization already runs
 
 ```mermaid
 flowchart LR
-  dev(["<b>Developer</b><br/>uses Claude Code or Codex"]):::person
+  dev(["<b>Developer</b><br/>uses Claude Code, Codex or Muse Code"]):::person
   subgraph machine["Developer machine"]
-    tool["<b>Claude Code / Codex</b><br/>AI coding tool"]:::external
+    tool["<b>Claude Code / Codex / Muse Code</b><br/>AI coding tool"]:::external
     ob["<b>openbox</b><br/>this repo: hooks, local secret<br/>redaction, model-call lanes"]:::system
   end
   platform["<b>OpenBox platform</b><br/>stores sessions, evaluates<br/>policy, handles approvals"]:::external
-  model["<b>Model provider</b><br/>Anthropic / OpenAI"]:::external
+  model["<b>Model provider</b><br/>Anthropic / OpenAI / Meta"]:::external
   admin(["<b>Admin / approver</b><br/>policy, review, approvals"]):::person
   dev -- prompts --> tool
   tool -- "runs as hooks" --> ob
@@ -36,7 +36,7 @@ flowchart LR
 
 ## How it works
 
-Claude Code and Codex can run a program at fixed moments, called **hooks**:
+Claude Code, Codex and Muse Code can run a program at fixed moments, called **hooks**:
 when a session starts, when you submit a prompt, before a tool runs, after it
 finishes. `openbox init` registers itself as those hooks. On every hook call,
 `openbox`:
@@ -50,15 +50,16 @@ finishes. `openbox init` registers itself as those hooks. On every hook call,
 5. stamps each git commit with the session that made it, so a deploy can be
    traced back to a session ([lineage](docs/lineage.md)).
 
-Hooks cannot see the requests sent to the model, so on Claude Code `openbox`
-also runs two small local background services, the **model-call lanes**, that
-record them. See [Architecture](docs/architecture.md) for the full picture.
+Hooks cannot see the requests sent to the model, so on Claude Code and Codex
+`openbox` also runs small local background services, the **model-call lanes**,
+that record them. Muse Code has no lane: its model calls are checked before
+they are sent, but not recorded. See [Architecture](docs/architecture.md) for the full picture.
 
 ## Quickstart
 
 **You need:**
 
-- macOS or Linux, with Claude Code or Codex installed. (Windows builds but is
+- macOS or Linux, with Claude Code, Codex or Muse Code installed. (Windows builds but is
   not tested end to end.)
 - An OpenBox platform. With the hosted service, the default URLs are correct.
 - An **organization API key** from the dashboard, **Organization → API Keys**.
@@ -151,14 +152,15 @@ The full walkthrough, with CI setup, approvals and troubleshooting, is in
 
 ## Supported tools
 
-| | Claude Code | Codex |
-|---|---|---|
-| Session, prompt and tool events | yes | yes |
-| Enforcement | block, approval, redact, halt | block, redact, halt (approval becomes block) |
-| Model calls recorded | yes (transport lane) | token usage only |
-| Org mandate file | managed settings | `requirements.toml` |
+| | Claude Code | Codex | Muse Code |
+|---|---|---|---|
+| Session, prompt and tool events | yes | yes | yes |
+| Enforcement | block, approval, redact, halt | block, redact, halt (approval becomes block) | block, redact, halt (approval and halt render as a plain refusal) |
+| Model calls recorded | yes (transport lane) | token usage; on macOS the request and reply too, once the relay has seen Codex | **no**; each call is checked before it is sent |
+| Org mandate file | managed settings | `requirements.toml` | hooks file and policy (unverified keys) |
 
-Details: [Provider coverage](docs/coverage.md).
+Muse Code's support is built from its documentation and has not been run
+against a Muse binary. Details: [Provider coverage](docs/coverage.md).
 
 ## Documentation
 

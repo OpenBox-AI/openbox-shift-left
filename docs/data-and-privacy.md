@@ -34,6 +34,11 @@ Bodies are content, and all of them answer to the one `content_capture` key.
 believe it had turned content off while one type kept flowing. The cost is
 that you cannot, for example, keep prompts and drop tool output.
 
+**Muse Code sends its own set.** Muse hooks carry the prompt, tool input and
+tool output (with error text on a failure), and each model call's request
+summary (see [Muse Code](#muse-code)); they carry no assistant reply or
+thinking, and Muse sends no token counts, so none of those leave the machine.
+
 **Codex sends less.** Codex hooks carry the prompt, the assistant reply and
 thinking, but not tool input or output. A gated Codex call sends its tool
 input (see [below](#what-an-enforced-call-sends)).
@@ -101,7 +106,7 @@ other field with markers and checks none of them reach the wire.
 is never opened. Because reply text and thinking ride the turn event, turning
 `finops` off removes them too.
 
-Both tools report usage per turn. Codex derives each turn's counts from its
+Claude Code and Codex report usage per turn (Muse reports none). Codex derives each turn's counts from its
 own rollout file; a Codex session that ends with no completed turn sends one
 per-session total instead.
 
@@ -207,6 +212,32 @@ counts those. It is still written raw to the local trace for 7 days
 (see [The local trace](#the-local-trace)), the same posture as claude.ai
 traffic that is not a chat completion.
 
+## Muse Code
+
+Muse's model calls are **not recorded** (no lane can see them; see
+[Coverage](coverage.md#1b-model-call-coverage-matrix)). What leaves the machine
+comes from its hooks, and each body is redacted before attachment and capped
+like any other:
+
+- **Prompt, tool input and tool output**, under `content_capture`. A gated
+  shell command and MCP arguments go to the platform verbatim so a policy can
+  judge what will run; a file write goes redacted. The same carve-outs as
+  Claude Code (see [What an enforced call sends](#what-an-enforced-call-sends)).
+- **Model-call gate.** Every `PreLLMCall` is evaluated before the request is
+  sent. Metadata always goes: provider, model, message and tool counts and tool
+  names. Under `content_capture` it also sends **message previews**: at most
+  16, each cut to 256 characters, after redaction. The closing `PostLLMCall`
+  is metadata only (status, finish reason, response id, an error class).
+- **Stays local.** `PostLLMCall`'s usage numbers and the request's trace
+  context go to the local trace only, never to the platform.
+- **Muse's session log is read locally.** At `Stop` and `SessionEnd`, OpenBox
+  reads `~/.local/share/muse/sessions/…/session.jsonl` for the join fields of
+  each recorded tool action (its type, name, time, and id where present) to
+  spot an action whose hook never ran. Nothing in it is copied, logged or sent.
+- **The gate ledger is content-free.** It lists tool names and ids the gate
+  was asked about, under the Muse spool directory's `reconcile/` folder, and
+  is swept after 14 days.
+
 ## Account attribution
 
 Once per session, `openbox` sends your Claude account **email** and
@@ -239,7 +270,7 @@ Linux, `%AppData%\openbox\` on Windows (move the queue with
 | `claude-code-prior-settings.json` | `~/.openbox/` | the previous `showThinkingSummaries` value |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | lane diagnostics; no traffic |
 | `*-delivery-status.json` | `~/.openbox/` | how many lane records the platform did not accept; no content |
-| `cc-spool/`, `codex-spool/` | runtime dir | the per-session event queue, already redacted, in plaintext. Normally empty: each event is attempted once and then removed |
+| `cc-spool/`, `codex-spool/`, `muse-spool/` | runtime dir | the per-session event queue, already redacted, in plaintext. Normally empty: each event is attempted once and then removed |
 | `enforcements.jsonl` | runtime dir | what enforcement did: verdict, source, redaction categories. Never the secret or the body |
 | `advisories.jsonl` | runtime dir | guardrail findings |
 | `halted-sessions/` | runtime dir | one small file per halted run: the reason and a timestamp. It keeps that run refused |
