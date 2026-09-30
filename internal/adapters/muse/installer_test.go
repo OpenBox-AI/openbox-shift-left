@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 )
@@ -162,9 +163,6 @@ func TestInstallWritesACatchAllHandlerPerEvent(t *testing.T) {
 			t.Errorf("%s: command = %q, want %q", ev, h.Command, want)
 		}
 		wantTimeout := map[bool]int{true: 30, false: 5}[ev.Gated()]
-		if ev == HookSessionEnd {
-			wantTimeout = 3
-		}
 		if h.Timeout != wantTimeout {
 			t.Errorf("%s: timeout = %d, want %d", ev, h.Timeout, wantTimeout)
 		}
@@ -530,5 +528,17 @@ func TestInstallerImplementsTheSeam(t *testing.T) {
 	warn, err := (Installer{}).Preflight()
 	if err != nil || warn == "" {
 		t.Errorf("Preflight without muse = %q, %v", warn, err)
+	}
+}
+
+// TestInlineDeliveryFitsInsideEveryHandlerThatRunsIt a handler Muse kills
+// before its inline drain finishes leaves a half-sent spool file, which the
+// next drain can only discard as unprovable: the session's last events are lost.
+func TestInlineDeliveryFitsInsideEveryHandlerThatRunsIt(t *testing.T) {
+	for _, ev := range []HookName{HookSessionStart, HookSessionEnd, HookSubagentStart, HookSubagentStop} {
+		ceiling := time.Duration(timeoutFor(ev)) * time.Second
+		if inlineWindow+500*time.Millisecond > ceiling {
+			t.Errorf("%s: inline delivery may take %s but Muse kills the handler at %s", ev, inlineWindow, ceiling)
+		}
 	}
 }

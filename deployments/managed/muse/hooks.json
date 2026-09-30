@@ -132,7 +132,7 @@
           {
             "type": "command",
             "command": "\"OPENBOX_BIN\" hook muse SessionEnd",
-            "timeout": 3
+            "timeout": 5
           }
         ]
       }

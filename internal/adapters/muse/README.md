@@ -181,7 +181,7 @@ govern nothing.
   with no contract type never get one. `ExpectedHandlers()` is what doctor counts
   against.
 - **Shape.** `{"type":"command","command":"\"<engine>\" hook muse [--home \"<dir>\"] <Event>","timeout":N}`,
-  with `N` 30 on a gated event, 3 on `SessionEnd`, 5 elsewhere, and on a gated
+  with `N` 30 on a gated event and 5 elsewhere (`SessionEnd` included: it delivers inline within that ceiling), and on a gated
   handler an `onFailure` object of the same form holding the `--fail-closed`
   command. The engine is an absolute path.
 - **Merge, not rewrite.** The file is edited by path, so every key and handler

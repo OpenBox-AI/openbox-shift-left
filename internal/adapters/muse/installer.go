@@ -23,21 +23,20 @@ type CredentialRef = providerspi.CredentialRef
 
 // Handler ceilings, in seconds. A gated handler may hold for a real approval
 // decision, so its ceiling is the engine's own gating ceiling; a tighter one
-// would kill the hook mid-decision and let the call through. SessionEnd is
-// short because nothing waits on it, and the successor only ever exits.
+// would kill the hook mid-decision and let the call through. Every other
+// handler, SessionEnd included, gets the non-gated ceiling: SessionStart,
+// SessionEnd and the subagent pair deliver inline within it (inlineWindow), and
+// a handler killed mid-delivery loses the half-sent events. Muse, unlike Codex,
+// imposes no shorter SessionEnd limit of its own.
 const (
-	otherHookTimeoutSec      = 5
-	sessionEndHookTimeoutSec = 3
-	successorTimeoutSec      = 5
+	otherHookTimeoutSec = 5
+	successorTimeoutSec = 5
 )
 
 func gatedHookTimeoutSec() int { return int(Engine{}.HookCeilings().Gating.Seconds()) }
 
 func timeoutFor(ev HookName) int {
-	switch {
-	case ev == HookSessionEnd:
-		return sessionEndHookTimeoutSec
-	case ev.Gated():
+	if ev.Gated() {
 		return gatedHookTimeoutSec()
 	}
 	return otherHookTimeoutSec
