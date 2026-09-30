@@ -106,6 +106,16 @@ Target paths:
 - Cloud-managed requirement bundles are the stronger channel where available,
   for the same reason as Claude Code's server-managed settings.
 
+### Muse Code; `muse/hooks.json` and `muse/policy.json`
+
+A managed hooks file with OpenBox's handlers (and the deny-only `onFailure`
+successors Muse's fail-open runtime needs) and a policy that asks Muse to
+require that lane. The policy keys come from Muse's 1.4.0 changelog, not from a
+reference page, and are **unverified**; validate with `muse config validate`
+before deploying. The macOS and Linux paths Muse reads them from are not
+documented. See `muse/README-mdm.md`, which also says what this does not stop:
+a local administrator can still remove hooks without your MDM.
+
 ### Cursor
 
 Not shipped: a Cursor adapter does not exist yet. Cursor gained a hook surface

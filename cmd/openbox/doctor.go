@@ -155,6 +155,7 @@ func (a *app) runDoctor(args []string) int {
 	a.reportSystemPAC()
 	a.reportCoverage()
 	a.reportSpool()
+	a.reportMuse()
 
 	fmt.Fprintf(a.stdout, "\nOnly `managed` values prove anything: `user` and `env` can be changed by\n")
 	fmt.Fprintf(a.stdout, "whoever runs this command, and only a deployed provider config survives a\n")

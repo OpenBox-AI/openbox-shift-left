@@ -73,7 +73,7 @@ func Lookup(name string) (provider.Installer, error) {
 		}
 		return inst, nil
 	case provider.Muse:
-		inst := muse.Installer{}
+		inst := muse.Installer{Runner: MuseRunner}
 		if exe, err := os.Executable(); err == nil {
 			inst.EngineBinary = exe
 		}
@@ -165,6 +165,46 @@ func ClaudePriorSettingsPath(homeDir string) string { return claudecode.PriorSet
 // CodexHooksPath is where the Codex adapter keeps its hook file, so an
 // uninstall can look where the install wrote without importing the adapter.
 func CodexHooksPath() string { return codex.DefaultHooksPath() }
+
+// MuseRunner runs every `muse` subprocess the install and doctor start: the
+// version gate, the hook load probe, the config checks. A test replaces it, so
+// none of them reaches a real binary.
+var MuseRunner muse.Runner = muse.ExecRunner
+
+// MuseRunResult, MuseSettingsAudit and MuseVersionCheck are the Muse adapter's
+// result shapes, re-declared so command code can read them without importing
+// the adapter.
+type (
+	MuseRunResult     = muse.RunResult
+	MuseSettingsAudit = muse.SettingsAudit
+	MuseVersionCheck  = muse.VersionCheck
+)
+
+// The states a MuseVersionCheck reports.
+const (
+	MuseVersionSupported  = muse.VersionSupported
+	MuseVersionNotOnPath  = muse.VersionNotOnPath
+	MuseVersionUnreadable = muse.VersionUnreadable
+	MuseVersionTooOld     = muse.VersionTooOld
+	MuseVersionUntested   = muse.VersionUntested
+)
+
+// ErrMuseNotOnPath is what MuseRunner returns when there is no muse binary.
+var ErrMuseNotOnPath = muse.ErrNotOnPath
+
+// MuseVersionRange names the tested Muse versions for a doctor row.
+func MuseVersionRange() string {
+	return ">= " + muse.MinVersion.String() + ", tested below " + muse.TestedBelow.String()
+}
+
+// CheckMuseVersion asks the installed muse for its version through MuseRunner.
+func CheckMuseVersion() MuseVersionCheck { return muse.CheckVersion(MuseRunner) }
+
+// AuditMuseSettings reads Muse's settings file under Muse's rules and audits its
+// OpenBox handlers against the --home this machine's hooks need.
+func AuditMuseSettings(path string) (MuseSettingsAudit, error) {
+	return muse.AuditSettings(path, muse.BakedHome())
+}
 
 // MuseSettingsPath is Muse's user-wide settings file, where an install
 // registers its hooks, so uninstall and doctor can look there without

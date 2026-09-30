@@ -12,6 +12,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 )
 
 // TestMain is the asserted-hermeticity control for the package that owns
@@ -43,6 +44,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("XDG_CONFIG_HOME", xdgConfig)
 
 	refuseTheRealSupervisor()
+	refuseTheRealMuse()
 
 	code := m.Run()
 
@@ -94,6 +96,16 @@ func withRealProbes(t *testing.T) {
 	origProbe, origListen, origFree := portOccupied, waitForListenerFn, waitForPortFreeFn
 	t.Cleanup(func() { portOccupied, waitForListenerFn, waitForPortFreeFn = origProbe, origListen, origFree })
 	portOccupied, waitForListenerFn, waitForPortFreeFn = realPortOccupied, realWaitForListener, realWaitForPortFree
+}
+
+// refuseTheRealMuse makes every `muse` subprocess fail loudly by default. The
+// install's version gate and doctor's probes all run through providers.MuseRunner,
+// and a developer machine that has Muse installed would otherwise answer them
+// from the real binary, starting a real (if model-free) session from a test.
+func refuseTheRealMuse() {
+	providers.MuseRunner = func(_ context.Context, _ string, args ...string) (providers.MuseRunResult, error) {
+		panic("reached the real muse binary from a test: use withMuseRunner (ran muse " + strings.Join(args, " ") + ")")
+	}
 }
 
 func refuseTheRealSupervisor() {

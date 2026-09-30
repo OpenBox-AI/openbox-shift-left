@@ -23,3 +23,24 @@ func SettingsPath() string {
 	}
 	return filepath.Join(home, ".config", "muse", "settings.json")
 }
+
+// BakedHome is the directory the installer bakes into every handler as
+// `--home`, or "" when there is nothing to bake. Muse clears the environment a
+// hook runs in, so OPENBOX_HOME never reaches it; without the argument a hook
+// would bind the default home and govern nothing on a machine that keeps its
+// identity elsewhere. The default home needs no argument, because the hook
+// derives it from HOME, which Muse passes through.
+func BakedHome() string {
+	if os.Getenv(devconfig.EnvHome) == "" {
+		return ""
+	}
+	home, err := devconfig.Home()
+	if err != nil {
+		return ""
+	}
+	userHome, err := os.UserHomeDir()
+	if err == nil && home == filepath.Join(userHome, ".openbox") {
+		return ""
+	}
+	return home
+}

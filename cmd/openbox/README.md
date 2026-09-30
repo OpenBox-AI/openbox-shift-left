@@ -52,6 +52,21 @@ read it. What `auth`/`init` write is nonetheless a plaintext file, on purpose;
 see [where credentials
 live](../../docs/credentials-and-secrets.md#where-credentials-live).
 
+## The hook argv
+
+Nobody types `openbox hook`; a tool's hook registration does. The forms are:
+
+| Argv | What it is |
+|---|---|
+| `openbox hook <provider> [--home <abs dir>] <event>` | One hook event for `<provider>` (`claude-code`, `codex` or `muse`); the tool's payload arrives on stdin. `--home` names the OpenBox home (what `OPENBOX_HOME` sets). Muse clears its hooks' environment, so `init` bakes the flag into every Muse handler whenever `OPENBOX_HOME` is set to a non-default home; it must be an absolute path. |
+| `openbox hook <provider> [--home <abs dir>] --fail-closed <event>` | The deny-only successor a host that fails open runs when a gate handler fails (Muse's `onFailure`). Only a provider whose engine has a fail-closed form accepts it, today `muse`. It needs no config, identity or network, writes nothing under the OpenBox home, and exits 2 with one line on stderr for a gated event, so a failed gate is a denial rather than an allow. |
+
+The fail-closed form is handled before any provider store is bound, which is why
+it works on a machine whose home, config and identity are all broken.
+`--home` and `--fail-closed` are parsed by `runHook`, not declared on a flag set,
+so the CI step that cross-checks documented flags against declared ones does not
+see them; `TestHookArgvIsDocumented` holds this table to the parser instead.
+
 ## Build & test
 
 ```bash

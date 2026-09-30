@@ -20,6 +20,13 @@ import (
 // Claude Code stop carrying an attestation and keep their trailer, which is
 // the same behaviour as any machine with no credentials. That degradation is
 // why the no-marker branch has to be real and tested rather than a fallback.
+//
+// There is no Muse arm. Muse documents no environment marker that a commit made
+// from its shell tool can be told apart by: its hooks run with a cleared
+// environment and carry no session id, and what its shell tool passes on is not
+// documented either. A commit Muse makes therefore keeps its trailer and
+// produces no CommitCreated event, the same as any tool that leaves no marker.
+// Add the arm here, and a test beside it, only once a real marker is observed.
 func attestProvider(getenv func(string) string) string {
 	if getenv == nil {
 		return ""

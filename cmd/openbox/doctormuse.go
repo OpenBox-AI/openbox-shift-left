@@ -1,0 +1,384 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+)
+
+// This file is doctor's Muse Code section. It reports what can be read without
+// running a model: the binary, the hooks file under Muse's own rules, whether
+// Muse actually loads the handlers, whether they ran, and what the org policy
+// says. Every `muse` subprocess goes through providers.MuseRunner, so a test
+// scripts each answer and never reaches a real binary.
+//
+// Several Muse outputs parsed here are documented in prose but not verified on
+// a binary (the load probe's summary line, `muse config status`'s wording, the
+// local-tracing log); the parsers fail soft, to "unverified" or a warning,
+// never to a false "ok".
+
+// museProbeTimeout bounds the echo-provider load probe: a full muse start-up
+// plus every handler's process.
+var museProbeTimeout = 60 * time.Second
+
+// museConfigTimeout bounds `muse config status` and `muse config validate`.
+var museConfigTimeout = 10 * time.Second
+
+// museLocalTracingDir is where Muse logs each hook run, as a third party
+// documented it. A seam so a test points it at a fixture.
+var museLocalTracingDir = func() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "muse", "local-tracing", "bootstrap")
+}
+
+// museHookLogBytes caps how much of one local-tracing log is read.
+const museHookLogBytes = 1 << 20
+
+// reportMuse prints the Muse section, or nothing on a machine where Muse was
+// never set up: a Claude-Code-only machine's output stays as it was.
+func (a *app) reportMuse() {
+	if !a.museInPlay() {
+		return
+	}
+	fmt.Fprintf(a.stdout, "\nMuse Code (hooks)\n")
+	ver := providers.CheckMuseVersion()
+	a.reportMuseBinary(ver)
+	audit, auditErr := a.reportMuseSettings()
+	a.reportMuseLoadProbe(ver, audit, auditErr)
+	a.reportMuseHookRuns(ver)
+	a.reportMusePolicy(ver)
+	a.reportMuseModelCalls()
+	a.reportMuseSpool()
+}
+
+// museInPlay reports whether this machine has been set up for Muse: an
+// identity for it, or a hooks file carrying an OpenBox registration. Muse
+// merely being installed is not enough to add a section.
+func (a *app) museInPlay() bool {
+	if cfgPath, err := devconfig.DevConfigPathFor("muse"); err == nil {
+		if cfg, _ := devconfig.Load(cfgPath); cfg.AgentID != "" {
+			return true
+		}
+	}
+	return carriesHookRegistration("muse", providers.MuseSettingsPath())
+}
+
+func (a *app) museFinding(name, status, label, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	a.wrapRow(label, "%s", msg)
+	traceDoctorFinding("muse:"+name, status, msg)
+}
+
+// 1. binary and version against the supported range.
+func (a *app) reportMuseBinary(v providers.MuseVersionCheck) {
+	rng := providers.MuseVersionRange()
+	switch v.State {
+	case providers.MuseVersionSupported:
+		a.museFinding("binary", "ok", "binary", "ok: muse %s (supported: %s)", v.Version, rng)
+	case providers.MuseVersionNotOnPath:
+		a.museFinding("binary", "warning", "binary", "WARNING: muse is not on PATH, so its version and the hook load cannot be checked. The hooks are installed and take effect once muse runs (supported: %s)", rng)
+	case providers.MuseVersionTooOld:
+		a.museFinding("binary", "fail", "binary", "FAIL: %s. A failed or malformed gate answers as an allow on this release; upgrade muse to the supported range (%s)", v.Detail, rng)
+	case providers.MuseVersionUntested:
+		a.museFinding("binary", "warning", "binary", "WARNING: %s. The hooks may still work; nothing here has been tested on it (supported: %s)", v.Detail, rng)
+	default:
+		a.museFinding("binary", "fail", "binary", "FAIL: muse's version could not be read (%s), so it cannot be shown to be in the supported range (%s). Older releases let a failed gate answer as an allow", v.Detail, rng)
+	}
+}
+
+// 2. the hooks file under Muse's rules, and the owned-handler count.
+func (a *app) reportMuseSettings() (providers.MuseSettingsAudit, error) {
+	path := providers.MuseSettingsPath()
+	audit, err := providers.AuditMuseSettings(path)
+	a.row("settings", "%s", withPresence(path))
+	switch {
+	case err != nil:
+		a.museFinding("settings", "fail", "", "FAIL: Muse cannot read this file (%v). Muse drops EVERY hook in a file it cannot read, with only a startup warning, so nothing is governed. Fix or remove it, then run `openbox init --provider muse`", err)
+		return audit, err
+	case !audit.Present:
+		a.museFinding("settings", "fail", "", "FAIL: no settings file, so no hook is registered. Run `openbox init --provider muse`")
+		return audit, nil
+	}
+	problems := audit.Problems()
+	engines := map[string]bool{}
+	for _, o := range audit.Owned {
+		engines[o.Engine] = true
+	}
+	var missingEngines []string
+	for engine := range engines {
+		if _, statErr := os.Stat(engine); statErr != nil {
+			missingEngines = append(missingEngines, engine)
+		}
+	}
+	sort.Strings(missingEngines)
+	switch {
+	case len(missingEngines) > 0:
+		a.museFinding("handlers", "fail", "", "FAIL: %d of %d OpenBox handlers registered, but the engine they run does not exist: %s. Every handler fails, and so does its successor. Run `openbox init --provider muse`", len(audit.Owned), audit.Expected, strings.Join(missingEngines, ", "))
+	case len(audit.Owned) == 0:
+		a.museFinding("handlers", "fail", "", "FAIL: 0 of %d OpenBox handlers registered. Run `openbox init --provider muse`", audit.Expected)
+	case len(audit.GatedFailures()) > 0:
+		a.museFinding("handlers", "fail", "", "FAIL: %d of %d OpenBox handlers registered, but a gated one can fail open or be skipped: %s. Run `openbox init --provider muse`", len(audit.Owned), audit.Expected, strings.Join(audit.GatedFailures(), "; "))
+	case len(problems) > 0:
+		a.museFinding("handlers", "warning", "", "WARNING: %d of %d OpenBox handlers registered; %s. Run `openbox init --provider muse`", len(audit.Owned), audit.Expected, strings.Join(problems, "; "))
+	default:
+		a.museFinding("handlers", "ok", "", "ok: %d of %d OpenBox handlers registered, every gated one with a deny-only successor", len(audit.Owned), audit.Expected)
+	}
+	for _, w := range audit.Warnings {
+		a.museFinding("settings-warning", "warning", "", "note: %s", w)
+	}
+	return audit, nil
+}
+
+// museLoadCounts is what the echo probe's summary line said.
+type museLoadCounts struct {
+	Runnable, Warnings int
+	// OpenBoxWarnings counts warning lines that name an OpenBox handler.
+	OpenBoxWarnings []string
+}
+
+var museHooksSummary = regexp.MustCompile(`Hooks:\s*(\d+)\s+runnable\D{1,8}(\d+)\s+warning`)
+
+// parseMuseLoadProbe reads `Hooks: N runnable · M warnings` from a probe's
+// output and the warning lines that name OpenBox. ok is false when no summary
+// line is present.
+func parseMuseLoadProbe(out string) (museLoadCounts, bool) {
+	var c museLoadCounts
+	found := false
+	sc := bufio.NewScanner(strings.NewReader(out))
+	for sc.Scan() {
+		line := sc.Text()
+		if m := museHooksSummary.FindStringSubmatch(line); m != nil && !found {
+			c.Runnable, _ = strconv.Atoi(m[1])
+			c.Warnings, _ = strconv.Atoi(m[2])
+			found = true
+			continue
+		}
+		low := strings.ToLower(line)
+		if (strings.Contains(low, "warn") || strings.Contains(low, "hook")) &&
+			(strings.Contains(low, "openbox") || strings.Contains(low, "hook muse")) {
+			c.OpenBoxWarnings = append(c.OpenBoxWarnings, strings.TrimSpace(line))
+		}
+	}
+	return c, found
+}
+
+// 3. does Muse load the handlers: N runnable >= expected and no OpenBox warning.
+//
+// The probe is an echo-provider session: it makes no model call, but it is a
+// real governed session, so its hooks run and its events reach the control
+// plane like any other session. It runs in a throwaway directory, and nothing
+// in it is keyed on tool-controlled input, so it cannot become a bypass.
+func (a *app) reportMuseLoadProbe(v providers.MuseVersionCheck, audit providers.MuseSettingsAudit, auditErr error) {
+	const label = "load probe"
+	switch {
+	case v.State == providers.MuseVersionNotOnPath:
+		a.museFinding("probe", "unverified", label, "not run: muse is not on PATH")
+		return
+	case v.State == providers.MuseVersionTooOld, v.State == providers.MuseVersionUnreadable:
+		a.museFinding("probe", "unverified", label, "not run: muse is not shown to be in the supported range")
+		return
+	case auditErr != nil || len(audit.Owned) == 0:
+		a.museFinding("probe", "unverified", label, "not run: there are no readable OpenBox handlers to load")
+		return
+	}
+	dir, err := os.MkdirTemp("", "openbox-doctor-muse-")
+	if err != nil {
+		a.museFinding("probe", "warning", label, "WARNING: could not make a scratch directory for the probe: %v", err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	ctx, cancel := context.WithTimeout(context.Background(), museProbeTimeout)
+	defer cancel()
+	res, runErr := providers.MuseRunner(ctx, dir, "exec", "--provider", "echo", "--trust-workspace", "openbox doctor hook probe")
+	if runErr != nil {
+		a.museFinding("probe", "warning", label, "WARNING: the echo probe did not finish: %v", runErr)
+		return
+	}
+	counts, ok := parseMuseLoadProbe(string(res.Stderr) + "\n" + string(res.Stdout))
+	switch {
+	case !ok:
+		a.museFinding("probe", "warning", label, "WARNING: the echo probe (exit %d) printed no `Hooks: N runnable` summary, so the load could not be confirmed", res.ExitCode)
+	case len(counts.OpenBoxWarnings) > 0:
+		a.museFinding("probe", "fail", label, "FAIL: Muse loaded %d hooks and warned about OpenBox's: %s", counts.Runnable, counts.OpenBoxWarnings[0])
+	case counts.Runnable < audit.Expected:
+		a.museFinding("probe", "fail", label, "FAIL: Muse found %d runnable hooks, fewer than the %d OpenBox registered; some are not loading", counts.Runnable, audit.Expected)
+	case counts.Warnings > 0:
+		a.museFinding("probe", "warning", label, "WARNING: Muse found %d runnable hooks (%d expected) and %d warning(s), none naming OpenBox", counts.Runnable, audit.Expected, counts.Warnings)
+	default:
+		a.museFinding("probe", "ok", label, "ok: Muse found %d runnable hooks (%d expected), 0 warnings. The probe is a model-free echo session and shows up as one session in the control plane", counts.Runnable, audit.Expected)
+	}
+}
+
+// museHookRunCounts is what the local-tracing log says about hook runs.
+type museHookRunCounts struct{ Terminal, Completed int }
+
+// parseMuseHookRuns counts `hook.execution.terminal` records and how many of
+// them ended `completed`.
+func parseMuseHookRuns(log string) museHookRunCounts {
+	var c museHookRunCounts
+	sc := bufio.NewScanner(strings.NewReader(log))
+	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.Contains(line, "hook.execution.terminal") {
+			continue
+		}
+		c.Terminal++
+		if strings.Contains(line, `status="completed"`) || strings.Contains(line, `"status":"completed"`) {
+			c.Completed++
+		}
+	}
+	return c
+}
+
+// 4. did hooks actually run, from Muse's own local-tracing log. The path comes
+// from a third party for one release line, so anything else is "unverified",
+// and this row never fails.
+func (a *app) reportMuseHookRuns(v providers.MuseVersionCheck) {
+	const label = "hook runs"
+	dir := museLocalTracingDir()
+	if v.State != providers.MuseVersionSupported {
+		a.museFinding("hook-runs", "unverified", label, "unverified: Muse's local-tracing log is documented for the tested versions only")
+		return
+	}
+	logs, _ := filepath.Glob(filepath.Join(dir, "*.log"))
+	if dir == "" || len(logs) == 0 {
+		a.museFinding("hook-runs", "unverified", label, "unverified: no local-tracing log at %s; a missing log is not a failure", orUnset(dir))
+		return
+	}
+	newest, newestTime := "", time.Time{}
+	for _, l := range logs {
+		if info, err := os.Stat(l); err == nil && info.ModTime().After(newestTime) {
+			newest, newestTime = l, info.ModTime()
+		}
+	}
+	raw, err := readTail(newest, museHookLogBytes)
+	if err != nil {
+		a.museFinding("hook-runs", "unverified", label, "unverified: could not read %s: %v", newest, err)
+		return
+	}
+	c := parseMuseHookRuns(raw)
+	if c.Terminal == 0 {
+		a.museFinding("hook-runs", "unverified", label, "unverified: %s records no hook run yet", filepath.Base(newest))
+		return
+	}
+	a.museFinding("hook-runs", "ok", label, "ok: %d hook run(s) recorded in %s, %d completed", c.Terminal, filepath.Base(newest), c.Completed)
+}
+
+// readTail returns the last max bytes of a file.
+func readTail(path string, max int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if info.Size() > max {
+		if _, err := f.Seek(info.Size()-max, io.SeekStart); err != nil {
+			return "", err
+		}
+	}
+	raw, err := io.ReadAll(f)
+	return string(raw), err
+}
+
+var museManagedLane = regexp.MustCompile(`(?i)managed[ _-]*hooks?[ _-]*(?:lane)?[ _-]*required\W{0,4}(true|yes|on|enabled|false|no|off|disabled)`)
+
+// parseMuseManagedLane reads whether the policy requires the managed hook
+// lane from `muse config status` output: "yes", "no" or "unknown".
+func parseMuseManagedLane(out string) string {
+	m := museManagedLane.FindStringSubmatch(out)
+	if m == nil {
+		return "unknown"
+	}
+	switch strings.ToLower(m[1]) {
+	case "true", "yes", "on", "enabled":
+		return "yes"
+	}
+	return "no"
+}
+
+// 5. the org policy plane: `muse config validate` exit 0 valid, 4 valid with
+// inactive members, 1 rejected; `muse config status` for the managed lane.
+func (a *app) reportMusePolicy(v providers.MuseVersionCheck) {
+	const label = "policy"
+	if v.State == providers.MuseVersionNotOnPath {
+		a.museFinding("policy", "unverified", label, "not checked: muse is not on PATH")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), museConfigTimeout)
+	defer cancel()
+	val, err := providers.MuseRunner(ctx, "", "config", "validate")
+	if err != nil {
+		a.museFinding("policy", "warning", label, "WARNING: `muse config validate` did not finish: %v", err)
+		return
+	}
+	lane := "unknown"
+	if st, stErr := providers.MuseRunner(ctx, "", "config", "status"); stErr == nil {
+		lane = parseMuseManagedLane(string(st.Stdout) + "\n" + string(st.Stderr))
+	}
+	switch val.ExitCode {
+	case 0:
+		a.museFinding("policy", "ok", label, "ok: muse config validates. managed lane required: %s", lane)
+	case 4:
+		a.museFinding("policy", "warning", label, "WARNING: muse config is valid but has inactive members (exit 4). managed lane required: %s", lane)
+	case 1:
+		a.museFinding("policy", "fail", label, "FAIL: muse rejects its config (exit 1); a rejected policy can leave the managed hook lane unenforced. managed lane required: %s", lane)
+	default:
+		a.museFinding("policy", "warning", label, "WARNING: `muse config validate` exited %d, which this doctor does not know. managed lane required: %s", val.ExitCode, lane)
+	}
+	if lane == "yes" {
+		a.row("", "a required managed lane is an org mandate; OpenBox's user-level hooks are a")
+		a.row("", "second registration, see deployments/managed/muse/README-mdm.md")
+	}
+}
+
+// 6. what is and is not recorded. Said plainly, and never as "not installed":
+// the hooks are installed and gate; there is simply no lane that can see a
+// Muse model call's body.
+func (a *app) reportMuseModelCalls() {
+	// Unwrapped: the sentence is a fixed claim and is searched for verbatim.
+	const modelCalls = "Muse model calls: not recorded (no proxy or telemetry lane can see them); tool, prompt and model-call gating still enforced"
+	a.row("model calls", "%s", modelCalls)
+	traceDoctorFinding("muse:model-calls", "info", modelCalls)
+	const mcp = "MCP gating: doc-verified, not empirically confirmed"
+	a.row("mcp", "%s", mcp)
+	traceDoctorFinding("muse:mcp", "info", mcp)
+}
+
+// 7. the spool backlog the hooks left. The details are in the machine-wide
+// "Spooled evidence" block, so this row is the Muse-specific pointer.
+func (a *app) reportMuseSpool() {
+	dir := providers.SpoolDirFor("muse")
+	if dir == "" {
+		return
+	}
+	sp := hookflow.Spool{Dir: dir}
+	backlog, discarded := sp.BacklogCount(), sp.DiscardedCount()
+	switch {
+	case backlog == 0 && discarded == 0:
+		a.museFinding("spool", "ok", "spool", "ok: 0 events waiting in %s", dir)
+	case backlog == 0:
+		a.museFinding("spool", "warning", "spool", "WARNING: nothing waiting, but at least %d event(s) were discarded in %s", discarded, dir)
+	default:
+		a.museFinding("spool", "warning", "spool", "WARNING: %d event(s) waiting in %s; `openbox hook muse flush` delivers them now", backlog, dir)
+	}
+}

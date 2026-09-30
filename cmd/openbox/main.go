@@ -204,6 +204,12 @@ func (a *app) runHook(args []string) (code int) {
 			code = faultCode()
 		}
 	}()
+	// First, and before the logger below: the trace it tees into lives under the
+	// OpenBox home, and the deny-only successor must work, and touch nothing,
+	// on a machine where that home, the config and the identity are all broken.
+	if code, handled := a.tryFailClosed(args); handled {
+		return code
+	}
 	// Teed into the trace: a hook exiting 0 has its stderr discarded by the
 	// tool, so an early return (no identity, unknown provider) would
 	// otherwise leave no reason anywhere.
@@ -262,6 +268,48 @@ func (a *app) runHook(args []string) (code int) {
 	a.warnIfUnconfigured(name, logger)
 	engine.RunHook(event, a.stdin, a.stdout, logger)
 	return exitOK
+}
+
+// tryFailClosed serves `openbox hook <provider> [--home <dir>] --fail-closed
+// <event>`, the deny-only successor a host that fails open runs when a gate
+// handler fails. It needs no config, identity or network and writes nothing
+// under the OpenBox home, so it binds no provider store and ignores --home:
+// the directory is only for a handler that has a store to find. Only a provider
+// whose engine implements FailClosedRunner has this form; for any other the
+// arguments fall through to the ordinary hook route, unchanged.
+func (a *app) tryFailClosed(args []string) (code int, handled bool) {
+	if len(args) < 2 || args[0] == "git" {
+		return 0, false
+	}
+	engine, err := hookEngineFn(args[0])
+	if err != nil {
+		return 0, false
+	}
+	fc, ok := engine.(provider.FailClosedRunner)
+	if !ok {
+		return 0, false
+	}
+	rest := args[1:]
+	if len(rest) >= 2 && rest[0] == "--home" {
+		rest = rest[2:]
+	}
+	if len(rest) == 0 || rest[0] != "--fail-closed" {
+		return 0, false
+	}
+	event := ""
+	if len(rest) > 1 {
+		event = rest[1]
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(a.stderr, "openbox hook: recovered from panic in the fail-closed handler: %v\n", r)
+			code, handled = exitError, true
+			if fe, ok := engine.(provider.FaultExiter); ok && fe.FaultExitCode(event) != 0 {
+				code = fe.FaultExitCode(event)
+			}
+		}
+	}()
+	return fc.RunFailClosed(event, a.stderr), true
 }
 
 // splitHookHome takes an optional `--home <dir>` off the front of a hook's
@@ -371,6 +419,17 @@ func (a *app) runDevInit(args []string) int {
 	inst, err := providers.Lookup(o.Provider)
 	if err != nil {
 		return a.errorf("%v", err)
+	}
+	// Before anything is written or registered: a refusal here leaves no agent
+	// behind that nothing can be installed for.
+	if pf, ok := inst.(provider.Preflighter); ok {
+		warning, err := pf.Preflight()
+		if err != nil {
+			return a.errorf("%v", err)
+		}
+		if warning != "" {
+			fmt.Fprintf(a.stderr, "warning: %s\n", warning)
+		}
 	}
 
 	// The commit-trailer hook is on. This is the one posture field init writes

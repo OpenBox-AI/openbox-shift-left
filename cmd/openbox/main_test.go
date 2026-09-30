@@ -1406,6 +1406,8 @@ func testAgentIDFor(t *testing.T, tool string) string {
 		return "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 	case "codex":
 		return "3f2504e0-4f89-11d3-9a0c-0305e82c9999"
+	case "muse":
+		return "3f2504e0-4f89-11d3-9a0c-0305e82c7777"
 	default:
 		t.Fatalf("no test agent id for provider %q", tool)
 		return ""

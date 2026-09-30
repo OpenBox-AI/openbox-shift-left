@@ -16,10 +16,10 @@ live session. The fixtures in `testdata/` are doc-derived and `testdata/README.m
 lists every guessed key. Replace them with scrubbed captures from a real session
 before treating any of it as ground truth.
 
-**The installer is a later phase.** `installer.go` still refuses, so no machine
-runs these hooks yet. This package is the runtime half: the handlers, the output
-contract, the fault exit code. The installer will register them and the
-`onFailure` successor described below.
+**The installer** (`installer.go`) merges OpenBox's handlers into
+`~/.config/muse/settings.json`; see [Installing](#installing) below. `openbox
+init --provider muse` refuses a Muse older than 1.4.0 before it registers
+anything.
 
 **Hooks are a guardrail, not a tamper-proof boundary.** A developer can edit
 `settings.json`, a malformed hooks file silently drops every handler from that
@@ -117,18 +117,87 @@ and the turn continues as if the hook never ran. Two layers close that.
    PreToolUse; assumed, not yet observed, for PermissionRequest and PreLLMCall). A panic on any other
    event gates nothing and is logged and swallowed. `fault_test.go` and
    `cmd/openbox/musefault_test.go` pin this.
-2. The installer (a later phase) will register a deny-only `onFailure` successor
-   on every gated handler, which also covers a timeout and an answer Muse rejects.
+2. The installer registers a deny-only `onFailure` successor on every gated
+   handler, which also covers a timeout and an answer Muse rejects. The
+   successor is `openbox hook muse --fail-closed <Event>` (`failclosed.go`): it
+   reads no config, identity or network, writes nothing under the OpenBox home
+   (`cmd/openbox` routes it before any provider store is bound), and exits 2 with
+   one stderr line for a gated event. `failclosed_test.go` keeps the exit-0
+   refusal shapes as a golden, unused: they are what a successor would write if
+   exit 2 turned out not to deny on some release.
 
 `OPENBOX_HOME` does not reach the hook (Muse clears its environment), so the
-installer bakes `--home <abs dir>` into the command for a non-default home;
-`openbox hook` sets it before binding the provider.
+installer bakes `--home "<abs dir>"` into every handler and successor whenever
+`OPENBOX_HOME` is set to a non-default home (`BakedHome`); `openbox hook` sets it
+before binding the provider. Without it the hook would bind the default home and
+govern nothing.
+
+## Installing
+
+- **Which events.** One catch-all handler (no matcher, so MCP tools are covered)
+  per event the adapter produces something for, derived from the adapter's own
+  table (`HookName.Observed`): eleven today. `Stop` and `SubagentStop` produce
+  nothing, so they get no handler; the five events with no contract type never
+  do. `ExpectedHandlers()` is what doctor counts against.
+- **Shape.** `{"type":"command","command":"\"<engine>\" hook muse [--home \"<dir>\"] <Event>","timeout":N}`,
+  with `N` 30 on a gated event, 3 on `SessionEnd`, 5 elsewhere, and on a gated
+  handler an `onFailure` object of the same form holding the `--fail-closed`
+  command. The engine is an absolute path.
+- **Merge, not rewrite.** The file is edited by path, so every key and handler
+  that is not OpenBox's keeps its bytes. A handler is OpenBox's only when its
+  command parses to `<engine> hook muse ...` (`parseInvocation`); one that merely
+  mentions it is foreign and survives install and uninstall. A second install is
+  byte-identical. `schema_version: 1` is written into a new file and left alone in
+  an existing one.
+- **Refuse, don't repair.** A file Muse cannot read (not JSON, a wrong type, a
+  `schema_version` other than 1) is refused with the file untouched, because Muse
+  drops every hook in such a source. Keys this adapter does not know are warnings,
+  since a newer Muse may accept them. `ValidateSettings` is shared by install and
+  doctor.
+- **Atomic, then read back.** The write goes through `hookflow.AtomicWriteFile`
+  (through a symlink if settings.json is one, keeping its mode), and what landed on
+  disk is re-read and checked for the exact handler set; on a mismatch the
+  previous file is restored.
+- **Uninstall** (`RemoveHooks`) removes exactly the owned handlers, and the event
+  or `hooks` object it emptied, so install then uninstall gives back the original
+  bytes. `schema_version` stays.
+- **Version gate.** `muse --version` (2 s bound) below 1.4.0 refuses, as does a
+  version that cannot be read (timeout, non-zero exit, no number: nothing proves
+  it is new enough) and a prerelease of 1.4.0; absent from PATH, or at 1.5.0 and
+  above, installs with a warning. Doctor rates an unreadable version FAIL.
+  Every `muse` subprocess goes through a `Runner`, so tests never run a real one.
+- **Posture** goes through `devconfig.WriteConfig(ConfigUpdate(ref))` like the
+  other adapters; a bool the run says nothing about stays unset.
 
 An unconfigured machine (no identity) is governance inactive, not a fault: the
 hook logs and exits 0, as the other adapters do. A delivery failure denies only
 its own call and never latches the run; only a real HALT verdict latches.
 
 ## Unverified, and what would settle it
+
+Guessed by the installer and doctor (Muse documents none of them by name):
+
+- The `onFailure` key and its shape: a nested handler object
+  (`{"type","command","timeout"}`). The 1.4.0 changelog names the feature, not
+  the JSON.
+- The closed handler key set `type, command, timeout, onFailure, async`, that
+  `timeout` is whole seconds, and that a missing `schema_version` is tolerated.
+- That `command` may quote its executable (`"/path with space/openbox" hook ...`)
+  and be split the way a shell would; the Claude Code and Codex installers rely on
+  the same.
+- `muse --version` printing a `major.minor.patch` token.
+- The load probe: `muse exec --provider echo --trust-workspace "..."` printing
+  `Hooks: N runnable · M warnings` (documented in prose only), making no model call,
+  and being a governed session whose hooks run and report.
+- `muse config validate` exiting 0, 4 or 1 (documented), its arguments
+  (none passed), and how `muse config status` spells "managed hook lane
+  required" (`doctormuse.go` matches a pattern and otherwise says `unknown`).
+- The local-tracing hook log path and its `hook.execution.terminal` records
+  (one third-party source); doctor says `unverified` whenever it is absent.
+- The managed policy's keys in `deployments/managed/muse/policy.json`, above
+  all the name for "managed lane required" and the values of `approval_modes`.
+- That Muse commits carry no marker: `cmd/openbox/attest.go` has no Muse arm,
+  so a commit Muse makes keeps its trailer and emits no CommitCreated.
 
 - Whether an MCP call fires `PreToolUse` (catch-all install is the plan).
 - The exact `onFailure` JSON, whether invalid output triggers it on 1.4.0.

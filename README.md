@@ -104,7 +104,9 @@ your user-wide settings. Every Claude Code session on this machine is now
 governed, in any folder, including sessions already open.
 
 Using Codex? Run `openbox init --provider codex` (and trust the new hooks with
-`/hooks` inside Codex). Run `init` once per tool; running it again is safe.
+`/hooks` inside Codex). Using Muse Code 1.4.0 or newer? Run
+`openbox init --provider muse`; it installs hooks only, so Muse's model calls
+are not recorded. Run `init` once per tool; running it again is safe.
 
 ### 4. Check it
 
@@ -141,7 +143,7 @@ The full walkthrough, with CI setup, approvals and troubleshooting, is in
 | Command | What it does |
 |---|---|
 | `openbox auth` | Save your platform URLs and organization key. |
-| `openbox init --provider <claude-code\|codex>` | Register that tool's agent and install its hooks. Once per tool. |
+| `openbox init --provider <claude-code\|codex\|muse>` | Register that tool's agent and install its hooks. Once per tool. |
 | `openbox doctor` | Show what is in effect, where each value came from, and what is wrong. |
 | `openbox trace` | Read the local record of what `openbox` did, per session. |
 | `openbox uninstall` | Remove everything `openbox` installed, including credentials. |

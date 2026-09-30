@@ -65,6 +65,15 @@ type Installer interface {
 	Install(ref CredentialRef) error
 }
 
+// Preflighter is the optional half of the install SPI for a tool whose install
+// can be refused before anything is written, such as one that must be a
+// minimum version. `init` calls it before it registers an agent, so a refusal
+// leaves no half-made identity behind. A non-empty warning is shown and the
+// install proceeds; an error stops it.
+type Preflighter interface {
+	Preflight() (warning string, err error)
+}
+
 // Supported lists the recognized provider names, sorted.
 func Supported() []string {
 	return []string{string(ClaudeCode), string(Codex), string(Muse)}

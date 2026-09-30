@@ -58,6 +58,15 @@ type FaultExiter interface {
 	FaultExitCode(event string) int
 }
 
+// FailClosedRunner is the optional half of the runtime SPI for a host that runs
+// a deny-only successor when a gate handler fails. RunFailClosed is that
+// successor's body: it reads no config, identity or network, writes nothing
+// under the OpenBox home, and reports the exit code the host reads as a denial
+// (0 where the event gates nothing). It answers on stderr only.
+type FailClosedRunner interface {
+	RunFailClosed(event string, stderr io.Writer) int
+}
+
 // Capability is one entry in a provider's declared capability profile. OpenBox
 // core is written against the normalized event contract and never assumes a
 // capability; an adapter declares what it supports so a per-session coverage

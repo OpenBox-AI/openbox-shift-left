@@ -77,7 +77,7 @@ Organization control token (obx_key_… or JWT):
 ✓ wrote ~/.openbox/.env       (0600; plaintext;)
 ✓ wrote ~/.openbox/dev.json   (URLs; no secrets)
 
-Next: openbox init --provider <claude-code|codex>
+Next: openbox init --provider <claude-code|codex|muse>
 ```
 
 Each prompt is prefilled with the current value, and a blank answer keeps it,
@@ -134,6 +134,23 @@ Same command with `--provider codex`. The agent lives in `~/.openbox/codex/`.
   that call.
 - Codex hooks do not carry tool output, so less content is sent than on
   Claude Code ([details](data-and-privacy.md#summary)).
+
+### Muse Code differences
+
+Same command with `--provider muse`; it needs Muse Code 1.4.0 or newer and
+refuses an older one before anything is written. The agent lives in
+`~/.openbox/muse/`, and the hooks go into `~/.config/muse/settings.json`.
+
+- Hooks only: Muse's model calls are **not recorded**, because no proxy or
+  telemetry lane can see them. Prompts, tool calls and model calls are still
+  gated.
+- Muse drops every hook in a settings file it cannot parse, so `init` refuses
+  to touch one, and `openbox doctor` says so when it finds one.
+- Every Muse handler also carries a deny-only fallback that runs if the gate
+  crashes or times out, so a failed gate is a denial rather than an allow.
+- An org can deploy a managed hooks file and policy with its own MDM; see
+  `deployments/managed/muse/README-mdm.md`. Nothing here resists a local
+  administrator.
 
 ## 5. Confirm it
 
