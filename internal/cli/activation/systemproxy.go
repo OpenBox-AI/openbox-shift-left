@@ -6,10 +6,14 @@ import (
 	// fingerprint format, never a security boundary: matching the wrong hash
 	// algorithm here means the read-back check below never confirms anything.
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -226,6 +230,48 @@ func LoadSystemEntry(homeDir string) (*SystemEntry, error) {
 		return nil, err
 	}
 	return record.System, nil
+}
+
+// LoadSystemEntryAt is LoadSystemEntry for a daemon, which is handed the
+// record's absolute path in its unit and has no $HOME to derive one from. An
+// absent file is nil, nil: nothing is activated.
+func LoadSystemEntryAt(recordPath string) (*SystemEntry, error) {
+	if !filepath.IsAbs(recordPath) {
+		return nil, fmt.Errorf("activation: the record path %q is not absolute", recordPath)
+	}
+	raw, err := os.ReadFile(recordPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("activation: reading %s: %w", recordPath, err)
+	}
+	var rec Record
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, fmt.Errorf("activation: %s is not valid JSON: %w", recordPath, err)
+	}
+	return rec.System, nil
+}
+
+// SystemPACSupported reports whether this OS has a system PAC activation at
+// all, which is what decides whether a provider whose transport routing IS
+// that PAC (Codex) can have a proxy lane here.
+func SystemPACSupported() bool { return currentGOOS == "darwin" }
+
+// RemoveSystemProvider drops name from the committed record's provider list
+// without touching anything else in it, so the election stops counting that
+// provider's proxy lane before any OS-side setting is rewritten. A missing
+// record or an absent name is a no-op.
+func RemoveSystemProvider(homeDir, name string) error {
+	record, err := loadRecord(homeDir)
+	if err != nil {
+		return err
+	}
+	if record.System == nil || !slices.Contains(record.System.Providers, name) {
+		return nil
+	}
+	record.System.Providers = slices.DeleteFunc(slices.Clone(record.System.Providers), func(p string) bool { return p == name })
+	return saveRecord(homeDir, record)
 }
 
 // ClearSystemEntry forgets the system-scope activation after a full

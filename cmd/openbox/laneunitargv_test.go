@@ -31,10 +31,21 @@ func TestEveryLaneUnitArgvIsAcceptedByItsOwnCommand(t *testing.T) {
 	// one that proves the command actually READ the path rather than accepting the
 	// flag and ignoring it.
 	settings := unreadableSettings(t)
+	// Codex's two paths ride both units the same way: an unparsable
+	// config.toml is the loud case that proves the daemon READ --codex-settings
+	// rather than accepting it, and the record path is one it must accept.
+	codexConfig := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(codexConfig, []byte("not [ valid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pacRecord := filepath.Join(t.TempDir(), "activation.json")
 
 	for name, spec := range map[string]laneservice.Spec{
-		"telemetry": laneservice.Telemetry(telemetry.DefaultAddr, settings, true),
-		"transport": laneservice.Transport(transport.DefaultAddr, settings, true),
+		"telemetry": laneservice.Telemetry(telemetry.DefaultAddr, settings, true).
+			WithCodexSettings(codexConfig).WithPACRecord(pacRecord),
+		"transport": laneservice.Transport(transport.DefaultAddr, settings, true).
+			WithProviders([]string{"claude-code", "codex"}).
+			WithCodexSettings(codexConfig).WithPACRecord(pacRecord),
 	} {
 		t.Run(name, func(t *testing.T) {
 			argv := spec.Argv("/bin/openbox")
@@ -87,6 +98,10 @@ func TestEveryLaneUnitArgvIsAcceptedByItsOwnCommand(t *testing.T) {
 			if !strings.Contains(errb.String(), "CANNOT DECIDE") {
 				t.Errorf("%s did not report the unreadable settings path it was handed, so it is "+
 					"not reading --settings at all; stderr: %s", name, errb.String())
+			}
+			if !strings.Contains(errb.String(), "CANNOT DECIDE whether to emit Codex model-call turns") {
+				t.Errorf("%s did not report the unreadable Codex config it was handed, so it is "+
+					"not reading --codex-settings; stderr: %s", name, errb.String())
 			}
 		})
 	}

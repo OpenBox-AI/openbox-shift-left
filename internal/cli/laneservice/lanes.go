@@ -107,6 +107,24 @@ func (s Spec) WithCodexSettings(configPath string) Spec {
 	return s
 }
 
+// PACRecordFlag carries the absolute path of the activation record (which
+// holds the system-PAC entry) into a lane unit. Both daemons resolve Codex's
+// election from it per call, and a daemon has no $HOME to derive it from.
+// Empty is omitted, like every other optional path flag.
+const PACRecordFlag = "--pac-record"
+
+// WithPACRecord returns a copy of s whose Args carry the activation record's
+// path, the same trailing-optional-flag shape WithCodexSettings uses.
+func (s Spec) WithPACRecord(recordPath string) Spec {
+	if recordPath == "" {
+		return s
+	}
+	args := make([]Arg, len(s.Args), len(s.Args)+2)
+	copy(args, s.Args)
+	s.Args = append(args, Literal(PACRecordFlag), Value(recordPath))
+	return s
+}
+
 // ProvidersFlag carries the transport lane's provider union into the unit,
 // mirroring transport.Config.Providers' own nil/empty distinction: a caller
 // passing nil gets s back with its Args untouched (today's default, unit

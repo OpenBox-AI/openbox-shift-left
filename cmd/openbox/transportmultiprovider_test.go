@@ -75,7 +75,7 @@ func newMultiRelay(t *testing.T, identities map[string]providerIdentity, provide
 		CandidatesForHost: transport.CandidatesForHost,
 		// The claude-code election is forced on: this test is about
 		// attribution and identity, not about settings-derived election.
-		Providers: relayProviderLanes(identities, filepath.Join(t.TempDir(), "settings.json"), &force),
+		Providers: relayProviderLanes(identities, filepath.Join(t.TempDir(), "settings.json"), codexElectionPaths{}, &force),
 	}
 	p, err := transport.New(transport.Config{Upstream: upstream.URL, Providers: providers}, ca, hostRestoringEmitter{next: em})
 	if err != nil {

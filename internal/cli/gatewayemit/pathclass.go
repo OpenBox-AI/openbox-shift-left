@@ -108,6 +108,11 @@ func classifyPath(rawURL string) PathClass {
 	return ClassUnknown
 }
 
+// IsModelCompletion reports whether rawURL is a real model completion request
+// of a tool session (not a probe, a chat or the tool's own telemetry): the
+// calls this relay actually records.
+func IsModelCompletion(rawURL string) bool { return classifyPath(rawURL) == ClassCompletion }
+
 func requestPath(rawURL string) string {
 	path := rawURL
 	if u, err := url.Parse(rawURL); err == nil && u.Path != "" {

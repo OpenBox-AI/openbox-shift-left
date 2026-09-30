@@ -61,3 +61,24 @@ func TestWithProvidersJoinsAsCommaList(t *testing.T) {
 		t.Errorf("the --providers flag name itself was not rendered as a plain literal: %+v", flag)
 	}
 }
+
+// TestWithPACRecordOmitsEmptyAndAppendsQuotedPath pins the optional trailing
+// flag: a caller with no record path gets an unchanged unit, and one with a
+// path gets a quoted value a daemon can re-read without a $HOME.
+func TestWithPACRecordOmitsEmptyAndAppendsQuotedPath(t *testing.T) {
+	base := Transport("127.0.0.1:8790", "", false)
+	if got := base.WithPACRecord(""); len(got.Args) != len(base.Args) {
+		t.Fatalf("an empty record path changed Args: %d -> %d", len(base.Args), len(got.Args))
+	}
+	got := base.WithPACRecord("/Users/dev/.openbox/activation.json")
+	last, flag := got.Args[len(got.Args)-1], got.Args[len(got.Args)-2]
+	if flag.Value != PACRecordFlag || flag.Quote {
+		t.Errorf("flag arg = %+v, want the literal %s", flag, PACRecordFlag)
+	}
+	if last.Value != "/Users/dev/.openbox/activation.json" || !last.Quote {
+		t.Errorf("value arg = %+v", last)
+	}
+	if len(base.Args) == len(got.Args) {
+		t.Error("the original Spec was mutated instead of copied")
+	}
+}

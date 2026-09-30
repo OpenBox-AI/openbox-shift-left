@@ -1,8 +1,11 @@
 package main
 
 import (
+	"io"
 	"log"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
@@ -86,39 +89,135 @@ func electionProblemFn(settingsPath string, override *bool) func() string {
 	}
 }
 
-// codexElectedFn is electedFn's Codex counterpart: it reads config.toml
-// through activation.ResolveCodexElection, never settings.json through
-// ResolveElection -- the two native surfaces must never be read through each
-// other's parser, or a TOML file handed to the JSON reader reports "cannot
-// decide" forever.
-func codexElectedFn(configPath string, override *bool) func() bool {
+// codexRelaySpoolSubdir and codexObservedMarker name where the relay's
+// evidence that it has seen Codex lives: inside Codex's own spool directory,
+// the same place (and the same resolution, laneSpoolDir) the run-started
+// markers live, so both daemons find one file without any path in their
+// unit and uninstall's spool sweep removes it with everything else.
+const (
+	codexRelaySpoolSubdir = "codex-spool"
+	codexObservedMarker   = "relay-observed/codex"
+)
+
+// codexElectionPaths are the three files Codex's election reads. Two come
+// from the unit's argv (a daemon has no $HOME to derive either from); the
+// third is resolved by the daemon the way it resolves every spool path.
+type codexElectionPaths struct {
+	config, pacRecord, marker string
+}
+
+func newCodexElectionPaths(config, pacRecord string, logger *log.Logger) codexElectionPaths {
+	return codexElectionPaths{
+		config:    config,
+		pacRecord: pacRecord,
+		marker:    filepath.Join(laneSpoolDir(codexRelaySpoolSubdir, logger), filepath.FromSlash(codexObservedMarker)),
+	}
+}
+
+// resolve is the one call every consumer makes, so the two daemons and
+// doctor cannot read the three files differently.
+func (p codexElectionPaths) resolve() activation.Election {
+	return activation.ResolveCodexElection(p.config, p.pacRecord, p.marker)
+}
+
+// codexElectedFn is electedFn's Codex counterpart: it reads config.toml and the
+// system-PAC record through activation.ResolveCodexElection, never
+// settings.json through ResolveElection -- the native surfaces must never be
+// read through each other's parser, or a TOML file handed to the JSON reader
+// reports "cannot decide" forever. lane is the lane the calling daemon speaks
+// for: telemetry asks for LaneTelemetry and the relay for LaneTransport, and
+// because both resolve the same three files exactly one of them is elected.
+func codexElectedFn(paths codexElectionPaths, lane activation.Lane, override *bool) func() bool {
 	return func() bool {
 		if override != nil && *override {
 			return true
 		}
-		return activation.ResolveCodexElection(configPath).Elected == activation.LaneTelemetry
+		return paths.resolve().Elected == lane
 	}
 }
 
-func reportCodexElection(logger *log.Logger, configPath string, override bool) {
-	e := activation.ResolveCodexElection(configPath)
+// codexElectedNameFn reports which lane Codex's election named, "" for none,
+// tracing a change the way electedNameFn does.
+func codexElectedNameFn(paths codexElectionPaths, lane activation.Lane, override *bool) func() string {
+	var mu sync.Mutex
+	last := electionChangeSentinel
+	return func() string {
+		var name string
+		if override != nil && *override {
+			name = string(lane)
+		} else {
+			name = string(paths.resolve().Elected)
+		}
+		traceElectionChange(&mu, &last, "codex:"+string(lane), name)
+		return name
+	}
+}
+
+// codexElectionProblemFn reports why Codex's election could not be decided.
+func codexElectionProblemFn(paths codexElectionPaths, override *bool) func() string {
+	return func() string {
+		if override != nil && *override {
+			return ""
+		}
+		return paths.resolve().SettingsProblem
+	}
+}
+
+// codexObserver is what the relay calls when a model call carrying Codex's
+// carrier crosses it: it writes the evidence Codex's election needs before
+// the relay may outrank telemetry. A failure to write it costs only the
+// election staying with telemetry, so it is reported (at most hourly) and
+// never raised.
+func codexObserver(paths codexElectionPaths, logger *log.Logger) func() {
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+	var mu sync.Mutex
+	var lastWarn time.Time
+	return func() {
+		wrote, err := activation.MarkCodexProxyObserved(paths.pacRecord, paths.marker)
+		if err != nil {
+			mu.Lock()
+			due := time.Since(lastWarn) >= time.Hour
+			if due {
+				lastWarn = time.Now()
+			}
+			mu.Unlock()
+			if due {
+				logger.Printf("openbox transport: could not record that the relay has seen Codex (%v); "+
+					"Codex's model calls stay with the telemetry lane until it can", err)
+			}
+			return
+		}
+		if wrote {
+			logger.Printf("openbox transport: the relay has now seen a Codex model call; it is the " +
+				"elected producer of Codex model-call turns and telemetry stands by")
+		}
+	}
+}
+
+// reportCodexElection logs a daemon's startup view of Codex's election. lane
+// is the lane the daemon speaks for ("telemetry" or "transport").
+func reportCodexElection(logger *log.Logger, paths codexElectionPaths, lane activation.Lane, override bool) {
+	e := paths.resolve()
+	name := string(lane)
 	if override {
-		logger.Printf("openbox telemetry: emitting Codex model-call turns because --elected was passed, "+
-			"overriding the election (which currently names %q)", orNone(string(e.Elected)))
+		logger.Printf("openbox %s: emitting Codex model-call turns because --elected was passed, "+
+			"overriding the election (which currently names %q)", name, orNone(string(e.Elected)))
 		return
 	}
 	if problem := e.SettingsProblem; problem != "" {
-		logger.Printf("openbox telemetry: CANNOT DECIDE whether to emit Codex model-call turns: %s. "+
+		logger.Printf("openbox %s: CANNOT DECIDE whether to emit Codex model-call turns: %s. "+
 			"Reinstall with `openbox init --provider codex` so the unit carries --codex-settings, or "+
-			"pass --elected. Claude Code's own election is unaffected.", problem)
+			"pass --elected. Claude Code's own election is unaffected.", name, problem)
 		return
 	}
-	if e.Elected == activation.LaneTelemetry {
-		logger.Printf("openbox telemetry: elected producer of Codex model-call turns; %s", e.Reason)
+	if e.Elected == lane {
+		logger.Printf("openbox %s: elected producer of Codex model-call turns; %s", name, e.Reason)
 		return
 	}
-	logger.Printf("openbox telemetry: NOT the elected producer of Codex model-call turns (%s); "+
-		"emitting none. Re-checked per call.", e.Reason)
+	logger.Printf("openbox %s: NOT the elected producer of Codex model-call turns (%s); "+
+		"emitting none. Re-checked per call.", name, e.Reason)
 }
 
 func reportElection(logger *log.Logger, lane string, settingsPath string, want activation.Lane, override bool) {

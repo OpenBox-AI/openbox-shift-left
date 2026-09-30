@@ -42,6 +42,8 @@ func (a *app) runTransport(args []string) int {
 	verbose := fs.Bool("verbose", false, "report every CONNECT and the capture outcome of every relayed call")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to the governed tool's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
+	codexSettings := fs.String("codex-settings", "", "absolute path to Codex's config.toml, written into the unit at install time when Codex is among the providers. Codex's election reads its model host from it")
+	pacRecord := fs.String("pac-record", "", "absolute path to the activation record that holds the system-PAC entry, written into the unit at install time. Codex's election reads it to tell whether the relay is routed for Codex")
 	providersFlag := fs.String("providers", "", "comma-separated provider names whose host-table union this lane intercepts and PACs. Absent keeps transport.Config's own default (today's claude-code-only lane); passed with an empty value intercepts nothing, for a machine with every provider uninstalled")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
@@ -110,6 +112,7 @@ func (a *app) runTransport(args []string) int {
 	dropped := combinedDroppedFrom(queues, chatPool)
 
 	settingsPath := a.laneSettingsPath(*settings)
+	codexPaths := newCodexElectionPaths(*codexSettings, *pacRecord, logger)
 	em := &gatewayemit.Emitter{
 		Lane: gatewayemit.LaneProxy,
 		// A claude.ai chat completion (sessionkey.IsChatKey) keeps the
@@ -120,7 +123,7 @@ func (a *app) runTransport(args []string) int {
 		// A call is attributed to one provider by host and carrier header; see
 		// relayProviderLanes for what each provider's entry is.
 		CandidatesForHost: transport.CandidatesForHost,
-		Providers:         relayProviderLanes(identities, settingsPath, elected),
+		Providers:         relayProviderLanes(identities, settingsPath, codexPaths, elected),
 	}
 	if *verbose {
 		em.Verbose = logger.Printf
@@ -138,7 +141,7 @@ func (a *app) runTransport(args []string) int {
 		// call. haltDecorator's own next stays nil for now, left ready for a
 		// real /evaluate evaluator to chain in behind it -- until then an
 		// unlatched call is allowed here exactly as it always was.
-		transport.WithGate(haltDecorator{logger: logger}, gatedFn),
+		transport.WithGate(haltDecorator{logger: logger, onCodexCall: codexCallObserver(codexPaths, *codexSettings, logger)}, gatedFn),
 	}
 	if *verbose {
 		opts = append(opts, transport.WithVerbose(logger.Printf))
@@ -185,6 +188,9 @@ func (a *app) runTransport(args []string) int {
 		"latched HALTed is refused locally (no /evaluate round trip); a server-side verdict does not " +
 		"yet refuse a call synchronously")
 	reportElection(logger, "transport", settingsPath, activation.LaneTransport, *elected)
+	if *codexSettings != "" {
+		reportCodexElection(logger, codexPaths, activation.LaneTransport, *elected)
+	}
 
 	if a.transportReady != nil {
 		a.transportReady(cfg.Addr)
@@ -243,12 +249,25 @@ func (a *app) runTransport(args []string) int {
 // attributed to it.
 //
 // claude-code's election is derived from its settings env block, re-resolved
-// per record. Codex's is not elected to this relay yet: its model calls stay
-// the telemetry receiver's, so this lane reports another lane as the
-// producer and records nothing for it.
-func relayProviderLanes(identities map[string]providerIdentity, settingsPath string, override *bool) map[string]gatewayemit.ProviderLane {
+// per record. Codex's is derived from its config.toml and the system-PAC
+// record (activation.ResolveCodexElection), also re-resolved per record: the
+// relay is its producer once the PAC is committed and the relay has seen a
+// Codex call, and until then the telemetry receiver is, so this lane records
+// nothing for it. A unit that carries no Codex config path (no Codex in this
+// relay's providers) has no proxy arm at all and always defers to telemetry.
+func relayProviderLanes(identities map[string]providerIdentity, settingsPath string, codex codexElectionPaths, override *bool) map[string]gatewayemit.ProviderLane {
 	didOf := func(tool string) func() string {
 		return func() string { return identities[tool].DID }
+	}
+	codexLane := gatewayemit.ProviderLane{
+		DID:         didOf(string(provider.Codex)),
+		Elected:     func() bool { return false },
+		ElectedName: func() string { return string(activation.LaneTelemetry) },
+	}
+	if codex.config != "" {
+		codexLane.Elected = codexElectedFn(codex, activation.LaneTransport, override)
+		codexLane.ElectionProblem = codexElectionProblemFn(codex, override)
+		codexLane.ElectedName = codexElectedNameFn(codex, activation.LaneTransport, override)
 	}
 	return map[string]gatewayemit.ProviderLane{
 		string(provider.ClaudeCode): {
@@ -261,12 +280,21 @@ func relayProviderLanes(identities map[string]providerIdentity, settingsPath str
 			// Which lane, not just whether this one: "nobody" is a routing gap.
 			ElectedName: electedNameFn(settingsPath, activation.LaneTransport, override),
 		},
-		string(provider.Codex): {
-			DID:         didOf(string(provider.Codex)),
-			Elected:     func() bool { return false },
-			ElectedName: func() string { return string(activation.LaneTelemetry) },
-		},
+		string(provider.Codex): codexLane,
 	}
+}
+
+// codexCallObserver is the gate-side hook that records the relay's evidence of
+// Codex, nil when the unit carries no Codex config path. It runs at REQUEST
+// time, before the provider is called: Codex's own telemetry for a call only
+// exists after the call, so the marker is on disk before telemetry can have
+// decided anything about that call, and it is the one call that could
+// otherwise be recorded twice.
+func codexCallObserver(paths codexElectionPaths, codexConfig string, logger *log.Logger) func() {
+	if codexConfig == "" {
+		return nil
+	}
+	return codexObserver(paths, logger)
 }
 
 // errChatPoolUnavailable is what chatDeliver reports to RecordDeliveryFailure
@@ -338,10 +366,16 @@ func gatedFn(r *http.Request) bool {
 type haltDecorator struct {
 	next   gateway.Evaluator
 	logger *log.Logger
+	// onCodexCall, when set, is told of every relayed model completion that
+	// carries Codex's carrier: the relay's proof that Codex really does route
+	// through it, which Codex's election requires before the relay outranks
+	// telemetry. It never affects the verdict.
+	onCodexCall func()
 }
 
 // Evaluate implements gateway.Evaluator.
 func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client.Evaluation, error) {
+	h.noteCodexCall(c)
 	if sessionID, info, halted := h.haltedRun(c); halted {
 		// Reuse SessionHaltDecision's wording rather than inventing a second
 		// refusal vocabulary: the same text a replayed hook refusal renders.
@@ -372,6 +406,19 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 		return client.Evaluation{Verdict: client.VerdictAllow}, nil
 	}
 	return h.next.Evaluate(ctx, c)
+}
+
+// noteCodexCall reports a call as Codex evidence only when it is attributed
+// to Codex by its carrier AND is a model completion: a browser's chatgpt.com
+// traffic, a probe or a telemetry POST is not evidence that Codex's model
+// calls reach this relay, and the relay records only completions.
+func (h haltDecorator) noteCodexCall(c gateway.Captured) {
+	if h.onCodexCall == nil || !gatewayemit.IsModelCompletion(c.HTTPURL) {
+		return
+	}
+	if p, _, ok := attributeRelayed(hostOf(c.HTTPURL), c.RequestHeaders); ok && p == sessionkey.Codex {
+		h.onCodexCall()
+	}
 }
 
 // haltedRun resolves the session key for c's provider (sessionkey.Resolve,

@@ -745,7 +745,7 @@ func (a *app) reportCodexLane() {
 	if !providers.HasOwnedCodexOtel(configPath) {
 		return
 	}
-	election := activation.ResolveCodexElection(configPath)
+	election := newCodexElectionPaths(configPath, activation.RecordPath(a.homeDir()), nil).resolve()
 	fmt.Fprintf(a.stdout, "\nCodex telemetry lane (config.toml, not settings.json)\n")
 	switch {
 	case election.SettingsProblem != "":

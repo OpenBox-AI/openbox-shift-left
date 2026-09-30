@@ -56,3 +56,39 @@ func countStage(recs []trace.Record, stage string) int {
 	}
 	return n
 }
+
+// TestCodexElectedNameFnTracesItsOwnLaneAndOnlyOnChange: Codex's election
+// trace is keyed per lane so the two daemons' records can be told apart, and
+// traces a change once, like the Claude Code one.
+func TestCodexElectedNameFnTracesItsOwnLaneAndOnlyOnChange(t *testing.T) {
+	dir := t.TempDir()
+	restore := trace.SetDefault(&trace.Writer{Dir: dir})
+	defer restore()
+
+	f := newCodexElectionFixture(t)
+	f.config(t, true)
+	name := codexElectedNameFn(f.paths, activation.LaneTransport, nil)
+
+	for i := 0; i < 3; i++ {
+		if got := name(); got != string(activation.LaneTelemetry) {
+			t.Fatalf("call %d: name() = %q, want telemetry while the relay has not seen Codex", i, got)
+		}
+	}
+	f.writeFile(t, f.paths.pacRecord, onceOnlyRecord(false))
+	f.writeFile(t, f.paths.marker, onceOnlyCommittedAt+"\n")
+	if got := name(); got != string(activation.LaneTransport) {
+		t.Fatalf("name() = %q after the marker, want transport", got)
+	}
+	recs, _, err := trace.Read(dir, nil)
+	if err != nil {
+		t.Fatalf("trace.Read: %v", err)
+	}
+	if n := countStage(recs, trace.StageElection); n != 2 {
+		t.Fatalf("election records = %d, want 2 (first resolution, then the change): %+v", n, recs)
+	}
+	for _, r := range recs {
+		if r.Stage == trace.StageElection && r.Lane != "codex:transport" {
+			t.Errorf("election record lane = %q, want codex:transport", r.Lane)
+		}
+	}
+}

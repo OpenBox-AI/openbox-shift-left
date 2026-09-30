@@ -14,6 +14,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
@@ -83,6 +84,7 @@ func (a *app) runTelemetry(args []string) int {
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to Claude Code's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
 	codexSettings := fs.String("codex-settings", "", "absolute path to Codex's config.toml, written into the unit at install time when Codex's telemetry lane is installed")
+	pacRecord := fs.String("pac-record", "", "absolute path to the activation record that holds the system-PAC entry, written into the unit at install time. Codex's election reads it to tell whether the transport relay has taken over Codex's model calls")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
 	}
@@ -152,17 +154,11 @@ func (a *app) runTelemetry(args []string) int {
 	}
 	var codexEmitter *telemetryemit.Emitter
 	var codexRecording func() bool
+	codexPaths := newCodexElectionPaths(*codexSettings, *pacRecord, logger)
 	if *codexSettings != "" {
-		codexElect := codexElectedFn(*codexSettings, elected)
 		codexRecording = telemetryPostureFor(string(provider.Codex), logger.Printf)
-		codexElectedNow := func() bool { return codexRecording() && codexElect() }
-		codexEmitter = &telemetryemit.Emitter{
-			Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: codexElectedNow}).
-				WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)),
-			DID:     func() string { return identities[string(provider.Codex)].DID },
-			Warn:    logger.Printf,
-			Deliver: deliver,
-		}
+		codexEmitter = newCodexTelemetryEmitter(codexPaths, codexRecording, elected,
+			func() string { return identities[string(provider.Codex)].DID }, deliver, logger.Printf)
 	}
 	em := &dualProviderTelemetryEmitter{cc: ccEmitter, codex: codexEmitter}
 	if *verbose {
@@ -211,7 +207,7 @@ func (a *app) runTelemetry(args []string) int {
 		logger.Printf("openbox telemetry: receiving exports but emitting no model-call turns")
 	}
 	if codexEmitter != nil {
-		reportCodexElection(logger, *codexSettings, *elected)
+		reportCodexElection(logger, codexPaths, activation.LaneTelemetry, *elected)
 		if !codexRecording() {
 			logger.Printf("openbox telemetry: codex's own posture telemetry=false; receiving exports and recording NOTHING for codex (its dev.json `telemetry` or %s)", devconfig.EnvTelemetry)
 		}
@@ -338,4 +334,21 @@ func onlyCancellation(err error) bool {
 		return true
 	}
 	return errors.Is(err, context.Canceled)
+}
+
+// newCodexTelemetryEmitter is the telemetry daemon's Codex producer: a
+// conversation.id-keyed mapper that emits only while telemetry is Codex's
+// elected lane, re-resolved per record from the same three files the relay's
+// Codex lane reads, so exactly one of the two records a given call.
+func newCodexTelemetryEmitter(paths codexElectionPaths, recording func() bool, override *bool,
+	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any)) *telemetryemit.Emitter {
+	elect := codexElectedFn(paths, activation.LaneTelemetry, override)
+	electedNow := func() bool { return recording() && elect() }
+	return &telemetryemit.Emitter{
+		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}).
+			WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)),
+		DID:     did,
+		Warn:    warn,
+		Deliver: deliver,
+	}
 }
