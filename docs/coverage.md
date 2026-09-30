@@ -19,10 +19,10 @@ provider is implemented.
 **Muse Code is partly observed.** Its adapter was built from Meta's published
 hook documentation (the hook-events reference and the 1.4.0 changelog), and its
 payload shapes were then corrected against scrubbed real captures of a Muse
-1.4.1 session, which the fixtures now are. Answer shapes Muse accepts (the
-`onFailure` JSON, a `PreLLMCall` block) have not been exercised against a
-binary, so every Muse claim below is at most E1 or E2, never against Muse
-itself. `internal/adapters/muse/README.md` lists what is still guessed.
+1.4.1 session, which the fixtures now are. The four refusal shapes and the
+`onFailure` successor were then exercised by hand against Muse 1.4.1 (below),
+but no automated test runs Muse, so every Muse row in §5 is at most E1 or E2.
+`internal/adapters/muse/README.md` lists what is still guessed.
 
 ## 1. Lifecycle coverage matrix
 
@@ -320,9 +320,11 @@ described in [Getting started § Approvals](getting-started.md#approvals).
   lets the action proceed. Two layers backstop that: a gated path ends in a
   valid answer or a non-zero exit (exit 2 reads as a block), and every gated
   handler carries an `onFailure` successor that only denies
-  (`openbox hook muse --fail-closed`). This is a documented-behavior design:
-  the `onFailure` shape and whether exit 2 denies on `PermissionRequest` and
-  `PreLLMCall` are unverified on a binary.
+  (`openbox hook muse --fail-closed`). Checked by hand on Muse 1.4.1: all four
+  refusal shapes block, and a crash, an unknown JSON shape or a timeout runs
+  the successor, which denies. Plain non-JSON output on exit 0 is the one case
+  Muse allows with no successor; the adapter only ever answers with JSON and a
+  crash writes nothing to stdout.
 
 **Assurance caveat.** This is all enforced by a user-local hook. Until a
 centrally managed provider config is deployed, a developer can remove the
@@ -407,7 +409,7 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | `doctor` names the Codex lane that is producing, and warns when the elected relay is not listening | E1 | `cmd/openbox/doctorcodex_test.go` · `TestDoctorSaysTheRelayIsElectedOnceItHasSeenCodex` |
 | A Meta Model API key is redacted by shape | E1 | `internal/decision/secrets_test.go` · `TestRedact_MetaAPIKey` |
 | Windows behaves at runtime as it does on macOS and Linux | **E0** | Cross-compiled in CI only; not run. |
-| Muse's payload, answer and `onFailure` shapes match a real Muse | **E3** | Every Muse fixture is recorded from documentation, and CI holds only those recorded goldens (E1): no Muse binary can be installed there, so nothing runs `muse plugins hook test`. Needs a Muse 1.4.0 machine. |
+| Muse's payload, answer and `onFailure` shapes match a real Muse | **E3** | Checked by hand on Muse 1.4.1: payloads captured (the fixtures are scrubbed copies), the four refusal shapes block, and a crash, unknown JSON shape or timeout runs the deny-only successor. CI cannot install Muse, so no automated test runs a real one; CI holds the recorded goldens (E1). |
 | A Muse model call is tied to a session, or recorded by any lane | **E3** | No lane exists for it; see §1b. |
 | The control plane accepts, stores and keeps apart what the client sends | **E3** | Needs a live platform. |
 

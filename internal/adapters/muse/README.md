@@ -121,15 +121,26 @@ answer Muse discards there is read as a failure and denied.
 ## Fail-open runtime, backstopped by the onFailure successor
 
 Muse fails open: a hook that crashes, times out or answers invalidly is recorded
-and the turn continues as if the hook never ran. Two layers close that.
+and the turn continues as if the hook never ran, unless the handler has an
+`onFailure` successor. Observed on Muse 1.4.1 with a `PreToolUse` handler that
+carries one:
+
+| The hook | Result |
+|---|---|
+| answers with one of the four refusals below | accepted; the call is blocked |
+| exits non-zero (crash) | successor runs; denied |
+| prints JSON of a shape Muse does not know | successor runs; denied |
+| runs past its `timeout` | successor runs; denied |
+| prints plain non-JSON text and exits 0 | **allowed**: Muse reads it as text, and no successor runs |
+
+The last row is why every answer here is JSON built from a closed struct, and why
+a crash never writes to stdout. Two layers close the rest.
 
 1. Every gated code path ends in a schema-valid answer or a non-zero exit.
    `RunHook` does **not** recover a panic on a gated event; it reaches
-   `openbox hook`'s recover, which exits with `Engine.FaultExitCode` (2). Muse
-   reads exit 2 as a block, and any other non-zero as a failed hook that starts
-   the `onFailure` successor, so 2 denies on both readings (documented for
-   PreToolUse; assumed, not yet observed, for PermissionRequest and PreLLMCall). A panic on any other
-   event gates nothing and is logged and swallowed. `fault_test.go` and
+   `openbox hook`'s recover, which exits with `Engine.FaultExitCode` (2) and
+   writes only to stderr, so the successor denies. A panic on any other event
+   gates nothing and is logged and swallowed. `fault_test.go` and
    `cmd/openbox/musefault_test.go` pin this.
 2. The installer registers a deny-only `onFailure` successor on every gated
    handler, which also covers a timeout and an answer Muse rejects. The
@@ -150,9 +161,10 @@ govern nothing.
 
 - **Which events.** One catch-all handler (no matcher, so MCP tools are covered)
   per event the adapter produces something for, derived from the adapter's own
-  table (`HookName.Observed`): eleven today. `Stop` and `SubagentStop` produce
-  nothing, so they get no handler; the five events with no contract type never
-  do. `ExpectedHandlers()` is what doctor counts against.
+  table (`HookName.Observed`): thirteen today (`Stop` triggers the session-log
+  reconciliation and `SubagentStop` closes a subagent's session); the five events
+  with no contract type never get one. `ExpectedHandlers()` is what doctor counts
+  against.
 - **Shape.** `{"type":"command","command":"\"<engine>\" hook muse [--home \"<dir>\"] <Event>","timeout":N}`,
   with `N` 30 on a gated event, 3 on `SessionEnd`, 5 elsewhere, and on a gated
   handler an `onFailure` object of the same form holding the `--fail-closed`
@@ -224,13 +236,16 @@ session id, so a Muse commit keeps its trailer and emits no CommitCreated
 (`cmd/openbox/attest.go`); Muse refusing a synchronous `Interrupt` handler (it
 must be `async: true`, which is one more reason the installer registers none); an
 empty stdin on a gated event (seen on `PreLLMCall` during `muse exec` teardown)
-being refused, never latched.
+being refused, never latched. Also observed: the four refusal shapes (the
+`PreToolUse` and `PermissionRequest` `hookSpecificOutput` denies, and
+`{"decision":"block","reason":...}` on `UserPromptSubmit` and `PreLLMCall`) are
+accepted and block; the `onFailure` key as a nested handler object
+(`{"type","command","timeout"}`) runs on a crash, an unknown JSON shape and a
+timeout, and our `--fail-closed` successor then denies; plain non-JSON output is
+allowed with no successor (see the table above).
 
 Still guessed by the installer and doctor (Muse documents none of them by name):
 
-- The `onFailure` key and its shape: a nested handler object
-  (`{"type","command","timeout"}`). The 1.4.0 changelog names the feature, not
-  the JSON.
 - The closed handler key set `type, command, timeout, onFailure, async`, that
   `timeout` is whole seconds, and that a missing `schema_version` is tolerated.
 - That `command` may quote its executable (`"/path with space/openbox" hook ...`)
@@ -250,10 +265,6 @@ Still guessed by the installer and doctor (Muse documents none of them by name):
   `extensions.hooks.allowed_sources: ["managed"]` as the managed-lane rule).
 
 - Whether an MCP call fires `PreToolUse` (catch-all install is the plan).
-- The exact `onFailure` JSON, whether invalid output triggers it on 1.4.0.
-- Whether `PreLLMCall` accepts `{"decision":"block","reason":...}`; the docs say
-  it can block but name no keys. If it does not, the block is discarded and the
-  call is sent.
 - Whether `updatedInput` without a `permissionDecision` is accepted on
   `PreToolUse`; if not, the answer is discarded and the write proceeds unredacted.
 - `PostLLMCall`'s `status` and `error` value sets.

@@ -311,10 +311,11 @@ provider credential. Do not widen an allowlist just to make an import pass.
   hooks cannot be mandated at all; the shipped managed config pins approval
   and sandbox modes instead ([`deployments/managed/`](../deployments/managed/)).
 - **Muse Code's runtime fails open.** Its payload shapes were read off Muse
-  1.4.1 captures, but the answer shapes it accepts are unverified against a
-  binary. A hook that crashes, times out or
-  answers invalidly lets the action proceed; a deny-only `onFailure` successor
-  and a non-zero exit on a gated crash backstop that. A payload over 256 KiB
+  1.4.1 captures, and its refusal shapes were checked by hand on 1.4.1. A hook
+  that crashes, times out or answers invalidly lets the action proceed; a
+  deny-only `onFailure` successor and a non-zero exit on a gated crash backstop
+  that (observed on 1.4.1), except plain non-JSON output, which Muse allows and
+  the adapter never writes. A payload over 256 KiB
   is never delivered to a hook: that gap is detected from Muse's own session
   log (a local finding, `doctor` count), not prevented. A local administrator
   can remove the hooks; an org-deployed managed hooks file is the only
