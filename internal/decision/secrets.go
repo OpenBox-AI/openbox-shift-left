@@ -53,6 +53,11 @@ func newSecretDetector() *secretDetector {
 		{category: "stripe_key", re: regexp.MustCompile(`\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{16,}\b`)},
 		{category: "ai_api_key", re: regexp.MustCompile(`\bsk-(?:ant-)?[A-Za-z0-9_\-]{20,}\b`)},
 		{category: "jwt", re: regexp.MustCompile(`\beyJ[A-Za-z0-9_\-]{5,}\.eyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\b`)},
+		// Meta Model API key: LLM|<app id>|<secret>, pipes possibly
+		// URL-encoded. Its own shape rule because the pipes split it into
+		// fragments the entropy pass never sees whole, and it is ahead of
+		// secret_assignment so the specific category wins.
+		{category: "meta_api_key", re: regexp.MustCompile(`\bLLM(?:\||%7[Cc])\d{10,}(?:\||%7[Cc])[A-Za-z0-9_\-]{20,}`)},
 		{category: "secret_assignment", valueGroup: 2, re: regexp.MustCompile(`(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|auth[_-]?token|client[_-]?secret)[\\"']*\s*[:=]\s*[\\"']*)([^\s"',;]{8,})(["']?)`)},
 		// private[_-]?key gets its own entry rather than joining the generic
 		// list above: the generic value group is charset-agnostic at 8+ chars,

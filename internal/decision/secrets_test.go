@@ -392,3 +392,57 @@ func TestRedact_JSONTerminatorsSurvive(t *testing.T) {
 }
 
 var placeholderPattern = regexp.MustCompile(`\$\{OPENBOX_REDACTED_[A-Z0-9_]+\}`)
+
+// metaKeyFixture builds a Meta Model API key shape at runtime so no
+// key-shaped literal ever lands in the source (the local redaction hook would
+// rewrite it on disk).
+func metaKeyFixture(sep string) string {
+	return "LLM" + sep + strings.Repeat("6", 15) + sep + strings.Repeat("Ab3_x-", 5)
+}
+
+// TestRedact_MetaAPIKey a Meta key is caught by its own shape in every context
+// it appears in, not only next to a credential-like key name.
+func TestRedact_MetaAPIKey(t *testing.T) {
+	key := metaKeyFixture("|")
+	enc := metaKeyFixture("%7C")
+	cases := []struct{ name, in, secret string }{
+		{"bare", "the key is " + key + " ok", key},
+		{"bearer", "Authorization: Bearer " + key, key},
+		{"muse_auth_set", "muse auth set " + key, key},
+		{"json_value", `{"api_key":"` + key + `","model":"x"}`, key},
+		{"json_unlabelled", `{"value":"` + key + `"}`, key},
+		{"url_query", "https://example.test/v1?k=" + key + "&x=1", key},
+		{"url_encoded", "https://example.test/v1?k=" + enc + "&x=1", enc},
+	}
+	d := newSecretDetector()
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			out, cats, changed := d.Redact(c.in)
+			if !changed || strings.Contains(out, c.secret) {
+				t.Fatalf("key survived: changed=%v out=%q", changed, out)
+			}
+			if strings.Contains(out, strings.Repeat("6", 15)) || strings.Contains(out, "Ab3_x-") {
+				t.Fatalf("a key fragment survived: %q", out)
+			}
+			if !slices.Contains(cats, "meta_api_key") {
+				t.Errorf("categories = %v, want meta_api_key", cats)
+			}
+		})
+	}
+}
+
+// TestRedact_MetaAPIKeyNoFalsePositive ordinary pipes next to "LLM" (markdown
+// tables, short ids) are left alone.
+func TestRedact_MetaAPIKeyNoFalsePositive(t *testing.T) {
+	d := newSecretDetector()
+	for _, in := range []string{
+		"| LLM|model | cost |",
+		"LLM|12345|shortvalue",
+		"LLM|" + strings.Repeat("7", 12) + "|tooshort",
+		"route=LLM|gpt|default",
+	} {
+		if out, cats, changed := d.Redact(in); changed && slices.Contains(cats, "meta_api_key") {
+			t.Errorf("false positive on %q -> %q", in, out)
+		}
+	}
+}

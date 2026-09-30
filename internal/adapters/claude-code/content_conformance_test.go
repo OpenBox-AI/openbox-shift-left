@@ -931,6 +931,12 @@ func TestContentCaptureCredentialCoverage(t *testing.T) {
 			secret: workloadToken,
 			caught: true, by: "jwt (the three-segment eyJ...eyJ...sig shape rule; no keyword needed)",
 		},
+		{
+			name:   "Meta Model API key after Bearer (runtime-built, no keyword)",
+			line:   "Authorization: Bearer " + "LLM|" + strings.Repeat("6", 15) + "|" + strings.Repeat("Ab3_x-", 5),
+			secret: "LLM|" + strings.Repeat("6", 15) + "|" + strings.Repeat("Ab3_x-", 5),
+			caught: true, by: "meta_api_key (the LLM|<digits>|<secret> shape rule)",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := fakecore.New(t, fakecore.Script{})

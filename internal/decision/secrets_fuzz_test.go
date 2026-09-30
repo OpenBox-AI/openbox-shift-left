@@ -17,6 +17,9 @@ func FuzzRedact(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
+	// The Meta key shape, built at runtime: pipes plus a URL-encoded variant.
+	f.Add("LLM|" + strings.Repeat("6", 15) + "|" + strings.Repeat("Ab3_x-", 5))
+	f.Add("LLM%7C" + strings.Repeat("6", 15) + "%7C" + strings.Repeat("Ab3_x-", 5))
 	d := newSecretDetector()
 	f.Fuzz(func(t *testing.T, body string) {
 		out, _, changed := d.Redact(body)

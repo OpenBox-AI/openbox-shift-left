@@ -130,7 +130,7 @@ plaintext under the runtime directory's `trace/`, for up to 7 days.
 
 The detector lives in `internal/decision/`. It has two layers:
 
-1. **Format rules**: nine local patterns (`secrets.go`) plus gitleaks' rule set
+1. **Format rules**: ten local patterns (`secrets.go`) plus gitleaks' rule set
    (`gitleaks.go`). These match a known credential by its shape, anywhere.
 2. **Keyword and entropy**: a value next to a credential-like key name
    (`api_key=…`, `"password": …`), or a long high-entropy token in a value
@@ -144,6 +144,7 @@ Measured against the real detector
 | Input | Redacted? | Why |
 |---|---|---|
 | an AWS, GitHub, Stripe, JWT or `sk-` key, anywhere | yes | matched by shape |
+| a Meta Model API key (`LLM\|<digits>\|<secret>`), bare, after `Bearer` or in a URL | yes | matched by shape (`meta_api_key`) |
 | a GitLab, Shopify, Twilio, Grafana or other known token | yes | a gitleaks rule |
 | `OPENBOX_API_KEY=obx_…` | yes | credential keyword |
 | `OPENBOX_WORKLOAD_PRIVATE_KEY=<long base64>` | yes | private-key keyword with a long base64 value |
