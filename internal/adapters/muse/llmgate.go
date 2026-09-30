@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -159,17 +160,17 @@ func (m Mapper) mapModelCallRequested(ev client.DevEvent, agent client.Tool, e *
 	}
 	// The previews are content: behind the capture gate, redacted before they
 	// are attached. The client cuts each to 256 runes and strips them when
-	// capture is off.
+	// capture is off. They are the NEWEST messages, in conversation order: the
+	// tail is what is about to be sent, and the head (the system prompt, the
+	// first turns) would fill the quota with the same text on every call.
 	if m.CaptureContent {
 		var previews []string
-		for _, raw := range e.Messages {
-			if len(previews) == maxPreviews {
-				break
-			}
-			if p := m.redact(previewOf(raw)); p != "" {
+		for i := len(e.Messages) - 1; i >= 0 && len(previews) < maxPreviews; i-- {
+			if p := m.redact(previewOf(e.Messages[i])); p != "" {
 				previews = append(previews, p)
 			}
 		}
+		slices.Reverse(previews)
 		if len(previews) > 0 {
 			meta["message_previews"] = previews
 		}

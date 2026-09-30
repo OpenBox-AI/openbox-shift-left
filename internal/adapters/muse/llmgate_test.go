@@ -2,6 +2,7 @@ package muse
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -181,5 +182,26 @@ func TestLLMTargetMapsThroughTheObserveMapper(t *testing.T) {
 	}
 	if req := tg.DecisionRequest(true); req.EventType != client.EventModelCallRequested || req.Content != nil {
 		t.Errorf("decision request = %+v", req)
+	}
+}
+
+// A long conversation's previews are its newest messages, oldest first: the
+// tail is what the model call is about to send, so a content policy has to see
+// it, not the system prompt and first turns every time.
+func TestModelCallPreviewsAreTheNewestMessages(t *testing.T) {
+	e := parseFixture(t, "pre-llm-call")
+	e.Messages = nil
+	for i := 1; i <= maxPreviews+4; i++ {
+		e.Messages = append(e.Messages, json.RawMessage(`{"role":"user","text_preview":"msg `+strconv.Itoa(i)+`"}`))
+	}
+	m := testMapper()
+	m.CaptureContent = true
+	ev, _ := m.Map(HookPreLLMCall, e)
+	previews, _ := ev.Metadata["message_previews"].([]string)
+	if len(previews) != maxPreviews {
+		t.Fatalf("previews = %d, want %d", len(previews), maxPreviews)
+	}
+	if previews[0] != "msg 5" || previews[maxPreviews-1] != "msg 20" {
+		t.Errorf("previews run %q..%q, want msg 5..msg 20", previews[0], previews[maxPreviews-1])
 	}
 }
