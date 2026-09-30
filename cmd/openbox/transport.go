@@ -375,7 +375,6 @@ type haltDecorator struct {
 
 // Evaluate implements gateway.Evaluator.
 func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client.Evaluation, error) {
-	h.noteCodexCall(c)
 	if sessionID, info, halted := h.haltedRun(c); halted {
 		// Reuse SessionHaltDecision's wording rather than inventing a second
 		// refusal vocabulary: the same text a replayed hook refusal renders.
@@ -402,6 +401,9 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 		})
 		return dec.Evaluation, nil
 	}
+	// After the halt check: a call refused because its run is latched never
+	// reaches the provider, so it is no evidence that Codex's calls flow here.
+	h.noteCodexCall(c)
 	if h.next == nil {
 		return client.Evaluation{Verdict: client.VerdictAllow}, nil
 	}
@@ -409,11 +411,16 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 }
 
 // noteCodexCall reports a call as Codex evidence only when it is attributed
-// to Codex by its carrier AND is a model completion: a browser's chatgpt.com
+// to Codex by its carrier, carries Codex's own originator header (any OpenAI
+// SDK script can send the request-id carrier, so the carrier alone proves
+// only "some app"), AND is a model completion: a browser's chatgpt.com
 // traffic, a probe or a telemetry POST is not evidence that Codex's model
 // calls reach this relay, and the relay records only completions.
 func (h haltDecorator) noteCodexCall(c gateway.Captured) {
 	if h.onCodexCall == nil || !gatewayemit.IsModelCompletion(c.HTTPURL) {
+		return
+	}
+	if !sessionkey.HasCodexOriginator(c.RequestHeaders) {
 		return
 	}
 	if p, _, ok := attributeRelayed(hostOf(c.HTTPURL), c.RequestHeaders); ok && p == sessionkey.Codex {

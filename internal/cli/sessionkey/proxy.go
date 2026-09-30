@@ -94,6 +94,15 @@ func CarrierHeader(p Provider) string {
 	return ProxyHeader(p)
 }
 
+// HasCodexOriginator reports whether the request carries Codex's own
+// originator header: the one signal no other OpenAI-speaking client is
+// expected to send, so the relay's evidence that Codex routes through it
+// requires it on every host. [UNVERIFIED]: if Codex does not send it, no
+// evidence accrues and telemetry simply stays the producer.
+func HasCodexOriginator(headers map[string]string) bool {
+	return strings.HasPrefix(strings.ToLower(headers[codexOriginatorHeader]), codexOriginatorPrefix)
+}
+
 // AttributeProxy picks the one provider a relayed call belongs to among the
 // providers whose host rows cover its host (candidates, most specific first),
 // by whose session carrier the call actually carries. It returns that
@@ -118,7 +127,7 @@ func AttributeProxy(candidates []string, headers map[string]string) (Provider, s
 		if !ok {
 			continue
 		}
-		if p == Codex && len(candidates) > 1 && !strings.HasPrefix(strings.ToLower(headers[codexOriginatorHeader]), codexOriginatorPrefix) {
+		if p == Codex && len(candidates) > 1 && !HasCodexOriginator(headers) {
 			continue
 		}
 		resolved++

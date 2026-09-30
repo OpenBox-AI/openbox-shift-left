@@ -124,8 +124,12 @@ type CATrustState struct {
 // reads to recognise its own half-applied state rather than recording its
 // own PAC URL as some prior value that was never really there.
 type SystemEntry struct {
-	Schema       string        `json:"schema"`
-	ActivatedAt  string        `json:"activated_at,omitempty"`
+	Schema      string `json:"schema"`
+	ActivatedAt string `json:"activated_at,omitempty"`
+	// ActivationID is the commit time at nanosecond resolution: the relay's evidence marker stores it, so a re-activation within the same
+	// second still invalidates old evidence. Records written before it existed
+	// carry none, and the marker falls back to ActivatedAt.
+	ActivationID string        `json:"activation_id,omitempty"`
 	Pending      bool          `json:"pending,omitempty"`
 	Declined     bool          `json:"declined,omitempty"`
 	Failed       bool          `json:"failed,omitempty"`

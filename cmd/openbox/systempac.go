@@ -309,12 +309,19 @@ func (a *app) printSystemPACActive(o activation.Outcome) {
 		"You were asked for your sudo password once; macOS may have asked once more",
 		"to confirm the trust change.",
 	)
+	// api.meta.ai is in every provider's rows, Claude Code's included, so this
+	// holds whichever provider was installed.
+	a.note(
+		"Your browser's api.meta.ai traffic passes through the relay and is decrypted too:",
+		"it carries no session header, so it is skipped and nothing of it is sent, but it",
+		"is kept raw in the local trace for 7 days, as claude.ai traffic is.",
+	)
 	if o.Entry != nil && slices.Contains(o.Entry.Providers, "codex") {
 		a.note(
-			"Codex is routed through the relay too, and the same rows cover chatgpt.com and",
-			"api.meta.ai in the browser: that traffic is decrypted, skipped (no session",
-			"carrier) and kept raw in the local trace for 7 days, as claude.ai is.",
-			"Codex's model calls stay with its telemetry lane until the relay has seen one.",
+			"Codex is routed through the relay too, and its rows also cover chatgpt.com in the",
+			"browser: that traffic is decrypted, skipped (no session carrier) and kept raw in",
+			"the local trace for 7 days. Codex's model calls stay with its telemetry lane until",
+			"the relay has seen one.",
 		)
 	}
 }

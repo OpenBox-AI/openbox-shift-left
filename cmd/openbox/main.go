@@ -88,6 +88,9 @@ type app struct {
 	// than widening setupTransport's own (int, error) signature, which ~20
 	// call sites across this package's tests share unchanged.
 	lastSystemPACOutcome activation.Outcome
+	// withholdSystemPAC makes setupTransportFor skip the system PAC step for
+	// the duration of one install, see setupLanes.
+	withholdSystemPAC bool
 }
 
 func defaultApp() *app {

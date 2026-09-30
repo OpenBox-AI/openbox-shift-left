@@ -386,3 +386,42 @@ func TestUninstallCommitsCodexRemovalBeforeTheUnitAndThePAC(t *testing.T) {
 		t.Fatalf("the unit removal and the PAC restore were not both observed: %v", atFirst)
 	}
 }
+
+// TestClaudeCodeInitWithCodexInstalledWaitsForTelemetryBeforeCommittingThePAC:
+// the derived set lists Codex whichever provider is being installed, so a
+// Claude Code install that cannot bring telemetry up on this binary must not
+// commit a record naming Codex: an older telemetry daemon would keep recording
+// what the relay then records too.
+func TestClaudeCodeInitWithCodexInstalledWaitsForTelemetryBeforeCommittingThePAC(t *testing.T) {
+	r := newCodexInstallRig(t)
+	r.seedTelemetryOnlyInstall() // Codex is installed
+	waitForListenerFn = func(addr string, _ time.Duration) bool { return addr != telemetry.DefaultAddr }
+
+	a, _, errb := testApp(map[string]string{"HOME": r.h.home})
+	report := a.setupLanes(laneRequest{
+		telemetry: true, transport: true,
+		telemetryAddr: telemetry.DefaultAddr, transportAddr: transport.DefaultAddr,
+		provider: "claude-code",
+	})
+	if !slices.Contains(report.installed, "transport") || !slices.Contains(report.failed, "telemetry") {
+		t.Fatalf("report = %+v", report)
+	}
+	if entry, err := activation.LoadSystemEntryAt(r.recordPath()); r.activations != 0 || err != nil || entry != nil {
+		t.Errorf("the PAC was activated (%d) or recorded (%v, %v) with telemetry still on the old binary", r.activations, entry, err)
+	}
+	if !strings.Contains(errb.String(), "system PAC was not activated") {
+		t.Errorf("the withheld PAC was not reported:\n%s", errb.String())
+	}
+
+	// With telemetry up, the same install commits it.
+	waitForListenerFn = func(string, time.Duration) bool { return true }
+	a, _, _ = testApp(map[string]string{"HOME": r.h.home})
+	report = a.setupLanes(laneRequest{
+		telemetry: true, transport: true,
+		telemetryAddr: telemetry.DefaultAddr, transportAddr: transport.DefaultAddr,
+		provider: "claude-code",
+	})
+	if r.activations != 1 || report.systemPAC.Class != activation.Activated {
+		t.Errorf("with telemetry up the PAC was not committed: activations=%d %+v", r.activations, report.systemPAC)
+	}
+}

@@ -11,6 +11,7 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
@@ -197,38 +198,54 @@ func TestACodexConfigPathlessRelayNeverRecordsCodex(t *testing.T) {
 	}
 }
 
-// TestTheGateRecordsEvidenceOnlyForACodexModelCompletion: the relay's marker
-// is the proof Codex really routes through it, so it must not be written by a
-// browser's chatgpt.com traffic, a Claude Code call, a non-completion POST or
-// anything that carries no Codex carrier, and not while the record is pending.
+// TestTheGateRecordsEvidenceOnlyForACodexModelCompletion: the relay's marker is
+// the proof Codex really routes through it, so it must not be written by a
+// browser's chatgpt.com traffic, a Claude Code call, a non-completion POST, a
+// request with only the generic request-id carrier (any OpenAI SDK script sends
+// one), anything without Codex's originator header, a refused call, or while
+// the record is pending.
 func TestTheGateRecordsEvidenceOnlyForACodexModelCompletion(t *testing.T) {
+	t.Setenv(devconfig.EnvEnforcementFile, filepath.Join(t.TempDir(), "enforcements.jsonl"))
 	t.Setenv(obgit.EnvSessionDir, t.TempDir())
 	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
 	codexCall := func(url string, headers map[string]string) gateway.Captured {
 		return gateway.Captured{HTTPMethod: "POST", HTTPURL: url, RequestHeaders: headers}
 	}
+	codexHeaders := map[string]string{"X-Client-Request-Id": "t1", "Originator": "codex_cli_rs"}
 	for _, tc := range []struct {
 		name   string
 		record string
 		call   gateway.Captured
+		halt   bool
 		want   bool
 	}{
 		{"codex completion under a committed record", onceOnlyRecord(false),
-			codexCall("https://api.openai.com/v1/responses", map[string]string{"X-Client-Request-Id": "t1"}), true},
+			codexCall("https://api.openai.com/v1/responses", codexHeaders), false, true},
+		{"codex completion on the chatgpt host", onceOnlyRecord(false),
+			codexCall("https://chatgpt.com/backend-api/codex/responses", codexHeaders), false, true},
+		{"request-id carrier alone, as any SDK script sends it", onceOnlyRecord(false),
+			codexCall("https://api.openai.com/v1/responses", map[string]string{"X-Client-Request-Id": "t1"}), false, false},
+		{"originator of another client", onceOnlyRecord(false),
+			codexCall("https://api.openai.com/v1/responses", map[string]string{"X-Client-Request-Id": "t1", "Originator": "some_sdk"}), false, false},
 		{"codex completion while the record is pending", onceOnlyRecord(true),
-			codexCall("https://api.openai.com/v1/responses", map[string]string{"X-Client-Request-Id": "t1"}), false},
+			codexCall("https://api.openai.com/v1/responses", codexHeaders), false, false},
+		{"codex completion refused because its run is latched", onceOnlyRecord(false),
+			codexCall("https://api.openai.com/v1/responses", codexHeaders), true, false},
 		{"browser chatgpt.com traffic with no carrier", onceOnlyRecord(false),
-			codexCall("https://chatgpt.com/backend-api/conversation", nil), false},
+			codexCall("https://chatgpt.com/backend-api/conversation", nil), false, false},
 		{"carrier on a path that is not a completion", onceOnlyRecord(false),
-			codexCall("https://api.openai.com/v1/models", map[string]string{"X-Client-Request-Id": "t1"}), false},
+			codexCall("https://api.openai.com/v1/models", codexHeaders), false, false},
 		{"claude-code call", onceOnlyRecord(false),
-			codexCall("https://api.anthropic.com/v1/messages", map[string]string{"X-Claude-Code-Session-Id": "s1"}), false},
+			codexCall("https://api.anthropic.com/v1/messages", map[string]string{"X-Claude-Code-Session-Id": "s1"}), false, false},
 		{"completion on a host no codex row covers", onceOnlyRecord(false),
-			codexCall("https://example.com/v1/responses", map[string]string{"X-Client-Request-Id": "t1"}), false},
+			codexCall("https://example.com/v1/responses", codexHeaders), false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCodexElectionFixture(t)
 			f.writeFile(t, f.paths.pacRecord, tc.record)
+			if tc.halt {
+				hookflow.WriteSessionHalt(discardMainLogger(), "t1", client.Evaluation{Verdict: client.VerdictHalt, Reason: "test"})
+			}
 			h := haltDecorator{onCodexCall: codexObserver(f.paths, nil)}
 			if _, err := h.Evaluate(context.Background(), tc.call); err != nil {
 				t.Fatal(err)

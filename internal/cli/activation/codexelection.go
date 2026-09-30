@@ -169,7 +169,7 @@ func codexProxyStatus(cfg CodexOtelRead, pacRecordPath, observedMarkerPath strin
 		return CodexProxyStatus{Reason: reason}
 	}
 	st := CodexProxyStatus{Committed: true}
-	if entry.ActivatedAt == "" || readMarker(observedMarkerPath) != entry.ActivatedAt {
+	if entry.stamp() == "" || readMarker(observedMarkerPath) != entry.stamp() {
 		st.Reason = "relay has not yet seen a Codex request since the system PAC was activated"
 		return st
 	}
@@ -207,6 +207,15 @@ func codexHostProblem(cfg CodexOtelRead) string {
 	return ""
 }
 
+// stamp is what the evidence marker stores: the activation's nanosecond id,
+// or its commit time for a record written before that id existed.
+func (e *SystemEntry) stamp() string {
+	if e.ActivationID != "" {
+		return e.ActivationID
+	}
+	return e.ActivatedAt
+}
+
 func readMarker(path string) string {
 	if path == "" {
 		return ""
@@ -234,17 +243,17 @@ func MarkCodexProxyObserved(pacRecordPath, markerPath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if entry == nil || entry.Pending || !entry.PACActivated || entry.ActivatedAt == "" ||
+	if entry == nil || entry.Pending || !entry.PACActivated || entry.stamp() == "" ||
 		!slices.Contains(entry.Providers, codexName) {
 		return false, nil
 	}
-	if readMarker(markerPath) == entry.ActivatedAt {
+	if readMarker(markerPath) == entry.stamp() {
 		return false, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(markerPath), 0o700); err != nil {
 		return false, err
 	}
-	if err := atomicfile.Write(markerPath, []byte(entry.ActivatedAt+"\n"), 0o600); err != nil {
+	if err := atomicfile.Write(markerPath, []byte(entry.stamp()+"\n"), 0o600); err != nil {
 		return false, err
 	}
 	return true, nil

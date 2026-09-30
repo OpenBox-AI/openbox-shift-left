@@ -332,3 +332,25 @@ func TestRemoveSystemProviderDropsOnlyThatProvider(t *testing.T) {
 		t.Errorf("removing an absent provider must be a no-op: %v", err)
 	}
 }
+
+// TestAReactivationInTheSameSecondStillInvalidatesEvidence: the commit time
+// has second resolution, so the activation's nanosecond id is what the marker
+// stores when a record has one; a record without one falls back to the commit
+// time.
+func TestAReactivationInTheSameSecondStillInvalidatesEvidence(t *testing.T) {
+	f := newCodexFixture(t, loopbackOtel)
+	withID := func(id string) string {
+		return `{"system":{"pac_activated":true,"activated_at":"` + committedAt + `","activation_id":"` + id + `","providers":["codex"]}}`
+	}
+	f.writeRecord(t, withID("2026-09-30T10:00:00.111111111Z"))
+	if ok, err := MarkCodexProxyObserved(f.record, f.marker); err != nil || !ok {
+		t.Fatalf("mark = %v, %v", ok, err)
+	}
+	if e := f.resolve(); e.Elected != LaneTransport {
+		t.Fatalf("Elected = %q, want transport", e.Elected)
+	}
+	f.writeRecord(t, withID("2026-09-30T10:00:00.999999999Z"))
+	if e := f.resolve(); e.Elected != LaneTelemetry {
+		t.Errorf("Elected = %q after a same-second re-activation, want telemetry", e.Elected)
+	}
+}

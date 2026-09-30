@@ -174,7 +174,9 @@ func activateSystemPACDarwin(ctx context.Context, run Runner, plan Plan) (Outcom
 
 	entry.Pending = false
 	entry.PACActivated = true
-	entry.ActivatedAt = time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC()
+	entry.ActivatedAt = now.Format(time.RFC3339)
+	entry.ActivationID = now.Format(time.RFC3339Nano)
 	if err := persistSystemEntry(plan.HomeDir, entry); err != nil {
 		return Outcome{}, err
 	}

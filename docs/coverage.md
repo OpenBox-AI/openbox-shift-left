@@ -118,11 +118,15 @@ record, and the relay outranks telemetry only when **both** hold: the PAC
 record is committed and lists Codex (with Codex's model host among the relay's
 hosts), and the relay has recorded evidence that Codex really routes through it
 — a marker file, `relay-observed/codex` in Codex's spool directory, written by
-the relay at request time when it sees a Codex model completion, holding the
-activation's commit time so a re-activation needs fresh evidence. Until both,
+the relay at request time when it sees a Codex model completion that carries
+both Codex's session carrier and its own `Originator: codex_cli_rs` header (the
+generic request-id header alone is not enough: any OpenAI SDK script sends it),
+holding the activation's nanosecond id so a re-activation needs fresh evidence. Until both,
 telemetry stays the producer, so a Codex that ignores the PAC or does not trust
 the relay's CA is never silenced. Once the relay is elected, telemetry records
-nothing for Codex. `openbox doctor` names the elected lane and warns when nothing is
+nothing for Codex, so a Codex-host call the relay cannot record (an unrecognised
+path, no session carrier) is recorded by nobody. `openbox doctor` counts those
+from the local trace ("Codex-host calls skipped while the relay is elected"). `openbox doctor` names the elected lane and warns when nothing is
 listening behind it — the check to run before trusting a data gap as
 "nothing happened" rather than "nothing was recorded". `telemetry` ships only
 the model id, four token counts, a duration and a request id — never a

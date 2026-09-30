@@ -169,3 +169,59 @@ func TestDoctorCountsUnattributedRelayedCalls(t *testing.T) {
 		t.Errorf("counted %d no-carrier and %d ambiguous, want 2 and 1", none, ambiguous)
 	}
 }
+
+func TestDoctorCountsCodexHostCallsLostWhileTheRelayIsElected(t *testing.T) {
+	dir := t.TempDir()
+	restore := trace.SetDefault(&trace.Writer{Dir: dir})
+	t.Cleanup(restore)
+	emit := func(outcome, reason, url string) {
+		trace.Emit(trace.Record{Stage: trace.StageCapture, Outcome: outcome,
+			Detail: map[string]any{"reason": reason, "url": url}})
+	}
+	emit("skipped", "no_session_id", "https://api.openai.com/v1/responses")
+	emit("skipped", "no_session_id", "https://chatgpt.com/backend-api/conversation")
+	emit("skipped", "not_elected", "https://api.openai.com/v1/responses")      // telemetry's turn: not a loss
+	emit("skipped", "no_provider_carrier", "https://api.meta.ai/v1/responses") // shared host: not counted
+	emit("skipped", "no_session_id", "https://api.anthropic.com/v1/messages")  // another provider
+	emit("recorded", "", "https://api.openai.com/v1/responses")
+
+	n, err := countCodexHostSkips(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Errorf("counted %d lost Codex-host calls, want 2", n)
+	}
+}
+
+func TestDoctorReportsLostCodexCallsWhenTheRelayIsElected(t *testing.T) {
+	t.Cleanup(trace.SetDefault(&trace.Writer{Dir: t.TempDir()}))
+	s := doctorCodexProxy(t, committedCodexRecord, true)
+	if !strings.Contains(s, "Codex-host calls skipped while the relay is elected") {
+		t.Errorf("doctor does not report the relay's loss counter:\n%s", s)
+	}
+}
+
+func TestSystemPACDisclosureNamesApiMetaAiForEveryProviderAndChatGPTOnlyWithCodex(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		providers []string
+		chatgpt   bool
+	}{
+		{"claude-code only", []string{"claude-code"}, false},
+		{"with codex", []string{"claude-code", "codex"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, out, _ := testApp(nil)
+			a.printSystemPACActive(activation.Outcome{Class: activation.Activated,
+				Entry: &activation.SystemEntry{PACURL: "http://127.0.0.1:8790/proxy.pac", Providers: tc.providers}})
+			s := out.String()
+			if !strings.Contains(s, "api.meta.ai") || !strings.Contains(s, "kept raw in the local trace for 7 days") {
+				t.Errorf("the api.meta.ai disclosure is missing:\n%s", s)
+			}
+			if got := strings.Contains(s, "chatgpt.com"); got != tc.chatgpt {
+				t.Errorf("chatgpt.com disclosure present = %v, want %v:\n%s", got, tc.chatgpt, s)
+			}
+		})
+	}
+}

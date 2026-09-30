@@ -189,6 +189,11 @@ conversation. Each completion is one record with the request and reply,
 redacted and gated like any other body. The session cookie never leaves the
 machine. Nothing else on claude.ai is recorded.
 
+**api.meta.ai (macOS, any provider).** `api.meta.ai` is in every provider's
+host rows, Claude Code's included, so with the system proxy active your
+browser's traffic to it is decrypted by the relay, skipped (no session header)
+and kept raw in the local trace for 7 days.
+
 **Codex on macOS: browser traffic on the same hosts.** With Codex installed on
 macOS the system proxy also routes Codex's hosts through the relay: its API
 host, `chatgpt.com` with every subdomain, and `api.meta.ai`. Codex's own model
@@ -196,7 +201,9 @@ calls are recorded from the relay once it has seen one (see
 [Coverage](coverage.md#1b-model-call-coverage-matrix)). Your **browser's**
 `chatgpt.com` and `api.meta.ai` traffic passes through the same relay and is
 decrypted by it. It carries no Codex session header, so it is skipped and
-nothing of it is sent. It is still written raw to the local trace for 7 days
+nothing of it is sent. Once the relay is elected for Codex, telemetry stands by,
+so a Codex-host call the relay cannot record is recorded nowhere; `openbox doctor`
+counts those. It is still written raw to the local trace for 7 days
 (see [The local trace](#the-local-trace)), the same posture as claude.ai
 traffic that is not a chat completion.
 

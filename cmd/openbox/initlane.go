@@ -384,6 +384,12 @@ func (a *app) setupTransportFor(installing provider.Name, homeDir, addr string, 
 			// rolling back what already succeeded. Its outcome is read back by
 			// setupLanes via a.lastSystemPACOutcome once this call returns; see
 			// setupTransportFor's own reset of that field.
+			if a.withholdSystemPAC {
+				fmt.Fprintf(a.stderr, "warning: the system PAC was not activated: the telemetry lane did not "+
+					"come up on this binary, and an older telemetry daemon would keep recording the Codex "+
+					"calls the relay is about to record too. Fix the telemetry lane and re-run `openbox init`\n")
+				return activated{keys: len(keys), replaced: res.Replaced}, nil
+			}
 			a.lastSystemPACOutcome = a.runSystemPACActivation(homeDir, addr, caPath, set)
 			return activated{keys: len(keys), replaced: res.Replaced}, nil
 		},

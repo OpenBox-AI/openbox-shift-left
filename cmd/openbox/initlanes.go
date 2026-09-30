@@ -266,6 +266,14 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 
 	if !(codex && req.transport) {
 		installTelemetry()
+		// The PAC commit inside the relay's install lists whatever the derived set
+		// holds, Codex included, whichever provider is being installed. With Codex
+		// in it, an older telemetry daemon left running would keep recording the
+		// calls the relay is about to record too, so the commit waits for telemetry
+		// to have come up on this binary.
+		a.withholdSystemPAC = req.transport && req.telemetry && !slices.Contains(report.installed, "telemetry") &&
+			hasProvider(derivedTransportProviders(home, provider.Name(req.provider)), provider.Codex)
+		defer func() { a.withholdSystemPAC = false }()
 		installTransport()
 		return report
 	}

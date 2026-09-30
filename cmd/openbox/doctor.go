@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -834,6 +835,7 @@ func (a *app) reportCodexProxy() {
 	case election.Elected == activation.LaneTransport:
 		a.row("election", "proxy elected; telemetry standing by")
 		traceDoctorFinding("codex:election", "proxy", "")
+		a.reportCodexRelayLoss()
 		if listening, _ := portOccupied(transport.DefaultAddr); !listening {
 			a.row("WARNING", "the relay is ELECTED for Codex but nothing is listening on %s, so Codex's", transport.DefaultAddr)
 			a.row("", "model calls are not being recorded; `openbox init --provider codex` brings it back")
@@ -847,6 +849,58 @@ func (a *app) reportCodexProxy() {
 		traceDoctorFinding("codex:election", "telemetry", reason)
 	}
 	a.reportCarrierSkips()
+}
+
+// reportCodexRelayLoss is the cost of electing the relay: telemetry stands
+// by, so a Codex-host call the relay cannot record (an unrecognised path, no
+// session carrier) is recorded by nobody. Counted from the local trace.
+func (a *app) reportCodexRelayLoss() {
+	dir := trace.Dir()
+	if dir == "" {
+		return
+	}
+	n, err := countCodexHostSkips(dir)
+	switch {
+	case err != nil:
+		a.row("lost", "unknown: the local trace could not be read: %v", err)
+	case n == 0:
+		a.row("lost", "0 Codex-host calls skipped while the relay is elected")
+	default:
+		a.row("lost", "%d Codex-host call(s) skipped while the relay is elected; telemetry stands by, so", n)
+		a.row("", "nothing recorded them (local trace, `capture.outcome` skipped/dropped)")
+	}
+}
+
+// countCodexHostSkips counts relayed calls on hosts only Codex's rows cover
+// that the relay skipped or dropped for any reason other than another lane
+// being elected. Shared hosts (api.meta.ai) are excluded: they are not
+// evidence of a Codex call.
+func countCodexHostSkips(dir string) (int, error) {
+	recs, _, err := trace.ReadFiltered(dir,
+		func(line []byte) bool {
+			return bytes.Contains(line, []byte("skipped")) || bytes.Contains(line, []byte("dropped"))
+		},
+		func(r trace.Record) bool {
+			if r.Stage != trace.StageCapture || (r.Outcome != "skipped" && r.Outcome != "dropped") {
+				return false
+			}
+			if reason, _ := r.Detail["reason"].(string); reason == "not_elected" {
+				return false
+			}
+			raw, _ := r.Detail["url"].(string)
+			u, err := url.Parse(raw)
+			if err != nil {
+				return false
+			}
+			return slices.Equal(transport.CandidatesForHost(u.Hostname()), []string{string(provider.Codex)})
+		})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return len(recs), nil
 }
 
 // reportCarrierSkips counts the relayed calls the relay held but would not
