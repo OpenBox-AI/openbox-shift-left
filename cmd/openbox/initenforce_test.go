@@ -125,31 +125,48 @@ func TestInitStillRequiresAProviderAndNamesTheSupportedSet(t *testing.T) {
 	}
 }
 
-// TestCodexInstallsTelemetryButNeverTransport: Codex gets the telemetry lane
-// (it reads its own config.toml), but never the in-path transport relay --
-// its proxy arm is the system PAC, which installs nothing here. Erroring
-// because a provider cannot have a lane it never asked for would be a
-// regression from the flag era; the right shape is a derivation with a
-// printed line instead.
-func TestCodexInstallsTelemetryButNeverTransport(t *testing.T) {
-	skipUnlessSupervised(t)
-	isolateHome(t)
-	seedCredentials(t, "codex")
-	a, out, errb := testApp(nil)
-	if code := a.run([]string{"init", "--provider", "codex"}); code != exitOK {
-		t.Fatalf("codex init exit = %d; stderr=%q", code, errb.String())
-	}
-	s := out.String()
-	if strings.Contains(s, "hooks only") {
-		t.Errorf("a codex install still claims hooks-only; the telemetry lane arm did not take:\n%s", s)
-	}
-	if !strings.Contains(s, "EXPORTS") {
-		t.Errorf("a codex install does not disclose the telemetry lane it now installs:\n%s", s)
-	}
-	// A relay of the Anthropic Messages API is Claude-Code-specific; Codex's
-	// proxy arm is the system PAC, which installs nothing here.
-	if strings.Contains(s, "INTERCEPTS") {
-		t.Errorf("a codex install claims the transport lane, which it cannot have:\n%s", s)
+// withSystemPACSupport pins whether this "machine" has a system PAC
+// activation, independent of the OS the suite runs on.
+func withSystemPACSupport(t *testing.T, supported bool) {
+	t.Helper()
+	prev := systemPACSupportedFn
+	t.Cleanup(func() { systemPACSupportedFn = prev })
+	systemPACSupportedFn = func() bool { return supported }
+}
+
+// TestCodexInstallsTelemetryAndOnlyWhereAPACExistsTheRelay: Codex always gets
+// the telemetry lane (it reads its own config.toml). Its proxy arm is the
+// system PAC, so the relay that serves it is installed only where a PAC can
+// be activated (macOS). Elsewhere it stays telemetry-only, with nothing
+// claiming an interception that cannot happen.
+func TestCodexInstallsTelemetryAndOnlyWhereAPACExistsTheRelay(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		supported bool
+	}{
+		{"a platform with a system PAC", true},
+		{"a platform without one", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			skipUnlessSupervised(t)
+			isolateHome(t)
+			withSystemPACSupport(t, tc.supported)
+			seedCredentials(t, "codex")
+			a, out, errb := testApp(nil)
+			if code := a.run([]string{"init", "--provider", "codex"}); code != exitOK {
+				t.Fatalf("codex init exit = %d; stderr=%q", code, errb.String())
+			}
+			s := out.String()
+			if strings.Contains(s, "hooks only") {
+				t.Errorf("a codex install still claims hooks-only; the telemetry lane arm did not take:\n%s", s)
+			}
+			if !strings.Contains(s, "EXPORTS") {
+				t.Errorf("a codex install does not disclose the telemetry lane it now installs:\n%s", s)
+			}
+			if got := strings.Contains(s, "INTERCEPTS"); got != tc.supported {
+				t.Errorf("the relay's interception disclosure present = %v, want %v:\n%s", got, tc.supported, s)
+			}
+		})
 	}
 }
 

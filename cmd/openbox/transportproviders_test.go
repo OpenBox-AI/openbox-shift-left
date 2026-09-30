@@ -4,7 +4,10 @@ import (
 	"context"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +15,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayemit"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/memhttptest"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -178,5 +184,68 @@ func TestLaneRecordInterleavesWithHookEventsInAppendOrder(t *testing.T) {
 	if n := hookSpool.PendingCount(sessionID); n != 0 {
 		t.Errorf("PendingCount(%s) = %d after both producers' events were drained, want 0 (spool empty)",
 			sessionID, n)
+	}
+}
+
+// TestDerivedTransportProviders is the derived set per installed-provider
+// fixture: which providers' model calls can reach the relay on this machine.
+func TestDerivedTransportProviders(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		installing provider.Name
+		ccRouted   bool // settings.json routes Claude Code at the relay
+		codexOtel  bool // Codex has an OpenBox-owned [otel] block
+		pacOS      bool // this OS has a system PAC
+		want       []string
+	}{
+		{"claude-code alone", provider.ClaudeCode, false, false, true, []string{"claude-code"}},
+		{"claude-code alone without a PAC", provider.ClaudeCode, false, false, false, []string{"claude-code"}},
+		{"codex alone on a PAC platform", provider.Codex, false, false, true, []string{"codex"}},
+		{"codex joins an installed claude-code", provider.Codex, true, false, true, []string{"claude-code", "codex"}},
+		{"claude-code joins an installed codex", provider.ClaudeCode, false, true, true, []string{"claude-code", "codex"}},
+		{"both already installed", provider.ClaudeCode, true, true, true, []string{"claude-code", "codex"}},
+		{"linux/windows: codex is never in the set", provider.ClaudeCode, true, true, false, []string{"claude-code"}},
+		{"linux/windows: codex alone has no relay at all", provider.Codex, false, false, false, []string{}},
+		{"muse has no proxy lane", provider.Muse, false, false, true, []string{}},
+		{"muse does not displace an installed codex", provider.Muse, false, true, true, []string{"codex"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := isolateHome(t)
+			t.Setenv("CODEX_HOME", filepath.Join(home, "codex-home"))
+			withSystemPACSupport(t, tc.pacOS)
+			claudeHome := t.TempDir()
+			if tc.ccRouted {
+				settings := gatewayservice.SettingsPath(claudeHome)
+				if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				body := `{"env":{"HTTPS_PROXY":"http://127.0.0.1:8790"}}`
+				if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.codexOtel {
+				if err := providers.WriteCodexOtel(providers.CodexConfigTOMLPath(), "http://127.0.0.1:4318/v1/logs"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got := derivedTransportProviders(claudeHome, tc.installing)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("derived set = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestHasTransportArm: Claude Code always, Codex only with a system PAC,
+// nothing else.
+func TestHasTransportArm(t *testing.T) {
+	withSystemPACSupport(t, true)
+	if !hasTransportArm(provider.ClaudeCode) || !hasTransportArm(provider.Codex) || hasTransportArm(provider.Muse) {
+		t.Error("with a system PAC: claude-code and codex have a transport arm, muse does not")
+	}
+	withSystemPACSupport(t, false)
+	if !hasTransportArm(provider.ClaudeCode) || hasTransportArm(provider.Codex) || hasTransportArm(provider.Muse) {
+		t.Error("without a system PAC: only claude-code has a transport arm")
 	}
 }

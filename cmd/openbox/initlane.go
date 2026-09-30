@@ -12,6 +12,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
@@ -229,7 +230,9 @@ func (a *app) setupTelemetry(homeDir, addr string, verbose bool) (int, error) {
 	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
 		WithEnv(a.laneUnitEnv())
 	if codexConfigPath := providers.CodexConfigTOMLPath(); providers.HasOwnedCodexOtel(codexConfigPath) {
-		spec = spec.WithCodexSettings(codexConfigPath)
+		// The record path rides with the config path: Codex's election reads both,
+		// and a daemon has no $HOME to find either.
+		spec = spec.WithCodexSettings(codexConfigPath).WithPACRecord(activation.RecordPath(homeDir))
 	}
 	binPath, err := a.selfPath()
 	if err != nil {
@@ -279,6 +282,7 @@ func (a *app) removeTelemetry(homeDir string, force bool) error {
 func (a *app) setupCodexTelemetry(homeDir, addr string, verbose bool) (int, error) {
 	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
 		WithCodexSettings(providers.CodexConfigTOMLPath()).
+		WithPACRecord(activation.RecordPath(homeDir)).
 		WithEnv(a.laneUnitEnv())
 	binPath, err := a.selfPath()
 	if err != nil {
@@ -305,10 +309,31 @@ func (a *app) setupCodexTelemetry(homeDir, addr string, verbose bool) (int, erro
 	})
 }
 
+// setupTransport installs the relay for Claude Code, the provider every
+// caller of the lower-level setup means.
 func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
+	return a.setupTransportFor(provider.ClaudeCode, homeDir, addr, verbose)
+}
+
+// setupTransportFor installs the relay's unit on behalf of one provider's
+// `init`. The unit always carries the derived provider set, so installing one
+// provider never drops another's routing.
+//
+// Claude Code's install also routes its env block at the relay and activates
+// the system PAC inside the lane's own activate step. Codex has no env block
+// to route: its routing IS the system PAC, which is activated last, after
+// both daemons are on the new binary (setupLanes), so this only installs and
+// proves the unit, and writes nothing Codex reads.
+func (a *app) setupTransportFor(installing provider.Name, homeDir, addr string, verbose bool) (int, error) {
+	set := derivedTransportProviders(homeDir, installing)
 	spec := laneservice.Transport(addr, claudeSettingsPath(homeDir), verbose).
-		WithProviders(transportSystemPACProviders).
+		WithProviders(set).
 		WithEnv(a.laneUnitEnv())
+	if hasProvider(set, provider.Codex) {
+		// Both paths come from here, never a re-derivation in the daemon,
+		// which has no $HOME.
+		spec = spec.WithCodexSettings(providers.CodexConfigTOMLPath()).WithPACRecord(activation.RecordPath(homeDir))
+	}
 	binPath, err := a.selfPath()
 	if err != nil {
 		return 0, err
@@ -320,13 +345,19 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
 	caPath, _ := transport.CAPaths(openboxHome)
 	settings := claudeSettingsPath(homeDir)
 
-	// Reset per call: setupTransport's own activate closure is the only writer,
-	// and only when it is actually reached (readiness proven, env keys
-	// written) -- see runSystemPACActivation's own doc for why a listen
-	// failure or a rollback must never touch this. A stale value from an
-	// earlier call in the same process must never be read as this one's.
+	// Reset per call: the system PAC step is the only writer, and only when it
+	// is actually reached (readiness proven) -- see runSystemPACActivation's
+	// own doc for why a listen failure or a rollback must never touch this. A
+	// stale value from an earlier call in the same process must never be read
+	// as this one's.
 	a.lastSystemPACOutcome = activation.Outcome{}
 
+	caMissing := func() error {
+		return fmt.Errorf("the transport relay is listening on %s but its CA certificate is not at %s; "+
+			"refusing to set NODE_EXTRA_CA_CERTS to a file that does not exist, because every intercepted "+
+			"handshake would then fail and look like the provider being down. Check %s",
+			addr, caPath, spec.LogPath(homeDir))
+	}
 	return a.setupLane(laneInstall{
 		label:         "transport",
 		addr:          addr,
@@ -338,10 +369,10 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
 			"directly and are unobserved by this lane",
 		activate: func() (activated, error) {
 			if !fileExists(caPath) {
-				return activated{}, fmt.Errorf("the transport relay is listening on %s but its CA certificate is not at %s; "+
-					"refusing to set NODE_EXTRA_CA_CERTS to a file that does not exist, because every intercepted "+
-					"handshake would then fail and look like the provider being down. Check %s",
-					addr, caPath, spec.LogPath(homeDir))
+				return activated{}, caMissing()
+			}
+			if installing == provider.Codex {
+				return activated{}, nil
 			}
 			keys := activation.TransportKeys(addr, caPath, activation.CurrentEnv(settings))
 			res, err := activation.Activate(homeDir, settings, activation.LaneTransport, keys)
@@ -352,11 +383,24 @@ func (a *app) setupTransport(homeDir, addr string, verbose bool) (int, error) {
 			// here must leave a working, env-routed transport lane rather than
 			// rolling back what already succeeded. Its outcome is read back by
 			// setupLanes via a.lastSystemPACOutcome once this call returns; see
-			// setupTransport's own reset of that field.
-			a.lastSystemPACOutcome = a.runSystemPACActivation(homeDir, addr, caPath)
+			// setupTransportFor's own reset of that field.
+			a.lastSystemPACOutcome = a.runSystemPACActivation(homeDir, addr, caPath, set)
 			return activated{keys: len(keys), replaced: res.Replaced}, nil
 		},
 	})
+}
+
+// activateCodexSystemPAC is the last step of `init --provider codex`: point
+// the system at the relay and commit the record that lists Codex. Nothing is
+// decided by this alone: Codex's election also waits for the relay to see a
+// Codex call.
+func (a *app) activateCodexSystemPAC(homeDir, addr string) activation.Outcome {
+	openboxHome, err := devconfig.Home()
+	if err != nil {
+		return activation.Outcome{Class: activation.Failed, Reason: err.Error()}
+	}
+	caPath, _ := transport.CAPaths(openboxHome)
+	return a.runSystemPACActivation(homeDir, addr, caPath, derivedTransportProviders(homeDir, provider.Codex))
 }
 
 func (a *app) removeTransport(homeDir string, force bool) error {

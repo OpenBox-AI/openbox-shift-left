@@ -520,26 +520,26 @@ func (a *app) runDevInit(args []string) int {
 
 	// Full means every lane the provider supports, which is a derivation rather
 	// than a choice. Codex gets the telemetry lane, reading its own
-	// config.toml; its proxy arm is the system PAC, which installs nothing
-	// here. An unsupported provider gets hooks alone and is told why: erroring
+	// config.toml, and on macOS a proxy arm: the relay plus the system PAC
+	// that routes Codex to it. An unsupported provider gets hooks alone and is told why: erroring
 	// because a provider cannot have a lane it never asked for would be a
 	// regression.
 	var laneReport laneReport
 	if laneCapable(o.Provider) {
 		// Before the transport unit is (re)installed: a legacy constrained CA
 		// re-issued AFTER the unit started would leave a daemon serving a
-		// certificate no longer on disk. Only the transport lane (Claude Code
-		// only) ever uses this CA at all.
-		if provider.Name(o.Provider) == provider.ClaudeCode {
+		// certificate no longer on disk. Both providers with a transport arm
+		// use this CA.
+		if hasTransportArm(provider.Name(o.Provider)) {
 			if err := a.reissueLegacyCAIfNeeded(); err != nil {
 				fmt.Fprintf(a.stderr, "warning: could not re-issue the legacy CA: %v\n", err)
 			}
 		}
 		laneReport = a.setupLanes(laneRequest{
 			telemetry: true,
-			// Claude Code only: Codex's transport/proxy arm is the system PAC,
-			// not this in-path relay.
-			transport:     provider.Name(o.Provider) == provider.ClaudeCode,
+			// Claude Code routes through the relay by its env block; Codex, on
+			// macOS, by the system PAC the relay serves.
+			transport:     hasTransportArm(provider.Name(o.Provider)),
 			telemetryAddr: telemetry.DefaultAddr,
 			transportAddr: transport.DefaultAddr,
 			provider:      o.Provider,

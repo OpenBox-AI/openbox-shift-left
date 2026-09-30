@@ -65,7 +65,7 @@ func seedSystemPACRecord(t *testing.T, home, pacURL, caPath string) {
 		System: &activation.SystemEntry{
 			PACActivated: true,
 			PACURL:       pacURL,
-			Providers:    transportSystemPACProviders,
+			Providers:    []string{"claude-code"},
 			Scopes:       []activation.ProxyScope{{Service: "Wi-Fi", PriorURLPresent: false, PriorEnabled: false}},
 			CATrust: &activation.CATrustState{
 				SHA1:     sha1,
@@ -288,8 +288,37 @@ func TestSystemPACAlreadyActiveRequiresALiveMatch(t *testing.T) {
 	t.Cleanup(func() { systemPACRunner = origRunner })
 	systemPACRunner = failingRunner(t)
 
-	if _, active := systemPACAlreadyActive(h, pacURL, caPEM); active {
+	if _, active := systemPACAlreadyActive(h, pacURL, caPEM, []string{"claude-code"}); active {
 		t.Error("systemPACAlreadyActive = true though the live read no longer matches our PAC URL")
+	}
+}
+
+// TestSystemPACAlreadyActiveRequiresTheSameProviderSet: the relay serves its
+// PAC from its own provider list, but Codex's election reads the RECORD's, so
+// a record missing a newly installed provider must be re-committed rather than
+// skipped as already active. It is decided before any live read or keychain
+// call, so the runner refuses everything.
+func TestSystemPACAlreadyActiveRequiresTheSameProviderSet(t *testing.T) {
+	h := t.TempDir()
+	t.Setenv(devconfig.EnvHome, filepath.Join(h, ".openbox"))
+	pacURL := systemPACURL(transport.DefaultAddr)
+	caPath := filepath.Join(h, "ca.pem")
+	seedSystemPACRecord(t, h, pacURL, caPath) // records claude-code only
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origRunner, origLive := systemPACRunner, liveSystemPACFn
+	t.Cleanup(func() { systemPACRunner, liveSystemPACFn = origRunner, origLive })
+	systemPACRunner = failingRunner(t)
+	liveSystemPACFn = func(context.Context, activation.Runner) ([]activation.ScopeState, error) {
+		t.Fatal("the live read ran for a record whose provider set differs")
+		return nil, nil
+	}
+	for _, want := range [][]string{{"claude-code", "codex"}, {"codex"}, {}} {
+		if _, active := systemPACAlreadyActive(h, pacURL, caPEM, want); active {
+			t.Errorf("a record of [claude-code] was read as already active for %v", want)
+		}
 	}
 }
 
@@ -316,7 +345,7 @@ func TestSystemPACAlreadyActiveRequiresMatchingCASHA1(t *testing.T) {
 	systemPACRunner = failingRunner(t)
 
 	reissuedPEM := []byte("-----BEGIN CERTIFICATE-----\nreissued-content\n-----END CERTIFICATE-----\n")
-	if _, active := systemPACAlreadyActive(h, pacURL, reissuedPEM); active {
+	if _, active := systemPACAlreadyActive(h, pacURL, reissuedPEM, []string{"claude-code"}); active {
 		t.Error("systemPACAlreadyActive = true though the on-disk CA's SHA-1 no longer matches the record")
 	}
 }
@@ -351,7 +380,7 @@ func TestSystemPACAlreadyActiveRequiresTheCertPresentInTheKeychain(t *testing.T)
 		return nil, nil
 	}
 
-	if _, active := systemPACAlreadyActive(h, pacURL, caPEM); active {
+	if _, active := systemPACAlreadyActive(h, pacURL, caPEM, []string{"claude-code"}); active {
 		t.Error("systemPACAlreadyActive = true though the System keychain no longer carries the recorded SHA-1")
 	}
 }

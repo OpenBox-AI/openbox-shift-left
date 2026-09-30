@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -58,6 +59,9 @@ type laneReport struct {
 	// (systempac.go), zero-value (Class == "") whenever the transport lane
 	// was not installed at all or never reached its own activate step.
 	systemPAC activation.Outcome
+	// codex is whether this install was Codex's, which changes what the system
+	// PAC disclosure and its fallback line say.
+	codex bool
 }
 
 // row prints one label/value line of the install report. The whole report is
@@ -182,6 +186,7 @@ func (r laneReport) running() []string {
 
 func (a *app) setupLanes(req laneRequest) laneReport {
 	var report laneReport
+	report.codex = provider.Name(req.provider) == provider.Codex
 	if !req.telemetry && !req.transport {
 		return report
 	}
@@ -207,7 +212,10 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 		return report
 	}
 
-	if req.transport {
+	// The gateway is Claude Code's base-URL relay, so only Claude Code's install
+	// retires it; Codex's never touches that env block.
+	codex := provider.Name(req.provider) == provider.Codex
+	if req.transport && !codex {
 		if value, present := gatewayservice.CurrentEnv(home); present && laneRouted(home, activation.LaneGateway) {
 			fmt.Fprintf(a.stdout, "\nRetiring the local gateway - the transport relay supersedes it\n")
 			if err := a.removeGateway(home); err != nil {
@@ -221,33 +229,69 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 	report.settings = gatewayservice.SettingsPath(home)
 	report.addrs = map[string]string{}
 
-	if req.telemetry {
+	installTelemetry := func() {
+		if !req.telemetry {
+			return
+		}
 		setup := a.setupTelemetry
-		if provider.Name(req.provider) == provider.Codex {
+		if codex {
 			setup = a.setupCodexTelemetry
 		}
 		keys, err := setup(home, req.telemetryAddr, req.verbose)
 		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: telemetry setup did not complete: %v\n", err)
 			report.failed = append(report.failed, "telemetry")
-		} else {
-			report.installed = append(report.installed, "telemetry")
-			report.addrs["telemetry"] = req.telemetryAddr
-			report.keys += keys
+			return
 		}
+		report.installed = append(report.installed, "telemetry")
+		report.addrs["telemetry"] = req.telemetryAddr
+		report.keys += keys
 	}
-
-	if req.transport {
-		keys, err := a.setupTransport(home, req.transportAddr, req.verbose)
+	installTransport := func() {
+		if !req.transport {
+			return
+		}
+		keys, err := a.setupTransportFor(provider.Name(req.provider), home, req.transportAddr, req.verbose)
 		if err != nil {
 			fmt.Fprintf(a.stderr, "warning: transport setup did not complete: %v\n", err)
 			report.failed = append(report.failed, "transport")
-		} else {
-			report.installed = append(report.installed, "transport")
-			report.addrs["transport"] = req.transportAddr
-			report.keys += keys
-			report.systemPAC = a.lastSystemPACOutcome
+			return
 		}
+		report.installed = append(report.installed, "transport")
+		report.addrs["transport"] = req.transportAddr
+		report.keys += keys
+		report.systemPAC = a.lastSystemPACOutcome
+	}
+
+	if !(codex && req.transport) {
+		installTelemetry()
+		installTransport()
+		return report
+	}
+
+	// Codex with a proxy arm. The order is what keeps one Codex call recorded
+	// once across an upgrade, and each step is a precondition of the next:
+	//  1. the relay's unit, carrying the record path, is started and proven
+	//     listening, while nothing yet lists Codex, so it records nothing;
+	//  2. the telemetry unit is rewritten and RESTARTED onto this binary, the
+	//     one that knows to stand down once the relay is elected. An older
+	//     telemetry daemon left running past the commit below would keep
+	//     recording every call the relay now also records;
+	//  3. only then the system PAC: priors recorded as Pending, the CA trusted
+	//     and read back, the PAC written, the record committed. The election
+	//     flips per record once the relay has also seen a Codex call.
+	installTransport()
+	installTelemetry()
+	switch {
+	case !slices.Contains(report.installed, "transport"):
+		// Nothing to point the system at, and the failure was reported above.
+	case !slices.Contains(report.installed, "telemetry"):
+		fmt.Fprintf(a.stderr, "warning: the system PAC was not activated for Codex: the telemetry "+
+			"lane did not come up on this binary, and an older telemetry daemon would keep "+
+			"recording the calls the relay is about to record too. Fix the telemetry lane and re-run "+
+			"`openbox init --provider codex`; Codex's model calls stay with the telemetry lane\n")
+	default:
+		report.systemPAC = a.activateCodexSystemPAC(home, req.transportAddr)
 	}
 	return report
 }
@@ -293,6 +337,15 @@ func (r removalResult) ok() bool { return len(r.failed) == 0 }
 func (a *app) runRemovals(home string, req removalRequest) removalResult {
 	fmt.Fprintf(a.stdout, "\nRemoving OpenBox lane configuration\n")
 	var res removalResult
+
+	// First, before any daemon, PAC or unit is touched: commit the removal of
+	// Codex from the system-PAC record. The election reads that record, so
+	// from here Codex's model calls are telemetry's again, and nothing below
+	// (the relay stopping, the PAC being restored) can leave them with no
+	// recorder.
+	if req.transport {
+		a.retireCodexProxyArm(home)
+	}
 
 	for _, lane := range []struct {
 		on     bool

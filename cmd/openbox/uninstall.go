@@ -192,10 +192,15 @@ type uninstallInventory struct {
 // activation-record key -- see initlane.go), so the telemetry unit existing
 // with zero activation-record lanes is that install's normal, healthy shape
 // on a Codex-only machine, not residue from an interrupted removal.
+//
+// The same holds for the transport unit where Codex has a proxy arm: a Codex
+// install on macOS runs the relay too, and it routes Codex by the system PAC
+// rather than by an activation-record lane, so a transport unit with no
+// record is that install's normal shape.
 func laneResidue(home string, codexOwnsTelemetry bool) bool {
-	specs := []laneservice.Spec{
-		laneservice.Transport("", "", false),
-		laneservice.Gateway("", "", "", false),
+	specs := []laneservice.Spec{laneservice.Gateway("", "", "", false)}
+	if !(codexOwnsTelemetry && systemPACSupportedFn()) {
+		specs = append(specs, laneservice.Transport("", "", false))
 	}
 	if !codexOwnsTelemetry {
 		specs = append(specs, laneservice.Telemetry("", "", false))

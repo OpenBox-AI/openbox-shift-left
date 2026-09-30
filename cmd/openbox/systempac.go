@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
-	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -30,12 +30,6 @@ var (
 	systemPACRunner activation.Runner = activation.ExecRunner
 )
 
-// transportSystemPACProviders is the union System PAC activation records for
-// the transport lane. Claude Code only, today: Codex never gets a transport
-// lane at all (initlanes.go's laneRequest.transport is CC-only: Codex rows
-// stay out of the union), so there is exactly one entry until that changes.
-var transportSystemPACProviders = []string{string(provider.ClaudeCode)}
-
 // systemPACURL is the relay's own PAC endpoint. Never "localhost": some
 // clients resolve that name differently than the loopback IP the relay
 // actually listens on (matches the library's own Plan.PACURL doc).
@@ -48,14 +42,17 @@ func systemPACURL(addr string) string { return "http://" + addr + "/proxy.pac" }
 // already-successful lane, not a precondition for it. It is never reached at
 // all when the listen check failed or the lane rolled back, because
 // setupLane only calls activate() once readiness is proven.
-func (a *app) runSystemPACActivation(homeDir, addr, caPath string) activation.Outcome {
+//
+// providers is the derived set (derivedTransportProviders), recorded verbatim
+// as the activation record's Providers: Codex's election reads it.
+func (a *app) runSystemPACActivation(homeDir, addr, caPath string, providers []string) activation.Outcome {
 	pacURL := systemPACURL(addr)
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
 		return activation.Outcome{Class: activation.Failed,
 			Reason: fmt.Sprintf("reading the CA certificate at %s: %v", caPath, err)}
 	}
-	if entry, active := systemPACAlreadyActive(homeDir, pacURL, caPEM); active {
+	if entry, active := systemPACAlreadyActive(homeDir, pacURL, caPEM, providers); active {
 		return activation.Outcome{Class: activation.Activated, Entry: entry}
 	}
 	outcome, err := activateSystemPACFn(context.Background(), systemPACRunner, activation.Plan{
@@ -63,7 +60,7 @@ func (a *app) runSystemPACActivation(homeDir, addr, caPath string) activation.Ou
 		PACURL:    pacURL,
 		CAPath:    caPath,
 		CAPEM:     caPEM,
-		Providers: transportSystemPACProviders,
+		Providers: providers,
 	})
 	if err != nil {
 		return activation.Outcome{Class: activation.Failed, Reason: err.Error()}
@@ -83,12 +80,19 @@ func (a *app) runSystemPACActivation(homeDir, addr, caPath string) activation.Ou
 //     under the same path without updating this record itself, and skipping
 //     this check would leave the new CA silently untrusted while this record
 //     and `doctor` both keep reporting a healthy activation;
+//   - the recorded provider set being exactly the one about to be activated:
+//     the relay serves its PAC from its own --providers, but the election reads
+//     this record, so a record missing a newly installed provider has to be
+//     re-committed, not skipped;
 //   - a LIVE read confirming every enabled scope still points at us;
 //   - that same fingerprint still present in the System keychain's trust
 //     store -- a hand-removed trust entry must not read as still active.
-func systemPACAlreadyActive(homeDir, pacURL string, caPEM []byte) (*activation.SystemEntry, bool) {
+func systemPACAlreadyActive(homeDir, pacURL string, caPEM []byte, providers []string) (*activation.SystemEntry, bool) {
 	entry, err := activation.LoadSystemEntry(homeDir)
 	if err != nil || entry == nil || !entry.PACActivated || entry.PACURL != pacURL {
+		return entry, false
+	}
+	if !sameProviderSet(entry.Providers, providers) {
 		return entry, false
 	}
 	if entry.CATrust == nil || entry.CATrust.SHA1 == "" {
@@ -112,6 +116,40 @@ func systemPACAlreadyActive(homeDir, pacURL string, caPEM []byte) (*activation.S
 		return entry, false
 	}
 	return entry, true
+}
+
+// retireCodexProxyArm commits Codex's removal from the system-PAC record, the
+// first step of taking its proxy arm down. A record that does not list Codex
+// (or no record) is left alone. A failure is reported and the removal goes on:
+// the PAC and the unit still have to come down, and the relay stops being
+// elected the moment it stops answering.
+func (a *app) retireCodexProxyArm(home string) {
+	entry, err := activation.LoadSystemEntry(home)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "warning: could not read the system PAC record: %v\n", err)
+		return
+	}
+	if entry == nil || !slices.Contains(entry.Providers, "codex") {
+		return
+	}
+	if err := activation.RemoveSystemProvider(home, "codex"); err != nil {
+		fmt.Fprintf(a.stderr, "warning: could not remove Codex from the system PAC record: %v\n", err)
+		return
+	}
+	a.row("retired", "Codex's proxy arm; its model calls are the telemetry lane's again")
+}
+
+// sameProviderSet compares two provider lists as sets.
+func sameProviderSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, x := range a {
+		if !slices.Contains(b, x) {
+			return false
+		}
+	}
+	return true
 }
 
 // deactivateSystemPAC restores the system PAC and untrusts the CA before the
@@ -233,11 +271,20 @@ func (r laneReport) printSystemPAC(a *app) {
 	case len(r.systemPAC.Manual) == 0:
 		// The unsupported-OS arm: no manual commands exist because the shapes
 		// are unmeasured on this OS, and a guessed command is worse than none.
-		a.row("system PAC", "not activated (not yet supported on %s in this build); Claude Code", runtime.GOOS)
-		a.row("", "stays env-routed; desktop apps and browsers are not covered")
+		a.row("system PAC", "not activated (not yet supported on %s in this build); %s", runtime.GOOS, r.stays())
+		a.row("", "desktop apps and browsers are not covered")
 	default:
-		a.printSystemPACNotActive(r.systemPAC)
+		a.printSystemPACNotActive(r.systemPAC, r.stays())
 	}
+}
+
+// stays is what keeps recording this provider's model calls while the system
+// PAC is not active.
+func (r laneReport) stays() string {
+	if r.codex {
+		return "Codex's model calls stay with its telemetry lane"
+	}
+	return "Claude Code stays env-routed"
 }
 
 // printSystemPACActive is the disclosure required whenever activation is
@@ -262,6 +309,14 @@ func (a *app) printSystemPACActive(o activation.Outcome) {
 		"You were asked for your sudo password once; macOS may have asked once more",
 		"to confirm the trust change.",
 	)
+	if o.Entry != nil && slices.Contains(o.Entry.Providers, "codex") {
+		a.note(
+			"Codex is routed through the relay too, and the same rows cover chatgpt.com and",
+			"api.meta.ai in the browser: that traffic is decrypted, skipped (no session",
+			"carrier) and kept raw in the local trace for 7 days, as claude.ai is.",
+			"Codex's model calls stay with its telemetry lane until the relay has seen one.",
+		)
+	}
 }
 
 // printSystemPACNotActive covers NotAttempted/Declined/Failed on darwin,
@@ -269,12 +324,12 @@ func (a *app) printSystemPACActive(o activation.Outcome) {
 // disclosure paragraph only prints for Declined/Failed: NotAttempted means
 // nothing was even asked (no controlling terminal), so nothing was disclosed
 // or risked yet.
-func (a *app) printSystemPACNotActive(o activation.Outcome) {
+func (a *app) printSystemPACNotActive(o activation.Outcome, stays string) {
 	reason := string(o.Class)
 	if o.Reason != "" {
 		reason += ": " + o.Reason
 	}
-	a.row("system PAC", "NOT activated (%s); Claude Code stays env-routed; run these to finish:", reason)
+	a.row("system PAC", "NOT activated (%s); %s; run these to finish:", reason, stays)
 	for _, cmd := range o.Manual {
 		a.row("", "  %s", cmd)
 	}

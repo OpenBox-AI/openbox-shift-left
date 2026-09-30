@@ -62,3 +62,14 @@ func TestUnsupportedOSNeverCallsRunnerAndPrintsNoManualCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestSystemPACSupportedOnlyOnDarwin(t *testing.T) {
+	prev := currentGOOS
+	t.Cleanup(func() { currentGOOS = prev })
+	for goos, want := range map[string]bool{"darwin": true, "linux": false, "windows": false} {
+		currentGOOS = goos
+		if got := SystemPACSupported(); got != want {
+			t.Errorf("SystemPACSupported() on %s = %v, want %v", goos, got, want)
+		}
+	}
+}
