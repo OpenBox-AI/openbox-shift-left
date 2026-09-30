@@ -30,7 +30,7 @@ func buildDecisionRequest(id Identity, e *HookEvent, localRedaction bool) decisi
 		attrs["mcp_function"] = capStr(function)
 	case kind == client.ToolShell:
 		// Only the in-process decider sees it; it is never egressed or logged.
-		attrs["command"] = hookflow.CapCommand(e.command())
+		attrs["command"] = hookflow.CapCommand(e.shellText())
 	}
 
 	req := decision.DecisionRequest{

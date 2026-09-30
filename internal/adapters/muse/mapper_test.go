@@ -24,25 +24,28 @@ func hookOf(ev *HookEvent) HookName { return HookName(ev.HookEventName) }
 // The table every fixture is held to: what it maps to, or that it maps to
 // nothing on purpose.
 var fixtureEvents = map[string]client.EventType{
-	"session-start-startup": client.EventSessionStarted,
-	"session-start-resume":  client.EventSessionStarted,
-	"session-start-clear":   client.EventSessionStarted,
-	"user-prompt-submit":    client.EventPromptSubmitted,
-	"pre-tool-use-bash":     client.EventToolCall,
-	"pre-tool-use-read":     client.EventToolCall,
-	"pre-tool-use-write":    client.EventToolCall,
-	"pre-tool-use-edit":     client.EventToolCall,
-	"pre-tool-use-mcp":      client.EventToolCall,
-	"permission-request":    client.EventPermissionRequest,
-	"post-tool-use":         client.EventToolResult,
-	"post-tool-use-failure": client.EventToolResult,
-	"subagent-start":        client.EventSubagentStarted,
-	"stop-failure":          client.EventAPIError,
-	"session-end":           client.EventSessionEnded,
-	"pre-llm-call":          client.EventModelCallRequested,
-	"post-llm-call":         client.EventModelCallFinished,
-	"subagent-stop":         "",
-	"stop":                  "",
+	"session-start-startup":       client.EventSessionStarted,
+	"session-start-clear":         client.EventSessionStarted,
+	"user-prompt-submit":          client.EventPromptSubmitted,
+	"pre-tool-use-bash":           client.EventToolCall,
+	"pre-tool-use-bash-escalated": client.EventToolCall,
+	"pre-tool-use-read":           client.EventToolCall,
+	"pre-tool-use-write":          client.EventToolCall,
+	"pre-tool-use-edit":           client.EventToolCall,
+	"pre-tool-use-mcp":            client.EventToolCall,
+	"permission-request":          client.EventPermissionRequest,
+	"post-tool-use":               client.EventToolResult,
+	"post-tool-use-write":         client.EventToolResult,
+	"post-tool-use-failure":       client.EventToolResult,
+	"subagent-start":              client.EventSubagentStarted,
+	"stop-failure":                client.EventAPIError,
+	"session-end":                 client.EventSessionEnded,
+	"pre-llm-call":                client.EventModelCallRequested,
+	"pre-llm-call-subagent":       client.EventModelCallRequested,
+	"post-llm-call":               client.EventModelCallFinished,
+	"post-llm-call-tool-calls":    client.EventModelCallFinished,
+	"subagent-stop":               "",
+	"stop":                        "",
 }
 
 func TestMapEveryFixture(t *testing.T) {
@@ -71,7 +74,7 @@ func TestMapEveryFixture(t *testing.T) {
 		if got.Tokens != nil || got.Cost != nil || got.TurnIndex != nil {
 			t.Errorf("%s: carries usage, cost or a turn index", name)
 		}
-		if got.SessionID != "sess-0001" || got.DeveloperDID != testDID {
+		if got.SessionID != ev.SessionID || !strings.HasPrefix(got.SessionID, "sess-000") || got.DeveloperDID != testDID {
 			t.Errorf("%s: identity = %q / %q", name, got.SessionID, got.DeveloperDID)
 		}
 	}
@@ -82,9 +85,14 @@ func TestMapEveryFixture(t *testing.T) {
 	}
 }
 
+// museInternalTools are Muse's own housekeeping tools, observed on 1.4.1 and
+// deliberately unclassified: they map to shell-kinded, semantically opaque, and
+// are still gated.
+var museInternalTools = map[string]bool{"submit_reminder_decision": true}
+
 // A write whose tool name the table does not know would be shell-kinded and
 // opaque, invisible to content gating. Every tool of every fixture must be a
-// recorded name or an MCP name.
+// recorded name, an MCP name, or a known internal tool.
 func TestFixturesToolsAreClassified(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("testdata", "*.json"))
 	for _, f := range files {
@@ -93,7 +101,7 @@ func TestFixturesToolsAreClassified(t *testing.T) {
 		if ev.ToolName == "" {
 			continue
 		}
-		if !strings.HasPrefix(ev.ToolName, "mcp__") && !isBuiltin(ev.ToolName) {
+		if !strings.HasPrefix(ev.ToolName, "mcp__") && !isBuiltin(ev.ToolName) && !museInternalTools[ev.ToolName] {
 			t.Errorf("%s: tool %q is not in builtinTools and would be treated as opaque", name, ev.ToolName)
 		}
 	}
@@ -154,7 +162,7 @@ func TestToolCallIdentityAndGateRecordCarryToolUseID(t *testing.T) {
 		}
 	}
 	w, _ := m.Map(HookPreToolUse, parseFixture(t, "pre-tool-use-write"))
-	if w.Span.SemanticType != "file_write" || w.Span.FilePath != "/tmp/proj/api/health.go" || w.Span.FileOp != "write" {
+	if w.Span.SemanticType != "file_write" || w.Span.FilePath != "a.txt" || w.Span.FileOp != "write" {
 		t.Errorf("write span = %+v", w.Span)
 	}
 	mc, _ := m.Map(HookPreToolUse, parseFixture(t, "pre-tool-use-mcp"))
@@ -228,7 +236,7 @@ func TestSessionStartCarriesRunLineageOnlyWhenContinued(t *testing.T) {
 	if tool.RunID != "run-2" || tool.ContinuedFromRunID != "" {
 		t.Errorf("a non-start event must carry the run but not the lineage: %+v", tool)
 	}
-	for src, want := range map[string]bool{"startup": false, "compact": false, "": false, "resume": true, "clear": true, "bogus": false} {
+	for src, want := range map[string]bool{"startup": false, "compact": false, "": false, "resume": true, "clear": false, "bogus": false} {
 		if isBumpSource(src) != want {
 			t.Errorf("isBumpSource(%q) = %v", src, !want)
 		}
@@ -279,7 +287,7 @@ func TestMapDropsWhatItCannotPlace(t *testing.T) {
 func TestSubagentAndStopFailureMappings(t *testing.T) {
 	m := testMapper()
 	sub, _ := m.Map(HookSubagentStart, parseFixture(t, "subagent-start"))
-	if sub.Metadata["agent_id"] != "sub-0001" {
+	if sub.Metadata["agent_id"] != "skill-reminder" {
 		t.Errorf("subagent metadata = %v", sub.Metadata)
 	}
 	sf, _ := m.Map(HookStopFailure, parseFixture(t, "stop-failure"))

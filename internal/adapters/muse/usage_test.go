@@ -8,9 +8,9 @@ import (
 
 func TestUsageNumbersIsAnAllowlistOfIntegers(t *testing.T) {
 	got := usageNumbers(json.RawMessage(`{
-		"input_tokens":1200,"output_tokens":"340","cache_read_tokens":800,"reasoning_tokens":96,
+		"input_tokens":1200,"output_tokens":"340","cached_tokens":800,"cache_read_tokens":800,"reasoning_tokens":96,
 		"prompt":"the user's text","cost_usd":0.12,"input_tokens_details":{"a":1},"total_tokens":-4}`))
-	want := map[string]int{"input_tokens": 1200, "output_tokens": 340, "cache_read_tokens": 800, "reasoning_tokens": 96}
+	want := map[string]int{"input_tokens": 1200, "output_tokens": 340, "cached_tokens": 800, "cache_read_tokens": 800, "reasoning_tokens": 96}
 	if len(got) != len(want) {
 		t.Fatalf("usage = %v, want %v", got, want)
 	}
@@ -27,11 +27,18 @@ func TestUsageNumbersIsAnAllowlistOfIntegers(t *testing.T) {
 }
 
 func TestTraceparentMustBeWellFormed(t *testing.T) {
-	ok := `{"meta":{"traceparent":"00-00000000000000000000000000000001-0000000000000001-01","reasoning":{"effort":"medium"}}}`
-	if got := traceparentOf(json.RawMessage(ok)); !strings.HasPrefix(got, "00-") {
-		t.Errorf("traceparent = %q", got)
+	const tp = "00-00000000000000000000000000000001-0000000000000001-01"
+	// Muse 1.4.1 sends options as a flat map with dotted keys; the nested form
+	// is only a fallback.
+	for name, ok := range map[string]string{
+		"flat":   `{"meta.traceparent":"` + tp + `","meta.reasoning.effort":"low"}`,
+		"nested": `{"meta":{"traceparent":"` + tp + `","reasoning":{"effort":"medium"}}}`,
+	} {
+		if got := traceparentOf(json.RawMessage(ok)); got != tp {
+			t.Errorf("%s: traceparent = %q", name, got)
+		}
 	}
-	for _, bad := range []string{`{"meta":{"traceparent":"not-a-trace-id"}}`, `{"meta":{"traceparent":"00-ZZ-00-01"}}`, `{"meta":{}}`, `{}`, `[]`, ``} {
+	for _, bad := range []string{`{"meta.traceparent":"not-a-trace-id"}`, `{"meta.traceparent":7}`, `{"meta":{"traceparent":"not-a-trace-id"}}`, `{"meta":{"traceparent":"00-ZZ-00-01"}}`, `{"meta":{}}`, `{}`, `[]`, ``} {
 		if got := traceparentOf(json.RawMessage(bad)); got != "" {
 			t.Errorf("traceparentOf(%s) = %q", bad, got)
 		}

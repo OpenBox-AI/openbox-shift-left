@@ -254,6 +254,21 @@ func (e *HookEvent) field(key string) string {
 // decider and the gated tool-input content; observe metadata never carries it.
 func (e *HookEvent) command() string { return e.field("command") }
 
+// shellText is what a shell-class call runs: its command, or, for a shell tool
+// whose input is not shaped {command} (bash_input), the whole tool_input, so a
+// payload under an unexpected key still reaches the decider and the content
+// gate instead of reading as empty.
+func (e *HookEvent) shellText() string {
+	if c := e.command(); c != "" {
+		return c
+	}
+	raw := strings.TrimSpace(string(e.ToolInput))
+	if raw == "null" {
+		return ""
+	}
+	return raw
+}
+
 // filePath is a file tool's target, a structural locator.
 func (e *HookEvent) filePath() string {
 	for _, k := range filePathKeys {
@@ -276,15 +291,24 @@ func (e *HookEvent) fileText() string {
 	return ""
 }
 
-// outputText is a tool_response or error as text: a string as is, an object's
-// `output` (or `error`) string, else the raw JSON.
+// outputText is a tool_response or error as text: an object's `output` (or
+// `error`) string, else the raw JSON. Muse's bash tool delivers its result as a
+// string that itself holds a JSON object ({"output": ..., "exit_code": ...});
+// that string is unwrapped the same way, and a string that is not such an
+// object is taken as is.
 func outputText(raw json.RawMessage) string {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
 	}
 	if raw[0] == '"' {
-		return str(raw)
+		s := str(raw)
+		if inner := strings.TrimSpace(s); strings.HasPrefix(inner, "{") {
+			if t := outputText(json.RawMessage(inner)); t != inner && t != "" {
+				return t
+			}
+		}
+		return s
 	}
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &m); err == nil {

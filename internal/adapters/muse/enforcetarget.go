@@ -60,7 +60,7 @@ func (t enforceTarget) overrideContent(redacted *client.Content) string {
 		// Membership in builtinTools is part of the test: classifyTool's default
 		// is shell/"internal", so the kind alone would put every unknown name on
 		// the verbatim path by fallthrough.
-		return bounded(t.ev.command())
+		return bounded(t.ev.shellText())
 	case kind == client.ToolMCP:
 		return bounded(string(t.ev.ToolInput))
 	case hookflow.IsFileSemantic(sem) && redacted != nil && redacted.FileText != "":
@@ -88,12 +88,12 @@ func bounded(s string) string {
 }
 
 // toolInputExtract is the raw extraction the observe path builds a tool_input
-// body from: the shell command alone for a shell call, the whole tool_input
-// otherwise. Its result is never used unredacted.
+// body from: the shell command alone for a shell call (the whole tool_input
+// when it carries no command), the whole tool_input otherwise. Its result is never used unredacted.
 func toolInputExtract(e *HookEvent) string {
 	kind, _, _, _, _ := classifyTool(e.ToolName)
 	if kind == client.ToolShell {
-		return e.command()
+		return e.shellText()
 	}
 	return string(e.ToolInput)
 }

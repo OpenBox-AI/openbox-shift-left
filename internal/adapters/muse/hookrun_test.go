@@ -57,6 +57,9 @@ func setHookEnv(t *testing.T) string {
 	dir := t.TempDir()
 	spool := filepath.Join(dir, "spool")
 	t.Setenv(devconfig.EnvHome, dir)
+	// A SessionStart reads Muse's config, and its auth lock is taken under
+	// the config home: keep that inside the case's own directory.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg-config"))
 	bindForTest(t)
 	t.Setenv(devconfig.EnvAgentID, testAgentID)
 	t.Setenv(devconfig.EnvSpoolDir, spool)
@@ -104,7 +107,16 @@ func runHook(t *testing.T, sub, payload string) (stdout, stderr string) {
 	return out.String(), errb.String()
 }
 
-// fixture reads a doc-derived payload, moved onto a session of the caller's.
+// fixtureAs is fixture with the subagent session of a capture moved onto the
+// same session too, for a test that needs a subagent-shaped payload (a
+// PermissionRequest, observed only there) to belong to one latched run.
+func fixtureAs(t *testing.T, name, session string) string {
+	t.Helper()
+	return strings.ReplaceAll(fixture(t, name, session), "sess-0002", session)
+}
+
+// fixture reads a captured payload (scrubbed, see testdata/README.md), moved
+// onto a session of the caller's.
 func fixture(t *testing.T, name, session string) string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", name+".json"))
@@ -261,7 +273,7 @@ func TestModelCallDenyBlocksAndLeavesTheStartedRowOnly(t *testing.T) {
 	if rows[0].EventType() != fakecore.WireActivityStarted {
 		t.Fatalf("the one gate row is %q, want %q", rows[0].EventType(), fakecore.WireActivityStarted)
 	}
-	if !strings.Contains(rows[0].ActivityID(), ":llmgate:req-0001.1") {
+	if !strings.Contains(rows[0].ActivityID(), ":llmgate:turn-0001:0:1.1") {
 		t.Errorf("activity id = %q, want the request id and attempt in the llmgate namespace", rows[0].ActivityID())
 	}
 }
@@ -302,7 +314,8 @@ func TestModelCallAllowThenFinishedIsOnePair(t *testing.T) {
 		}
 	}
 	out, _ := rows[1].Body["activity_output"].(map[string]any)
-	if out["status"] != "completed" || out["finish_reason"] != "tool_calls" || out["response_id"] != "resp-0001" {
+	// A success with a null finish_reason carries no finish_reason at all.
+	if _, present := out["finish_reason"]; out["status"] != "completed" || present || out["response_id"] != "resp_0001" {
 		t.Errorf("completed half output = %v", out)
 	}
 }
@@ -335,7 +348,7 @@ func TestOutageDeniesOnlyItsOwnModelCall(t *testing.T) {
 	}
 
 	f.SetOutage(false)
-	next := strings.ReplaceAll(fixture(t, "pre-llm-call", "s-outage"), "req-0001", "req-0002")
+	next := strings.ReplaceAll(fixture(t, "pre-llm-call", "s-outage"), `"request_id": "turn-0001:0:1"`, `"request_id": "turn-0001:0:2"`)
 	before := f.Hits()
 	stdout, _ = runHook(t, "PreLLMCall", next)
 	if strings.TrimSpace(stdout) != "" {
@@ -372,7 +385,7 @@ func TestHaltLatchesTheRunAndDeniesLaterCallsWithoutTheNetwork(t *testing.T) {
 		{"UserPromptSubmit", "user-prompt-submit"},
 		{"PermissionRequest", "permission-request"},
 	} {
-		out, _ := runHook(t, tc.hook, fixture(t, tc.file, "s-halt"))
+		out, _ := runHook(t, tc.hook, fixtureAs(t, tc.file, "s-halt"))
 		if strings.TrimSpace(out) == "" {
 			t.Errorf("%s after a HALT wrote nothing; the latch must still refuse", tc.hook)
 			continue
@@ -384,29 +397,40 @@ func TestHaltLatchesTheRunAndDeniesLaterCallsWithoutTheNetwork(t *testing.T) {
 	}
 }
 
-// A latch is keyed on the run, so a SessionStart that opens a new run
-// (continue-as-new on clear or resume) is unlatched.
-func TestClearAndResumeOpenAnUnlatchedRun(t *testing.T) {
-	for _, source := range []string{"clear", "resume"} {
-		t.Run(source, func(t *testing.T) {
-			setHookEnv(t)
-			serveCore(t, fakecore.Script{Default: allowJSON})
-			sess := "s-run-" + source
+// A latch is keyed on the run, so a SessionStart with source=resume, which
+// continues the session as a new run (continue-as-new), is unlatched.
+func TestResumeSessionStartOpensAnUnlatchedRun(t *testing.T) {
+	setHookEnv(t)
+	serveCore(t, fakecore.Script{Default: allowJSON})
+	const sess = "s-run-resume"
 
-			// A latch on the session's first run.
-			hookflow.WriteSessionHalt(log.New(&bytes.Buffer{}, "", 0), sess,
-				client.Evaluation{Verdict: client.VerdictHalt, Reason: "seeded", PolicyID: "p"})
-			if out, _ := runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", sess)); strings.TrimSpace(out) == "" {
-				t.Fatal("the seeded latch did not refuse")
-			}
+	// A latch on the session's first run.
+	hookflow.WriteSessionHalt(log.New(&bytes.Buffer{}, "", 0), sess,
+		client.Evaluation{Verdict: client.VerdictHalt, Reason: "seeded", PolicyID: "p"})
+	if out, _ := runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", sess)); strings.TrimSpace(out) == "" {
+		t.Fatal("the seeded latch did not refuse")
+	}
 
-			start := strings.ReplaceAll(fixture(t, "session-start-startup", sess), `"source": "startup"`, `"source": "`+source+`"`)
-			runHook(t, "SessionStart", start)
+	start := strings.ReplaceAll(fixture(t, "session-start-startup", sess), `"source": "startup"`, `"source": "resume"`)
+	runHook(t, "SessionStart", start)
 
-			if out, _ := runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", sess)); strings.TrimSpace(out) != "" {
-				t.Fatalf("source=%s must open a new, unlatched run, got %q", source, out)
-			}
-		})
+	if out, _ := runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", sess)); strings.TrimSpace(out) != "" {
+		t.Fatalf("source=resume must open a new, unlatched run, got %q", out)
+	}
+}
+
+// A clear is a new session id, not a continuation: it never bumps a run, so a
+// latch on the same id (which a clear never reuses) would still hold.
+func TestClearSessionStartDoesNotOpenANewRun(t *testing.T) {
+	setHookEnv(t)
+	serveCore(t, fakecore.Script{Default: allowJSON})
+	const sess = "s-run-clear"
+	hookflow.WriteSessionHalt(log.New(&bytes.Buffer{}, "", 0), sess,
+		client.Evaluation{Verdict: client.VerdictHalt, Reason: "seeded", PolicyID: "p"})
+	start := strings.ReplaceAll(fixture(t, "session-start-startup", sess), `"source": "startup"`, `"source": "clear"`)
+	runHook(t, "SessionStart", start)
+	if out, _ := runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", sess)); strings.TrimSpace(out) == "" {
+		t.Fatal("a clear bumped the run of an id it would never reuse")
 	}
 }
 
@@ -459,11 +483,11 @@ func TestRequireApprovalOnAModelCallDenies(t *testing.T) {
 func TestPermissionRequestNeverAllows(t *testing.T) {
 	setHookEnv(t)
 	serveCore(t, fakecore.Script{Default: allowJSON})
-	if out, _ := runHook(t, "PermissionRequest", fixture(t, "permission-request", "s-perm")); strings.TrimSpace(out) != "" {
+	if out, _ := runHook(t, "PermissionRequest", fixtureAs(t, "permission-request", "s-perm")); strings.TrimSpace(out) != "" {
 		t.Fatalf("an allowed PermissionRequest must write nothing so the human is still asked, got %q", out)
 	}
 	serveCore(t, fakecore.Script{Default: verdictJSON("block", "no")})
-	out, _ := runHook(t, "PermissionRequest", fixture(t, "permission-request", "s-perm"))
+	out, _ := runHook(t, "PermissionRequest", fixtureAs(t, "permission-request", "s-perm"))
 	if strings.Contains(out, `"allow"`) || !strings.Contains(out, `"behavior":"deny"`) {
 		t.Fatalf("PermissionRequest answer = %q", out)
 	}
@@ -479,7 +503,7 @@ func TestToolPairing(t *testing.T) {
 
 	byActivity := map[string][]string{}
 	for _, r := range f.Inbox() {
-		if r.ToolUseID() == "toolu-0001" {
+		if r.ToolUseID() == "call_0001" {
 			byActivity[r.ActivityID()] = append(byActivity[r.ActivityID()], r.EventType())
 		}
 	}
@@ -516,7 +540,7 @@ func TestUsageAndTraceparentStayLocal(t *testing.T) {
 		raw, _ := os.ReadFile(p)
 		local.Write(raw)
 	}
-	for _, want := range []string{outcomeTraceparent, outcomeUsage, "00-00000000000000000000000000000001-0000000000000001-01", `"input_tokens":1200`, `"cache_read_tokens":800`} {
+	for _, want := range []string{outcomeTraceparent, outcomeUsage, "00-00000000000000000000000000000001-0000000000000001-01", `"input_tokens":1200`, `"cache_read_tokens":800`, `"cached_tokens":800`} {
 		if !strings.Contains(local.String(), want) {
 			t.Errorf("the local trace lacks %q", want)
 		}

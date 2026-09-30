@@ -20,6 +20,7 @@ import (
 var usageKeys = map[string]bool{
 	"input_tokens":       true,
 	"output_tokens":      true,
+	"cached_tokens":      true,
 	"cache_read_tokens":  true,
 	"cache_write_tokens": true,
 	"reasoning_tokens":   true,
@@ -49,18 +50,26 @@ func usageNumbers(raw json.RawMessage) map[string]int {
 
 var traceparentRE = regexp.MustCompile(`^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$`)
 
-// traceparentOf reads options.meta.traceparent, and only a well-formed W3C
-// value: anything else is not a trace id and is not recorded.
+// traceparentOf reads the W3C trace context from a model call's options, and
+// only a well-formed value: anything else is not a trace id and is not
+// recorded. Muse 1.4.1 delivers options as a flat map with dotted keys
+// ("meta.traceparent"); the nested form is read as a fallback. Only PostLLMCall
+// carried it on 1.4.1.
 func traceparentOf(options json.RawMessage) string {
-	var o struct {
-		Meta struct {
-			Traceparent string `json:"traceparent"`
-		} `json:"meta"`
-	}
-	if json.Unmarshal(options, &o) != nil || !traceparentRE.MatchString(o.Meta.Traceparent) {
+	var flat map[string]json.RawMessage
+	if json.Unmarshal(options, &flat) != nil {
 		return ""
 	}
-	return o.Meta.Traceparent
+	if tp := str(flat["meta.traceparent"]); traceparentRE.MatchString(tp) {
+		return tp
+	}
+	var nested struct {
+		Traceparent string `json:"traceparent"`
+	}
+	if json.Unmarshal(flat["meta"], &nested) == nil && traceparentRE.MatchString(nested.Traceparent) {
+		return nested.Traceparent
+	}
+	return ""
 }
 
 // Outcomes of the local records below, on the capture stage.
@@ -70,8 +79,12 @@ const (
 )
 
 // traceModelCall records a model call's local-only facts, joined to its gate
-// row by activity id: the trace context on PreLLMCall, usage on PostLLMCall.
+// row by activity id: the trace context on whichever half carries it, usage on
+// PostLLMCall.
 func traceModelCall(hook HookName, e *HookEvent, ev client.DevEvent) {
+	if hook != HookPreLLMCall && hook != HookPostLLMCall {
+		return
+	}
 	rec := trace.Record{
 		Provider:   provider,
 		SessionID:  e.SessionID,
@@ -81,23 +94,18 @@ func traceModelCall(hook HookName, e *HookEvent, ev client.DevEvent) {
 		EventType:  string(hook),
 		Stage:      trace.StageCapture,
 	}
-	switch hook {
-	case HookPreLLMCall:
-		tp := traceparentOf(e.Options)
-		if tp == "" {
-			return
-		}
-		rec.Outcome = outcomeTraceparent
-		rec.Detail = map[string]any{"traceparent": tp}
-	case HookPostLLMCall:
-		u := usageNumbers(e.Usage)
-		if u == nil {
-			return
-		}
-		rec.Outcome = outcomeUsage
-		rec.Detail = map[string]any{"usage": u}
-	default:
-		return
+	if tp := traceparentOf(e.Options); tp != "" {
+		r := rec
+		r.Outcome = outcomeTraceparent
+		r.Detail = map[string]any{"traceparent": tp}
+		trace.Emit(r)
 	}
-	trace.Emit(rec)
+	if hook == HookPostLLMCall {
+		if u := usageNumbers(e.Usage); u != nil {
+			r := rec
+			r.Outcome = outcomeUsage
+			r.Detail = map[string]any{"usage": u}
+			trace.Emit(r)
+		}
+	}
 }

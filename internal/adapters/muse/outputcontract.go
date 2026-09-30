@@ -52,7 +52,10 @@ const (
 // precedence fileText reads them and RedactToolInput rewrites them. Every key a
 // Muse write, edit or patch tool may carry a body under is listed: a body under
 // an unlisted key would route around the secret scan and the content gate.
-var contentFieldKeys = []string{"content", "new_string", "new_str", "file_text", "patch", "diff"}
+// Observed on 1.4.1: write_file {path, content} and edit_file {path, find,
+// replace}; replace is listed before find because it is the text that lands on
+// disk. The rest are the Claude Code spellings Muse accepts as aliases.
+var contentFieldKeys = []string{"content", "replace", "find", "new_string", "new_str", "file_text", "patch", "diff"}
 
 // filePathKeys are the tool_input fields that name the file a tool touches.
 var filePathKeys = []string{"file_path", "path", "filename", "notebook_path"}

@@ -1,11 +1,25 @@
 {
-  "hook_event_name": "PreToolUse",
+  "hook_event_name": "PostToolUse",
   "tool_name": "write_file",
   "tool_input": {
     "content": "hello",
     "path": "a.txt"
   },
   "tool_use_id": "call_0001",
+  "tool_response": {
+    "filePath": "/tmp/proj/a.txt",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 0,
+        "newStart": 1,
+        "newLines": 1,
+        "lines": [
+          "+hello"
+        ]
+      }
+    ]
+  },
   "session_id": "sess-0001",
   "turn_id": "turn-0001",
   "cwd": "/tmp/proj",

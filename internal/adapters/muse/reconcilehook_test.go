@@ -41,8 +41,8 @@ func TestStopReconcilesTheSessionJournalAgainstGatedCalls(t *testing.T) {
 	root := pointSessionLogs(t)
 	const sid = "s-gap"
 
-	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash", sid)) // tool_use_id toolu-0001; no core, denied
-	log := intentLine(1, "Bash", "toolu-0001", t0, `{"command":"go test ./..."}`) +
+	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash", sid)) // tool_use_id call_0001; no core, denied
+	log := intentLine(1, "bash", "call_0001", t0, `{"command":"go test ./..."}`) +
 		intentLine(2, "Write", "toolu-oversize", t1, `{"file_path":"/big"}`)
 	writeLog(t, todaysLog(root, sid), log)
 

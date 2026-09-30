@@ -83,16 +83,52 @@ func nameOf(raw json.RawMessage) string {
 	return str(m["name"])
 }
 
-// previewOf reads one element of messages[]: its text preview.
+// previewSourceBytes bounds the text one message contributes before redaction.
+// The client cuts a preview to 256 runes, so nothing past this reaches the
+// wire, and a secret straddling the bound is never part of what is sent.
+const previewSourceBytes = 8 << 10
+
+// previewOf reads one element of messages[]: the text of its content blocks
+// ({"type":"text","text":...}), joined, or a bare string content or a
+// text_preview. Blocks of any other type (images, tool calls) contribute
+// nothing.
 func previewOf(raw json.RawMessage) string {
 	if s := str(raw); s != "" {
-		return s
+		return hookflow.TruncateBytes(s, previewSourceBytes)
 	}
 	var m map[string]json.RawMessage
 	if json.Unmarshal(raw, &m) != nil {
 		return ""
 	}
-	return str(m["text_preview"])
+	if s := str(m["text_preview"]); s != "" {
+		return hookflow.TruncateBytes(s, previewSourceBytes)
+	}
+	if s := str(m["content"]); s != "" && strings.TrimSpace(string(m["content"]))[0] == '"' {
+		return hookflow.TruncateBytes(s, previewSourceBytes)
+	}
+	var blocks []struct {
+		Type string          `json:"type"`
+		Text json.RawMessage `json:"text"`
+	}
+	if json.Unmarshal(m["content"], &blocks) != nil {
+		return ""
+	}
+	var parts []string
+	size := 0
+	for _, b := range blocks {
+		if b.Type != "text" {
+			continue
+		}
+		t := str(b.Text)
+		if t == "" {
+			continue
+		}
+		parts = append(parts, t)
+		if size += len(t); size >= previewSourceBytes {
+			break
+		}
+	}
+	return hookflow.TruncateBytes(strings.Join(parts, "\n"), previewSourceBytes)
 }
 
 func (m Mapper) mapModelCallRequested(ev client.DevEvent, agent client.Tool, e *HookEvent) (client.DevEvent, bool) {
@@ -144,9 +180,11 @@ func (m Mapper) mapModelCallRequested(ev client.DevEvent, agent client.Tool, e *
 }
 
 // completedStatuses are the PostLLMCall status values that read as a success;
-// any other non-empty status is a failure. The value set is undocumented.
+// any other non-empty status is a failure. Observed on 1.4.1: "success" (a
+// text answer) and "tool_calls" (the model asked for tools), both with a null
+// error. The others are kept for spellings not yet seen.
 var completedStatuses = map[string]bool{
-	"completed": true, "complete": true, "ok": true, "success": true, "succeeded": true,
+	"completed": true, "complete": true, "ok": true, "success": true, "succeeded": true, "tool_calls": true,
 }
 
 func (m Mapper) mapModelCallFinished(ev client.DevEvent, agent client.Tool, e *HookEvent) (client.DevEvent, bool) {

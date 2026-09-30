@@ -277,17 +277,23 @@ type toolClass struct {
 	fileOp string
 }
 
-// builtinTools maps Muse's tool names. Muse accepts the Claude Code names as
-// aliases (the documented ones are Bash, Read, Edit, Write, Grep, WebFetch,
-// WebSearch), and the native names read_file, write_file and edit_file are
-// named in Muse's own documentation. The other native spellings below are
-// unverified guesses kept so a rename does not turn a write into an
-// unclassified call; a real capture should settle them.
+// builtinTools maps Muse's tool names. Observed on 1.4.1: bash, bash_input,
+// read_file, write_file, edit_file and search are the native spellings. Muse
+// also runs internal tools of its own (submit_reminder_decision, subagent_*,
+// work_*, cron_*, *_memory, *_goal, write_todos, report_progress, read_skill,
+// snooze_reminder, monitor, workflow) that are deliberately absent here:
+// classifyTool sends any name this table does not know to shell-kinded,
+// semantically opaque, and the gate still evaluates it.
+//
+// The Claude Code names (Bash, Read, Edit, Write, Grep, WebFetch, WebSearch)
+// are documented aliases, and the remaining spellings were never observed; they
+// are kept so a rename does not turn a write into an unclassified call.
 var builtinTools = map[string]toolClass{
 	"Bash":       {client.ToolShell, "internal", ""},
 	"BashOutput": {client.ToolShell, "internal", ""},
 	"KillShell":  {client.ToolShell, "internal", ""},
 	"bash":       {client.ToolShell, "internal", ""},
+	"bash_input": {client.ToolShell, "internal", ""},
 	"shell":      {client.ToolShell, "internal", ""},
 
 	"Write":        {client.ToolFile, "file_write", "write"},
@@ -306,6 +312,7 @@ var builtinTools = map[string]toolClass{
 	"NotebookRead": {client.ToolFile, "file_read", "read"},
 	"Glob":         {client.ToolFile, "internal", ""},
 	"Grep":         {client.ToolFile, "internal", ""},
+	"search":       {client.ToolFile, "internal", ""},
 	"glob":         {client.ToolFile, "internal", ""},
 	"grep":         {client.ToolFile, "internal", ""},
 
@@ -336,12 +343,10 @@ var (
 )
 
 // isBumpSource reports whether a SessionStart source opens a new run of the
-// same session: a resume and a clear both continue-as-new. Whether Muse keeps
-// the session id across /clear is unverified; either way the new run is
-// unlatched, and a clear under a fresh id simply has no run to continue.
+// same session. Only a resume does: a clear mints a new session id (observed on
+// Muse 1.4.1), so it has no prior run under its own id to continue.
 func isBumpSource(source string) bool {
-	s := hookflow.EnumOr(source, sourceValues)
-	return s == "resume" || s == "clear"
+	return hookflow.EnumOr(source, sourceValues) == "resume"
 }
 
 // capStr delegates so the adapters and the engine cap an identifier the same

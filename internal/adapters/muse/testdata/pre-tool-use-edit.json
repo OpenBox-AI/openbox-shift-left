@@ -1,17 +1,17 @@
 {
   "hook_event_name": "PreToolUse",
+  "tool_name": "edit_file",
+  "tool_input": {
+    "find": "hello",
+    "path": "a.txt",
+    "replace": "goodbye"
+  },
+  "tool_use_id": "call_0001",
   "session_id": "sess-0001",
   "turn_id": "turn-0001",
   "cwd": "/tmp/proj",
-  "transcript_path": "/tmp/proj/.muse-fixture/session.jsonl",
-  "model": "muse-spark-1.3",
+  "transcript_path": null,
+  "model": "muse-spark-1.3-contributor",
   "permission_mode": "default",
-  "model_provider": "meta",
-  "tool_name": "Edit",
-  "tool_input": {
-    "file_path": "/tmp/proj/api/server.go",
-    "old_string": "mux := http.NewServeMux()",
-    "new_string": "mux := http.NewServeMux()\n\tmux.HandleFunc(\"/health\", healthHandler)"
-  },
-  "tool_use_id": "toolu-0004"
+  "model_provider": "meta"
 }

@@ -62,7 +62,7 @@ func TestModelCallGateEventsValidateAndPair(t *testing.T) {
 				t.Errorf("%s carries %s", ev.EventType, forbidden)
 			}
 		}
-		if generic["model_call_request_id"] != "req-0001.1" {
+		if generic["model_call_request_id"] != "turn-0001:0:1.1" {
 			t.Errorf("%s: model_call_request_id = %v", ev.EventType, generic["model_call_request_id"])
 		}
 	}

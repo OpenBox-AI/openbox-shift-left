@@ -14,17 +14,17 @@ func TestModelCallRequestedMapping(t *testing.T) {
 	if !ok {
 		t.Fatal("PreLLMCall did not map")
 	}
-	if ev.EventType != client.EventModelCallRequested || ev.ModelCallRequestID != "req-0001.1" {
+	if ev.EventType != client.EventModelCallRequested || ev.ModelCallRequestID != "turn-0001:0:1.1" {
 		t.Fatalf("event = %s id %q", ev.EventType, ev.ModelCallRequestID)
 	}
-	if ev.Model != "muse-spark-1.3" {
+	if ev.Model != "muse-spark-1.3-contributor" {
 		t.Errorf("model = %q", ev.Model)
 	}
-	if ev.Metadata["provider"] != "meta" || ev.Metadata["message_count"] != 2 || ev.Metadata["tool_count"] != 5 {
+	if ev.Metadata["provider"] != "model.meta.response" || ev.Metadata["message_count"] != 2 || ev.Metadata["tool_count"] != 5 {
 		t.Errorf("metadata = %v", ev.Metadata)
 	}
 	names, _ := ev.Metadata["tool_names"].([]string)
-	if len(names) != 5 || names[4] != "mcp__docs__search" {
+	if len(names) != 5 || names[4] != "edit_file" {
 		t.Errorf("tool_names = %v", ev.Metadata["tool_names"])
 	}
 	if _, present := ev.Metadata["message_previews"]; present {
@@ -112,7 +112,7 @@ func TestModelCallRequestID(t *testing.T) {
 func TestModelCallFinishedMapping(t *testing.T) {
 	m := testMapper()
 	pre, _ := m.Map(HookPreLLMCall, parseFixture(t, "pre-llm-call"))
-	post, ok := m.Map(HookPostLLMCall, parseFixture(t, "post-llm-call"))
+	post, ok := m.Map(HookPostLLMCall, parseFixture(t, "post-llm-call-tool-calls"))
 	if !ok {
 		t.Fatal("PostLLMCall did not map")
 	}
@@ -122,7 +122,7 @@ func TestModelCallFinishedMapping(t *testing.T) {
 	if post.EventType != client.EventModelCallFinished || post.Status != client.StatusCompleted {
 		t.Errorf("post = %s / %q", post.EventType, post.Status)
 	}
-	if post.Metadata["finish_reason"] != "tool_calls" || post.Metadata["response_id"] != "resp-0001" || post.Metadata["tool_call_count"] != 1 {
+	if post.Metadata["finish_reason"] != "tool_calls" || post.Metadata["response_id"] != "resp_0002" || post.Metadata["tool_call_count"] != 1 {
 		t.Errorf("metadata = %v", post.Metadata)
 	}
 	for _, leaked := range []string{"usage", "tokens", "output_text_preview", "input_tokens"} {

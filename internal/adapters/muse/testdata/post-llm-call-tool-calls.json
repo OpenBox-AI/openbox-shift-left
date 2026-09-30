@@ -1,9 +1,23 @@
 {
-  "hook_event_name": "PreLLMCall",
+  "hook_event_name": "PostLLMCall",
   "provider": "model.meta.response",
   "request_id": "turn-0001:0:1",
   "attempt": 1,
   "step": 0,
+  "status": "tool_calls",
+  "response_id": "resp_0002",
+  "usage": {
+    "input_tokens": 1000,
+    "output_tokens": 120,
+    "cached_tokens": 0,
+    "cache_write_tokens": 0,
+    "cache_read_tokens": 0,
+    "reasoning_tokens": 40
+  },
+  "finish_reason": "tool_calls",
+  "error": null,
+  "output_text_preview": "",
+  "tool_call_count": 1,
   "messages": [
     {
       "role": "developer",
@@ -59,8 +73,14 @@
   ],
   "tool_count": 5,
   "options": {
+    "meta.instructions": "You are a coding agent.",
     "meta.max_output_tokens": 128000,
-    "meta.reasoning.effort": "max"
+    "meta.model": "muse-spark-1.3-contributor",
+    "meta.prompt_cache_key": "cache:main:sess-0001",
+    "meta.reasoning.effort": "max",
+    "meta.session_id": "sess-0001",
+    "meta.supports_video": false,
+    "meta.traceparent": "00-00000000000000000000000000000002-0000000000000002-01"
   },
   "session_id": "sess-0001",
   "turn_id": "turn-0001",
