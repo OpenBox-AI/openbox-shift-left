@@ -106,7 +106,7 @@ func TestOwnedSpoolDirsAreDeDuplicated(t *testing.T) {
 func TestOwnedSpoolDirsCoversEveryAdapter(t *testing.T) {
 	t.Setenv(devconfig.EnvSpoolDir, "")
 	dirs := providers.OwnedSpoolDirs()
-	if len(dirs) != 2 {
+	if len(dirs) != len(provider.Supported()) {
 		t.Fatalf("OwnedSpoolDirs() = %v; want one per adapter", dirs)
 	}
 	seen := map[string]bool{}
@@ -129,5 +129,54 @@ func TestOwnedSpoolDirsCoversEveryAdapter(t *testing.T) {
 		if !found {
 			t.Errorf("no owned spool dir ends in %q: %v", want, dirs)
 		}
+	}
+}
+
+// TestMuseHasAnArmAtEveryRegistrySwitch a recognized name that fell through to
+// a default arm would read as "unknown" at one entry point and "supported" at
+// another.
+func TestMuseHasAnArmAtEveryRegistrySwitch(t *testing.T) {
+	name := string(provider.Muse)
+	if _, err := providers.Engine(name); err != nil {
+		t.Errorf("Engine(muse): %v", err)
+	}
+	if _, err := providers.Lookup(name); err != nil {
+		t.Errorf("Lookup(muse): %v", err)
+	}
+	if providers.SpoolDirFor(name) == "" {
+		t.Error("SpoolDirFor(muse) is empty")
+	}
+	if len(providers.HookMarkers(name)) == 0 {
+		t.Error("HookMarkers(muse) is empty")
+	}
+	if _, err := providers.RestoreProviderSettings(name, filepath.Join(t.TempDir(), "s.json"), t.TempDir()); err != nil {
+		t.Errorf("RestoreProviderSettings(muse): %v", err)
+	}
+}
+
+// TestMuseRemoveLeavesAnUnownedSettingsFileAlone a Muse settings file with no
+// OpenBox handler in it is the developer's, byte for byte.
+func TestMuseRemoveLeavesAnUnownedSettingsFileAlone(t *testing.T) {
+	body := `{"schema_version":1,"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"my-audit"}]}]}}`
+	path := seed(t, "settings.json", body)
+	removed, err := providers.RemoveProviderHooks(string(provider.Muse), path)
+	if err != nil || len(removed) != 0 {
+		t.Fatalf("RemoveProviderHooks = %v, %v; want nothing removed", removed, err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != body {
+		t.Fatalf("settings changed:\n%s", got)
+	}
+}
+
+// TestMuseInstallerRefusesUntilBuilt `init --provider muse` must fail loudly
+// rather than half-install.
+func TestMuseInstallerRefusesUntilBuilt(t *testing.T) {
+	inst, err := providers.Lookup(string(provider.Muse))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.Install(provider.CredentialRef{}); err == nil {
+		t.Fatal("Muse installer accepted an install")
 	}
 }

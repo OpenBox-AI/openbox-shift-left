@@ -129,6 +129,8 @@ func (a *app) runTelemetry(args []string) int {
 	ccSweeper := hookflow.Sweeper{Spool: ccHookSpool, Provider: telemetrySpoolProvider}
 	codexHookSpool := hookflow.Spool{Dir: laneSpoolDir("codex-spool", logger)}
 	codexSweeper := hookflow.Sweeper{Spool: codexHookSpool, Provider: string(provider.Codex)}
+	museHookSpool := hookflow.Spool{Dir: laneSpoolDir("muse-spool", logger)}
+	museSweeper := hookflow.Sweeper{Spool: museHookSpool, Provider: string(provider.Muse)}
 
 	settingsPath := a.laneSettingsPath(*settings)
 	// electedFn, not a second copy: hand-writing it is how the three diverge.
@@ -188,6 +190,7 @@ func (a *app) runTelemetry(args []string) int {
 
 	go ccSweeper.Run(ctx, logger)
 	go codexSweeper.Run(ctx, logger)
+	go museSweeper.Run(ctx, logger)
 	go runTraceSweeps(ctx, logger)
 	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
 	go startTokenWarmers(ctx, logger)

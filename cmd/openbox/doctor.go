@@ -962,27 +962,28 @@ func (a *app) reportSpool() {
 		fmt.Fprintf(a.stdout, "  flusher log  %s\n", spool.FlusherLogPath())
 	}
 
-	a.reportCodexSpool(spool.Dir)
+	a.reportProviderSpool(provider.Codex, spool.Dir)
+	a.reportProviderSpool(provider.Muse, spool.Dir)
 }
 
-// reportCodexSpool is the additive half of the spool section: a Codex-only
-// machine spools to "codex-spool", never "cc-spool", so the block above --
-// reading only the cc-spool directory -- reports a healthy empty queue while
-// a real backlog waits in a directory it never looked at. It renders
-// nothing, not even a directory row, when Codex's resolved spool path
-// matches ccDir (OPENBOX_SPOOL_DIR overrides the whole path for every
-// provider, so both resolve to the same directory; comparing resolved paths
-// keeps that machine from double-counting its own backlog) or when Codex's
-// spool has nothing waiting or discarded -- so a Claude-Code-only machine's
-// output stays byte-identical to before this existed.
-func (a *app) reportCodexSpool(ccDir string) {
-	codexSpool := hookflow.Spool{Dir: providers.CodexSpoolDir()}
-	if filepath.Clean(codexSpool.Dir) == filepath.Clean(ccDir) {
+// reportProviderSpool is the additive half of the spool section: a Codex- or
+// Muse-only machine spools to its own directory, never "cc-spool", so the
+// block above -- reading only the cc-spool directory -- reports a healthy
+// empty queue while a real backlog waits in a directory it never looked at.
+// It renders nothing, not even a directory row, when the provider's resolved
+// spool path matches ccDir (OPENBOX_SPOOL_DIR overrides the whole path for
+// every provider, so all resolve to the same directory; comparing resolved
+// paths keeps that machine from double-counting its own backlog) or when
+// that spool has nothing waiting or discarded -- so a Claude-Code-only
+// machine's output stays byte-identical to before this existed.
+func (a *app) reportProviderSpool(name provider.Name, ccDir string) {
+	ps := hookflow.Spool{Dir: providers.SpoolDirFor(string(name))}
+	if ps.Dir == "" || filepath.Clean(ps.Dir) == filepath.Clean(ccDir) {
 		return
 	}
 
-	backlog := codexSpool.BacklogCount()
-	discarded := codexSpool.DiscardedCount()
+	backlog := ps.BacklogCount()
+	discarded := ps.DiscardedCount()
 	if backlog == 0 && discarded == 0 {
 		return
 	}
@@ -990,20 +991,20 @@ func (a *app) reportCodexSpool(ccDir string) {
 	// The row label names the owning provider (constraint: the remediation
 	// must say who owns a non-zero backlog), mirroring how reportIdentities and
 	// reportStoreReachability label multi-provider rows above.
-	a.row(string(provider.Codex), "%s", codexSpool.Dir)
+	a.row(string(name), "%s", ps.Dir)
 	switch {
 	case backlog == 0:
 		a.row("", "waiting 0; delivery is self-triggering, so an empty queue is the healthy state")
 	default:
-		a.row("", "waiting %d event(s), of which %d are in carry-over files from a failed delivery.", backlog, codexSpool.UndeliveredCount())
-		a.row("", "A lane daemon sweeps every %s; `openbox hook %s flush` does it now.", hookflow.DefaultSweepInterval, provider.Codex)
+		a.row("", "waiting %d event(s), of which %d are in carry-over files from a failed delivery.", backlog, ps.UndeliveredCount())
+		a.row("", "A lane daemon sweeps every %s; `openbox hook %s flush` does it now.", hookflow.DefaultSweepInterval, name)
 	}
 	if discarded > 0 {
 		a.row("", "DISCARDED at least %d event(s): core did not accept their one delivery", discarded)
 		a.row("", "attempt, or they passed the %d-day retention age unattempted. Recorded in %s.",
-			int(hookflow.RetireSpoolAfter.Hours()/24), codexSpool.DiscardPath())
+			int(hookflow.RetireSpoolAfter.Hours()/24), ps.DiscardPath())
 	}
-	fmt.Fprintf(a.stdout, "  flusher log  %s\n", codexSpool.FlusherLogPath())
+	fmt.Fprintf(a.stdout, "  flusher log  %s\n", ps.FlusherLogPath())
 }
 
 // reportCoverage answers what absence cannot; docs/coverage.md §1b.

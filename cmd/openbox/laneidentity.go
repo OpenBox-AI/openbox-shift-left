@@ -116,6 +116,7 @@ func warnFn(warn func(format string, args ...any)) client.Logger {
 var providerSpoolSubdir = map[string]string{
 	string(provider.ClaudeCode): "cc-spool",
 	string(provider.Codex):      "codex-spool",
+	string(provider.Muse):       "muse-spool",
 }
 
 // laneSpoolDir resolves one provider's own spool directory for a lane

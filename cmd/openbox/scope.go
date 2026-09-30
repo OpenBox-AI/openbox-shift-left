@@ -85,6 +85,15 @@ func (a *app) printGovernedScope(o devinit.Options) {
 		a.printHookBlockNotice()
 		return
 	}
+	if o.Provider == "muse" {
+		fmt.Fprintf(a.stdout, "\nGoverned: EVERY MUSE SESSION on this machine (user-wide hooks)\n")
+		a.row("hooks", "%s", providers.MuseSettingsPath())
+		a.printPosture(o)
+		// Muse reads settings.json at session start; whether an edit reaches a
+		// running session is undocumented, so promise only the safe claim.
+		a.row("restart", "open Muse sessions, so they load the new hooks")
+		return
+	}
 
 	fmt.Fprintf(a.stdout, "\nGoverned: EVERY SESSION on this machine, in any directory\n")
 	a.row("hooks", "%s", providers.ClaudeUserSettingsPath())

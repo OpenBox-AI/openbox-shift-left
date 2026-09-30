@@ -35,7 +35,7 @@ func TestTelemetryCommandActuallyRecords(t *testing.T) {
 	fake := fakecore.New(t, fakecore.Script{})
 	t.Setenv(devconfig.EnvHome, t.TempDir())
 	// Every LaneQueue now appends into a real, provider-scoped spool dir
-	// (devconfig.SpoolDir/providers.CodexSpoolDir); without this, an
+	// (devconfig.SpoolDir/providers.SpoolDirFor); without this, an
 	// isolated OPENBOX_HOME alone would still resolve the developer's real
 	// spool (SpoolDir does not consult OPENBOX_HOME at all).
 	t.Setenv(devconfig.EnvSpoolRoot, t.TempDir())

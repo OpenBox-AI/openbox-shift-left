@@ -11,6 +11,7 @@ import (
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/internal/adapters/claude-code"
 	codex "github.com/openbox-ai/openbox-shift-left/internal/adapters/codex"
+	muse "github.com/openbox-ai/openbox-shift-left/internal/adapters/muse"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
@@ -21,6 +22,8 @@ func Engine(name string) (provider.HookEngine, error) {
 		return claudecode.Engine{}, nil
 	case provider.Codex:
 		return codex.Engine{}, nil
+	case provider.Muse:
+		return muse.Engine{}, nil
 	default:
 		return nil, unknownProvider(name)
 	}
@@ -69,6 +72,12 @@ func Lookup(name string) (provider.Installer, error) {
 			inst.EngineBinary = exe
 		}
 		return inst, nil
+	case provider.Muse:
+		inst := muse.Installer{}
+		if exe, err := os.Executable(); err == nil {
+			inst.EngineBinary = exe
+		}
+		return inst, nil
 	default:
 		return nil, unknownProvider(name)
 	}
@@ -89,6 +98,8 @@ func RemoveProviderHooks(name, settingsPath string) ([]string, error) {
 		return claudecode.RemoveLocalHooks(settingsPath)
 	case provider.Codex:
 		return codex.RemoveHooks(settingsPath)
+	case provider.Muse:
+		return muse.RemoveHooks(settingsPath)
 	default:
 		return nil, unknownProvider(name)
 	}
@@ -138,7 +149,8 @@ func RestoreProviderSettings(name, settingsPath, homeDir string) (SettingsRestor
 			Present:  r.Present,
 			Value:    r.Value,
 		}, err
-	case provider.Codex:
+	case provider.Codex, provider.Muse:
+		// Neither forces a bare settings key at install time.
 		return SettingsRestoreResult{}, nil
 	default:
 		return SettingsRestoreResult{}, unknownProvider(name)
@@ -154,9 +166,10 @@ func ClaudePriorSettingsPath(homeDir string) string { return claudecode.PriorSet
 // uninstall can look where the install wrote without importing the adapter.
 func CodexHooksPath() string { return codex.DefaultHooksPath() }
 
-// CodexSpoolDir is where the Codex adapter spools events before flush, so
-// doctor can report its backlog without importing the adapter.
-func CodexSpoolDir() string { return codex.DefaultSpoolDir() }
+// MuseSettingsPath is Muse's user-wide settings file, where an install
+// registers its hooks, so uninstall and doctor can look there without
+// importing the adapter.
+func MuseSettingsPath() string { return muse.SettingsPath() }
 
 // SpoolDirFor is the spool directory the named provider's adapter writes to,
 // reusing that adapter's own DefaultSpoolDir (which honours OPENBOX_SPOOL_DIR)
@@ -170,6 +183,8 @@ func SpoolDirFor(name string) string {
 		return claudecode.DefaultSpoolDir()
 	case provider.Codex:
 		return codex.DefaultSpoolDir()
+	case provider.Muse:
+		return muse.DefaultSpoolDir()
 	default:
 		return ""
 	}
@@ -188,7 +203,7 @@ func SpoolDirFor(name string) string {
 func OwnedSpoolDirs() []string {
 	seen := map[string]bool{}
 	var dirs []string
-	for _, dir := range []string{claudecode.DefaultSpoolDir(), codex.DefaultSpoolDir()} {
+	for _, dir := range []string{claudecode.DefaultSpoolDir(), codex.DefaultSpoolDir(), muse.DefaultSpoolDir()} {
 		if dir == "" {
 			continue
 		}
@@ -246,6 +261,8 @@ func HookMarkers(name string) []string {
 		return claudecode.HookInvocationMarkers()
 	case provider.Codex:
 		return codex.HookInvocationMarkers()
+	case provider.Muse:
+		return muse.HookInvocationMarkers()
 	default:
 		return nil
 	}

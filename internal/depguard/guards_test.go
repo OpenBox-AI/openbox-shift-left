@@ -314,6 +314,10 @@ func TestAdaptersDoNotImportEachOther(t *testing.T) {
 	for _, pair := range []struct{ subject, forbidden string }{
 		{"internal/adapters/claude-code", "internal/adapters/codex"},
 		{"internal/adapters/codex", "internal/adapters/claude-code"},
+		{"internal/adapters/claude-code", "internal/adapters/muse"},
+		{"internal/adapters/codex", "internal/adapters/muse"},
+		{"internal/adapters/muse", "internal/adapters/claude-code"},
+		{"internal/adapters/muse", "internal/adapters/codex"},
 	} {
 		t.Run(pair.subject, func(t *testing.T) {
 			self := repoPrefix + "/" + pair.subject

@@ -163,3 +163,20 @@ func TestBareInitEnforcesWithoutWritingTheField(t *testing.T) {
 		t.Errorf("the install must report the enforcing posture:\n%s", out.String())
 	}
 }
+
+// TestPrintGovernedScopeNamesMuse a Muse install governs every Muse session
+// through its user-wide settings file, and must name that file.
+func TestPrintGovernedScopeNamesMuse(t *testing.T) {
+	isolateHome(t)
+	a, out, _ := testApp(nil)
+	a.printGovernedScope(optionsFor("muse", ""))
+	s := out.String()
+	for _, want := range []string{"EVERY MUSE SESSION", providers.MuseSettingsPath()} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the Muse scope statement does not say %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "EVERY SESSION on this machine, in any directory") {
+		t.Errorf("Muse fell through to the Claude Code statement:\n%s", s)
+	}
+}

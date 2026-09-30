@@ -85,6 +85,8 @@ func (a *app) runTransport(args []string) int {
 	ccSweeper := hookflow.Sweeper{Spool: ccHookSpool, Provider: transportSpoolProvider}
 	codexHookSpool := hookflow.Spool{Dir: laneSpoolDir("codex-spool", logger)}
 	codexSweeper := hookflow.Sweeper{Spool: codexHookSpool, Provider: string(provider.Codex)}
+	museHookSpool := hookflow.Spool{Dir: laneSpoolDir("muse-spool", logger)}
+	museSweeper := hookflow.Sweeper{Spool: museHookSpool, Provider: string(provider.Muse)}
 
 	// Pre-resolved ONCE at startup, never per record. The transport/proxy lane
 	// has only one producer today -- Codex's proxy arm is the system PAC, not
@@ -181,6 +183,7 @@ func (a *app) runTransport(args []string) int {
 
 	go ccSweeper.Run(ctx, logger)
 	go codexSweeper.Run(ctx, logger)
+	go museSweeper.Run(ctx, logger)
 	go runTraceSweeps(ctx, logger)
 	go reportDeliveryStatusPeriodically(ctx, statusPersister, dropped)
 	go startTokenWarmers(ctx, logger)

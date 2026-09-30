@@ -8,7 +8,7 @@ import (
 
 func TestSupportedIsSortedAndComplete(t *testing.T) {
 	got := Supported()
-	want := []string{"claude-code", "codex"}
+	want := []string{"claude-code", "codex", "muse"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("Supported() = %v, want %v", got, want)
 	}

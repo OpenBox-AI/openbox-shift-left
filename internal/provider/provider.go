@@ -1,5 +1,5 @@
 // Package provider is the shared SPI between the `openbox` CLI and the per-
-// tool adapters (Claude Code, Codex). Every recognized name has a built
+// tool adapters (Claude Code, Codex, Muse). Every recognized name has a built
 // adapter: there is no not-built state, no stub, and no predicate that could
 // only ever answer one way. An Installer receives only non-secret install-time
 // context (the DID, URLs and posture); it must never receive or embed a
@@ -15,6 +15,7 @@ type Name string
 const (
 	ClaudeCode Name = "claude-code"
 	Codex      Name = "codex"
+	Muse       Name = "muse"
 )
 
 // ErrUnknown means the provider name is not recognized at all.
@@ -66,5 +67,5 @@ type Installer interface {
 
 // Supported lists the recognized provider names, sorted.
 func Supported() []string {
-	return []string{string(ClaudeCode), string(Codex)}
+	return []string{string(ClaudeCode), string(Codex), string(Muse)}
 }

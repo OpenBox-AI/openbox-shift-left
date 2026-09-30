@@ -31,6 +31,8 @@ const (
 	ClaudeCode Provider = "claude-code"
 	// Codex is OpenAI's CLI tool.
 	Codex Provider = "codex"
+	// Muse is Meta's Muse Code CLI.
+	Muse Provider = "muse"
 )
 
 // Lane identifies which channel a carrier is read from. The three lanes this

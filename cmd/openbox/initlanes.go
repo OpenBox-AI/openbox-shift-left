@@ -19,7 +19,9 @@ import (
 // Code gets both lanes (telemetry via its own settings, transport as an
 // in-path relay of the Anthropic Messages API); Codex gets the telemetry
 // lane only -- it reads its own config.toml, and its proxy arm is the system
-// PAC, which installs nothing here.
+// PAC, which installs nothing here. Muse is hooks-only: no lane has been
+// shown to see its model calls (no documented OTel exporter, and no proof it
+// follows the system PAC or trusts the relay's CA), so it has none.
 func laneCapable(name string) bool {
 	switch provider.Name(name) {
 	case provider.ClaudeCode, provider.Codex:

@@ -259,13 +259,14 @@ func (inv uninstallInventory) empty() bool {
 func (a *app) uninstallInventory(home string) uninstallInventory {
 	inv := uninstallInventory{home: home}
 
-	// All four surfaces unconditionally, rather than branching on a detected
+	// Every surface unconditionally, rather than branching on a detected
 	// provider: a surface skipped because "this machine looks like Codex" is a
 	// hook that keeps firing after the command reports success.
 	for _, s := range []hookSurface{
 		{provider: string(provider.ClaudeCode), path: gatewayservice.SettingsPath(home), restoreSettings: true},
 		{provider: string(provider.ClaudeCode), path: filepath.Join(".claude", "settings.local.json")},
 		{provider: string(provider.Codex), path: providers.CodexHooksPath()},
+		{provider: string(provider.Muse), path: providers.MuseSettingsPath()},
 	} {
 		if abs, err := filepath.Abs(s.path); err == nil {
 			s.path = abs
