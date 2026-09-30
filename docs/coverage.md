@@ -16,23 +16,24 @@ mapping rules, see [the event contract](dev-event-contract.md) and
 authoritative per-provider profile; this document must agree with it. No other
 provider is implemented.
 
-**Muse Code is doc-derived.** Its adapter was built from Meta's published hook
-documentation (the hook-events reference and the 1.4.0 changelog). No Muse
-binary was available, so no payload or answer shape here has been observed on a
-live session: the fixtures are recorded from the documentation, and every Muse
-claim below is at most E1 or E2 against those fixtures, never against Muse
-itself. `internal/adapters/muse/README.md` lists each guessed key.
+**Muse Code is partly observed.** Its adapter was built from Meta's published
+hook documentation (the hook-events reference and the 1.4.0 changelog), and its
+payload shapes were then corrected against scrubbed real captures of a Muse
+1.4.1 session, which the fixtures now are. Answer shapes Muse accepts (the
+`onFailure` JSON, a `PreLLMCall` block) have not been exercised against a
+binary, so every Muse claim below is at most E1 or E2, never against Muse
+itself. `internal/adapters/muse/README.md` lists what is still guessed.
 
 ## 1. Lifecycle coverage matrix
 
 | Contract type | Claude Code | Codex | Muse Code |
 |---|---|---|---|
-| `SessionStarted` | `SessionStart` hook | `SessionStart` hook | `SessionStart` hook; `source` `resume` or `clear` opens a new run |
+| `SessionStarted` | `SessionStart` hook | `SessionStart` hook | `SessionStart` hook; `source` `resume` opens a new run. Muse fires no `SessionStart` on resume or for a subagent (its own session id), so the first event of such a session opens the run |
 | `PromptSubmitted` | `UserPromptSubmit` hook | `UserPromptSubmit` hook | `UserPromptSubmit` hook |
 | `ToolCall` | `PreToolUse` hook | `PreToolUse` hook | `PreToolUse` hook, catch-all, MCP tools included |
 | `ToolResult` | `PostToolUse` hook | `PostToolUse` hook | `PostToolUse` (completed) or `PostToolUseFailure` (failed) |
 | `SessionEnded` | `SessionEnd` hook | `SessionEnd` hook | `SessionEnd` hook |
-| `SubagentStarted` | `SubagentStart` hook | `SubagentStart` hook | `SubagentStart` hook |
+| `SubagentStarted` | `SubagentStart` hook | `SubagentStart` hook | none: a Muse subagent is a session of its own, so `SubagentStart` / `SubagentStop` are that session's `SessionStarted` / `SessionEnded` |
 | `PermissionRequest` | `PermissionRequest` hook; content-gated; no `tool_use_id`, so it never correlates to the tool call it is about | `PermissionRequest` hook; content-gated | `PermissionRequest` hook; evaluated only so it can refuse, never to grant; no `tool_use_id` |
 | `PermissionDenied` | `PermissionDenied` hook; only auto-mode classifier denials — a static deny rule or a manual denial never fires it | none | none |
 | `APIError` | `StopFailure` hook | none | `StopFailure` hook; no error text is bound |
@@ -64,14 +65,16 @@ A few of those hooks buy less than they look like:
   not a gap.
 
 Muse Code documents eighteen hook events; the adapter installs a handler for
-the eleven that map to a contract type (`SessionStart`, `UserPromptSubmit`,
+the twelve that map to a contract type (`SessionStart`, `UserPromptSubmit`,
 `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PostToolUseFailure`,
-`SubagentStart`, `StopFailure`, `SessionEnd`, `PreLLMCall`, `PostLLMCall`).
+`SubagentStart`, `SubagentStop`, `StopFailure`, `SessionEnd`, `PreLLMCall`,
+`PostLLMCall`).
 `Stop` runs only the session-log reconciler (§3) and reports nothing. `Stop`'s
 turn boundary carries no usage, so Muse sends no per-turn token counts or
-reply text. `SubagentStop`, `PreCompact`, `PostCompact`, `Notification`,
+reply text. `PreCompact`, `PostCompact`, `Notification`,
 `PostToolBatch` and `Interrupt` have no contract type and are not installed;
-`Interrupt` in particular never fabricates a completion.
+`Interrupt` in particular never fabricates a completion (and Muse refuses a
+synchronous `Interrupt` handler, which would have to be `async: true`).
 
 Codex documents about a dozen hook events in total; the ones not listed above
 are not wired. Its own `tool.status` is not reported at all: one `PostToolUse`
@@ -270,8 +273,10 @@ These are documented gaps, not missing work:
     action with no gate record. Nothing is blocked or sent to the platform;
     `openbox doctor` shows the count.
 17. **Muse Code: commits carry the trailer but no `CommitCreated`.** The
-    attestation reads an environment marker per tool, and Muse documents none,
-    so no commit is attributed to a Muse session.
+    attestation reads an environment marker per tool. A Muse tool call's shell
+    carries `MUSE_TOOL_USE_ID` and `MUSE_RELEASE_INFO` but no session id, so no
+    commit is attributed to a Muse session (and it never attests as Claude Code,
+    whose markers it lacks).
 
 ## 4. Enforcement posture
 

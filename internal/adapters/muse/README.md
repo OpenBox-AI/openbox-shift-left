@@ -8,13 +8,12 @@ follows the Claude Code and Codex adapters by pattern. Nothing is imported from
 either: `internal/depguard` forbids adapter-to-adapter imports, and shared code
 lives in `adapters/common/hookflow`.
 
-**Status: doc-derived, unverified on a Muse binary.** Every payload shape and
-answer shape here comes from Muse's published hook documentation (Muse Code SDK
-hook-events reference, verified by Meta on 1.3.0, and the 1.4.0 changelog). No
-Muse binary was available when this was written, so none of it was measured on a
-live session. The fixtures in `testdata/` are doc-derived and `testdata/README.md`
-lists every guessed key. Replace them with scrubbed captures from a real session
-before treating any of it as ground truth.
+**Status: read off Muse 1.4.1 captures, partly unverified.** The payload shapes
+and the fixtures in `testdata/` come from scrubbed real payloads of a Muse 1.4.1
+session (`testdata/README.md` says which keys were observed). What is still
+guessed is listed under [Unverified](#unverified-and-what-would-settle-it); the
+answer shapes Muse accepts (the `onFailure` JSON, what a `PreLLMCall` block looks
+like) have not been exercised against a binary that then refused one.
 
 **The installer** (`installer.go`) merges OpenBox's handlers into
 `~/.config/muse/settings.json`; see [Installing](#installing) below. `openbox
@@ -55,18 +54,18 @@ journal line are decoded; its content is never copied or logged.
 
 | Muse hook | Contract type | Gated | Answer |
 |---|---|---|---|
-| `SessionStart` | `SessionStarted`; `source` `resume` or `clear` opens a new run (continue-as-new) | no | none |
+| `SessionStart` | `SessionStarted`; `source` `resume` opens a new run (continue-as-new) | no | none |
 | `UserPromptSubmit` | `PromptSubmitted` | yes | `{"decision":"block","reason":...}` |
 | `PreToolUse` | `ToolCall` (started) | yes | `hookSpecificOutput{permissionDecision:"deny",...}`, or `updatedInput` alone |
 | `PermissionRequest` | `PermissionRequest` (a record, never the gate) | yes | `hookSpecificOutput.decision{behavior:"deny",message}` |
 | `PostToolUse` / `PostToolUseFailure` | `ToolResult` completed / failed | no | none |
-| `SubagentStart` | `SubagentStarted` | no | none |
+| `SubagentStart` | `SessionStarted` of the child's own session (`agent_id` = `subagent_id`, `agent_type` = `subagent`) | no | none |
 | `StopFailure` | `APIError` (no error text is bound) | no | none |
 | `SessionEnd` | `SessionEnded`, then an inline spool drain | no | none |
 | `PreLLMCall` | `ModelCallRequested` (started, evaluated) | yes | `{"decision":"block","reason":...}` |
 | `PostLLMCall` | `ModelCallFinished` (completed, metadata only) | no | none |
 | `Stop` | nothing reported: no usage is taken from a hook payload, and no completion is fabricated. Runs the session-log reconciler (see below) | no | none |
-| `SubagentStop` | nothing; never installed | - | - |
+| `SubagentStop` | `SessionEnded` of the child's own session, then an inline spool drain | no | none |
 | `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | nothing: no contract type. Never installed; one that runs anyway is a no-op | - | - |
 
 ## The model-call gate
@@ -188,9 +187,46 @@ An unconfigured machine (no identity) is governance inactive, not a fault: the
 hook logs and exits 0, as the other adapters do. A delivery failure denies only
 its own call and never latches the run; only a real HALT verdict latches.
 
+## Run lifecycle
+
+Muse gives no reliable lifecycle to hang a run on, so `runlifecycle.go` keeps one
+small record per session id (under the spool's `lifecycle/`, locked per session)
+saying which run the session is on and whether `SessionEnd` or `SubagentStop`
+sealed it:
+
+- **`muse resume` fires no `SessionStart`.** It sends `UserPromptSubmit` and the
+  rest under the old session id after that session already got `SessionEnd`. The
+  first event of a session whose run was sealed opens a new run (continue-as-new,
+  the same as a Claude Code `SessionStart` `source=resume`) and its
+  `SessionStarted` is spooled before the event. The halt latch is keyed by run,
+  so the resumed session starts unlatched.
+- **A subagent runs under its own session id** (`SubagentStart`/`SubagentStop`
+  carry `session_id == child_session_id == turn_id` and a `subagent_id`, never a
+  parent id), so it is a session of its own and cannot be linked to its parent.
+  Any event of a session id with no known run opens it first. Nothing is skipped
+  by `subagent_id`: a subagent's tool and model calls are gated like any other.
+
 ## Unverified, and what would settle it
 
-Guessed by the installer and doctor (Muse documents none of them by name):
+Observed on Muse 1.4.1 and no longer guesses: native tool names (`bash`,
+`read_file`, `write_file`, `edit_file`, ...) and their `tool_input` keys; the
+`SessionStart` `source` key (`startup`, `clear`; a `clear` carries a new session
+id); subagent sessions under their own ids; resume firing no `SessionStart`; the
+load probe printing `Hooks: N runnable · M warnings` only when at least one
+warning exists (a clean load prints nothing, and `--json` has no count), so
+doctor believes a silent probe only once a muse `hook.in` record appears in the
+local trace after the probe began; `muse config status` printing
+`plane=... source_class=... state=...` source lines (and `muse config validate`
+needing `--plane <defaults|policy> --file <path>`, so doctor does not call it);
+a Muse tool call's shell carrying `MUSE_TOOL_USE_ID`, `MUSE_RELEASE_INFO` and
+`CLAUDE_CODE_TOOL_USE_ID` but not `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` or any
+session id, so a Muse commit keeps its trailer and emits no CommitCreated
+(`cmd/openbox/attest.go`); Muse refusing a synchronous `Interrupt` handler (it
+must be `async: true`, which is one more reason the installer registers none); an
+empty stdin on a gated event (seen on `PreLLMCall` during `muse exec` teardown)
+being refused, never latched.
+
+Still guessed by the installer and doctor (Muse documents none of them by name):
 
 - The `onFailure` key and its shape: a nested handler object
   (`{"type","command","timeout"}`). The 1.4.0 changelog names the feature, not
@@ -201,18 +237,17 @@ Guessed by the installer and doctor (Muse documents none of them by name):
   and be split the way a shell would; the Claude Code and Codex installers rely on
   the same.
 - `muse --version` printing a `major.minor.patch` token.
-- The load probe: `muse exec --provider echo --trust-workspace "..."` printing
-  `Hooks: N runnable · M warnings` (documented in prose only), making no model call,
-  and being a governed session whose hooks run and report.
-- `muse config validate` exiting 0, 4 or 1 (documented), its arguments
-  (none passed), and how `muse config status` spells "managed hook lane
-  required" (`doctormuse.go` matches a pattern and otherwise says `unknown`).
+- Whether the echo probe (`muse exec --provider echo --trust-workspace "..."`)
+  makes no model call, and is a governed session whose hooks run and report.
+- What a present policy source's `state` reads (only `absent` was observed), and
+  how a policy would spell "managed hook lane required" (`doctormuse.go` matches
+  a pattern and otherwise says `unknown`).
 - The local-tracing hook log path and its `hook.execution.terminal` records
   (one third-party source); doctor says `unverified` whenever it is absent.
-- The managed policy's keys in `deployments/managed/muse/policy.json`, above
-  all the name for "managed lane required" and the values of `approval_modes`.
-- That Muse commits carry no marker: `cmd/openbox/attest.go` has no Muse arm,
-  so a commit Muse makes keeps its trailer and emits no CommitCreated.
+- The managed policy's setting keys in `deployments/managed/muse/policy.json`
+  (the `schema_version` envelope is verified), above all the name for "managed
+  lane required" and the values of `approval_modes`: run
+  `muse config validate --plane policy --file policy.json` before deploying.
 
 - Whether an MCP call fires `PreToolUse` (catch-all install is the plan).
 - The exact `onFailure` JSON, whether invalid output triggers it on 1.4.0.
@@ -221,12 +256,7 @@ Guessed by the installer and doctor (Muse documents none of them by name):
   call is sent.
 - Whether `updatedInput` without a `permissionDecision` is accepted on
   `PreToolUse`; if not, the answer is discarded and the write proceeds unredacted.
-- Whether `/clear` keeps the session id (either way the new run is unlatched).
-- Native tool names beyond `read_file`, `write_file` and `edit_file`, and every
-  `tool_input` key. `builtinTools` and `contentFieldKeys` list the plausible
-  ones, and a fixture tool missing from the table fails a test.
-- `PostLLMCall`'s `status` and `error` value sets, and the `usage` inner keys.
-- Muse's shell-tool environment, so no commit is attributed to a Muse session.
+- `PostLLMCall`'s `status` and `error` value sets.
 
 - The session journal: its location
   (`~/.local/share/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl`, subagents
@@ -234,9 +264,8 @@ Guessed by the installer and doctor (Muse documents none of them by name):
   every field the reconciler reads (`type`, `timestamp`, `tool_name`, optional
   `tool_use_id`, `seq`) come from research, not a binary
   (`testdata/session-jsonl-sample.jsonl`). A line that does not match stops the
-  pass and doctor says `unverified`. Also unknown: whether a subagent's hooks carry
-  the parent's or their own session id (the ledger is checked under both), and
-  whether a denied call writes an intent at all.
+  pass and doctor says `unverified`. Also unknown: whether a denied call writes an
+  intent at all.
 
 ## Files
 
@@ -248,6 +277,7 @@ Guessed by the installer and doctor (Muse documents none of them by name):
 | `outputcontract.go` | the four closed answers, the caps |
 | `promptgate.go`, `permissiongate.go`, `enforcetarget.go`, `enforce.go`, `enforceevaluate.go` | gate targets and the evaluator |
 | `hookrun.go` | `RunHook`: the gated and observed paths, the inline drain |
+| `runlifecycle.go` | the per-session run record: resume and subagent sessions open a run before their first event |
 | `usage.go` | usage and trace context, local trace only |
 | `sessionlog.go`, `reconcile.go` | the session-journal reader with its cursor, the gate ledger, the join and the `evidence.gap` findings |
 | `engine.go` | `Engine`, `FaultExitCode`, the ceilings (Gating 30s, Other 5s) |

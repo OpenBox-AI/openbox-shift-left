@@ -98,23 +98,25 @@ Built by `wireTypeFor` in `internal/client/payload.go`.
 ### Muse Code hooks
 
 Muse's hook stdin is Claude Code-shaped; `internal/adapters/muse/mapper.go`
-maps it onto the same contract. The shapes are doc-derived and unverified on a
-Muse binary (see [coverage.md](coverage.md)).
+maps it onto the same contract. The shapes were read off Muse 1.4.1 captures
+(see [coverage.md](coverage.md)); a subagent is a session of its own, and Muse
+fires no `SessionStart` on resume.
 
 | Muse hook | Dev `event_type` | Gated | Note |
 |---|---|---|---|
-| `SessionStart` | `SessionStarted` | no | `source` `resume` or `clear` opens a new run |
+| `SessionStart` | `SessionStarted` | no | `source` `resume` opens a new run; a resumed session (no `SessionStart` at all) gets one on its first event |
 | `UserPromptSubmit` | `PromptSubmitted` | yes | refusal is `decision: block` |
 | `PreToolUse` | `ToolCall` | yes | `mcp__<server>__<tool>` names are MCP tools; paired by `tool_use_id` |
 | `PostToolUse` / `PostToolUseFailure` | `ToolResult` | no | `completed` / `failed` |
 | `PermissionRequest` | `PermissionRequest` | yes | evaluated to refuse only; no `tool_use_id` |
-| `SubagentStart` | `SubagentStarted` | no | |
+| `SubagentStart` | `SessionStarted` | no | the subagent's own session id; no parent id exists |
+| `SubagentStop` | `SessionEnded` | no | the subagent's own session id |
 | `StopFailure` | `APIError` | no | no error text bound |
 | `SessionEnd` | `SessionEnded` | no | |
 | `PreLLMCall` | `ModelCallRequested` | yes | a model-call gate, see below |
 | `PostLLMCall` | `ModelCallFinished` | no | metadata only |
 | `Stop` | none | no | runs the session-log reconciler; no turn, no usage |
-| `SubagentStop`, `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | none | no | not installed |
+| `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | none | no | not installed |
 
 Muse sends no `TurnStarted`/`TurnCompleted`: no hook payload's usage reaches
 the wire, so a Muse session has no `llm_completion` rows.

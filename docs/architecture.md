@@ -310,9 +310,9 @@ provider credential. Do not widen an allowlist just to make an import pass.
 - **Without managed settings, the developer can remove the hooks.** For Codex,
   hooks cannot be mandated at all; the shipped managed config pins approval
   and sandbox modes instead ([`deployments/managed/`](../deployments/managed/)).
-- **Muse Code's hooks are doc-derived, and its runtime fails open.** No Muse
-  binary was available when the adapter was written, so its payload and answer
-  shapes are unverified on a live session. A hook that crashes, times out or
+- **Muse Code's runtime fails open.** Its payload shapes were read off Muse
+  1.4.1 captures, but the answer shapes it accepts are unverified against a
+  binary. A hook that crashes, times out or
   answers invalidly lets the action proceed; a deny-only `onFailure` successor
   and a non-zero exit on a gated crash backstop that. A payload over 256 KiB
   is never delivered to a hook: that gap is detected from Muse's own session
