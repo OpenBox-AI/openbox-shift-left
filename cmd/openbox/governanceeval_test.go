@@ -293,6 +293,9 @@ func evalEnv(t *testing.T, fake *fakecore.Server, dir, spool string, p fakecore.
 	t.Helper()
 	t.Setenv(devconfig.EnvHome, filepath.Join(dir, "home"))
 	t.Setenv("HOME", filepath.Join(dir, "home"))
+	// A Muse SessionStart runs `muse --version` when one is on PATH, and that
+	// binary takes an auth lock under its config home: keep it in the case.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "xdg-config"))
 	t.Setenv(devconfig.EnvConfigPath, filepath.Join(dir, "none.json"))
 	t.Setenv(devconfig.EnvSpoolDir, spool)
 	t.Setenv("OPENBOX_SESSION_DIR", filepath.Join(dir, "sessions"))

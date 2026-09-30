@@ -21,12 +21,15 @@ import (
 // the same behaviour as any machine with no credentials. That degradation is
 // why the no-marker branch has to be real and tested rather than a fallback.
 //
-// There is no Muse arm. Muse documents no environment marker that a commit made
-// from its shell tool can be told apart by: its hooks run with a cleared
-// environment and carry no session id, and what its shell tool passes on is not
-// documented either. A commit Muse makes therefore keeps its trailer and
-// produces no CommitCreated event, the same as any tool that leaves no marker.
-// Add the arm here, and a test beside it, only once a real marker is observed.
+// There is no Muse arm. A Muse tool call's shell (observed on 1.4.1) carries
+// MUSE_TOOL_USE_ID and MUSE_RELEASE_INFO, so a Muse marker exists, plus
+// CLAUDE_CODE_TOOL_USE_ID as a compatibility alias, but NOT CLAUDECODE or
+// CLAUDE_CODE_ENTRYPOINT (so a Muse commit never attests as claude-code) and no
+// session-id variable at all. Its hooks run with a cleared environment too. A
+// marker without a session id cannot tie a commit to the governed session, so a
+// Muse commit keeps its trailer and produces no CommitCreated, the same as any
+// tool that leaves no session marker. Add the arm here, and a test beside it,
+// only once a variable that names the session is observed.
 func attestProvider(getenv func(string) string) string {
 	if getenv == nil {
 		return ""

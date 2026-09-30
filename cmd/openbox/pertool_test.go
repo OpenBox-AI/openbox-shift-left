@@ -297,6 +297,10 @@ func TestAttestProviderMarkerRule(t *testing.T) {
 		{"neither", map[string]string{}, ""},
 		{"empty values are not markers", map[string]string{obgit.EnvCodexThreadID: "", "CLAUDECODE": ""}, ""},
 		{"codex wins", map[string]string{obgit.EnvCodexThreadID: "th-1", "CLAUDECODE": "1"}, "codex"},
+		// What a Muse tool call's shell carries (1.4.1): its own markers and a
+		// Claude Code compat tool-use id, but neither CLAUDECODE nor
+		// CLAUDE_CODE_ENTRYPOINT. Claude Code's marker rule must not claim it.
+		{"muse tool call", map[string]string{"MUSE_TOOL_USE_ID": "call_1", "MUSE_RELEASE_INFO": "1.4.1", "CLAUDE_CODE_TOOL_USE_ID": "call_1"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := tc.env

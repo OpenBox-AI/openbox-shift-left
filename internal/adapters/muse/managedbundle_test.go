@@ -1,6 +1,7 @@
 package muse
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -74,6 +75,26 @@ func TestManagedPolicyIsJSONThatNamesItsOwnIntent(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("policy.json lacks %s", want)
 		}
+	}
+	// The envelope the real binary demands of an enterprise plane document: a
+	// schema version and the settings under their own key.
+	var doc struct {
+		SchemaVersion int            `json:"schema_version"`
+		Settings      map[string]any `json:"settings"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("policy.json does not decode: %v", err)
+	}
+	if doc.SchemaVersion != 1 || len(doc.Settings) == 0 {
+		t.Errorf("policy.json must be {\"schema_version\":1,\"settings\":{...}}, got version %d with %d settings", doc.SchemaVersion, len(doc.Settings))
+	}
+	if _, ok := doc.Settings["extensions"]; !ok {
+		t.Error("policy.json keeps its guessed keys under settings")
+	}
+	if readme, err := os.ReadFile(managedBundle + "README-mdm.md"); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(readme), "muse config validate --plane policy --file policy.json") {
+		t.Error("README-mdm.md does not tell the operator to validate the policy before deploying")
 	}
 	for _, credential := range []string{"KEY", "TOKEN", "SECRET"} {
 		if strings.Contains(strings.ToUpper(string(raw)), credential) {

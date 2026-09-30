@@ -45,12 +45,15 @@ after `hook muse` in every command and successor in `hooks.json`
 | `execution.allow_user_approval_override: false` | A user cannot widen that set. |
 | `extensions.hooks.allowed_env_vars` | The environment names a managed hook may receive. Muse clears a hook's environment; `OPENBOX_HOME` is listed so a non-default OpenBox home can reach it. **No credential goes here**, and Muse refuses provider credential names in it anyway. |
 
-**Every key above is unverified.** They come from Muse's 1.4.0 changelog, which
-names the members but has no reference page, and the file layout, the exact key
-for "managed lane required" and the value names in `approval_modes` are guesses.
-**Run `muse config validate` on the file before you roll it out** (exit 0 valid,
-4 valid with inactive members, 1 rejected), and fix the keys it rejects. Exit 4
-means a member did nothing.
+**The envelope is verified; the setting keys are not.** Muse 1.4.1 rejects a
+policy document with no `schema_version` (`enterprise_document_invalid:
+plane=policy reason=missing_schema_version`), so `policy.json` is
+`{"schema_version": 1, "settings": {...}}`. The keys inside `settings` come from
+Muse's 1.4.0 changelog, which names the members but has no reference page: the
+exact key for "managed lane required" and the value names in `approval_modes`
+are guesses. **Run `muse config validate --plane policy --file policy.json` on
+the file before you roll it out** and fix what it rejects (exit 0 valid, 4 valid
+with inactive members, 1 rejected; exit 4 means a member did nothing).
 
 Where Muse reads the policy and managed hooks from is documented for Windows
 only (`%ProgramFiles%\muse\`). On macOS and Linux the location is not
@@ -60,15 +63,20 @@ start) before deploying, and do not trust a path written here.
 ## Verify
 
 ```bash
-muse config validate
+muse config validate --plane policy --file policy.json
 muse config status
 openbox doctor
 ```
 
-`openbox doctor` runs both `muse config` commands and prints the exit code's
-meaning and whether the managed lane is required. It cannot see whether Muse
-actually loads the managed file; the `load probe` row counts runnable hooks, and
-on a machine with both a managed and a user registration it counts both.
+`muse config validate` checks one enterprise plane document (`--plane
+defaults|policy`), not `settings.json`. `muse config status` lists the four
+sources Muse reads (`plane=defaults|policy` by `source_class=system_file` or
+`macos_managed_preferences`) and whether each is present or absent. `openbox
+doctor` runs `muse config status` and reports, per source, whether a policy is
+present; it says "managed lane required: unknown" unless one is, because the
+status output does not say what a policy requires. It cannot see whether Muse
+actually loads the managed hooks file; the `load probe` row only confirms
+OpenBox's handlers ran.
 
 ## Open questions
 

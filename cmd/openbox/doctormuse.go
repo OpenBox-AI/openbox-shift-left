@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -25,16 +26,17 @@ import (
 // says. Every `muse` subprocess goes through providers.MuseRunner, so a test
 // scripts each answer and never reaches a real binary.
 //
-// Several Muse outputs parsed here are documented in prose but not verified on
-// a binary (the load probe's summary line, `muse config status`'s wording, the
-// local-tracing log); the parsers fail soft, to "unverified" or a warning,
-// never to a false "ok".
+// Muse 1.4.1 prints the load probe's `Hooks: N runnable · M warnings` line only
+// when there is a warning, and `muse config status` lists policy sources but
+// not what a policy requires. The local-tracing log is still documented by a
+// third party only; the parsers fail soft, to "unverified" or a warning, never
+// to a false "ok".
 
 // museProbeTimeout bounds the echo-provider load probe: a full muse start-up
 // plus every handler's process.
 var museProbeTimeout = 60 * time.Second
 
-// museConfigTimeout bounds `muse config status` and `muse config validate`.
+// museConfigTimeout bounds `muse config status`.
 var museConfigTimeout = 10 * time.Second
 
 // museLocalTracingDir is where Muse logs each hook run, as a third party
@@ -156,8 +158,10 @@ type museLoadCounts struct {
 var museHooksSummary = regexp.MustCompile(`Hooks:\s*(\d+)\s+runnable\D{1,8}(\d+)\s+warning`)
 
 // parseMuseLoadProbe reads `Hooks: N runnable · M warnings` from a probe's
-// output and the warning lines that name OpenBox. ok is false when no summary
-// line is present.
+// output, and the warning lines that name OpenBox. Muse 1.4.1 prints that line
+// ONLY when at least one hook warning exists; a clean load prints nothing, so
+// ok=false means "no warnings", never "unknown", and it is up to the caller to
+// confirm the handlers ran.
 func parseMuseLoadProbe(out string) (museLoadCounts, bool) {
 	var c museLoadCounts
 	found := false
@@ -179,7 +183,26 @@ func parseMuseLoadProbe(out string) (museLoadCounts, bool) {
 	return c, found
 }
 
-// 3. does Muse load the handlers: N runnable >= expected and no OpenBox warning.
+// museHookRanSince reports whether a muse hook invocation was recorded in the
+// local trace (a `hook.in` record, written by every `openbox hook muse` run
+// before it reads anything else) at or after since. It is how doctor knows the
+// handlers really ran during the probe, which a silent clean load cannot show.
+func museHookRanSince(since time.Time) bool {
+	recs, _, err := trace.ReadFiltered(trace.Dir(),
+		func(line []byte) bool {
+			return bytes.Contains(line, []byte(`"provider":"muse"`)) && bytes.Contains(line, []byte(`"`+trace.StageHookIn+`"`))
+		},
+		func(r trace.Record) bool {
+			return r.Provider == "muse" && r.Stage == trace.StageHookIn && !r.TS.Before(since)
+		})
+	return err == nil && len(recs) > 0
+}
+
+// 3. does Muse load the handlers, and do they run. A Hooks summary line (only
+// printed when a warning exists) is judged as before: a warning naming OpenBox
+// fails, fewer runnable than registered fails. No summary line with exit 0 is a
+// load with 0 warnings, and is then only believed once a muse hook invocation
+// shows up in the trace after the probe began.
 //
 // The probe is an echo-provider session: it makes no model call, but it is a
 // real governed session, so its hooks run and its events reach the control
@@ -206,6 +229,7 @@ func (a *app) reportMuseLoadProbe(v providers.MuseVersionCheck, audit providers.
 	defer os.RemoveAll(dir)
 	ctx, cancel := context.WithTimeout(context.Background(), museProbeTimeout)
 	defer cancel()
+	began := time.Now()
 	res, runErr := providers.MuseRunner(ctx, dir, "exec", "--provider", "echo", "--trust-workspace", "openbox doctor hook probe")
 	if runErr != nil {
 		a.museFinding("probe", "warning", label, "WARNING: the echo probe did not finish: %v", runErr)
@@ -213,16 +237,18 @@ func (a *app) reportMuseLoadProbe(v providers.MuseVersionCheck, audit providers.
 	}
 	counts, ok := parseMuseLoadProbe(string(res.Stderr) + "\n" + string(res.Stdout))
 	switch {
-	case !ok:
-		a.museFinding("probe", "warning", label, "WARNING: the echo probe (exit %d) printed no `Hooks: N runnable` summary, so the load could not be confirmed", res.ExitCode)
-	case len(counts.OpenBoxWarnings) > 0:
+	case res.ExitCode != 0 && !ok:
+		a.museFinding("probe", "warning", label, "WARNING: the echo probe exited %d without a `Hooks: N runnable` summary, so the load could not be confirmed", res.ExitCode)
+	case ok && len(counts.OpenBoxWarnings) > 0:
 		a.museFinding("probe", "fail", label, "FAIL: Muse loaded %d hooks and warned about OpenBox's: %s", counts.Runnable, counts.OpenBoxWarnings[0])
-	case counts.Runnable < audit.Expected:
+	case ok && counts.Runnable < audit.Expected:
 		a.museFinding("probe", "fail", label, "FAIL: Muse found %d runnable hooks, fewer than the %d OpenBox registered; some are not loading", counts.Runnable, audit.Expected)
-	case counts.Warnings > 0:
+	case ok && counts.Warnings > 0:
 		a.museFinding("probe", "warning", label, "WARNING: Muse found %d runnable hooks (%d expected) and %d warning(s), none naming OpenBox", counts.Runnable, audit.Expected, counts.Warnings)
+	case !museHookRanSince(began):
+		a.museFinding("probe", "warning", label, "WARNING: hooks did not run during the probe: Muse reported no hook warning, but no OpenBox hook invocation was recorded in the local trace after it began")
 	default:
-		a.museFinding("probe", "ok", label, "ok: Muse found %d runnable hooks (%d expected), 0 warnings. The probe is a model-free echo session and shows up as one session in the control plane", counts.Runnable, audit.Expected)
+		a.museFinding("probe", "ok", label, "ok: Muse loaded the hooks with 0 warnings and OpenBox's handlers ran during the probe. The probe is a model-free echo session and shows up as one session in the control plane")
 	}
 }
 
@@ -305,7 +331,9 @@ func readTail(path string, max int64) (string, error) {
 var museManagedLane = regexp.MustCompile(`(?i)managed[ _-]*hooks?[ _-]*(?:lane)?[ _-]*required\W{0,4}(true|yes|on|enabled|false|no|off|disabled)`)
 
 // parseMuseManagedLane reads whether the policy requires the managed hook
-// lane from `muse config status` output: "yes", "no" or "unknown".
+// lane from `muse config status` output: "yes", "no" or "unknown". Muse 1.4.1
+// prints no such line; the parse exists for a release that does, and answers
+// "unknown" otherwise.
 func parseMuseManagedLane(out string) string {
 	m := museManagedLane.FindStringSubmatch(out)
 	if m == nil {
@@ -318,8 +346,37 @@ func parseMuseManagedLane(out string) string {
 	return "no"
 }
 
-// 5. the org policy plane: `muse config validate` exit 0 valid, 4 valid with
-// inactive members, 1 rejected; `muse config status` for the managed lane.
+// museConfigSource is one `plane=... source_class=... state=...` line of
+// `muse config status`.
+type museConfigSource struct{ Plane, Class, State string }
+
+var museConfigSourceLine = regexp.MustCompile(`plane=(\S+)\s+source_class=(\S+)\s+state=(\S+)`)
+
+// parseMuseConfigStatus reads the source lines of `muse config status`:
+//
+//	Enterprise configuration status
+//	Generation: sha256:...
+//	Sources:
+//	  plane=policy source_class=system_file state=absent
+func parseMuseConfigStatus(out string) []museConfigSource {
+	var srcs []museConfigSource
+	for _, line := range strings.Split(out, "\n") {
+		if m := museConfigSourceLine.FindStringSubmatch(line); m != nil {
+			srcs = append(srcs, museConfigSource{Plane: m[1], Class: m[2], State: m[3]})
+		}
+	}
+	return srcs
+}
+
+// 5. the org policy plane, read from `muse config status`. `muse config
+// validate` needs `--plane` and `--file` and checks one enterprise document,
+// not the machine, so it is not called. The status output names each policy
+// source and whether it is present; it does not say what a policy requires, so
+// the managed lane is "unknown" unless a policy source is present, and then
+// only what a status line says. The only state observed on a binary is
+// `absent`; any other state is reported as Muse printed it, and one that names
+// an error is a FAIL, because a rejected policy can leave the managed lane
+// unenforced.
 func (a *app) reportMusePolicy(v providers.MuseVersionCheck) {
 	const label = "policy"
 	if v.State == providers.MuseVersionNotOnPath {
@@ -328,28 +385,53 @@ func (a *app) reportMusePolicy(v providers.MuseVersionCheck) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), museConfigTimeout)
 	defer cancel()
-	val, err := providers.MuseRunner(ctx, "", "config", "validate")
+	st, err := providers.MuseRunner(ctx, "", "config", "status")
 	if err != nil {
-		a.museFinding("policy", "warning", label, "WARNING: `muse config validate` did not finish: %v", err)
+		a.museFinding("policy", "warning", label, "WARNING: `muse config status` did not finish: %v", err)
 		return
 	}
+	out := string(st.Stdout) + "\n" + string(st.Stderr)
+	if st.ExitCode != 0 {
+		a.museFinding("policy", "warning", label, "WARNING: `muse config status` exited %d, so the policy plane could not be read. managed lane required: unknown", st.ExitCode)
+		return
+	}
+	var policy []museConfigSource
+	for _, src := range parseMuseConfigStatus(out) {
+		if src.Plane == "policy" {
+			policy = append(policy, src)
+		}
+	}
+	if len(policy) == 0 {
+		a.museFinding("policy", "unverified", label, "unverified: `muse config status` listed no policy source. managed lane required: unknown")
+		return
+	}
+	var parts []string
+	present, broken := false, false
+	for _, src := range policy {
+		parts = append(parts, fmt.Sprintf("%s %s", src.Class, src.State))
+		low := strings.ToLower(src.State)
+		if low != "absent" {
+			present = true
+		}
+		if strings.Contains(low, "invalid") || strings.Contains(low, "error") || strings.Contains(low, "reject") {
+			broken = true
+		}
+	}
 	lane := "unknown"
-	if st, stErr := providers.MuseRunner(ctx, "", "config", "status"); stErr == nil {
-		lane = parseMuseManagedLane(string(st.Stdout) + "\n" + string(st.Stderr))
+	if present {
+		lane = parseMuseManagedLane(out)
 	}
-	switch val.ExitCode {
-	case 0:
-		a.museFinding("policy", "ok", label, "ok: muse config validates. managed lane required: %s", lane)
-	case 4:
-		a.museFinding("policy", "warning", label, "WARNING: muse config is valid but has inactive members (exit 4). managed lane required: %s", lane)
-	case 1:
-		a.museFinding("policy", "fail", label, "FAIL: muse rejects its config (exit 1); a rejected policy can leave the managed hook lane unenforced. managed lane required: %s", lane)
+	switch {
+	case broken:
+		a.museFinding("policy", "fail", label, "FAIL: a Muse policy source is not valid (%s); a rejected policy can leave the managed hook lane unenforced. managed lane required: %s", strings.Join(parts, ", "), lane)
+	case present:
+		a.museFinding("policy", "ok", label, "ok: policy present (%s). managed lane required: %s", strings.Join(parts, ", "), lane)
+		if lane == "yes" {
+			a.row("", "a required managed lane is an org mandate; OpenBox's user-level hooks are a")
+			a.row("", "second registration, see deployments/managed/muse/README-mdm.md")
+		}
 	default:
-		a.museFinding("policy", "warning", label, "WARNING: `muse config validate` exited %d, which this doctor does not know. managed lane required: %s", val.ExitCode, lane)
-	}
-	if lane == "yes" {
-		a.row("", "a required managed lane is an org mandate; OpenBox's user-level hooks are a")
-		a.row("", "second registration, see deployments/managed/muse/README-mdm.md")
+		a.museFinding("policy", "ok", label, "ok: no policy present (%s). managed lane required: %s", strings.Join(parts, ", "), lane)
 	}
 }
 

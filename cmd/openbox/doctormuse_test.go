@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
@@ -16,13 +17,42 @@ import (
 
 // healthyMuse scripts a muse 1.4.0 whose hooks all load and whose policy is
 // clean; a test overrides one answer to reach each row's other states.
+//
+// Muse prints its `Hooks:` summary only when a hook warns, so a clean probe
+// prints nothing; `muse config status` lists the four enterprise sources.
 func healthyMuse() museOutputs {
 	return museOutputs{
 		"--version":            {Stdout: []byte("muse 1.4.0\n")},
-		"exec --provider echo": {Stderr: []byte("Hooks: 12 runnable · 0 warnings\n")},
-		"config validate":      {ExitCode: 0},
-		"config status":        {Stdout: []byte("managed hooks lane required: false\n")},
+		"exec --provider echo": {},
+		"config status":        {Stdout: []byte(absentPolicyStatus)},
 	}
+}
+
+const absentPolicyStatus = `Enterprise configuration status
+Generation: sha256:0000
+Sources:
+  plane=defaults source_class=system_file state=absent
+  plane=policy source_class=system_file state=absent
+  plane=defaults source_class=macos_managed_preferences state=absent
+  plane=policy source_class=macos_managed_preferences state=absent
+`
+
+// withProbedMuse is withMuseRunner for a muse whose hooks run: the echo probe
+// leaves the `hook.in` record an OpenBox handler writes when Muse invokes it.
+// The record goes to a scratch trace, so nothing reaches the developer's own.
+func withProbedMuse(t *testing.T, outputs museOutputs) *museCalls {
+	t.Helper()
+	calls := withMuseRunner(t, outputs)
+	evidenceTrace(t)
+	inner := providers.MuseRunner
+	providers.MuseRunner = func(ctx context.Context, dir string, args ...string) (providers.MuseRunResult, error) {
+		res, err := inner(ctx, dir, args...)
+		if err == nil && len(args) > 0 && args[0] == "exec" {
+			trace.Emit(trace.Record{Provider: "muse", SessionID: "probe", EventType: "SessionStart", Stage: trace.StageHookIn, Outcome: "ok"})
+		}
+		return res, err
+	}
+	return calls
 }
 
 func with(base museOutputs, key string, r providers.MuseRunResult) museOutputs {
@@ -102,14 +132,14 @@ func TestDoctorSaysNothingAboutMuseOnAMachineThatNeverSetItUp(t *testing.T) {
 
 func TestDoctorMuseAllSevenRowsHealthy(t *testing.T) {
 	installedMuse(t)
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	section := museDoctor(t)
 	mustContain(t, section,
 		"ok: muse 1.4.0 (supported: >= 1.4.0, tested below 1.5.0)",
-		"ok: 12 of 12 OpenBox handlers registered, every gated one with a deny-only successor",
-		"ok: Muse found 12 runnable hooks (12 expected), 0 warnings",
+		"ok: 13 of 13 OpenBox handlers registered, every gated one with a deny-only successor",
+		"ok: Muse loaded the hooks with 0 warnings and OpenBox's handlers ran during the probe",
 		"unverified: no local-tracing log",
-		"ok: muse config validates. managed lane required: no",
+		"ok: no policy present (system_file absent, macos_managed_preferences absent). managed lane required: unknown",
 		"Muse model calls: not recorded (no proxy or telemetry lane can see them); tool, prompt and model-call gating still enforced",
 		"ok: 0 events waiting",
 		"MCP gating: doc-verified, not empirically confirmed",
@@ -127,7 +157,7 @@ func TestDoctorMuseAllSevenRowsHealthy(t *testing.T) {
 // the docs name, and the scratch directory is gone afterwards.
 func TestDoctorMuseLoadProbeRunsEchoInAScratchDirectory(t *testing.T) {
 	installedMuse(t)
-	calls := withMuseRunner(t, healthyMuse())
+	calls := withProbedMuse(t, healthyMuse())
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -157,19 +187,53 @@ func TestDoctorMuseLoadProbeStates(t *testing.T) {
 		result providers.MuseRunResult
 		want   string
 	}{
-		{"fewer than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 5 runnable · 0 warnings")}, "FAIL: Muse found 5 runnable hooks, fewer than the 12 OpenBox registered"},
-		{"more than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 14 runnable · 0 warnings")}, "ok: Muse found 14 runnable hooks (12 expected)"},
-		{"foreign warning", providers.MuseRunResult{Stderr: []byte("Hooks: 12 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 12 runnable hooks (12 expected) and 1 warning(s), none naming OpenBox"},
+		{"fewer than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 5 runnable · 1 warnings")}, "FAIL: Muse found 5 runnable hooks, fewer than the 13 OpenBox registered"},
+		{"more than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 14 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 14 runnable hooks (13 expected) and 1 warning(s), none naming OpenBox"},
+		{"foreign warning", providers.MuseRunResult{Stderr: []byte("Hooks: 13 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 13 runnable hooks (13 expected) and 1 warning(s), none naming OpenBox"},
 		{"openbox warning", providers.MuseRunResult{Stderr: []byte("Hooks: 10 runnable · 1 warnings\nwarning: hook \"/o/openbox\" hook muse PreToolUse: unknown key")}, "FAIL: Muse loaded 10 hooks and warned about OpenBox's"},
-		{"no summary", providers.MuseRunResult{ExitCode: 3, Stderr: []byte("boom")}, "WARNING: the echo probe (exit 3) printed no `Hooks: N runnable` summary"},
+		{"clean load prints nothing", providers.MuseRunResult{}, "ok: Muse loaded the hooks with 0 warnings and OpenBox's handlers ran during the probe"},
+		{"failed with no summary", providers.MuseRunResult{ExitCode: 3, Stderr: []byte("boom")}, "WARNING: the echo probe exited 3 without a `Hooks: N runnable` summary"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			installedMuse(t)
-			withMuseRunner(t, with(healthyMuse(), "exec --provider echo", c.result))
+			withProbedMuse(t, with(healthyMuse(), "exec --provider echo", c.result))
 			mustContain(t, museDoctor(t), c.want)
 		})
 	}
+}
+
+// A clean load is silent, so silence alone proves nothing: with no muse hook
+// invocation in the trace after the probe began, the handlers did not run.
+func TestDoctorMuseCleanProbeNeedsAHookToHaveRun(t *testing.T) {
+	installedMuse(t)
+	withMuseRunner(t, healthyMuse()) // a muse that loads nothing: no hook.in record
+	evidenceTrace(t)
+	section := museDoctor(t)
+	mustContain(t, section, "WARNING: hooks did not run during the probe")
+	if strings.Contains(section, "ok: Muse loaded") {
+		t.Errorf("a silent probe with no hook run reads as ok:\n%s", section)
+	}
+}
+
+// A hook record from before the probe began is not evidence the probe's own
+// session ran a handler.
+func TestDoctorMuseIgnoresAHookRecordOlderThanTheProbe(t *testing.T) {
+	installedMuse(t)
+	withMuseRunner(t, healthyMuse())
+	dir := evidenceTrace(t)
+	old := time.Now().Add(-time.Hour)
+	line, err := json.Marshal(trace.Record{TS: old, Provider: "muse", SessionID: "earlier", Stage: trace.StageHookIn, Outcome: "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "trace-"+old.UTC().Format("2006-01-02")+".jsonl"), append(line, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, museDoctor(t), "WARNING: hooks did not run during the probe")
 }
 
 func TestDoctorMuseVersionStates(t *testing.T) {
@@ -188,7 +252,7 @@ func TestDoctorMuseVersionStates(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			installedMuse(t)
-			calls := withMuseRunner(t, healthyMuse())
+			calls := withProbedMuse(t, healthyMuse())
 			base := providers.MuseRunner
 			providers.MuseRunner = func(ctx context.Context, dir string, args ...string) (providers.MuseRunResult, error) {
 				if strings.Join(args, " ") == "--version" {
@@ -210,25 +274,41 @@ func TestDoctorMuseVersionStates(t *testing.T) {
 }
 
 func TestDoctorMusePolicyRow(t *testing.T) {
+	const presentStatus = `Enterprise configuration status
+Generation: sha256:1
+Sources:
+  plane=defaults source_class=system_file state=absent
+  plane=policy source_class=system_file state=present
+  plane=policy source_class=macos_managed_preferences state=absent
+`
 	cases := []struct {
-		name     string
-		validate providers.MuseRunResult
-		status   string
-		want     string
+		name   string
+		status providers.MuseRunResult
+		want   []string
 	}{
-		{"valid", providers.MuseRunResult{}, "managed hooks lane required: true", "ok: muse config validates. managed lane required: yes"},
-		{"inactive members", providers.MuseRunResult{ExitCode: 4}, "managed hooks required = no", "WARNING: muse config is valid but has inactive members (exit 4). managed lane required: no"},
-		{"rejected", providers.MuseRunResult{ExitCode: 1}, "", "FAIL: muse rejects its config (exit 1)"},
-		{"unknown exit", providers.MuseRunResult{ExitCode: 9}, "", "WARNING: `muse config validate` exited 9"},
-		{"unparsed status", providers.MuseRunResult{}, "everything is fine", "managed lane required: unknown"},
+		{"absent everywhere", providers.MuseRunResult{Stdout: []byte(absentPolicyStatus)},
+			[]string{"ok: no policy present (system_file absent, macos_managed_preferences absent). managed lane required: unknown"}},
+		{"present", providers.MuseRunResult{Stdout: []byte(presentStatus)},
+			[]string{"ok: policy present (system_file present, macos_managed_preferences absent). managed lane required: unknown"}},
+		{"present and says required", providers.MuseRunResult{Stdout: []byte(presentStatus + "managed hooks lane required: true\n")},
+			[]string{"managed lane required: yes", "see deployments/managed/muse/README-mdm.md"}},
+		{"not parsed when no policy is present", providers.MuseRunResult{Stdout: []byte(absentPolicyStatus + "managed hooks lane required: true\n")},
+			[]string{"managed lane required: unknown"}},
+		{"rejected source", providers.MuseRunResult{Stdout: []byte("Sources:\n  plane=policy source_class=system_file state=invalid\n")},
+			[]string{"FAIL: a Muse policy source is not valid (system_file invalid)"}},
+		{"status fails", providers.MuseRunResult{ExitCode: 2},
+			[]string{"WARNING: `muse config status` exited 2", "managed lane required: unknown"}},
+		{"no source lines", providers.MuseRunResult{Stdout: []byte("everything is fine")},
+			[]string{"unverified: `muse config status` listed no policy source. managed lane required: unknown"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			installedMuse(t)
-			outs := with(healthyMuse(), "config validate", c.validate)
-			outs = with(outs, "config status", providers.MuseRunResult{Stdout: []byte(c.status)})
-			withMuseRunner(t, outs)
-			mustContain(t, museDoctor(t), c.want)
+			calls := withProbedMuse(t, with(healthyMuse(), "config status", c.status))
+			mustContain(t, museDoctor(t), c.want...)
+			if calls.ran("config validate") {
+				t.Error("`muse config validate` needs --plane and --file and checks one document; doctor must not call it bare")
+			}
 		})
 	}
 }
@@ -248,14 +328,14 @@ func TestDoctorMuseReportsACountShortOfTheExpectedAndAMissingHome(t *testing.T) 
 	if err := os.WriteFile(path, []byte(stripped), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	withMuseRunner(t, healthyMuse())
-	mustContain(t, museDoctor(t), "WARNING: 12 of 12 OpenBox handlers registered; --home does not match this machine's OpenBox home on")
+	withProbedMuse(t, healthyMuse())
+	mustContain(t, museDoctor(t), "WARNING: 13 of 13 OpenBox handlers registered; --home does not match this machine's OpenBox home on")
 
 	// And a handler that is simply gone.
 	if err := os.WriteFile(path, []byte(strings.Replace(stripped, "hook muse SessionEnd", "hook codex SessionEnd", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, museDoctor(t), "11 of 12 OpenBox handlers registered", "no OpenBox handler for [SessionEnd]")
+	mustContain(t, museDoctor(t), "12 of 13 OpenBox handlers registered", "no OpenBox handler for [SessionEnd]")
 }
 
 func TestDoctorMuseFlagsASettingsFileMuseCannotRead(t *testing.T) {
@@ -263,7 +343,7 @@ func TestDoctorMuseFlagsASettingsFileMuseCannotRead(t *testing.T) {
 	if err := os.WriteFile(providers.MuseSettingsPath(), []byte(`{"hooks": `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	calls := withMuseRunner(t, healthyMuse())
+	calls := withProbedMuse(t, healthyMuse())
 	section := museDoctor(t)
 	mustContain(t, section, "FAIL: Muse cannot read this file", "drops EVERY hook", "not run: there are no readable OpenBox handlers to load")
 	if calls.ran("exec ") {
@@ -283,7 +363,7 @@ func TestDoctorMuseFlagsAnEngineThatIsGone(t *testing.T) {
 	if err := os.WriteFile(path, []byte(gone), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	mustContain(t, museDoctor(t), "the engine they run does not exist", "no-such-openbox")
 }
 
@@ -314,8 +394,8 @@ func TestDoctorMuseRatesAGatedHandlerThatCannotGovernAsFail(t *testing.T) {
 			if err := os.WriteFile(path, out, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			withMuseRunner(t, healthyMuse())
-			mustContain(t, museDoctor(t), "FAIL: 12 of 12 OpenBox handlers registered, but a gated one can fail open or be skipped")
+			withProbedMuse(t, healthyMuse())
+			mustContain(t, museDoctor(t), "FAIL: 13 of 13 OpenBox handlers registered, but a gated one can fail open or be skipped")
 		})
 	}
 }
@@ -325,7 +405,7 @@ func TestDoctorMuseNoSettingsFile(t *testing.T) {
 	if err := os.Remove(providers.MuseSettingsPath()); err != nil {
 		t.Fatal(err)
 	}
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	mustContain(t, museDoctor(t), "FAIL: no settings file, so no hook is registered")
 }
 
@@ -342,7 +422,7 @@ func TestDoctorMuseHookRunEvidence(t *testing.T) {
 	}
 	installedMuse(t)
 	withMuseTracingDir(t, dir)
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	mustContain(t, museDoctor(t), "ok: 3 hook run(s) recorded in boot.log, 2 completed")
 
 	// A log with no hook record is unverified, never a failure.
@@ -363,13 +443,13 @@ func TestDoctorMuseHookRunsAreUnverifiedOnAVersionOutsideTheTestedRange(t *testi
 	}
 	installedMuse(t)
 	withMuseTracingDir(t, dir)
-	withMuseRunner(t, with(healthyMuse(), "--version", providers.MuseRunResult{Stdout: []byte("muse 1.9.0")}))
+	withProbedMuse(t, with(healthyMuse(), "--version", providers.MuseRunResult{Stdout: []byte("muse 1.9.0")}))
 	mustContain(t, museDoctor(t), "unverified: Muse's local-tracing log is documented for the tested versions only")
 }
 
 func TestDoctorMuseSpoolRowPointsAtFlush(t *testing.T) {
 	installedMuse(t)
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	sp := hookflow.Spool{Dir: providers.SpoolDirFor("muse")}
 	if err := os.MkdirAll(sp.Dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -385,8 +465,8 @@ func TestDoctorMuseSpoolRowPointsAtFlush(t *testing.T) {
 }
 
 func TestParseMuseLoadProbe(t *testing.T) {
-	c, ok := parseMuseLoadProbe("starting\nHooks: 12 runnable · 0 warnings\nbye")
-	if !ok || c.Runnable != 12 || c.Warnings != 0 || len(c.OpenBoxWarnings) != 0 {
+	c, ok := parseMuseLoadProbe("starting\nHooks: 12 runnable · 1 warnings\nbye")
+	if !ok || c.Runnable != 12 || c.Warnings != 1 || len(c.OpenBoxWarnings) != 0 {
 		t.Errorf("= %+v, %v", c, ok)
 	}
 	c, ok = parseMuseLoadProbe("Hooks: 3 runnable • 2 warnings")
@@ -395,6 +475,19 @@ func TestParseMuseLoadProbe(t *testing.T) {
 	}
 	if _, ok := parseMuseLoadProbe("no summary here"); ok {
 		t.Error("parsed a summary that is not there")
+	}
+}
+
+func TestParseMuseConfigStatus(t *testing.T) {
+	got := parseMuseConfigStatus(absentPolicyStatus)
+	if len(got) != 4 {
+		t.Fatalf("sources = %+v", got)
+	}
+	if got[1] != (museConfigSource{Plane: "policy", Class: "system_file", State: "absent"}) {
+		t.Errorf("second source = %+v", got[1])
+	}
+	if got := parseMuseConfigStatus("Enterprise configuration status\nGeneration: sha256:x\n"); len(got) != 0 {
+		t.Errorf("parsed sources that are not there: %+v", got)
 	}
 }
 
@@ -432,7 +525,7 @@ func evidenceTrace(t *testing.T) string {
 
 func TestDoctorMuseCountsUngatedActions(t *testing.T) {
 	installedMuse(t)
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	evidenceTrace(t)
 	for i := 0; i < 3; i++ {
 		trace.Emit(trace.Record{Provider: "muse", SessionID: "s-1", Stage: trace.StageEvidenceGap, Outcome: "no_gate_record"})
@@ -446,7 +539,7 @@ func TestDoctorMuseCountsUngatedActions(t *testing.T) {
 
 func TestDoctorMuseSaysUnverifiedWhenTheReconcilerDisabledItself(t *testing.T) {
 	installedMuse(t)
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	evidenceTrace(t)
 	trace.Emit(trace.Record{Provider: "muse", SessionID: "s-1", Stage: trace.StageEvidenceReconcile, Outcome: "disabled"})
 	section := museDoctor(t)
@@ -470,7 +563,7 @@ func TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls(t *testing.T) {
 		prev := systemPACSupportedFn
 		systemPACSupportedFn = func() bool { return tc.pac }
 		installedMuse(t)
-		withMuseRunner(t, healthyMuse())
+		withProbedMuse(t, healthyMuse())
 		section := museDoctor(t)
 		systemPACSupportedFn = prev
 		mustContain(t, section, tc.want)
@@ -482,6 +575,6 @@ func TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls(t *testing.T) {
 // exists; doctor says so rather than leaving the reader to wonder.
 func TestDoctorMuseSaysTelemetryIsNotSupported(t *testing.T) {
 	installedMuse(t)
-	withMuseRunner(t, healthyMuse())
+	withProbedMuse(t, healthyMuse())
 	mustContain(t, museDoctor(t), "telemetry: not supported by this tool (no documented OpenTelemetry exporter to point at the loopback receiver)")
 }
