@@ -3,10 +3,11 @@ package fakecore
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // The wire body is governanceEventPayload, not a DevEvent: a projection whose
-// event_type is one of four stored values rather than the client's 33-type
+// event_type is one of four stored values rather than the client's 35-type
 // vocabulary. These predicates are that object's validator, and the contract
 // schema is the other object's. Neither is reachable by the other's shape --
 // running the DevEvent schema here would reject every event, after which the
@@ -75,6 +76,38 @@ func checkWireShape(body map[string]any) []string {
 		}
 	}
 
+	reasons = append(reasons, checkModelCallGateShape(body)...)
+	return reasons
+}
+
+// checkModelCallGateShape holds a model_call_gate row to what separates it from
+// a model-call record: it lives in the gate's own activity id namespace, and it
+// carries no usage, no cost, no turn index and no reply, in either half. Core
+// extracts usage from the literal llm_completion and counts turns by index, so
+// any of these on a gate row is the mislabelling this activity type exists to
+// prevent. Key-level, like the rest of checkWireShape.
+func checkModelCallGateShape(body map[string]any) []string {
+	if at, _ := body["activity_type"].(string); at != activityTypeModelCallGate {
+		return nil
+	}
+	var reasons []string
+	if id, _ := body["activity_id"].(string); !strings.Contains(id, ":llmgate:") {
+		reasons = append(reasons, fmt.Sprintf("a model_call_gate row's activity_id %q is outside the :llmgate: namespace", id))
+	}
+	for _, field := range []string{"activity_input", "activity_output"} {
+		obj, _ := body[field].(map[string]any)
+		for _, k := range []string{"usage", "reply_text"} {
+			if _, present := obj[k]; present {
+				reasons = append(reasons, fmt.Sprintf("a model_call_gate row carries %s.%s", field, k))
+			}
+		}
+	}
+	meta, _ := body["metadata"].(map[string]any)
+	for _, k := range []string{"tokens", "cost", "turn_index"} {
+		if _, present := meta[k]; present {
+			reasons = append(reasons, fmt.Sprintf("a model_call_gate row carries metadata.%s", k))
+		}
+	}
 	return reasons
 }
 

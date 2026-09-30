@@ -19,8 +19,8 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
-// devEventTypes deliberately orders the v1.8 vocabulary (33 entries: the
-// original 12 plus 21 observe-only lifecycle signals) into one coherent
+// devEventTypes deliberately orders the v1.8 vocabulary (35 entries: the
+// original 12, the model-call gate pair, and 21 observe-only lifecycle signals) into one coherent
 // session rather than repeating client.AllEventTypes' declaration order:
 // Setup/InstructionsLoaded before SessionStarted, Elicitation mid-session,
 // PostCompact after PreCompact, SessionEnded always last (/clear is a
@@ -51,6 +51,8 @@ var devEventTypes = []client.EventType{
 	client.EventPostModelSwitch,
 	client.EventTurnStarted,
 	client.EventTurnCompleted,
+	client.EventModelCallRequested,
+	client.EventModelCallFinished,
 	client.EventAPIError,
 	client.EventElicitation,
 	client.EventElicitationResult,
@@ -116,6 +118,9 @@ func minimalEvent(et client.EventType, did, sessionID string) client.DevEvent {
 		// non-empty activity_id; turnActivityIDFor derives one from TurnIndex.
 		turnIndex := 0
 		ev.TurnIndex = &turnIndex
+	case client.EventModelCallRequested, client.EventModelCallFinished:
+		// Activity* wire types again: the gate's id is its activity_id.
+		ev.ModelCallRequestID = "acceptance-req.1"
 	case client.EventCommitCreated:
 		ev.Metadata = map[string]any{"commit_sha": "0000000000000000000000000000000000000000", "repo": "openbox-ai/acceptance"}
 	case client.EventDeploy:

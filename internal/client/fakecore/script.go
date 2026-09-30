@@ -14,6 +14,12 @@ type Script struct {
 	Default string
 	// Verdicts maps a tool_use_id to the verdict JSON served for that call.
 	Verdicts map[string]string
+	// VerdictsByActivityType maps a wire activity_type to the verdict JSON served
+	// for every row of that type that no Verdicts entry claimed. It exists for
+	// rows with no tool_use_id to key on -- a model-call gate ("model_call_gate")
+	// -- so a scenario can deny one without touching Default, which would answer
+	// every other event the same way. A tool_use_id match wins over it.
+	VerdictsByActivityType map[string]string
 	// AlwaysStatus, when non-zero, answers every request with this status.
 	AlwaysStatus int
 	// Delay holds each response, for the timeout paths.
@@ -50,12 +56,15 @@ func (s Script) withDefaults() Script {
 }
 
 // answer picks the verdict and status for one request.
-func (s Script) answer(toolUseID string) (int, string) {
+func (s Script) answer(toolUseID, activityType string) (int, string) {
 	status := http.StatusOK
 	if s.AlwaysStatus != 0 {
 		status = s.AlwaysStatus
 	}
 	if v, ok := s.Verdicts[toolUseID]; ok && toolUseID != "" {
+		return status, v
+	}
+	if v, ok := s.VerdictsByActivityType[activityType]; ok && activityType != "" {
 		return status, v
 	}
 	return status, s.Default

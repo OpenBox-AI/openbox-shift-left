@@ -36,8 +36,18 @@ func ApprovalKeyFor(ev DevEvent) ApprovalKey {
 	return ApprovalKey{
 		WorkflowID: workflowIDFor(ev),
 		RunID:      runIDFor(ev),
-		ActivityID: activityIDFor(ev),
+		ActivityID: approvalActivityIDFor(ev),
 	}
+}
+
+// approvalActivityIDFor is the activity id core files a gated record under: a
+// model-call gate is keyed on its :llmgate: id, everything else on the
+// hashed tool-call id.
+func approvalActivityIDFor(ev DevEvent) string {
+	if ev.EventType == EventModelCallRequested || ev.EventType == EventModelCallFinished {
+		return WireActivityID(ev)
+	}
+	return activityIDFor(ev)
 }
 
 // ApprovalStatus is one poll answer: where the approval stands right now.

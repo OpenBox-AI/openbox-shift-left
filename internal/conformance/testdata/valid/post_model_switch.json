@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.9",
+  "schema_version": "1.10",
   "event_id": "evt-0118",
   "event_type": "PostModelSwitch",
   "openbox_session_id": "sess-abc123",

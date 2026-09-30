@@ -19,6 +19,7 @@ var contractEventTypes = []string{
 	"SessionStarted", "PromptSubmitted", "ToolCall", "ToolResult",
 	"SessionEnded", "CommitCreated", "Deploy",
 	"TurnStarted", "TurnCompleted",
+	"ModelCallRequested", "ModelCallFinished",
 	"SubagentStarted", "PermissionDenied", "APIError",
 	"Setup", "InstructionsLoaded", "UserPromptExpansion", "MessageDisplay",
 	"PermissionRequest", "PostToolBatch", "Notification", "TaskCreated",

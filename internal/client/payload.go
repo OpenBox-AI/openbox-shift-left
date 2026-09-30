@@ -77,6 +77,12 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if isModelCallGate(ev.EventType) {
+		if err := checkModelCallGate(ev); err != nil {
+			return nil, err
+		}
+		ev = normalizeModelCallGate(ev)
+	}
 
 	// cut accumulates every capBodyInto cut across every builder below, so
 	// buildMetadata -- called last -- can serialize one combined summary.
@@ -117,6 +123,15 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		p.DurationMs = durationMs(ev)
 		// Deliberately NOT set: hook_trigger, which would route a model turn onto
 		// core's approval-bypass path.
+	case EventModelCallRequested:
+		p.ActivityID = modelCallGateActivityID(ev)
+		p.ActivityInput = modelCallGateInput(ev)
+	case EventModelCallFinished:
+		p.ActivityID = modelCallGateActivityID(ev)
+		p.ActivityOutput = modelCallGateOutput(ev)
+		p.DurationMs = durationMs(ev)
+		p.Status = statusFor(ev)
+		// Also no hook_trigger: a gate is evaluated as an ordinary activity.
 	}
 	// A turn naming no producer cannot be placed: activity_id is empty and
 	// omitempty drops it, so content must not ride the row. Both deleted span
@@ -202,9 +217,9 @@ func wireTypeFor(et EventType) (wireType, signalName string, err error) {
 	case EventElicitationResult:
 		return wireSignalReceived, "elicitation_result", nil
 
-	case EventToolCall, EventTurnStarted:
+	case EventToolCall, EventTurnStarted, EventModelCallRequested:
 		return wireActivityStarted, "", nil
-	case EventToolResult, EventTurnCompleted:
+	case EventToolResult, EventTurnCompleted, EventModelCallFinished:
 		return wireActivityCompleted, "", nil
 	}
 	return "", "", fmt.Errorf("client: no base wire type for event_type %q", et)
@@ -265,6 +280,11 @@ func WireActivityID(ev DevEvent) string {
 		return activityIDFor(ev)
 	case EventTurnStarted, EventTurnCompleted:
 		return turnActivityIDFor(ev)
+	case EventModelCallRequested, EventModelCallFinished:
+		if !UsableModelCallRequestID(ev.ModelCallRequestID) {
+			return "" // buildPayload refuses the event, so no row carries an id
+		}
+		return modelCallGateActivityID(ev)
 	}
 	return ""
 }
@@ -415,7 +435,7 @@ var toolStatuses = map[string]bool{
 }
 
 func statusFor(ev DevEvent) string {
-	if ev.EventType != EventToolResult {
+	if ev.EventType != EventToolResult && ev.EventType != EventModelCallFinished {
 		return ""
 	}
 	if !toolStatuses[ev.Status] {
@@ -431,8 +451,13 @@ func statusFor(ev DevEvent) string {
 //   - A turn event → "llm_completion", the same label on both halves, so the
 //     core-side usage extractor has one key to select on and the two runtimes
 //     share one vocabulary;
+//   - A model-call gate event → "model_call_gate", never llm_completion,
+//     whatever the adapter set;
 //   - Everything else (lifecycle, Deploy) → the event_type string.
 func activityLabel(ev DevEvent) string {
+	if isModelCallGate(ev.EventType) {
+		return ActivityTypeModelCallGate
+	}
 	// Only from the closed vocabulary: this column is pass-through, so a typo would
 	// reach the dashboard unfiltered.
 	if slices.Contains(AllActivityTypes, ev.ActivityType) {
@@ -489,6 +514,10 @@ var contentMetadataKeys = map[string]bool{
 	// so these ride metadata, and this list is their only gate.
 	"notification_title": true, // Notification.title
 	"task_description":   true, // Task{Created,Completed}.task_description
+
+	// v1.10: a model-call gate's message previews, which also ride the gate's
+	// activity_input (modelCallGateInput applies the same gate there).
+	modelCallPreviewsKey: true,
 }
 
 // observesAResponse is which half of an activity may assert an HTTP status.

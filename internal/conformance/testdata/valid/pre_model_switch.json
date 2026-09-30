@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.9",
+  "schema_version": "1.10",
   "event_id": "evt-0117",
   "event_type": "PreModelSwitch",
   "openbox_session_id": "sess-abc123",

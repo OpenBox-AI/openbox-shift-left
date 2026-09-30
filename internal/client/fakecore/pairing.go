@@ -22,6 +22,10 @@ const (
 // one legitimate class of activity row without one.
 const activityTypeLLMCompletion = "llm_completion"
 
+// activityTypeModelCallGate labels a model-call gate's activity pair: a pre-send
+// decision, likewise with no tool call to identify.
+const activityTypeModelCallGate = "model_call_gate"
+
 // PairingGrader holds the binary to: every call that RAN is reported twice,
 // once started and once completed; every call blocked before it ran is
 // reported once.
@@ -58,6 +62,9 @@ func PairingGrader() Grader {
 }
 
 type activityGroup struct {
+	// gate marks a model-call gate, whose completion is optional: a pre-send
+	// deny leaves the started row only, and no completion is fabricated.
+	gate        bool
 	started     int
 	completed   int
 	toolName    string
@@ -109,10 +116,11 @@ func checkPairing(sc Scenario, run Run) []string {
 			g.add(r)
 			continue
 		}
-		// No tool_use_id. A model turn legitimately has none; anything else
+		// No tool_use_id. A model turn or a model-call gate legitimately has none; anything else
 		// has lost its join key, and grading it would grade the fallback path
 		// production does not take.
-		if at, _ := r.Body["activity_type"].(string); at != activityTypeLLMCompletion {
+		at, _ := r.Body["activity_type"].(string)
+		if at != activityTypeLLMCompletion && at != activityTypeModelCallGate {
 			reasons = append(reasons, fmt.Sprintf(
 				"activity %s (activity_type %q): no metadata.tool_use_id on the wire, so no scenario input can be joined to it",
 				r.ActivityID(), at))
@@ -122,6 +130,7 @@ func checkPairing(sc Scenario, run Run) []string {
 		g, ok := byActivity[id]
 		if !ok {
 			g = newGroup()
+			g.gate = at == activityTypeModelCallGate
 			byActivity[id] = g
 			activityOrder = append(activityOrder, id)
 		}
@@ -136,10 +145,16 @@ func checkPairing(sc Scenario, run Run) []string {
 	}
 	for _, id := range activityOrder {
 		g := byActivity[id]
-		if g.started != 1 || g.completed != 1 {
+		kind, rule := "model turn", "a turn is one pair"
+		torn := g.started != 1 || g.completed != 1
+		if g.gate {
+			kind, rule = "model-call gate", "a gate is a started row, and at most one completed row"
+			torn = g.started != 1 || g.completed > 1
+		}
+		if torn {
 			reasons = append(reasons, fmt.Sprintf(
-				"model turn %s: %d started and %d completed rows; a turn is one pair",
-				id, g.started, g.completed))
+				"%s %s: %d started and %d completed rows; %s",
+				kind, id, g.started, g.completed, rule))
 		}
 	}
 	return reasons

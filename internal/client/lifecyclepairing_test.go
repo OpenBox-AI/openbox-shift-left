@@ -100,8 +100,8 @@ func assertLifecyclePairing(t *testing.T, name string, events []wireEvent, ended
 // population is fixed by wireTypeFor, so a new event type cannot quietly join it
 // without a decision about which of the three it is.
 func TestEveryEventTypeIsEitherPairedAWorkflowBoundaryOrASignal(t *testing.T) {
-	starts := map[EventType]bool{EventToolCall: true, EventTurnStarted: true}
-	completes := map[EventType]bool{EventToolResult: true, EventTurnCompleted: true}
+	starts := map[EventType]bool{EventToolCall: true, EventTurnStarted: true, EventModelCallRequested: true}
+	completes := map[EventType]bool{EventToolResult: true, EventTurnCompleted: true, EventModelCallFinished: true}
 
 	for _, et := range AllEventTypes {
 		wire, signal, err := wireTypeFor(et)
@@ -182,6 +182,10 @@ func TestASyntheticSessionSatisfiesTheLifecyclePairingInvariant(t *testing.T) {
 	evs = append(evs, turnPair(func(e *DevEvent) { e.OtelRequestID = "otel-1" })...)
 	// Codex's session-wide usage rollup.
 	evs = append(evs, turnPair(func(e *DevEvent) { e.SessionRollup = true })...)
+	// A model-call gate: the same wire pairing, in its own namespace.
+	gateStarted, gateFinished := base(EventModelCallRequested), base(EventModelCallFinished)
+	gateStarted.ModelCallRequestID, gateFinished.ModelCallRequestID = "req-1.1", "req-1.1"
+	evs = append(evs, gateStarted, gateFinished)
 	evs = append(evs, base(EventSubagentStarted), base(EventPermissionDenied), base(EventAPIError))
 	// v1.8's 21 observe-only lifecycle signals: every one rides SignalReceived
 	// (never paired, never a workflow boundary), so each is one more S, not a W
@@ -206,11 +210,12 @@ func TestASyntheticSessionSatisfiesTheLifecyclePairingInvariant(t *testing.T) {
 	assertLifecyclePairing(t, "synthetic session", wire, true)
 
 	// The reference session's arithmetic, restated against this one so the shape is
-	// not merely internally consistent. W=2 (SessionStarted, SessionEnded), A=8 (two
-	// tool calls plus six turns -- hook, subagent, proxy, gateway, otel, rollup), S=25
+	// not merely internally consistent. W=2 (SessionStarted, SessionEnded), A=9 (two
+	// tool calls, six turns -- hook, subagent, proxy, gateway, otel, rollup -- and one
+	// model-call gate), S=25
 	// (PromptSubmitted, SubagentStarted, PermissionDenied, APIError, plus the 21 v1.8
-	// signal classes): W(2)+2A(8)+S(25)=43.
-	const wantW, wantA, wantS = 2, 8, 25
+	// signal classes): W(2)+2A(9)+S(25)=45.
+	const wantW, wantA, wantS = 2, 9, 25
 	if got := len(wire); got != wantW+2*wantA+wantS {
 		t.Errorf("the fixture is %d events; W + 2A + S = %d + 2(%d) + %d = %d",
 			got, wantW, wantA, wantS, wantW+2*wantA+wantS)

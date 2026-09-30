@@ -12,7 +12,7 @@
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
-const SchemaVersion = "1.9"
+const SchemaVersion = "1.10"
 
 // EventType is a developer-runtime lifecycle event type.
 type EventType string
@@ -33,6 +33,15 @@ const (
 	// unit a coding agent spends tokens in.
 	EventTurnStarted   EventType = "TurnStarted"
 	EventTurnCompleted EventType = "TurnCompleted"
+
+	// EventModelCallRequested / EventModelCallFinished are one model-call GATE's
+	// halves (v1.10): a provider hook that fires before a model call can be sent,
+	// evaluated through policy like a tool call, and the one that reports it
+	// finished. Not a turn and not a model-call record: activity_type is always
+	// model_call_gate, no usage rides either half, and the activity id is
+	// <session>:llmgate:<model_call_request_id>.
+	EventModelCallRequested EventType = "ModelCallRequested"
+	EventModelCallFinished  EventType = "ModelCallFinished"
 
 	// EventSubagentStarted marks a subagent spawning.
 	EventSubagentStarted EventType = "SubagentStarted"
@@ -91,6 +100,8 @@ var AllEventTypes = []EventType{
 	EventDeploy,
 	EventTurnStarted,
 	EventTurnCompleted,
+	EventModelCallRequested,
+	EventModelCallFinished,
 	EventSubagentStarted,
 	EventPermissionDenied,
 	EventAPIError,
@@ -137,6 +148,10 @@ const (
 	// ActivityTypeProviderRequest is a provider path this client has never heard
 	// of. Emitted, never dropped: unknown traffic is what an auditor wants.
 	ActivityTypeProviderRequest = "provider_request"
+	// ActivityTypeModelCallGate is a pre-send gate on a model call (v1.10). It is
+	// policy-evaluated like a tool call and is never a completion: it carries no
+	// usage, no turn index and no producer request id.
+	ActivityTypeModelCallGate = "model_call_gate"
 )
 
 // AllActivityTypes is the closed vocabulary, read from the constants rather than
@@ -146,6 +161,7 @@ var AllActivityTypes = []string{
 	ActivityTypeTokenCount,
 	ActivityTypeToolTelemetry,
 	ActivityTypeProviderRequest,
+	ActivityTypeModelCallGate,
 }
 
 // ToolKind is the provider-agnostic tool class ($defs.tool.kind).
@@ -357,6 +373,20 @@ type DevEvent struct {
 	// as a duplicate; silently, since dedupe is the server behaving correctly.
 	OtelRequestID  string `json:"otel_request_id,omitempty"`
 	ProxyRequestID string `json:"proxy_request_id,omitempty"`
+
+	// ModelCallRequestID names one model-call gate (v1.10): the provider's request
+	// id, a ".", and the attempt number, so a retry of one request is a new gate.
+	// Required on ModelCallRequested/ModelCallFinished and meaningless on any
+	// other type. Bounded like the producer request ids above (see
+	// UsableModelCallRequestID) because it reaches a stored key verbatim; the
+	// client refuses to build a gate event whose id fails the bound.
+	//
+	// A gate's structural facts ride Metadata, no new carrier: provider,
+	// message_count, tool_count, tool_names, and message_previews (gated content,
+	// each <= 256 runes, at most 16) on ModelCallRequested; provider,
+	// finish_reason, response_id, error_class and tool_call_count on
+	// ModelCallFinished, with the outcome in Status and the model in Model.
+	ModelCallRequestID string `json:"model_call_request_id,omitempty"`
 
 	// WorkspaceID is a stable per-workspace/developer identity used as core's
 	// workflow_id so (workflow_id, run_id) is unique per session (mapping.md §1).

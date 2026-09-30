@@ -187,13 +187,21 @@ func (a *app) dispatch(args []string) int {
 	}
 }
 
+// hookEngineFn resolves a provider's hook engine; a seam so a test can run
+// runHook's own fault handling against an engine that panics.
+var hookEngineFn = providers.Engine
+
 func (a *app) runHook(args []string) (code int) {
 	code = exitOK
+	// faultCode is what this run exits with if it cannot produce an answer:
+	// 0 unless the engine's host reads exit 0 as allow (FaultExiter).
+	faultCode := func() int { return exitOK }
 	// Report it on stderr, which the tool shows as a diagnostic and never parses
 	// as hook output.
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(a.stderr, "openbox hook: recovered from panic: %v\n", r)
+			code = faultCode()
 		}
 	}()
 	// Teed into the trace: a hook exiting 0 has its stderr discarded by the
@@ -215,26 +223,61 @@ func (a *app) runHook(args []string) (code int) {
 		return exitOK
 	}
 
-	engine, err := providers.Engine(args[0])
+	engine, err := hookEngineFn(args[0])
 	if err != nil {
 		logger.Printf("unknown hook provider %q (supported: %s, git)", args[0], strings.Join(provider.Supported(), ", "))
 		return exitOK
 	}
+	name, rest := args[0], args[1:]
+	home, rest, homeErr := splitHookHome(rest)
+	if len(rest) < 1 {
+		logger.Printf("usage: openbox hook %s [--home <abs dir>] <event>", name)
+		return exitOK
+	}
+	event := rest[0]
+	if fe, ok := engine.(provider.FaultExiter); ok {
+		faultCode = func() int { return fe.FaultExitCode(event) }
+	}
+	if homeErr != nil {
+		logger.Printf("%v", homeErr)
+		return faultCode()
+	}
+	if home != "" {
+		// A host that clears the hook's environment cannot deliver
+		// OPENBOX_HOME, so the installer bakes it into argv instead; set
+		// before BindProvider so the per-tool store resolves under it.
+		if err := os.Setenv(devconfig.EnvHome, home); err != nil {
+			logger.Printf("cannot set %s: %v", devconfig.EnvHome, err)
+			return faultCode()
+		}
+	}
 	// After the name is known to be a real provider, so a typo cannot create a
 	// directory under ~/.openbox.
-	release, err := devconfig.BindProvider(args[0])
+	release, err := devconfig.BindProvider(name)
 	if err != nil {
-		logger.Printf("cannot resolve %s's identity store: %v", args[0], err)
-		return exitOK
+		logger.Printf("cannot resolve %s's identity store: %v", name, err)
+		return faultCode()
 	}
 	defer release()
-	if len(args) < 2 {
-		logger.Printf("usage: openbox hook %s <event>", args[0])
-		return exitOK
-	}
-	a.warnIfUnconfigured(args[0], logger)
-	engine.RunHook(args[1], a.stdin, a.stdout, logger)
+	a.warnIfUnconfigured(name, logger)
+	engine.RunHook(event, a.stdin, a.stdout, logger)
 	return exitOK
+}
+
+// splitHookHome takes an optional `--home <dir>` off the front of a hook's
+// arguments. The directory must be absolute: a relative one would resolve
+// against whatever cwd the host happened to run the hook in.
+func splitHookHome(args []string) (home string, rest []string, err error) {
+	if len(args) == 0 || args[0] != "--home" {
+		return "", args, nil
+	}
+	if len(args) < 2 {
+		return "", nil, errors.New("--home needs a directory")
+	}
+	if !filepath.IsAbs(args[1]) {
+		return "", args[2:], fmt.Errorf("--home %q is not an absolute path", args[1])
+	}
+	return filepath.Clean(args[1]), args[2:], nil
 }
 
 // warnIfUnconfigured names the fix once when the bound tool has no identity at

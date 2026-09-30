@@ -34,7 +34,8 @@ var gatedEvents = map[string]bool{
 	"PreToolUse":        true,
 	"UserPromptSubmit":  true,
 	"ConfigChange":      true, // Claude Code only
-	"PermissionRequest": true, // Codex only
+	"PermissionRequest": true, // Codex and Muse
+	"PreLLMCall":        true, // Muse only
 }
 
 type evalRun struct {

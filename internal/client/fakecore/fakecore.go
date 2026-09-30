@@ -86,6 +86,10 @@ func (r Received) EventType() string { return r.topString("event_type") }
 // ActivityID pairs a tool call's two halves onto one row.
 func (r Received) ActivityID() string { return r.topString("activity_id") }
 
+// ActivityType is the wire activity_type label ("llm_completion",
+// "model_call_gate", a tool name, ...).
+func (r Received) ActivityType() string { return r.topString("activity_type") }
+
 func (r Received) topString(key string) string {
 	s, _ := r.Body[key].(string)
 	return s

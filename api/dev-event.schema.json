@@ -1,10 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://openbox.ai/schemas/dev-event/1.9/dev-event.schema.json",
+  "$id": "https://openbox.ai/schemas/dev-event/1.10/dev-event.schema.json",
   "title": "OpenBox Developer-Runtime Normalized Event",
   "description": "Tool-agnostic, versioned ADAPTER-FACING event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()). The OpenBox client then RE-EXPRESSES it onto the base SDK's unified wire model — WorkflowStarted/WorkflowCompleted/SignalReceived/ActivityStarted+hook_trigger — on POST /api/v3/governance/evaluate (see docs/mapping.md). This is NOT a verbatim event_type pass-through: core accepts only its own wire types, never a developer-runtime event type. Adding a provider never changes this contract or the wire model. The wire model is the OpenBox core server's governance event contract, shared with the base SDK.",
-  "x-schema-version": "1.9",
+  "x-schema-version": "1.10",
   "x-changelog": {
+    "1.10": "Adds the model-call GATE: a provider's pre-send hook evaluated through policy as an activity of its own, paired with the hook that reports the call finished. Two new event types, ModelCallRequested -> ActivityStarted and ModelCallFinished -> ActivityCompleted, both with activity_type model_call_gate (a new member of the closed activity_type vocabulary), paired by activity_id <session>:llmgate:<model_call_request_id> -- a namespace disjoint from the tool ids, <session>:turn:<n> and the :proxy:, :otel:, :gateway: and :usage:rollup shapes. `model_call_request_id` is the provider's request id, a '.', and the attempt number, bounded like the three producer ids (1-128 printable ASCII). A gate is NOT a model-call record: it is never llm_completion, carries no usage (`tokens`, `cost`) on either half, is not a turn (no `turn_index`), names no lane producer (no `gateway_request_id`, `otel_request_id`, `proxy_request_id`, `session_rollup`) and sends no spans[]; the contract rejects all of them on these two types, and the client drops them before egress regardless. ModelCallRequested's activity_input carries model, provider, message_count, tool_count, tool_names and, under content capture only, `message_previews` (each cut to 256 characters, at most 16, after local redaction; gated content, stripped with capture off like every other content key). ModelCallFinished's activity_output is metadata only: status, finish_reason, response_id, error_class, tool_call_count, model, provider -- never the reply, thinking or a body; `status` follows the ToolResult rule (completed or failed). A pre-send deny, or a call that never reports finished, leaves the started row only; a completion is never fabricated. PRECONDITION, an ordering constraint: core must evaluate an ActivityStarted with activity_type model_call_gate through policy (so a policy can match and deny it), must not count it as llm_completion or as a turn in metrics, goal alignment or judge input, and must not route it onto the approval-bypass path. Verified against openbox-core source on 2026-09-30: usage extraction and observability key on the literal llm_completion, and the bypass path requires hook_trigger together with spans, which this client never sets. That core must be deployed before a client speaking 1.10 reaches a developer. Also adds the gate's structural metadata keys `message_count`, `tool_count`, `tool_names`, `finish_reason`, `response_id`, `error_class` and `tool_call_count`. A 1.9 payload restamped 1.10 still validates.",
     "1.9": "Turns a lifecycle signal's payload into an enforcement surface. Every SignalReceived except prompt_submitted now projects its structural metadata keys -- and, when content capture is on, its one per-class content key -- into signal_args as well as metadata. WHY: metadata has no reader in any governance engine. OPA matches signal_name plus signal_args; Guardrails read signal_args and nothing else on a signal. So the 21 classes v1.8 added were write-only telemetry: a policy could match THAT a config_change happened, never that it touched `.env`. v1.8 stated the opposite rule and was right to: core read any SignalReceived with non-empty signal_args as a NEW USER GOAL, unconditionally. That entry is left exactly as shipped and is not amended -- what changed is core, not the reasoning. PRECONDITION, and it is an ordering constraint rather than a note: core's goal gate (which suppresses goal creation when source is developer-runtime and signal_name is not prompt_submitted) MUST be running on the control plane before a client speaking 1.9 reaches a developer. Against an ungated core, each of the ~140 signals a session emits overwrites the session goal and every later action is judged against the last one. prompt_submitted's signal_args is unchanged and byte-identical: it IS the goal, and core's preference order over prompt/message/input/text/content means a second key there could silently become the goal text. The projection duplicates and never moves: `metadata` keeps every key it carried, because the correlation keys the SQL forensics path reads live there. Also adds `activity_output.reply_text` on a hook-lane turn completion -- the reassembled assistant reply, which core's judge keys on the presence of, with no fallback to activity_output.content, so before this no assistant turn had ever been judged; a relayed model call, whose text is raw SSE, deliberately does NOT carry it. Binds two fields this adapter decoded and left unread, as gated content in `metadata.notification_title` (Notification's title) and `metadata.task_description` (TaskCreated/TaskCompleted), each beside the signal_detail sibling that already owns their class's `content.signal_detail`. permission_suggestions, including rules[].ruleContent, stays deliberately unbound: it needs an array-capable carrier on the highest privacy-risk item in the inventory, and it can embed literal command text. PRIVACY: this widens where signal payload is SHOWN, and adds two keys that are newly sent at all. The Verify tab already rendered metadata, so these values were not invisible before; signal_args is rendered in more surfaces (session replay's event stream, event details, the signal_received overview, the monitor's issue detail, guardrail violation records, compliance source evidence), so the seven v1.8 content keys move from one JSON block to first-class text in several views and into stored violation and evidence records. notification_title and task_description are the two that newly egress. See docs/data-and-privacy.md. Additive on the wire: no field removed, no type changed, no event gains an activity_id, and every 1.8 payload remains valid at 1.9 once its version marker is restamped. ALSO IN 1.9: four span properties for Claude Code's own per-call correlation block, parsed in-process from the raw request body and never egressed as raw text -- `span.prompt_id`, `span.previous_request_id`, `span.is_subagent`, `span.entrypoint` -- each rehomed into `metadata` ungated exactly like `span.credential_fingerprint`, so the `:gateway:` and `:proxy:` lanes carry the same classifier the OTel lane's query_source/prompt.id promotion already provides. `is_subagent` is OMITTED, never emitted as a false value, when its source entry is absent. Purely additive: no field removed, no type changed, and every event that validated before this addition still validates unchanged. ALSO IN 1.9: two span properties reporting a relayed model call's own response completeness, populated by the in-path lanes only, like the four above -- `span.response_bytes_seen`, `span.response_truncated` -- combined with this client's own `capModelCallBody` cut into `activity_output.openbox_capture` ({truncated, original_bytes}), attached beside `activity_output.content`: the response-side twin of the request side's openbox_selection note. `truncated: false` is emitted, never omitted -- that is the \"this reply is complete\" signal a UI needs, the same \"loss is acceptable, unreported loss is not\" rule the openbox_selection note already follows. Present only alongside `activity_output.content`, so it is absent under `content_capture: false` along with the body it describes, and on a hook-sourced turn, which has no gateway sink to report from. Purely additive: no field removed, no type changed, and every event that validated before this addition still validates unchanged. AMENDMENT (still 1.9, no version bump): `span.response_truncated` now also drives `metadata.openbox_capture.truncated_paths`, not only `activity_output.openbox_capture.truncated`. The client-side cut this summary indexes used to fire only from this client's own `capModelCallBody` cut (`len(response_body) > 65,536` bytes); a gateway cut whose stored buffer already landed at or under that same bound left the index silent about a body the row's own `truncated: true` admitted was incomplete. `metadata.openbox_capture.truncated_paths` now keys off the client's own cut ORed with `span.response_truncated`, the identical OR `activity_output.openbox_capture.truncated` already computes, so the bool and the index are two readings of one condition and cannot disagree. No field added, removed or retyped.",
     "1.8": "Adds 21 developer-runtime lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult), taking event_type.enum and oneOf from 12 to 33. Every one of the 21 rides stock SignalReceived with a unique signal_name (its EventType's snake_case) — no new wire type is proposed, because core's wire event_type is closed at 7 and a developer-runtime-specific wire type was already tried and deliberately withdrawn. None of the 21 carries signal_args (core reads any SignalReceived with non-empty signal_args as a NEW USER GOAL and would overwrite the session's goal 21 times over) and none carries activity_id (none is paired as an Activity). SessionEnd keeps mapping to WorkflowCompleted for EVERY reason, byte-identically — there is no session_suspended class: every SessionEnd seals its run. A `/clear` does NOT continue that run -- as of Claude Code 2.1.263, it mints a NEW session id, so the SessionStart that follows belongs to a session the control plane has never seen and starts at generation 0. `--resume` is the one source that reuses the session id, and therefore the one that opens a continued run. WorktreeCreate is deliberately NOT registered: its stdout last line IS the created worktree path, so an observer that emits nothing would break `claude --worktree`; ceiling is 32 of 33 documented hooks, by choice. The 7 new content-gated metadata keys (requested_tool_input, notification_message, task_subject, compact_instructions, compact_summary, elicitation_message, elicitation_response) land in `metadata` under the existing `content.signal_detail` carrier — no new Content field. Also adds three additive run-identity properties: `run_id` (a wire-payload field since v1.0, declared in THIS schema for the first time — a session's first run keeps run_id == openbox_session_id; a run opened by a SessionStart(source = resume) mints a fresh UUIDv4 client-side instead; clear, startup, compact and fork do not continue a run), `run_generation` (0 for the original run; informational, may restart after record loss), and `continued_from_run_id` (the sealed run a generation ≥ 1 run continues from, set only on that generation's WorkflowStarted — lineage is a property of the boundary, not of every row). All three are optional and omitempty; a generation-0 event sets none of them, so every 1.7 payload remains a valid 1.8 payload unchanged once its version marker is restamped. Nothing is added to the top-level required array.",
     "1.7": "Repairs what a relayed model call is CALLED, and adds the field that carries the answer. `activity_type` names the class of an event's activity explicitly, from a closed vocabulary (llm_completion | token_count | tool_telemetry | provider_request), overriding the label the client would otherwise derive. It exists because the in-path lanes classified a relayed call by HTTP METHOD alone, so every POST to the intercepted host became `activity_type: llm_completion` — and roughly 40% of those rows were `POST /v1/messages/count_tokens` probes, which carry no usage, no assistant text and no completion. They distorted every llm_completion metric and every turn count. The producer that classified the call now says so, rather than leaving the client to re-derive it from a URL, which would put one classification table in two packages; and the value must survive the spool, because a flush can happen long after the process that classified the call exited. Core RECOMPUTES semantic_type per span and ignores what the client sends, but activity_type is a pass-through column the dashboard reads first, so this vocabulary is genuinely the client's to pick — docs/mapping.md is its authority. A path the table has never heard of is still emitted, under the `activity_type` value \"provider_request\": unknown traffic to the provider is exactly what an auditor wants to see, and the failure directions are not symmetric. Purely additive: an event omitting the field gets the derived label it always got. ALSO IN 1.7, and the reason this version exists at all: a model call's captured bodies stop riding `spans[]` and move to the wire payload's \"activity_input\" / \"activity_output\", which map to dedicated governance_events.input / .output columns and demonstrably round-trip. `spans[]` did not. Core parses that array on the normal path, uses it in memory for policy, behaviour and goal checks, and then DISCARDS it: persistence is gated on \"hook_trigger\" plus a pre-existing event row, and this client deliberately never sets \"hook_trigger\", because doing so would put a model turn on core's approval-bypass fingerprint path. So every response body sent that way was parsed and dropped. The client now sends NO span at all -- a span describes work nested INSIDE an activity, and for a model call \"llm_completion\" IS the activity, so nesting one in it would represent the same call twice. `span.request_body` / `span.response_body` stay declared here, because they remain the ADAPTER-FACING carrier an adapter fills in and the content gate clears; what changed is where the client puts them on the wire. `span.request_headers` / `span.response_headers` are no longer populated by any producer: nothing ever read them (they only reached core inside the discarded array) and they were the highest-risk class this client carried, since the developer's live provider credential is on every model request. `span.credential_fingerprint` is rehomed to the payload's `metadata`, ungated as ever -- which is a rehoming rather than a regression, because span attributes never persisted for a developer session, so account binding has in fact never had anything to match on. Finally the in-path and telemetry lanes emit BOTH halves of their activity: every activity_id must carry exactly one ActivityStarted and one ActivityCompleted, and every model-call row those lanes produced was single-sided, which is a contract violation rather than a documentable choice. Purely additive to this contract's shape: no declared field changed type or meaning, and a 1.6 event is a valid 1.7 event once its version marker is restamped.",
@@ -29,7 +30,7 @@
   "properties": {
     "schema_version": {
       "description": "Version of THIS event contract carried on the wire. Bumped on a breaking change to the normalized shape.",
-      "const": "1.9"
+      "const": "1.10"
     },
     "event_id": {
       "description": "Client-generated unique id for idempotent ingestion. Retries/buffered flush reuse the same id so tokens/cost/lineage are never double-counted.",
@@ -37,7 +38,7 @@
       "minLength": 1
     },
     "event_type": {
-      "description": "Developer-runtime LIFECYCLE type (adapter-facing). NOTE: CommitCreated's first producer is the `git post-commit` hook (ALSO IN 1.9): one event per resolved session, only where the git hook is installed AND only for an agent commit (the tool's own env marker must agree with the resolving session's recorded tool -- a hand commit in a governed worktree keeps its trailer but never produces this event). The client re-maps each onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy/SubagentStarted/PermissionDenied/APIError and the 21 v1.8 lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult)->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted/ActivityCompleted (paired by a shared activity_id; no span is sent), TurnStarted/TurnCompleted->ActivityStarted/ActivityCompleted with activity_type llm_completion (paired by activity_id <session>:turn:<index>). NOT a verbatim core event_type: core accepts only its own wire types. See docs/mapping.md.",
+      "description": "Developer-runtime LIFECYCLE type (adapter-facing). NOTE: CommitCreated's first producer is the `git post-commit` hook (ALSO IN 1.9): one event per resolved session, only where the git hook is installed AND only for an agent commit (the tool's own env marker must agree with the resolving session's recorded tool -- a hand commit in a governed worktree keeps its trailer but never produces this event). The client re-maps each onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy/SubagentStarted/PermissionDenied/APIError and the 21 v1.8 lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult)->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted/ActivityCompleted (paired by a shared activity_id; no span is sent), TurnStarted/TurnCompleted->ActivityStarted/ActivityCompleted with activity_type llm_completion (paired by activity_id <session>:turn:<index>). ModelCallRequested/ModelCallFinished->ActivityStarted/ActivityCompleted with activity_type model_call_gate (v1.10; paired by activity_id <session>:llmgate:<model_call_request_id>; never llm_completion, no usage). NOT a verbatim core event_type: core accepts only its own wire types. See docs/mapping.md.",
       "enum": [
         "SessionStarted",
         "PromptSubmitted",
@@ -48,6 +49,8 @@
         "Deploy",
         "TurnStarted",
         "TurnCompleted",
+        "ModelCallRequested",
+        "ModelCallFinished",
         "SubagentStarted",
         "PermissionDenied",
         "APIError",
@@ -75,12 +78,13 @@
       ]
     },
     "activity_type": {
-      "description": "The class of work this event's activity is, set by a producer that can tell one class from another and passed through to core's activity_type column (which the OpenBox dashboard's Activity column reads FIRST). Closed vocabulary. `llm_completion` is a real model turn. `token_count` is a POST /v1/messages/count_tokens probe: auditable, and deliberately not called a completion — filing probes as completions is what made ~40% of llm_completion rows describe no model turn at all. `tool_telemetry` is the governed tool reporting on ITSELF to its vendor over the same host the relay intercepts (/api/event_logging, /api/claude_code/metrics, hundreds a day, all without a session header). `provider_request` is a provider path this client has never heard of — emitted, never dropped and never mislabelled. OMIT the field to keep the label the client derives from event_type and tool name; a hook event does not set it. Structural (INV-2): it is a class name, never content.",
+      "description": "The class of work this event's activity is, set by a producer that can tell one class from another and passed through to core's activity_type column (which the OpenBox dashboard's Activity column reads FIRST). Closed vocabulary. `llm_completion` is a real model turn. `token_count` is a POST /v1/messages/count_tokens probe: auditable, and deliberately not called a completion — filing probes as completions is what made ~40% of llm_completion rows describe no model turn at all. `tool_telemetry` is the governed tool reporting on ITSELF to its vendor over the same host the relay intercepts (/api/event_logging, /api/claude_code/metrics, hundreds a day, all without a session header). `provider_request` is a provider path this client has never heard of — emitted, never dropped and never mislabelled. OMIT the field to keep the label the client derives from event_type and tool name; a hook event does not set it. `model_call_gate` (v1.10) is a provider's pre-send hook evaluated through policy: set by the client on ModelCallRequested/ModelCallFinished whatever an adapter supplies, and never a completion. Structural (INV-2): it is a class name, never content.",
       "enum": [
         "llm_completion",
         "token_count",
         "tool_telemetry",
-        "provider_request"
+        "provider_request",
+        "model_call_gate"
       ]
     },
     "openbox_session_id": {
@@ -154,7 +158,7 @@
       "type": "string"
     },
     "status": {
-      "description": "Outcome of a tool call (v1.2). Set on ToolResult ONLY — the client drops it on every other event type, because core copies payload.status into the row's workflow_status column for ANY event type and a lifecycle event's workflow_status means something else. This scope cannot be expressed in the subset of JSON Schema the conformance validator implements, so it is enforced by client.statusFor and asserted on the outbound bytes by the conformance suite. Structural, NOT content (INV-2): derived from which provider hook fired, or from a bound bool/int — never parsed from tool output — so it is not content-gated and ships identically with content_capture off. Core reads the literal 'completed' and nothing else, which is why the enum is closed rather than free-form.",
+      "description": "Outcome of a tool call (v1.2). Set on ToolResult and, since v1.10, ModelCallFinished ONLY — the client drops it on every other event type, because core copies payload.status into the row's workflow_status column for ANY event type and a lifecycle event's workflow_status means something else. This scope cannot be expressed in the subset of JSON Schema the conformance validator implements, so it is enforced by client.statusFor and asserted on the outbound bytes by the conformance suite. Structural, NOT content (INV-2): derived from which provider hook fired, or from a bound bool/int — never parsed from tool output — so it is not content-gated and ships identically with content_capture off. Core reads the literal 'completed' and nothing else, which is why the enum is closed rather than free-form.",
       "enum": [
         "completed",
         "failed"
@@ -182,6 +186,12 @@
       "maxLength": 128,
       "pattern": "^[\\x21-\\x7e]+$"
     },
+    "model_call_request_id": {
+      "description": "One model-call gate's id (v1.10): the provider's request id, a '.', and the attempt number, so a retry of one request is a new gate. Required on ModelCallRequested and ModelCallFinished, and putting that gate's activity_id at `<session>:llmgate:<id>`. Same shape and same reasoning as `proxy_request_id`: structural identifier (INV-2), never derived from prompt or body text, bounded and charset-checked declaratively because it reaches a stored key verbatim; client.UsableModelCallRequestID applies the same rule imperatively and the client refuses to build a gate event that fails it.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
     "metadata": {
       "description": "Additive per-type key/values. NOT verbatim at the far end: core stores a UNION of this object and the flattened `span`, renaming `invocation_id` to `tool_use_id` on the way, so a stored `metadata` and this one are not the same shape. Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`); those two are enforced by `contentMetadataKeys` in code, and only partly here.",
       "type": "object",
@@ -192,6 +202,42 @@
         },
         "provider": {
           "type": "string"
+        },
+        "message_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ModelCallRequested (v1.10): how many messages the pending model call carries."
+        },
+        "tool_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ModelCallRequested (v1.10): how many tool definitions the pending model call offers."
+        },
+        "tool_names": {
+          "type": "array",
+          "description": "ModelCallRequested (v1.10): the offered tools' names, at most 64. Array; element shape is not constrained because this schema's reviewed keyword set has no items. Identifier-class, not content."
+        },
+        "message_previews": {
+          "type": "array",
+          "x-content-gated": true,
+          "description": "ModelCallRequested (v1.10): short previews of the pending call's messages, each cut to 256 characters after redaction, at most 16. Gated content: absent with capture off. Also rides activity_input. Array; element shape is not constrained because this schema's reviewed keyword set has no items."
+        },
+        "finish_reason": {
+          "type": "string",
+          "description": "ModelCallFinished (v1.10): the provider's own reason the call ended."
+        },
+        "response_id": {
+          "type": "string",
+          "description": "ModelCallFinished (v1.10): the provider's response id."
+        },
+        "error_class": {
+          "type": "string",
+          "description": "ModelCallFinished (v1.10): the class of a failure, never its text."
+        },
+        "tool_call_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ModelCallFinished (v1.10): how many tool calls the model asked for."
         },
         "surface": {
           "type": "string",
@@ -914,6 +960,54 @@
         }
       },
       "$ref": "#/$defs/turnProducer"
+    },
+    {
+      "title": "ModelCallRequested",
+      "description": "Opens one model-call gate (v1.10). Rides ActivityStarted with activity_type model_call_gate, evaluated through policy before the call is sent; activity_id <session>:llmgate:<model_call_request_id>. Never a turn and never a completion: no usage, no turn_index, no lane producer id, no span. Metadata keys: provider, message_count, tool_count, tool_names and, under content capture, message_previews.",
+      "required": [
+        "event_type",
+        "model_call_request_id"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ModelCallRequested"
+        },
+        "activity_type": {
+          "const": "model_call_gate"
+        },
+        "tokens": false,
+        "cost": false,
+        "turn_index": false,
+        "session_rollup": false,
+        "gateway_request_id": false,
+        "otel_request_id": false,
+        "proxy_request_id": false,
+        "span": false
+      }
+    },
+    {
+      "title": "ModelCallFinished",
+      "description": "Closes one model-call gate (v1.10). Rides ActivityCompleted with activity_type model_call_gate, sharing the started half's activity_id. Metadata only: status, finish_reason, response_id, error_class, tool_call_count, model, provider -- no reply, thinking or body, and no usage. Absent when the call never reports finished; never fabricated.",
+      "required": [
+        "event_type",
+        "model_call_request_id"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ModelCallFinished"
+        },
+        "activity_type": {
+          "const": "model_call_gate"
+        },
+        "tokens": false,
+        "cost": false,
+        "turn_index": false,
+        "session_rollup": false,
+        "gateway_request_id": false,
+        "otel_request_id": false,
+        "proxy_request_id": false,
+        "span": false
+      }
     },
     {
       "title": "SubagentStarted",

@@ -462,7 +462,7 @@ func (f *Server) serveV3Evaluate(w http.ResponseWriter, r *http.Request, raw []b
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	status, verdict := f.script.answer(rec.ToolUseID())
+	status, verdict := f.script.answer(rec.ToolUseID(), rec.ActivityType())
 	if status >= 200 && status < 300 {
 		f.inbox = append(f.inbox, rec)
 	} else {

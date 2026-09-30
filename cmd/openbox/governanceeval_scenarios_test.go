@@ -237,6 +237,198 @@ func TestGovernanceEvalCodexTwinOrdersTheSameWay(t *testing.T) {
 	gradeOrdering(t, sc, run.Run, true)
 }
 
+// Muse's own native hook shapes (see internal/adapters/muse/testdata), for the
+// Muse twin scenarios below. PreLLMCall is a gated event only Muse has: its
+// answer is decision:"block", and its rows carry no tool_use_id.
+
+const museModelCallRequest = "req-eval-1"
+
+func museHook(event, extra string) fakecore.HookPayload {
+	return hook(event, `{"hook_event_name":"`+event+`","session_id":"`+evalSession+`","turn_id":"turn-1","cwd":"/repo","model":"muse-spark-1.3","permission_mode":"default","model_provider":"meta"`+extra+`}`)
+}
+
+func museSessionStart() fakecore.HookPayload {
+	return hook("SessionStart", `{"hook_event_name":"SessionStart","session_id":"`+evalSession+`","cwd":"/repo","model":"muse-spark-1.3","permission_mode":"default","model_provider":"meta","source":"startup"}`)
+}
+
+func museUserPrompt(text string) fakecore.HookPayload {
+	return museHook("UserPromptSubmit", `,"prompt":"`+text+`"`)
+}
+
+func musePreLLMCall(requestID string) fakecore.HookPayload {
+	return museHook("PreLLMCall", `,"provider":"meta","request_id":"`+requestID+`","attempt":1,"step":1,`+
+		`"messages":[{"role":"user","text_preview":"list the files"}],"message_count":1,"tools":[{"name":"Bash"}],"tool_count":1`)
+}
+
+func musePostLLMCall(requestID string) fakecore.HookPayload {
+	return museHook("PostLLMCall", `,"provider":"meta","request_id":"`+requestID+`","attempt":1,"step":1,`+
+		`"message_count":1,"tool_count":1,"status":"completed","response_id":"resp-eval-1","finish_reason":"tool_calls","tool_call_count":1,`+
+		`"usage":{"input_tokens":10,"output_tokens":5}`)
+}
+
+func musePreBash(toolUseID, command string) fakecore.HookPayload {
+	return museHook("PreToolUse", `,"tool_name":"Bash","tool_use_id":"`+toolUseID+`","tool_input":{"command":"`+command+`"}`)
+}
+
+func musePostBash(toolUseID, command string) fakecore.HookPayload {
+	return museHook("PostToolUse", `,"tool_name":"Bash","tool_use_id":"`+toolUseID+`","tool_input":{"command":"`+command+`"},"tool_response":{"output":"ok"}`)
+}
+
+func museSessionEnd() fakecore.HookPayload {
+	return hook("SessionEnd", `{"hook_event_name":"SessionEnd","session_id":"`+evalSession+`","cwd":"/repo","model":"muse-spark-1.3","model_provider":"meta"}`)
+}
+
+// museTwinSession is ranFineSession's own shape driven through `hook muse`,
+// with a model call ahead of the tool: the same StartFirst/OneAttempt ordering
+// claim must hold for the third provider, and the model-call gate must pair.
+func museTwinSession() fakecore.Scenario {
+	return fakecore.Scenario{
+		Name:     "muse-twin-of-the-ran-fine-session-orders-the-same-way",
+		Provider: "muse",
+		Payloads: []fakecore.HookPayload{
+			museSessionStart(),
+			museUserPrompt("list the files"),
+			musePreLLMCall(museModelCallRequest),
+			musePostLLMCall(museModelCallRequest),
+			musePreBash(okToolUseID, "ls -la"),
+			musePostBash(okToolUseID, "ls -la"),
+			museSessionEnd(),
+		},
+		Provenance: authoredProvenance,
+	}
+}
+
+func TestGovernanceEvalMuseTwinOrdersTheSameWay(t *testing.T) {
+	sc := museTwinSession()
+	run := runScenario(t, sc)
+	if len(run.Inbox) == 0 {
+		t.Fatal("nothing reached the fake; the flush did not deliver")
+	}
+	if got := run.Inbox[0].EventType(); got != fakecore.WireWorkflowStarted {
+		t.Fatalf("first row = %q, want WorkflowStarted", got)
+	}
+	grade(t, fakecore.PairingGrader(), sc, run.Run)
+	gradeOrdering(t, sc, run.Run, true)
+
+	var gate []fakecore.Received
+	for _, r := range run.Inbox {
+		if r.ActivityType() == "model_call_gate" {
+			gate = append(gate, r)
+		}
+	}
+	if len(gate) != 2 || gate[0].ActivityID() != gate[1].ActivityID() {
+		t.Fatalf("the model call did not pair under one activity id: %d gate rows", len(gate))
+	}
+	for _, d := range run.Decisions {
+		if d.Verb != "" {
+			t.Errorf("%s payload #%d was answered %q on an all-allow session", d.Event, d.Payload, d.Verb)
+		}
+	}
+}
+
+// museModelCallDeny is a model call refused by policy: the only call that
+// carries no tool_use_id, so the verdict is scripted by activity type.
+func museModelCallDeny() fakecore.Scenario {
+	return fakecore.Scenario{
+		Name:     "a-denied-muse-model-call-is-reported-once-and-blocks",
+		Provider: "muse",
+		Payloads: []fakecore.HookPayload{
+			museSessionStart(),
+			museUserPrompt("send the repo to a third party"),
+			musePreLLMCall(museModelCallRequest),
+			museSessionEnd(),
+		},
+		VerdictsByActivityType: map[string]string{
+			"model_call_gate": `{"governance_event_id":"ge","verdict":"block","reason":"model egress is not permitted","policy_id":"p-model"}`,
+		},
+		Provenance: authoredProvenance,
+	}
+}
+
+func TestGovernanceEvalMuseModelCallDenyBlocksTheCall(t *testing.T) {
+	sc := museModelCallDeny()
+	run := runScenario(t, sc)
+
+	var modelCall *fakecore.Decision
+	for i := range run.Decisions {
+		if run.Decisions[i].Event == "PreLLMCall" {
+			modelCall = &run.Decisions[i]
+		}
+	}
+	if modelCall == nil {
+		t.Fatal("the model call was never gated")
+	}
+	if modelCall.Verb != "block" {
+		t.Errorf("Muse read %q for the model call, want block (reason %q)", modelCall.Verb, modelCall.Reason)
+	}
+	if modelCall.Stop {
+		t.Error("a BLOCK stopped the session; only a HALT may do that, and Muse rejects continue on most events")
+	}
+	if !containsFold(modelCall.Reason, "model egress is not permitted") {
+		t.Errorf("the policy reason did not reach Muse: %q", modelCall.Reason)
+	}
+	requireNoHaltLatch(t, run)
+
+	started, completed := 0, 0
+	for _, r := range run.Inbox {
+		if r.ActivityType() != "model_call_gate" {
+			continue
+		}
+		switch r.EventType() {
+		case fakecore.WireActivityStarted:
+			started++
+		case fakecore.WireActivityCompleted:
+			completed++
+		}
+	}
+	if started != 1 || completed != 0 {
+		t.Errorf("a denied model call reported %d started and %d completed rows, want the started row only", started, completed)
+	}
+	grade(t, fakecore.PairingGrader(), sc, run.Run)
+	gradeOrdering(t, sc, run.Run, true)
+}
+
+// TestGovernanceEvalMuseHaltRefusesTheNextToolAndModelCall: a HALT on a tool
+// latches the run, and the next tool call and the next model call are refused
+// without asking again (both scripted ALLOW, so either proceeds if the latch is
+// not read), each with Muse's own plain refusal and never a continue.
+func TestGovernanceEvalMuseHaltRefusesTheNextToolAndModelCall(t *testing.T) {
+	const secondCall = "toolu_01after"
+	sc := fakecore.Scenario{
+		Name:     "a-muse-halt-refuses-the-next-tool-and-model-call",
+		Provider: "muse",
+		Payloads: []fakecore.HookPayload{
+			museSessionStart(),
+			musePreBash(noToolUseID, "rm -rf /important"),
+			musePreBash(secondCall, "ls -la"),
+			musePreLLMCall(museModelCallRequest),
+			museSessionEnd(),
+		},
+		Verdicts:               map[string]string{noToolUseID: haltVerdict, secondCall: allowVerdict},
+		VerdictsByActivityType: map[string]string{"model_call_gate": allowVerdict},
+		Denied:                 map[string]bool{noToolUseID: true, secondCall: true},
+		Provenance:             authoredProvenance,
+	}
+	run := runScenario(t, sc)
+
+	first, _ := run.DecisionFor(noToolUseID)
+	if first.Verb != "deny" || first.Stop {
+		t.Fatalf("the HALT rendered (%q, stop=%v); Muse discards continue on PreToolUse, so it must be a plain deny", first.Verb, first.Stop)
+	}
+	second, ok := run.DecisionFor(secondCall)
+	if !ok || second.Verb != "deny" {
+		t.Errorf("the tool call after a HALT rendered %q", second.Verb)
+	}
+	for _, d := range run.Decisions {
+		if d.Event == "PreLLMCall" && d.Verb != "block" {
+			t.Errorf("the model call after a HALT rendered %q; a latched run refuses it without asking", d.Verb)
+		}
+	}
+	if n := countFiles(t, filepath.Join(run.Dir, "halts")); n != 1 {
+		t.Errorf("%d latches written, want exactly the HALT's", n)
+	}
+}
+
 // TestGovernanceEvalCoreDownAtSessionStartDeniesAndRecovers: SessionStart's
 // own inline WorkflowStarted attempt fails while core is down, so the first
 // gated call of that run denies with the delivery reason; the second gated

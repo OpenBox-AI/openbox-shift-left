@@ -14,9 +14,9 @@ import (
 // (signalvocabulary_test.go, schema_guard_test.go, acceptancetest) lives
 // elsewhere; this file does not duplicate it.
 
-func TestSchemaVersionIsV19(t *testing.T) {
-	if SchemaVersion != "1.9" {
-		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.9")
+func TestSchemaVersionIsV110(t *testing.T) {
+	if SchemaVersion != "1.10" {
+		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.10")
 	}
 }
 
@@ -76,11 +76,11 @@ func TestNewLifecycleClassesRideSignalReceived(t *testing.T) {
 	}
 }
 
-// TestNewClassesAreInAllEventTypes: len == 33 and every new constant is
-// present exactly once.
+// TestNewClassesAreInAllEventTypes: len == 35 (33 plus the two model-call gate
+// halves) and every new constant is present exactly once.
 func TestNewClassesAreInAllEventTypes(t *testing.T) {
-	if len(AllEventTypes) != 33 {
-		t.Fatalf("len(AllEventTypes) = %d, want 33", len(AllEventTypes))
+	if len(AllEventTypes) != 35 {
+		t.Fatalf("len(AllEventTypes) = %d, want 35", len(AllEventTypes))
 	}
 	counts := map[EventType]int{}
 	for _, et := range AllEventTypes {
@@ -330,7 +330,7 @@ func TestSchemaRejectsInvalidRunIdentityFields(t *testing.T) {
 	}
 }
 
-// TestSchemaEnumAndOneOfHave33Entries binds the schema's own declared
+// TestSchemaEnumAndOneOfHave35Entries binds the schema's own declared
 // vocabulary size, independent of AllEventTypes (the vocabulary suite asserts
 // the two are equal).
 func TestSchemaEnumAndOneOfHave33Entries(t *testing.T) {
@@ -338,22 +338,22 @@ func TestSchemaEnumAndOneOfHave33Entries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load schema: %v", err)
 	}
-	if v := schema["x-schema-version"]; v != "1.9" {
-		t.Errorf("x-schema-version = %v, want 1.9", v)
+	if v := schema["x-schema-version"]; v != "1.10" {
+		t.Errorf("x-schema-version = %v, want 1.10", v)
 	}
 	props, _ := schema["properties"].(map[string]any)
 	sv, _ := props["schema_version"].(map[string]any)
-	if sv["const"] != "1.9" {
-		t.Errorf("properties.schema_version.const = %v, want 1.9", sv["const"])
+	if sv["const"] != "1.10" {
+		t.Errorf("properties.schema_version.const = %v, want 1.10", sv["const"])
 	}
 	et, _ := props["event_type"].(map[string]any)
 	enum, _ := et["enum"].([]any)
-	if len(enum) != 33 {
-		t.Errorf("event_type.enum has %d entries, want 33", len(enum))
+	if len(enum) != 35 {
+		t.Errorf("event_type.enum has %d entries, want 35", len(enum))
 	}
 	oneOf, _ := schema["oneOf"].([]any)
-	if len(oneOf) != 33 {
-		t.Errorf("oneOf has %d branches, want 33", len(oneOf))
+	if len(oneOf) != 35 {
+		t.Errorf("oneOf has %d branches, want 35", len(oneOf))
 	}
 	if _, present := props["run_id"]; !present {
 		t.Error("properties.run_id is not declared")

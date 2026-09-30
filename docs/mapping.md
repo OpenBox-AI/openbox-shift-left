@@ -88,6 +88,8 @@ Built by `wireTypeFor` in `internal/client/payload.go`.
 | `ToolResult` | `ActivityCompleted` | — | closes it, sharing `activity_id`; independently evaluated; `status` drives the tool's success metric |
 | `TurnStarted` | `ActivityStarted` | `activity_type: llm_completion` | opens a model turn — see "Model turns" below |
 | `TurnCompleted` | `ActivityCompleted` | `activity_type: llm_completion` | carries token counts, and under content capture the model's reply |
+| `ModelCallRequested` | `ActivityStarted` | `activity_type: model_call_gate` | opens a model-call gate, evaluated through policy before the call is sent — see "Model-call gate" below |
+| `ModelCallFinished` | `ActivityCompleted` | `activity_type: model_call_gate` | closes it, sharing `activity_id`; metadata only, never usage |
 | `SubagentStarted` | `SignalReceived` | `subagent_started` | `metadata.agent_id`/`.agent_type` |
 | `PermissionDenied` | `SignalReceived` | `permission_denied` | `denial_reason` is gated free text |
 | `APIError` | `SignalReceived` | `api_error` | `error_type` is a closed provider enum; `error_details` is gated free text |
@@ -162,6 +164,23 @@ probe as a real completion:
 | `POST /v1/messages/count_tokens` | `token_count` | no, and not emitted at all |
 | the tool's own telemetry call to its vendor | `tool_telemetry` | no |
 | anything else on the intercepted host | `provider_request` | yes |
+| a provider's pre-send hook, evaluated through policy (no path: not a relayed call) | `model_call_gate` | no, metadata only |
+
+### Model-call gate
+
+`ModelCallRequested`/`ModelCallFinished` ride the same `ActivityStarted`/
+`ActivityCompleted` pair, with `activity_type: model_call_gate` on both halves
+(v1.10). `activity_id` is `<session_id>:llmgate:<model_call_request_id>`
+(`modelCallGateActivityID` in `internal/client/modelcallgate.go`), a namespace
+disjoint from every producer above. It is never `llm_completion`: neither half
+carries usage, a turn index or a producer request id, and no `hook_trigger` or
+`spans[]` is sent. `ModelCallRequested`'s `activity_input` holds `model`,
+`provider`, `message_count`, `tool_count`, `tool_names` and, under content
+capture, `message_previews`; `ModelCallFinished`'s `activity_output` holds
+`status`, `finish_reason`, `response_id`, `error_class`, `tool_call_count`,
+`model` and `provider`. A denied gate leaves the started row only. Core must
+evaluate the started half through policy and count it as neither a completion
+nor a turn; see the 1.10 entry in [dev-event-contract.md](dev-event-contract.md).
 
 ### Signal payload: `signal_args`
 

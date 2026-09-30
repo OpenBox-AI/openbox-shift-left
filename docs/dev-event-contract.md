@@ -39,6 +39,7 @@ needed to add a lifecycle type.
 | `SessionStarted` / `SessionEnded` | a session opens / closes | one `WorkflowStarted` and one `WorkflowCompleted`, paired |
 | `ToolCall` / `ToolResult` | before / after a tool runs | one `ActivityStarted` and one `ActivityCompleted`, paired by `activity_id` |
 | `TurnStarted` / `TurnCompleted` | before / after a model turn | same pairing, with `activity_type: llm_completion` |
+| `ModelCallRequested` / `ModelCallFinished` | before a model call is sent / after it finishes (1.10) | same pairing, with `activity_type: model_call_gate` — see [Model-call gate](#model-call-gate-110) |
 | `PromptSubmitted`, `CommitCreated`, `Deploy`, `SubagentStarted`, `PermissionDenied`, `APIError`, and every other lifecycle signal (config changes, notifications, compaction, model switches, elicitations, …) | a one-off lifecycle moment | a single `SignalReceived` row — unpaired |
 
 Every activity that ran gets exactly its two rows; a `SignalReceived` never
@@ -56,6 +57,52 @@ counts, and (for a model call) bodies — the client reads it into
 `activity_input`/`activity_output` rather than serializing it as a wire span.
 An adapter author populates `span`; nothing downstream expects a literal span
 on the wire.
+
+## Model-call gate (1.10)
+
+Contract 1.10 adds a pre-send gate on a model call: a provider hook that fires
+before the call leaves, is evaluated through policy like a tool call, and is
+paired with the hook that reports the call finished. Two new `event_type`
+values carry it, `ModelCallRequested` (wire `ActivityStarted`) and
+`ModelCallFinished` (wire `ActivityCompleted`), and `activity_type` gains
+`model_call_gate`.
+
+A gate is not a model-call record, and the contract keeps the two apart:
+
+- `model_call_request_id` is required on both halves: the provider's request
+  id, a `.`, and the attempt number, bounded like the producer request ids
+  (1 to 128 printable ASCII characters). The `activity_id` is
+  `<session>:llmgate:<model_call_request_id>`, disjoint from tool ids,
+  `<session>:turn:<n>` and the `:proxy:`, `:otel:`, `:gateway:` and
+  `:usage:rollup` shapes.
+- `activity_type` is `model_call_gate` on both halves, never `llm_completion`.
+- Neither half carries usage (`tokens`, `cost`), a `turn_index`, a producer
+  request id, `session_rollup` or a `span`. The schema rejects them on these
+  types and the client drops them before egress whatever an adapter sets.
+- `ModelCallRequested`'s `activity_input` carries `model`, `provider`,
+  `message_count`, `tool_count`, `tool_names` and, under content capture only,
+  `message_previews` (gated content: at most 16 previews of at most 256
+  characters each, after local redaction).
+- `ModelCallFinished`'s `activity_output` is metadata only: `status`,
+  `finish_reason`, `response_id`, `error_class`, `tool_call_count`, `model`,
+  `provider`. Never the reply, thinking or a body.
+- A pre-send deny, or a call that never reports finished, leaves the started
+  row only. A completion is never fabricated.
+
+An adapter sets these through `DevEvent`: `ModelCallRequestID`, `Model`,
+`Status` (on `ModelCallFinished`) and the `Metadata` keys above.
+
+Version history entry, 1.10. Precondition: core must evaluate an
+`ActivityStarted` with `activity_type` `model_call_gate` through policy, must
+not count it as `llm_completion` or as a turn, and must not route it onto the
+approval-bypass path. Checked against openbox-core source on 2026-09-30: usage
+extraction and observability key on the literal `llm_completion`, and the
+approval-bypass path needs `hook_trigger` together with `spans`, which this
+client never sets; policy evaluation (`PolicyEvaluationActivity`) runs on
+every event regardless of `activity_type`, which core passes through
+unvalidated. That core has to be deployed before a client speaking 1.10
+reaches a developer. Restamped, a 1.9 event still validates: 1.10 adds and
+removes nothing.
 
 ## Invariants
 

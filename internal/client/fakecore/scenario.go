@@ -18,6 +18,9 @@ type Scenario struct {
 	Payloads []HookPayload
 	// Verdicts is what core answers, keyed by tool_use_id.
 	Verdicts map[string]string
+	// VerdictsByActivityType is Script.VerdictsByActivityType: a verdict per wire
+	// activity_type for rows with no tool_use_id, e.g. "model_call_gate".
+	VerdictsByActivityType map[string]string
 	// Default overrides the verdict answered for any call with no matching
 	// Verdicts entry (including one with no tool_use_id to key on at all,
 	// e.g. a UserPromptSubmit): "" (the common case) leaves Script's own
@@ -82,7 +85,7 @@ type Posture struct {
 
 // Script projects the scenario onto what the fake should answer.
 func (s Scenario) Script() Script {
-	return Script{Verdicts: s.Verdicts, AlwaysStatus: s.AlwaysStatus, Default: s.Default}
+	return Script{Verdicts: s.Verdicts, VerdictsByActivityType: s.VerdictsByActivityType, AlwaysStatus: s.AlwaysStatus, Default: s.Default}
 }
 
 // Grader is a predicate over (scenario, inbox) returning reasons, not a

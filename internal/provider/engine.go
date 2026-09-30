@@ -48,6 +48,16 @@ type Rewaker interface {
 	RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int
 }
 
+// FaultExiter is the optional half of the runtime SPI for a host that fails
+// OPEN when a hook crashes or answers invalidly: it treats exit 0 with no
+// usable answer as allow. Such a provider installs a deny-only successor that
+// runs on a non-zero exit, so a crashed gated hook must exit non-zero rather
+// than 0. FaultExitCode reports that code for one event, or 0 where a crash
+// gates nothing.
+type FaultExiter interface {
+	FaultExitCode(event string) int
+}
+
 // Capability is one entry in a provider's declared capability profile. OpenBox
 // core is written against the normalized event contract and never assumes a
 // capability; an adapter declares what it supports so a per-session coverage
