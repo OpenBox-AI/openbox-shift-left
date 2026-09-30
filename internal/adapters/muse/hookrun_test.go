@@ -107,6 +107,22 @@ func runHook(t *testing.T, sub, payload string) (stdout, stderr string) {
 	return out.String(), errb.String()
 }
 
+// endSession runs a SessionEnd and then the flusher it hands delivery to. In
+// production that flusher is a detached process; a test binary never spawns
+// one (that would re-run the suite), so the test runs its one step inline.
+func endSession(t *testing.T, payload, session string) {
+	t.Helper()
+	runHook(t, "SessionEnd", payload)
+	flushSession(t, session)
+}
+
+// flushSession is the detached flusher's own step for one session.
+func flushSession(t *testing.T, session string) {
+	t.Helper()
+	t.Setenv(hookflow.EnvFlushSession, session)
+	runHook(t, "flush", "")
+}
+
 // fixtureAs is fixture with the subagent session of a capture moved onto the
 // same session too, for a test that needs a subagent-shaped payload (a
 // PermissionRequest, observed only there) to belong to one latched run.
@@ -268,7 +284,7 @@ func TestModelCallDenyBlocksAndLeavesTheStartedRowOnly(t *testing.T) {
 
 	// The session end drains whatever is still queued; the deny leaves no
 	// completion behind it.
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-deny"))
+	endSession(t, fixture(t, "session-end", "s-deny"), "s-deny")
 	rows := gateRows(f)
 	if len(rows) != 1 {
 		t.Fatalf("gate rows = %d, want exactly the started row", len(rows))
@@ -293,7 +309,7 @@ func TestModelCallAllowThenFinishedIsOnePair(t *testing.T) {
 	if stdout, _ := runHook(t, "PostLLMCall", fixture(t, "post-llm-call", "s-pair")); stdout != "" {
 		t.Fatalf("PostLLMCall must write nothing, got %q", stdout)
 	}
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-pair"))
+	endSession(t, fixture(t, "session-end", "s-pair"), "s-pair")
 
 	rows := gateRows(f)
 	if len(rows) != 2 {
@@ -328,7 +344,7 @@ func TestMissingModelCallFinishedLeavesTheStartedRowOnly(t *testing.T) {
 	setHookEnv(t)
 	f := serveCore(t, fakecore.Script{Default: allowJSON})
 	runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", "s-nopost"))
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-nopost"))
+	endSession(t, fixture(t, "session-end", "s-nopost"), "s-nopost")
 	rows := gateRows(f)
 	if len(rows) != 1 || rows[0].EventType() != fakecore.WireActivityStarted {
 		t.Fatalf("gate rows = %d, want the started row only", len(rows))
@@ -502,7 +518,7 @@ func TestToolPairing(t *testing.T) {
 	f := serveCore(t, fakecore.Script{Default: allowJSON})
 	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash", "s-tool"))
 	runHook(t, "PostToolUse", fixture(t, "post-tool-use", "s-tool"))
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-tool"))
+	endSession(t, fixture(t, "session-end", "s-tool"), "s-tool")
 
 	byActivity := map[string][]string{}
 	for _, r := range f.Inbox() {
@@ -527,7 +543,7 @@ func TestUsageAndTraceparentStayLocal(t *testing.T) {
 	t.Setenv(devconfig.EnvContentCapture, "1")
 	runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", "s-usage"))
 	runHook(t, "PostLLMCall", fixture(t, "post-llm-call", "s-usage"))
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-usage"))
+	endSession(t, fixture(t, "session-end", "s-usage"), "s-usage")
 
 	for _, r := range f.Inbox() {
 		raw := string(r.Raw)

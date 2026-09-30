@@ -357,6 +357,14 @@ func TestSummarizeEvidence(t *testing.T) {
 	if sum, _ := SummarizeEvidence(dir, now); sum.Unverified {
 		t.Error("a later clean pass did not clear unverified")
 	}
+	// A session whose pass disabled itself may never get another one (an echo
+	// probe, a session run under an older build); a later clean pass of any
+	// other session still proves the journal reads now.
+	emitAt(now.Add(-8*time.Minute), rec("c", "disabled"))
+	emitAt(now.Add(-5*time.Minute), rec("d", "ok"))
+	if sum, _ := SummarizeEvidence(dir, now); sum.Unverified {
+		t.Error("an old disabled session kept unverified after another session's clean pass")
+	}
 }
 
 func TestReconcileJournalWithoutIdsJoinsHooksThatCarryThem(t *testing.T) {

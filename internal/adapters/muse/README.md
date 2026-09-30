@@ -74,13 +74,13 @@ a pass of eight or more lines none of which is an envelope.
 | `PreToolUse` | `ToolCall` (started) | yes | `hookSpecificOutput{permissionDecision:"deny",...}`, or `updatedInput` alone |
 | `PermissionRequest` | `PermissionRequest` (a record, never the gate) | yes | `hookSpecificOutput.decision{behavior:"deny",message}` |
 | `PostToolUse` / `PostToolUseFailure` | `ToolResult` completed / failed | no | none |
-| `SubagentStart` | `SessionStarted` of the child's own session (`agent_id` = `subagent_id`, `agent_type` = `subagent`) | no | none |
+| `SubagentStart` | `SessionStarted` of the child's own session (`agent_id` = `subagent_id`, `agent_type` = `subagent`), delivered by the detached flusher | no | none |
 | `StopFailure` | `APIError` (no error text is bound) | no | none |
-| `SessionEnd` | `SessionEnded`, then an inline spool drain | no | none |
+| `SessionEnd` | `SessionEnded`, delivered by the detached flusher (Muse kills this hook as the session exits) | no | none |
 | `PreLLMCall` | `ModelCallRequested` (started, evaluated) | yes | `{"decision":"block","reason":...}` |
 | `PostLLMCall` | `ModelCallFinished` (completed, metadata only) | no | none |
 | `Stop` | nothing reported: no usage is taken from a hook payload, and no completion is fabricated. Runs the session-log reconciler (see below) | no | none |
-| `SubagentStop` | `SessionEnded` of the child's own session, then an inline spool drain | no | none |
+| `SubagentStop` | `SessionEnded` of the child's own session, delivered by the detached flusher | no | none |
 | `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | nothing: no contract type. Never installed; one that runs anyway is a no-op | - | - |
 
 ## The model-call gate
@@ -181,7 +181,7 @@ govern nothing.
   with no contract type never get one. `ExpectedHandlers()` is what doctor counts
   against.
 - **Shape.** `{"type":"command","command":"\"<engine>\" hook muse [--home \"<dir>\"] <Event>","timeout":N}`,
-  with `N` 30 on a gated event and 5 elsewhere (`SessionEnd` included: it delivers inline within that ceiling), and on a gated
+  with `N` 30 on a gated event and 5 elsewhere (`SessionEnd` included), and on a gated
   handler an `onFailure` object of the same form holding the `--fail-closed`
   command. The engine is an absolute path.
 - **Merge, not rewrite.** The file is edited by path, so every key and handler
@@ -215,6 +215,14 @@ hook logs and exits 0, as the other adapters do. A delivery failure denies only
 its own call and never latches the run; only a real HALT verdict latches.
 
 ## Run lifecycle
+
+**Muse kills some hooks early.** On Muse 1.4.1 a `SessionEnd` hook, and a
+subagent's `SubagentStart`/`SubagentStop` hooks, are killed as soon as Muse is
+done with them, whatever their `timeout`: a delivery started there dies
+mid-send, and the half-sent file can only be discarded by the next drain. Those
+three hooks therefore only spool their event and hand delivery to the detached
+flusher, which runs in its own session and outlives the hook. A main session's
+`SessionStart` still delivers inline.
 
 Muse gives no reliable lifecycle to hang a run on, so `runlifecycle.go` keeps one
 small record per session id (under the spool's `lifecycle/`, locked per session)
@@ -299,7 +307,7 @@ Still guessed by the installer and doctor (Muse documents none of them by name):
 | `llmgate.go` | the model-call gate: mapping, request id, target |
 | `outputcontract.go` | the four closed answers, the caps |
 | `promptgate.go`, `permissiongate.go`, `enforcetarget.go`, `enforce.go`, `enforceevaluate.go` | gate targets and the evaluator |
-| `hookrun.go` | `RunHook`: the gated and observed paths, the inline drain |
+| `hookrun.go` | `RunHook`: the gated and observed paths, `SessionStart`'s inline drain, the flusher handoff |
 | `runlifecycle.go` | the per-session run record: resume and subagent sessions open a run before their first event |
 | `usage.go` | usage and trace context, local trace only |
 | `sessionlog.go`, `reconcile.go` | the session-journal reader with its cursor, the gate ledger, the join and the `evidence.gap` findings |

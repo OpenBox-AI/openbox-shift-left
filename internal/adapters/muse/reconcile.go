@@ -464,7 +464,8 @@ func sweepState(spoolDir string, now time.Time) {
 type EvidenceSummary struct {
 	// Gaps counts evidence.gap findings inside the window.
 	Gaps int
-	// Unverified is set when some session's latest pass disabled itself.
+	// Unverified is set when the most recent pass, of any session, disabled
+	// itself.
 	Unverified bool
 }
 
@@ -488,20 +489,20 @@ func SummarizeEvidence(traceDir string, now time.Time) (EvidenceSummary, error) 
 		}
 		return sum, err
 	}
-	latest := map[string]string{} // session -> outcome of its latest pass; recs are time-ordered
+	// Whether the journal reads is a property of the Muse build writing it, not
+	// of one session, so the most recent pass decides (recs are time-ordered).
+	// Judging per session instead would pin "unverified" on a session that
+	// never gets another pass, long after an upgrade made every later pass clean.
+	latest := ""
 	for _, r := range recs {
 		switch r.Stage {
 		case trace.StageEvidenceGap:
 			sum.Gaps++
 		case trace.StageEvidenceReconcile:
-			latest[r.SessionID] = r.Outcome
+			latest = r.Outcome
 		}
 	}
-	for _, o := range latest {
-		if o == reconcileDisabled {
-			sum.Unverified = true
-		}
-	}
+	sum.Unverified = latest == reconcileDisabled
 	return sum, nil
 }
 

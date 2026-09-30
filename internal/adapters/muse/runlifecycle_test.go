@@ -1,6 +1,7 @@
 package muse
 
 import (
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"strings"
 	"testing"
 
@@ -52,7 +53,7 @@ func TestResumeWithoutSessionStartOpensAnUnlatchedRun(t *testing.T) {
 	if len(haltLatches(t)) != 1 {
 		t.Fatalf("run 1 is not latched: %v", haltLatches(t))
 	}
-	runHook(t, "SessionEnd", fixture(t, "session-end", sess))
+	endSession(t, fixture(t, "session-end", sess), sess)
 
 	before := f.Hits()
 	for _, tc := range []struct{ hook, file string }{
@@ -84,7 +85,7 @@ func TestResumedRunOpensOnce(t *testing.T) {
 	const sess = "s-resumed-once"
 	f := serveCore(t, fakecore.Script{Default: allowJSON})
 	runHook(t, "SessionStart", fixture(t, "session-start-startup", sess))
-	runHook(t, "SessionEnd", fixture(t, "session-end", sess))
+	endSession(t, fixture(t, "session-end", sess), sess)
 	for i := 0; i < 3; i++ {
 		runHook(t, "UserPromptSubmit", fixture(t, "user-prompt-submit", sess))
 	}
@@ -103,6 +104,7 @@ func TestSubagentSessionIsOpenedOnceWhicheverEventComesFirst(t *testing.T) {
 	runHook(t, "PreLLMCall", fixture(t, "pre-llm-call-subagent", ""))
 	runHook(t, "SubagentStart", fixture(t, "subagent-start", ""))
 	runHook(t, "SubagentStop", fixture(t, "subagent-stop", ""))
+	flushSession(t, "sess-0002")
 
 	runs := startedFirst(t, f)
 	if len(runs) != 1 || runs[0] != "sess-0002" {
@@ -151,12 +153,41 @@ func TestSecondEndOfAnEndedRunIsDropped(t *testing.T) {
 	setHookEnv(t)
 	f := serveCore(t, fakecore.Script{Default: allowJSON})
 	runHook(t, "SessionStart", fixture(t, "session-start-startup", "s-twice"))
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-twice"))
-	runHook(t, "SessionEnd", fixture(t, "session-end", "s-twice"))
+	endSession(t, fixture(t, "session-end", "s-twice"), "s-twice")
+	endSession(t, fixture(t, "session-end", "s-twice"), "s-twice")
 	if n := rowCount(f, fakecore.WireWorkflowCompleted); n != 1 {
 		t.Errorf("WorkflowCompleted rows = %d, want 1", n)
 	}
 	if n := rowCount(f, fakecore.WireWorkflowStarted); n != 1 {
 		t.Errorf("WorkflowStarted rows = %d, want 1", n)
+	}
+}
+
+// Muse kills a SessionEnd hook, and a subagent's hooks, as soon as it is done
+// with them, so none of those three may start a delivery of its own: a killed
+// attempt leaves a half-sent file the next drain can only discard. Their events
+// wait in the spool for the detached flusher.
+func TestEndingAndSubagentHooksLeaveDeliveryToTheFlusher(t *testing.T) {
+	spool := setHookEnv(t)
+	f := serveCore(t, fakecore.Script{Default: allowJSON})
+
+	runHook(t, "SessionStart", fixture(t, "session-start-startup", "s-late"))
+	before := len(f.Inbox())
+	runHook(t, "SessionEnd", fixture(t, "session-end", "s-late"))
+	runHook(t, "SubagentStart", fixture(t, "subagent-start", ""))
+	runHook(t, "SubagentStop", fixture(t, "subagent-stop", ""))
+	if got := len(f.Inbox()); got != before {
+		t.Fatalf("an ending or subagent hook delivered %d event(s) inline; it must leave them to the flusher", got-before)
+	}
+	sp := hookflow.Spool{Dir: spool}
+	for _, sess := range []string{"s-late", "sess-0002"} {
+		if sp.PendingCount(sess) == 0 {
+			t.Errorf("%s: nothing waits in the spool for the flusher", sess)
+		}
+	}
+	flushSession(t, "s-late")
+	flushSession(t, "sess-0002")
+	if n := rowCount(f, fakecore.WireWorkflowCompleted); n != 2 {
+		t.Errorf("after the flusher ran, WorkflowCompleted rows = %d, want 2", n)
 	}
 }

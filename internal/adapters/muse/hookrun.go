@@ -204,23 +204,27 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// Nothing to report; the pass over the session's own journal is the
 		// whole of this handler.
 		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
-	case HookSessionStart, HookSubagentStart:
+	case HookSessionStart:
 		// The session's own WorkflowStarted event is drained inline, under this
 		// session's own stripe, right after the append above, so no detached
 		// flusher's debounce window can let anything else of this run overtake it.
 		inlineAttempt(ad, logger, ev.SessionID, hookStart)
 	case HookSessionEnd:
-		// The journal pass comes first, on a budget far below the handler's
-		// ceiling, so it cannot eat the delivery window it precedes.
+		// Muse kills a SessionEnd hook as the session exits, whatever its
+		// timeout, so an inline attempt here dies mid-delivery and leaves a
+		// half-sent file the next drain can only discard. Delivery goes to the
+		// detached flusher (its own session, so it outlives this process) at
+		// once; the journal pass after it is best-effort.
+		forceFlusher(logger, ev.SessionID)
 		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
-		// The same inline attempt, within SessionEnd's own budget, falling back
-		// to the detached flusher when the window runs out.
-		inlineAttempt(ad, logger, ev.SessionID, hookStart)
-	case HookSubagentStop:
-		// A subagent's own journal is not reconciled (it is the parent's tool
-		// actions that the journal join looks for); its end is delivered the same
-		// way a session's is.
-		inlineAttempt(ad, logger, ev.SessionID, hookStart)
+	case HookSubagentStart, HookSubagentStop:
+		// Muse tears a subagent's hooks down as soon as the subagent is done,
+		// the same race as SessionEnd, so a subagent's SessionStarted and
+		// SessionEnded go to the detached flusher too. A gated call of the
+		// subagent drains its own backlog first, so its WorkflowStarted still
+		// reaches core ahead of anything else of that run. A subagent's own
+		// journal is not reconciled: the join looks for the parent's actions.
+		forceFlusher(logger, ev.SessionID)
 	default:
 		nudgeFlush()
 	}
