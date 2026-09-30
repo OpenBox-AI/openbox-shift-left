@@ -121,6 +121,10 @@ type HookEvent struct {
 	// SubagentID and ChildSessionID identify a subagent on SubagentStart.
 	SubagentID     string
 	ChildSessionID string
+	// SubagentSessionID is never read off a payload: foldSubagent sets it to
+	// the subagent's own session id when it moves the event into its parent's
+	// session, and a non-empty value is what marks the event as folded.
+	SubagentSessionID string
 
 	// Model-call keys, on PreLLMCall and repeated on PostLLMCall.
 	Provider  string
@@ -235,6 +239,10 @@ func intOf(raw json.RawMessage) (int, bool) {
 }
 
 // field reads one string key from a tool_input object.
+// folded reports that the event is a subagent's, moved into its parent's
+// session.
+func (e *HookEvent) folded() bool { return e != nil && e.SubagentSessionID != "" }
+
 func (e *HookEvent) field(key string) string {
 	if len(e.ToolInput) == 0 {
 		return ""

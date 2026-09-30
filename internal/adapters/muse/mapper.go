@@ -70,7 +70,20 @@ func NewMapper(id Identity) Mapper {
 // whether an event should be emitted at all: false when the payload is unusable
 // (no session id, no valid developer DID) or the hook maps to nothing. The
 // caller drops it; a gated caller then denies, never proceeds.
+//
+// A folded subagent event (foldSubagent) is mapped under its parent's session
+// and tagged the way Claude Code tags a subagent's events: agent_id and
+// agent_type on every event, SubagentStart as the SubagentStarted signal, and
+// no SessionEnded for SubagentStop.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
+	ev, ok := m.mapHook(hook, e)
+	if ok && e.folded() {
+		ev.Metadata = mergeMetadata(ev.Metadata, subagentMetadata(e))
+	}
+	return ev, ok
+}
+
+func (m Mapper) mapHook(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	if e == nil || e.SessionID == "" {
 		return client.DevEvent{}, false
 	}
@@ -110,7 +123,13 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
 			"turn_id":         capStr(e.TurnID),
 		})
-		if m.CaptureContent && e.Prompt != "" {
+		if e.folded() {
+			// A subagent's prompt is not the developer's goal, and a
+			// prompt_submitted signal's args are what core reads the goal off:
+			// its text is withheld, as Claude Code withholds a machine-injected
+			// turn's.
+			ev.Metadata = mergeMetadata(ev.Metadata, map[string]any{"prompt_source": subagentAgentType})
+		} else if m.CaptureContent && e.Prompt != "" {
 			if p := m.redact(e.Prompt); p != "" {
 				ev.Content = &client.Content{Prompt: p}
 			}
@@ -158,9 +177,14 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Content = m.gatedToolOutput(outputText(e.Error))
 
 	case HookSubagentStart:
-		// A subagent runs under its own session id, so its start is that
-		// session's SessionStarted. Muse names no parent session in any payload,
-		// so the child cannot be linked to the session that spawned it.
+		if e.folded() {
+			ev.EventType = client.EventSubagentStarted
+			ev.Tool = agent
+			ev.Metadata = subagentMetadata(e)
+			break
+		}
+		// A subagent whose parent could not be found stays a session of its
+		// own, so its start is that session's SessionStarted.
 		ev.EventType = client.EventSessionStarted
 		ev.Tool = agent
 		ev.Metadata = mergeMetadata(sessionStartMetadata(e), subagentMetadata(e))
@@ -172,6 +196,9 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		}
 
 	case HookSubagentStop:
+		if e.folded() {
+			return client.DevEvent{}, false
+		}
 		ev.EventType = client.EventSessionEnded
 		ev.EndedAt = ts
 		ev.Tool = agent

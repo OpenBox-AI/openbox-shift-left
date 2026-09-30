@@ -118,13 +118,24 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	pinnedNow := nowFn()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
-	if hook.ends() {
+	lc := lifecycle{
+		Dir:  lifecycleDir(DefaultSpoolDir()),
+		Runs: obgit.RunStore{Dir: obgit.RunDir(obgit.DefaultSessionDir())},
+		Now:  func() time.Time { return pinnedNow },
+		Log:  logger,
+	}
+	// A subagent's event moves into its parent's session before anything reads
+	// the session id: the spool, the run, the latch and the gate ledger are all
+	// the parent's from here on, as a Claude Code subagent's are.
+	lc.foldSubagent(hook, ev, sessionLogRoot())
+
+	if hook.ends() && !ev.folded() {
 		ad.Mapper.Evidence = &EvidenceState{
 			Undelivered: ad.Spool.UndeliveredCountFor(ev.SessionID),
 			Discarded:   ad.Spool.DiscardedCount(),
 		}
 	}
-	if hook == HookSessionStart || hook == HookSubagentStart {
+	if hook == HookSessionStart || (hook == HookSubagentStart && !ev.folded()) {
 		posture := effectivePosture()
 		ad.Mapper.Posture = &posture
 	}
@@ -138,12 +149,6 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	// Absent, unreadable or corrupt records fall back to generation 0 with one
 	// stderr line: a run-identity lookup must never block a call or drop an
 	// event.
-	lc := lifecycle{
-		Dir:  lifecycleDir(DefaultSpoolDir()),
-		Runs: obgit.RunStore{Dir: obgit.RunDir(obgit.DefaultSessionDir())},
-		Now:  func() time.Time { return pinnedNow },
-		Log:  logger,
-	}
 	var (
 		run  RunIdentity
 		tr   transition
@@ -220,9 +225,10 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	case HookSubagentStart, HookSubagentStop:
 		// Muse tears a subagent's hooks down as soon as the subagent is done,
 		// the same race as SessionEnd, so a subagent's SessionStarted and
-		// SessionEnded go to the detached flusher too. A gated call of the
-		// subagent drains its own backlog first, so its WorkflowStarted still
-		// reaches core ahead of anything else of that run. A subagent's own
+		// SessionEnded go to the detached flusher too; a folded subagent's
+		// events sit in its parent's spool, which is the one flushed. A gated
+		// call drains its session's backlog first, so a run's WorkflowStarted
+		// still reaches core ahead of anything else of it. A subagent's own
 		// journal is not reconciled: the join looks for the parent's actions.
 		forceFlusher(logger, ev.SessionID)
 	default:

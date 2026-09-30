@@ -25,7 +25,9 @@ import (
 //     SessionEnd.
 //   - A subagent runs under its OWN session id and is announced by
 //     SubagentStart/SubagentStop. Its first model call can reach a hook before
-//     its SubagentStart does, and there is no parent session id in any payload.
+//     its SubagentStart does, and there is no parent session id in any payload
+//     (subagentparent.go reads the parent off its journal and folds the child
+//     into the parent's session; only an unlinked child reaches here as its own).
 //
 // Core must never receive a run's events without that run's WorkflowStarted
 // first, so the adapter keeps one small record per session (runState) saying
@@ -194,8 +196,18 @@ func (l lifecycle) advance(hook HookName, ev *HookEvent) (RunIdentity, transitio
 	sid := ev.SessionID
 	st, have := l.load(sid)
 	open := have && !st.Sealed
+	// A folded subagent event is one more event of its parent's run: its
+	// SubagentStart is not that run's start and its SubagentStop is not its end.
+	folded := ev.folded()
+	ends := hook.ends() && !folded
+	childStart := hook == HookSubagentStart && !folded
 
 	switch {
+	case folded && hook == HookSubagentStop:
+		// A subagent ending reports nothing inside its parent's session, and
+		// must never reopen a parent run that has already ended.
+		return l.current(sid), transition{Drop: true}
+
 	case hook == HookSessionStart:
 		// An explicit start: a resume source continues the session as a new run.
 		var run RunIdentity
@@ -207,19 +219,19 @@ func (l lifecycle) advance(hook HookName, ev *HookEvent) (RunIdentity, transitio
 		l.save(sid, run, false)
 		return run, transition{}
 
-	case hook == HookSubagentStart && open:
+	case childStart && open:
 		// The child's first model call raced ahead of its SubagentStart and
 		// already opened its run.
 		return l.current(sid), transition{Drop: true}
 
 	case open:
 		run := l.current(sid)
-		if hook.ends() {
+		if ends {
 			l.save(sid, run, true)
 		}
 		return run, transition{}
 
-	case have && hook.ends():
+	case have && ends:
 		// A second end of a run that already ended: nothing to report, and no
 		// reason to resurrect a run just to end it again.
 		return l.current(sid), transition{Drop: true}
@@ -234,10 +246,10 @@ func (l lifecycle) advance(hook HookName, ev *HookEvent) (RunIdentity, transitio
 	} else {
 		run = l.current(sid)
 	}
-	l.save(sid, run, hook.ends())
-	// A SubagentStart is itself the child's SessionStarted; every other hook
-	// needs one synthesised ahead of it.
-	return run, transition{Open: hook != HookSubagentStart, Resumed: resumed}
+	l.save(sid, run, ends)
+	// An unfolded SubagentStart is itself the child's SessionStarted; every
+	// other hook needs one synthesised ahead of it.
+	return run, transition{Open: !childStart, Resumed: resumed}
 }
 
 // openEvent builds the SessionStarted that opens a run no SessionStart

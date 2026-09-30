@@ -74,13 +74,13 @@ a pass of eight or more lines none of which is an envelope.
 | `PreToolUse` | `ToolCall` (started) | yes | `hookSpecificOutput{permissionDecision:"deny",...}`, or `updatedInput` alone |
 | `PermissionRequest` | `PermissionRequest` (a record, never the gate) | yes | `hookSpecificOutput.decision{behavior:"deny",message}` |
 | `PostToolUse` / `PostToolUseFailure` | `ToolResult` completed / failed | no | none |
-| `SubagentStart` | `SessionStarted` of the child's own session (`agent_id` = `subagent_id`, `agent_type` = `subagent`), delivered by the detached flusher | no | none |
+| `SubagentStart` | `SubagentStarted` in the parent's session (`agent_id` = `subagent_id`, `agent_type` = `subagent`); `SessionStarted` of the child's own session only when no parent link is found. Delivered by the detached flusher | no | none |
 | `StopFailure` | `APIError` (no error text is bound) | no | none |
 | `SessionEnd` | `SessionEnded`, delivered by the detached flusher (Muse kills this hook as the session exits) | no | none |
 | `PreLLMCall` | `ModelCallRequested` (started, evaluated) | yes | `{"decision":"block","reason":...}` |
 | `PostLLMCall` | `ModelCallFinished` (completed, metadata only) | no | none |
 | `Stop` | nothing reported: no usage is taken from a hook payload, and no completion is fabricated. Runs the session-log reconciler (see below) | no | none |
-| `SubagentStop` | `SessionEnded` of the child's own session, delivered by the detached flusher | no | none |
+| `SubagentStop` | nothing in the parent's session (a subagent ending ends no run); `SessionEnded` of the child's own session only when unlinked. Delivered by the detached flusher | no | none |
 | `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | nothing: no contract type. Never installed; one that runs anyway is a no-op | - | - |
 
 ## The model-call gate
@@ -177,7 +177,7 @@ govern nothing.
 - **Which events.** One catch-all handler (no matcher, so MCP tools are covered)
   per event the adapter produces something for, derived from the adapter's own
   table (`HookName.Observed`): thirteen today (`Stop` triggers the session-log
-  reconciliation and `SubagentStop` closes a subagent's session); the five events
+  reconciliation and `SubagentStop` hands a subagent's backlog to the flusher); the five events
   with no contract type never get one. `ExpectedHandlers()` is what doctor counts
   against.
 - **Shape.** `{"type":"command","command":"\"<engine>\" hook muse [--home \"<dir>\"] <Event>","timeout":N}`,
@@ -237,9 +237,20 @@ sealed it:
   so the resumed session starts unlatched.
 - **A subagent runs under its own session id** (`SubagentStart`/`SubagentStop`
   carry `session_id == child_session_id == turn_id` and a `subagent_id`, never a
-  parent id), so it is a session of its own and cannot be linked to its parent.
-  Any event of a session id with no known run opens it first. Nothing is skipped
-  by `subagent_id`: a subagent's tool and model calls are gated like any other.
+  parent id). The parent's journal names it: a record carrying
+  `parent_session_id` and `child_session_id`
+  (`memory_reminder_child_session_linked` on 1.4.1), written before the child's
+  first hook. `subagentparent.go` looks that record up once per child (the main
+  journals written in the last 10 minutes, polling up to 300ms), records the
+  answer under `lifecycle/subagents/`, and folds every event of the child into
+  the parent's session, as Claude Code reports a subagent: the parent's run,
+  spool and halt latch, each row tagged `agent_id` = `subagent_id` and
+  `agent_type` = `subagent`, `SubagentStart` as `SubagentStarted`, and
+  `SubagentStop` sealing nothing. A folded `UserPromptSubmit` carries no prompt
+  text (`prompt_source` = `subagent`), so it never becomes the parent's goal. A
+  child with no link found stays a session of its own for all its events, never
+  split across two. Nothing is skipped by `subagent_id`: a subagent's tool and
+  model calls are gated like any other.
 
 ## Unverified, and what would settle it
 
@@ -308,7 +319,8 @@ Still guessed by the installer and doctor (Muse documents none of them by name):
 | `outputcontract.go` | the four closed answers, the caps |
 | `promptgate.go`, `permissiongate.go`, `enforcetarget.go`, `enforce.go`, `enforceevaluate.go` | gate targets and the evaluator |
 | `hookrun.go` | `RunHook`: the gated and observed paths, `SessionStart`'s inline drain, the flusher handoff |
-| `runlifecycle.go` | the per-session run record: resume and subagent sessions open a run before their first event |
+| `runlifecycle.go` | the per-session run record: resume and unlinked subagent sessions open a run before their first event |
+| `subagentparent.go` | the child-to-parent link read off the parent's journal, and the fold into the parent's session |
 | `usage.go` | usage and trace context, local trace only |
 | `sessionlog.go`, `reconcile.go` | the session-journal reader with its cursor, the gate ledger, the join and the `evidence.gap` findings |
 | `engine.go` | `Engine`, `FaultExitCode`, the ceilings (Gating 30s, Other 5s) |

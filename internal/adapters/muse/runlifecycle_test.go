@@ -94,7 +94,7 @@ func TestResumedRunOpensOnce(t *testing.T) {
 	}
 }
 
-// A subagent is a session of its own with no parent id. Its first event may
+// A subagent no parent journal links is a session of its own. Its first event may
 // reach a hook before its SubagentStart does: that event opens the run, and
 // the SubagentStart that follows does not start it a second time.
 func TestSubagentSessionIsOpenedOnceWhicheverEventComesFirst(t *testing.T) {

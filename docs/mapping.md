@@ -99,8 +99,9 @@ Built by `wireTypeFor` in `internal/client/payload.go`.
 
 Muse's hook stdin is Claude Code-shaped; `internal/adapters/muse/mapper.go`
 maps it onto the same contract. The shapes were read off Muse 1.4.1 captures
-(see [coverage.md](coverage.md)); a subagent is a session of its own, and Muse
-fires no `SessionStart` on resume.
+(see [coverage.md](coverage.md)); a subagent's events are folded into the session
+that spawned it (the parent's journal names the child), and Muse fires no
+`SessionStart` on resume.
 
 | Muse hook | Dev `event_type` | Gated | Note |
 |---|---|---|---|
@@ -109,8 +110,8 @@ fires no `SessionStart` on resume.
 | `PreToolUse` | `ToolCall` | yes | `mcp__<server>__<tool>` names are MCP tools; paired by `tool_use_id` |
 | `PostToolUse` / `PostToolUseFailure` | `ToolResult` | no | `completed` / `failed` |
 | `PermissionRequest` | `PermissionRequest` | yes | evaluated to refuse only; no `tool_use_id` |
-| `SubagentStart` | `SessionStarted` | no | the subagent's own session id; no parent id exists |
-| `SubagentStop` | `SessionEnded` | no | the subagent's own session id |
+| `SubagentStart` | `SubagentStarted` | no | in the parent's session, found through the parent journal's link record; `SessionStarted` of the child's own session when no link is found |
+| `SubagentStop` | none | no | a subagent ending ends no run; `SessionEnded` of the child's own session when unlinked |
 | `StopFailure` | `APIError` | no | no error text bound |
 | `SessionEnd` | `SessionEnded` | no | |
 | `PreLLMCall` | `ModelCallRequested` | yes | a model-call gate, see below |

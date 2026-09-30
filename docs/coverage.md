@@ -28,12 +28,12 @@ but no automated test runs Muse, so every Muse row in §5 is at most E1 or E2.
 
 | Contract type | Claude Code | Codex | Muse Code |
 |---|---|---|---|
-| `SessionStarted` | `SessionStart` hook | `SessionStart` hook | `SessionStart` hook; `source` `resume` opens a new run. Muse fires no `SessionStart` on resume or for a subagent (its own session id), so the first event of such a session opens the run |
+| `SessionStarted` | `SessionStart` hook | `SessionStart` hook | `SessionStart` hook; `source` `resume` opens a new run. Muse fires no `SessionStart` on resume, so the first event of such a session opens the run; a subagent is folded into its parent's run |
 | `PromptSubmitted` | `UserPromptSubmit` hook | `UserPromptSubmit` hook | `UserPromptSubmit` hook |
 | `ToolCall` | `PreToolUse` hook | `PreToolUse` hook | `PreToolUse` hook, catch-all, MCP tools included |
 | `ToolResult` | `PostToolUse` hook | `PostToolUse` hook | `PostToolUse` (completed) or `PostToolUseFailure` (failed) |
 | `SessionEnded` | `SessionEnd` hook | `SessionEnd` hook | `SessionEnd` hook |
-| `SubagentStarted` | `SubagentStart` hook | `SubagentStart` hook | none: a Muse subagent is a session of its own, so `SubagentStart` / `SubagentStop` are that session's `SessionStarted` / `SessionEnded` |
+| `SubagentStarted` | `SubagentStart` hook | `SubagentStart` hook | `SubagentStart` hook, in the parent's session; the parent is read off its journal's link record, and a child with no link stays a session of its own |
 | `PermissionRequest` | `PermissionRequest` hook; content-gated; no `tool_use_id`, so it never correlates to the tool call it is about | `PermissionRequest` hook; content-gated | `PermissionRequest` hook; evaluated only so it can refuse, never to grant; no `tool_use_id` |
 | `PermissionDenied` | `PermissionDenied` hook; only auto-mode classifier denials — a static deny rule or a manual denial never fires it | none | none |
 | `APIError` | `StopFailure` hook | none | `StopFailure` hook; no error text is bound |
