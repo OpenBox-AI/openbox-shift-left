@@ -28,22 +28,14 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
-const (
-	transportSpoolSubdir   = "cc-spool"
-	transportSpoolProvider = "claude-code"
-)
+const transportSpoolSubdir = "cc-spool"
 
 func (a *app) runTransport(args []string) int {
-	// A lane daemon acts for exactly one tool for its whole life, and takes it
-	// from a compile-time constant rather than argv: this is the one bind site
-	// the environment cannot redirect. A daemon that cannot resolve its own
-	// identity must not come up half-governing.
-	release, err := devconfig.BindProvider(transportSpoolProvider)
-	if err != nil {
-		return a.errorf("cannot resolve %s's identity store: %v", transportSpoolProvider, err)
-	}
-	defer release()
-
+	// Unlike the hook binaries, this daemon is not bound to one tool's identity
+	// store: it serves every provider that has a usable identity for its whole
+	// life (resolveProviderIdentities below), so it comes up on a machine that
+	// has only Codex's, or only Claude Code's. Nothing on its record path reads
+	// an ambient bound provider.
 	fs := a.newFlagSet("transport")
 	addr := fs.String("addr", transport.DefaultAddr, "loopback listen address (host:port)")
 	grace := fs.Duration("shutdown-grace", 30*time.Second, "how long to let in-flight relays finish after a stop signal")
@@ -82,16 +74,14 @@ func (a *app) runTransport(args []string) int {
 	// for a flusher, and this daemon keeps sweeping both -- the completeness
 	// net for a session that never got a realtime nudge.
 	ccHookSpool := hookflow.Spool{Dir: laneSpoolDir(transportSpoolSubdir, logger)}
-	ccSweeper := hookflow.Sweeper{Spool: ccHookSpool, Provider: transportSpoolProvider}
+	ccSweeper := hookflow.Sweeper{Spool: ccHookSpool, Provider: string(provider.ClaudeCode)}
 	codexHookSpool := hookflow.Spool{Dir: laneSpoolDir("codex-spool", logger)}
 	codexSweeper := hookflow.Sweeper{Spool: codexHookSpool, Provider: string(provider.Codex)}
 	museHookSpool := hookflow.Spool{Dir: laneSpoolDir("muse-spool", logger)}
 	museSweeper := hookflow.Sweeper{Spool: museHookSpool, Provider: string(provider.Muse)}
 
-	// Pre-resolved ONCE at startup, never per record. The transport/proxy lane
-	// has only one producer today -- Codex's proxy arm is the system PAC, not
-	// this relay -- but the shape is shared with telemetry.go for when a
-	// second provider lands on this lane too.
+	// Pre-resolved ONCE at startup, never per record; the shape is shared with
+	// telemetry.go. Any non-empty subset of providers may resolve.
 	identities := resolveProviderIdentities(logger.Printf)
 	advisory := &hookflow.Advisory{Path: hookflow.DefaultAdvisoryPath(), Log: logger}
 
@@ -126,15 +116,11 @@ func (a *app) runTransport(args []string) int {
 		// in-process pool; every other record appends into and drains
 		// through its own provider's LaneQueue.
 		Deliver: routeLaneRecord(queues, chatDeliver, logger, "transport"),
-		DID:     devconfig.ResolveDIDOrEmpty,
 		Warn:    logger.Printf,
-		// Re-resolved PER RECORD, never cached: see electedFn.
-		Elected: electedFn(settingsPath, activation.LaneTransport, elected),
-		// Not derivable from Elected(): a false there means either "another lane
-		// won" or "nothing could be read", and only the second is a defect.
-		ElectionProblem: electionProblemFn(settingsPath, elected),
-		// Which lane, not just whether this one: "nobody" is a routing gap.
-		ElectedName: electedNameFn(settingsPath, activation.LaneTransport, elected),
+		// A call is attributed to one provider by host and carrier header; see
+		// relayProviderLanes for what each provider's entry is.
+		CandidatesForHost: transport.CandidatesForHost,
+		Providers:         relayProviderLanes(identities, settingsPath, elected),
 	}
 	if *verbose {
 		em.Verbose = logger.Printf
@@ -248,6 +234,39 @@ func (a *app) runTransport(args []string) int {
 	statusPersister.Flush(dropped.Dropped())
 	logger.Printf("openbox transport: stopped; delivery pool dropped=%d", dropped.Dropped())
 	return exitOK
+}
+
+// relayProviderLanes is the relay emitter's per-provider table: each
+// provider's identity (from the daemon's own startup resolution, so a
+// provider with none yet answers "" and is reported by name) and its
+// election. Muse has no entry: it has no session carrier, so no call is ever
+// attributed to it.
+//
+// claude-code's election is derived from its settings env block, re-resolved
+// per record. Codex's is not elected to this relay yet: its model calls stay
+// the telemetry receiver's, so this lane reports another lane as the
+// producer and records nothing for it.
+func relayProviderLanes(identities map[string]providerIdentity, settingsPath string, override *bool) map[string]gatewayemit.ProviderLane {
+	didOf := func(tool string) func() string {
+		return func() string { return identities[tool].DID }
+	}
+	return map[string]gatewayemit.ProviderLane{
+		string(provider.ClaudeCode): {
+			DID: didOf(string(provider.ClaudeCode)),
+			// Re-resolved PER RECORD, never cached: see electedFn.
+			Elected: electedFn(settingsPath, activation.LaneTransport, override),
+			// Not derivable from Elected(): a false there means either "another lane
+			// won" or "nothing could be read", and only the second is a defect.
+			ElectionProblem: electionProblemFn(settingsPath, override),
+			// Which lane, not just whether this one: "nobody" is a routing gap.
+			ElectedName: electedNameFn(settingsPath, activation.LaneTransport, override),
+		},
+		string(provider.Codex): {
+			DID:         didOf(string(provider.Codex)),
+			Elected:     func() bool { return false },
+			ElectedName: func() string { return string(activation.LaneTelemetry) },
+		},
+	}
 }
 
 // errChatPoolUnavailable is what chatDeliver reports to RecordDeliveryFailure
