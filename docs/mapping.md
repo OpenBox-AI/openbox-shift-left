@@ -161,6 +161,8 @@ probe as a real completion:
 | Path | `activity_type` | Carries bodies |
 |---|---|---|
 | `POST /v1/messages` | `llm_completion` | yes |
+| `POST /v1/responses`, `POST /v1/chat/completions` (any host) | `llm_completion` | yes |
+| `POST /backend-api/codex/responses` on `chatgpt.com` only (path unverified against a live capture) | `llm_completion` | yes |
 | `POST /v1/messages/count_tokens` | `token_count` | no, and not emitted at all |
 | the tool's own telemetry call to its vendor | `tool_telemetry` | no |
 | anything else on the intercepted host | `provider_request` | yes |

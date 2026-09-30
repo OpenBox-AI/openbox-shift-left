@@ -285,3 +285,33 @@ func TestCapturesBodyAtKeepsAChatCompletionBody(t *testing.T) {
 		t.Error("the gateway lane's /v1/messages body must still be captured")
 	}
 }
+
+// TestClassifyPathOpenAIShapes: the Responses and Chat Completions paths are
+// completions on any host, while the ChatGPT sign-in completion path counts
+// only on chatgpt.com so an unrelated host's look-alike stays unknown.
+func TestClassifyPathOpenAIShapes(t *testing.T) {
+	for _, tc := range []struct {
+		url  string
+		want PathClass
+	}{
+		{"https://api.openai.com/v1/responses", ClassCompletion},
+		{"https://api.openai.com/v1/responses/", ClassCompletion},
+		{"https://api.openai.com/v1/responses?stream=true", ClassCompletion},
+		{"https://api.meta.ai/v1/responses", ClassCompletion},
+		{"https://api.meta.ai/v1/chat/completions", ClassCompletion},
+		{"https://api.openai.com/v1/chat/completions/", ClassCompletion},
+		{"/v1/responses", ClassCompletion},
+		{"https://chatgpt.com/backend-api/codex/responses", ClassCompletion},
+		{"https://CHATGPT.com/backend-api/codex/responses/", ClassCompletion},
+		{"https://chatgpt.com/backend-api/codex/responses?x=1", ClassCompletion},
+		{"https://chatgpt.com:443/backend-api/codex/responses", ClassCompletion},
+		{"https://api.openai.com/backend-api/codex/responses", ClassUnknown},
+		{"/backend-api/codex/responses", ClassUnknown},
+		{"https://chatgpt.com/backend-api/conversation", ClassUnknown},
+		{"https://api.openai.com/v1/responses/resp_1/cancel", ClassUnknown},
+	} {
+		if got := classifyPath(tc.url); got != tc.want {
+			t.Errorf("classifyPath(%q) = %v, want %v", tc.url, got, tc.want)
+		}
+	}
+}

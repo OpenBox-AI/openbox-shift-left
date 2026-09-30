@@ -1,6 +1,7 @@
 package gatewayemit
 
 import (
+	"net"
 	"net/url"
 	"strings"
 
@@ -33,6 +34,18 @@ const (
 	pathMessages   = "/v1/messages"
 	pathCountToken = "/v1/messages/count_tokens"
 	prefixToolAPI  = "/api/"
+
+	// Completion paths of the OpenAI wire shapes, valid on any host: Codex's
+	// API-key route and the other tools that speak Responses or Chat
+	// Completions. Host-independent for the same reason /v1/messages is.
+	pathResponses       = "/v1/responses"
+	pathChatCompletions = "/v1/chat/completions"
+
+	// Codex's ChatGPT-sign-in completion path. UNVERIFIED: the path is taken
+	// from the client's source, not from a captured call. It is honoured on
+	// chatgpt.com only, because the path is meaningless on any other host.
+	hostChatGPT           = "chatgpt.com"
+	pathChatGPTCodexReply = "/backend-api/codex/responses"
 )
 
 func (c PathClass) ActivityType() string {
@@ -85,7 +98,9 @@ func classifyPath(rawURL string) PathClass {
 	switch {
 	case path == pathCountToken:
 		return ClassTokenCount
-	case path == pathMessages:
+	case path == pathMessages, path == pathResponses, path == pathChatCompletions:
+		return ClassCompletion
+	case path == pathChatGPTCodexReply && isChatGPTHost(requestHost(rawURL)):
 		return ClassCompletion
 	case strings.HasPrefix(path, prefixToolAPI):
 		return ClassToolTelemetry
@@ -105,6 +120,14 @@ func requestPath(rawURL string) string {
 		path = strings.TrimRight(path, "/")
 	}
 	return path
+}
+
+// isChatGPTHost matches the ChatGPT host exactly, ignoring case and port.
+func isChatGPTHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.EqualFold(host, hostChatGPT)
 }
 
 func requestHost(rawURL string) string {
