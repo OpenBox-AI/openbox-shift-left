@@ -361,6 +361,16 @@ func (a *app) reportMuseModelCalls() {
 	const modelCalls = "Muse model calls: not recorded (no proxy or telemetry lane can see them); tool, prompt and model-call gating still enforced"
 	a.row("model calls", "%s", modelCalls)
 	traceDoctorFinding("muse:model-calls", "info", modelCalls)
+	// Why no proxy lane: on an OS with no system proxy activation the relay
+	// never sees Muse's traffic; on macOS the relay could, but Muse was never
+	// shown to trust its CA or follow the PAC, and without a session carrier
+	// a relayed Muse call could not be attributed anyway.
+	proxy := "none; this OS has no system proxy activation, so the relay cannot see Muse"
+	if systemPACSupportedFn() {
+		proxy = "not built; Muse is not shown to trust the relay's CA or follow the system PAC, and sends no session carrier the relay could attribute"
+	}
+	a.row("", "proxy: %s", proxy)
+	traceDoctorFinding("muse:proxy-lane", "info", proxy)
 	const mcp = "MCP gating: doc-verified, not empirically confirmed"
 	a.row("mcp", "%s", mcp)
 	traceDoctorFinding("muse:mcp", "info", mcp)

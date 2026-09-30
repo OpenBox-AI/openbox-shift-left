@@ -455,3 +455,24 @@ func TestDoctorMuseSaysUnverifiedWhenTheReconcilerDisabledItself(t *testing.T) {
 		t.Errorf("an unverified reconciler reads as clean:\n%s", section)
 	}
 }
+
+// TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls the unrecorded row is
+// only actionable with its reason: whether the relay can see Muse at all
+// depends on the OS, and on macOS on what Muse was never shown to do.
+func TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls(t *testing.T) {
+	for _, tc := range []struct {
+		pac  bool
+		want string
+	}{
+		{true, "proxy: not built; Muse is not shown to trust the relay's CA or follow the system PAC, and sends no session carrier the relay could attribute"},
+		{false, "proxy: none; this OS has no system proxy activation, so the relay cannot see Muse"},
+	} {
+		prev := systemPACSupportedFn
+		systemPACSupportedFn = func() bool { return tc.pac }
+		installedMuse(t)
+		withMuseRunner(t, healthyMuse())
+		section := museDoctor(t)
+		systemPACSupportedFn = prev
+		mustContain(t, section, tc.want)
+	}
+}
