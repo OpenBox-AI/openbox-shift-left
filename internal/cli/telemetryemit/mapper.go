@@ -149,7 +149,7 @@ type FieldMap struct {
 	// record's own, folds the call into that session: a subagent's calls are
 	// recorded in the session that spawned it, tagged as a subagent's, the way
 	// the hook path folds the same child. KindKey names what kind of session the
-	// record's own is, and becomes the subagent's agent_id.
+	// record's own is (Muse: reminder), carried as metadata subagent_kind.
 	RootSessionKey string
 	KindKey        string
 	// URL is the synthesized stand-in for the call's endpoint on the span.
@@ -171,11 +171,12 @@ var defaultFieldMap = FieldMap{
 
 // MuseFieldMap is Muse Code's `model_call` log record, read off Muse 1.4.1's
 // own export (GenAI semconv 1.34, snake_case): the provider's response id with
-// Muse's message id as the fallback, and metadata only -- no content is ever
+// no fallback (Muse's message id can recur across calls, and a shared id would
+// let core's dedupe absorb one call as a duplicate of another), and metadata only -- no content is ever
 // exported, so none can be read. Its input count includes the cached tokens.
 var MuseFieldMap = FieldMap{
 	Event:              "model_call",
-	RequestIDKeys:      []string{"gen_ai_response_id", "message_id"},
+	RequestIDKeys:      []string{"gen_ai_response_id"},
 	ModelKey:           "gen_ai_request_model",
 	DurationKey:        "duration_ms",
 	InputTokens:        "gen_ai_usage_input_tokens",
@@ -508,7 +509,10 @@ func metadataFor(attrs map[string]string, fm FieldMap, folded bool) map[string]a
 	if folded {
 		add("agent_type", subagentAgentType)
 		if fm.KindKey != "" {
-			add("agent_id", attrs[fm.KindKey])
+			// Not agent_id: the hook path's agent_id is the subagent's own id (for
+			// example skill-reminder), which the export does not carry, and a kind
+			// under that key would make the two lanes disagree about the same child.
+			add("subagent_kind", attrs[fm.KindKey])
 		}
 	}
 	return m

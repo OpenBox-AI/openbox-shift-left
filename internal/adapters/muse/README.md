@@ -133,11 +133,16 @@ sent):
   `hook_run`, `subagent_*` and the spans are received and skipped.
 - **Mapping** (`internal/cli/telemetryemit`, `MuseFieldMap`): one
   `llm_completion` Started/Completed pair per `model_call`, `:otel:` activity id
-  from the response id (the message id if that is unusable), usage on the close.
+  from the response id, usage on the close. There is no fallback id: Muse's
+  `message_id` can recur across calls, so a record with no usable response id is
+  dropped and counted rather than risk one call deduping another.
   A call from a subagent is recorded in the session `session_root_id` names, with
-  `agent_type: subagent` and `agent_id` from `session_kind`, the same tags the
-  hook path gives the same child (`subagentparent.go` finds the parent from the
-  journal; the export names it directly).
+  `agent_type: subagent` (the hook path's tag) and `subagent_kind` from
+  `session_kind`. `agent_id` is deliberately not set: the hook path's is the
+  subagent's own id (for example `skill-reminder`), which the export does not
+  carry, and a kind under that key would make the two lanes disagree
+  (`subagentparent.go` finds the parent from the journal; the export names it
+  directly).
 - **Install** (`telemetrykeys.go`): the receiver is started and proven listening
   first; then Muse's previous `telemetry` value is recorded in
   `~/.openbox/muse-prior-settings.json` **before** the key is merged by path
@@ -149,6 +154,11 @@ sent):
   this receiver (enabled, destination `external`, a loopback endpoint on the
   receiver's port), re-read per record from the `--muse-settings` path the unit
   carries.
+- **Doctor** reports the lane in the Muse section's `model calls` row: routed and
+  elected with the receiver listening, or why not. It checks the receiver only at
+  `telemetry.DefaultAddr` (127.0.0.1:8789), the same convention as Codex's
+  reachability row, so a receiver started on another `--addr` reads as not
+  listening.
 
 ## Output contract
 

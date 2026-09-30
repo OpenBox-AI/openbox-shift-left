@@ -113,17 +113,23 @@ func TestMuseModelCallBecomesOneLLMCompletionPair(t *testing.T) {
 	}
 }
 
-func TestMuseRequestIDFallsBackToMessageID(t *testing.T) {
+// TestMuseNeverFallsBackToTheMessageID: Muse's message id can recur across
+// calls, and a request id two calls share would let core's dedupe absorb one of
+// them. No usable response id means the record is dropped and counted.
+func TestMuseNeverFallsBackToTheMessageID(t *testing.T) {
 	for name, bad := range map[string]string{"absent": "", "a colon": "resp:1", "over the bound": strings.Repeat("r", 200)} {
 		t.Run(name, func(t *testing.T) {
-			ev, out := completedHalf(museMapper().EventsFor(museModelCall(map[string]string{"gen_ai_response_id": bad})))
-			if out != Emitted || ev.OtelRequestID != "feed0002-0000-4000-8000-000000000002" {
-				t.Fatalf("outcome %v, request id %q; want the message id", out, ev.OtelRequestID)
+			events, out := museMapper().EventsFor(museModelCall(map[string]string{"gen_ai_response_id": bad}))
+			if out != DropNoRequestID || len(events) != 0 {
+				t.Fatalf("outcome %v with %d events, want DropNoRequestID", out, len(events))
 			}
 		})
 	}
-	if _, out := museMapper().EventsFor(museModelCall(map[string]string{"gen_ai_response_id": "", "message_id": ""})); out != DropNoRequestID {
-		t.Errorf("no id at all: outcome %v, want DropNoRequestID", out)
+	// Two calls of one message are two activities when their response ids differ.
+	a, _ := completedHalf(museMapper().EventsFor(museModelCall(map[string]string{"gen_ai_response_id": "resp_a"})))
+	b, _ := completedHalf(museMapper().EventsFor(museModelCall(map[string]string{"gen_ai_response_id": "resp_b"})))
+	if client.WireActivityID(a) == client.WireActivityID(b) {
+		t.Error("two calls sharing a message id share an activity id")
 	}
 }
 
@@ -152,8 +158,11 @@ func TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt(t *testing.T) {
 		if ev.SessionID != museMain {
 			t.Errorf("%s: session = %q, want the parent %q", ev.EventType, ev.SessionID, museMain)
 		}
-		if ev.Metadata["agent_type"] != "subagent" || ev.Metadata["agent_id"] != "reminder" {
-			t.Errorf("%s: metadata = %v, want agent_type subagent and agent_id from session_kind", ev.EventType, ev.Metadata)
+		if ev.Metadata["agent_type"] != "subagent" || ev.Metadata["subagent_kind"] != "reminder" {
+			t.Errorf("%s: metadata = %v, want agent_type subagent and the kind under subagent_kind", ev.EventType, ev.Metadata)
+		}
+		if _, set := ev.Metadata["agent_id"]; set {
+			t.Errorf("%s: agent_id set from the session kind; the hook path's agent_id is the subagent's own id", ev.EventType)
 		}
 	}
 

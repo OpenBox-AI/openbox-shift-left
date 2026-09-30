@@ -147,7 +147,8 @@ stored row.
 | `task_id` | Claude Code | correlates `TaskCreated`/`TaskCompleted`; never an activity pair |
 | `elicitation_id` | Claude Code | correlates `Elicitation`/`ElicitationResult` |
 | `turn_id`, `message_id` | Claude Code | `MessageDisplay`'s own correlation pair |
-| `agent_id`, `agent_type` | Claude Code, Muse (hooks and telemetry lane) | identifies the subagent an event occurred inside |
+| `agent_id`, `agent_type` | Claude Code, Muse (hooks) | identifies the subagent an event occurred inside |
+| `agent_type`, `subagent_kind` | Muse (telemetry lane) | `subagent`, and the export's `session_kind` (for example `reminder`); no `agent_id`, because the export does not carry the subagent's own id |
 | `turn_id` | Codex | per-turn correlation id |
 | `thread_id`, `root_session_id` | Codex | set only when a forked thread's id differs from the session id it continues |
 
