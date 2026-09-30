@@ -18,9 +18,10 @@ import (
 
 // laneCapable reports whether a provider has model-call lanes at all. Claude
 // Code gets both lanes (telemetry via its own settings, transport as an
-// in-path relay of the Anthropic Messages API); Codex gets the telemetry
-// lane only -- it reads its own config.toml, and its proxy arm is the system
-// PAC, which installs nothing here. Muse is hooks-only: no lane has been
+// in-path relay of the Anthropic Messages API). Codex gets telemetry (it reads
+// its own config.toml) and, where a system PAC exists (macOS), the same relay,
+// which it reaches through the PAC rather than an env block -- see
+// hasTransportArm. Muse is hooks-only: no lane has been
 // shown to see its model calls (no documented OTel exporter, and no proof it
 // follows the system PAC or trusts the relay's CA), so it has none.
 func laneCapable(name string) bool {

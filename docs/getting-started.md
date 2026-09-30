@@ -283,8 +283,15 @@ restricted to those hosts, so a leaked key could forge a certificate for any
 site. `openbox uninstall` restores the network settings, untrusts the CA, then
 deletes it.
 
+`openbox init --provider codex` does the same on macOS, in this order: the
+relay's service, then the telemetry service restarted onto the same binary,
+then the CA trust and PAC, committed last. The same PAC then also routes
+Codex's hosts (and your browser's `chatgpt.com` and `api.meta.ai`) through the
+relay; see [Data and privacy](data-and-privacy.md). Codex's model calls stay
+with the telemetry lane until the relay has seen one.
+
 Linux and Windows do not get this yet; `init` says so and changes nothing at
-the OS level.
+the OS level. Codex there stays telemetry-only.
 
 ## Enforcement in practice
 

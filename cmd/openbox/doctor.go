@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,10 +24,12 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/managed"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
@@ -601,6 +604,11 @@ func (a *app) reportLanes() {
 		}
 	}
 
+	codexProxyCommitted := false
+	if a.codexPresent() {
+		codexProxyCommitted = a.codexPaths().proxy().Committed
+	}
+
 	// A lane with nothing wrong is one row; a lane with something wrong keeps
 	// the whole section it always had. Which means every line printed here is
 	// either a coordinate or a problem, and the reader never learns to skip a
@@ -613,6 +621,11 @@ func (a *app) reportLanes() {
 		lane.unit = lane.spec.UnitPath(runtime.GOOS, home)
 		lane.routed = slices.Contains(election.Routed, activation.Lane(lane.name))
 		lane.inPath = slices.Contains(election.Candidates, activation.Lane(lane.name))
+		if lane.name == "transport" && codexProxyCommitted {
+			// Codex is routed to the relay by the system PAC, not by settings.json,
+			// so a Codex-only machine's relay is configured and in path too.
+			lane.routed, lane.inPath = true, true
+		}
 		lane.listening, _ = portOccupied(lane.addr)
 		if !lane.healthy(undecidable) {
 			unhealthy = append(unhealthy, lane)
@@ -664,9 +677,10 @@ func (a *app) reportLanes() {
 				a.row("", "The tool is pointed at a port with nothing behind it.")
 			}
 		}
-		// Lane-gated: laneCapable is provider.ClaudeCode only (initlanes.go), so
-		// Codex has no lanes to elect and cannot reach this branch. The literal
-		// "claude-code" below is not a missed provider case -- leave it.
+		// This branch is the settings.json election, which is Claude Code's alone:
+		// Codex's two lanes are elected from config.toml and the system-PAC record
+		// and reported in their own section below. The literal "claude-code" here
+		// is therefore not a missed provider case.
 		if election.Elected == activation.Lane(lane.name) && !lane.listening {
 			a.row("WARNING", "this lane is ELECTED but nothing is listening, so NO lane is emitting")
 			a.row("", "model-call turns on this machine. If you did not install it, something")
@@ -735,17 +749,39 @@ func readDeliveryStatus(openboxHome, lane string) (hookflow.DeliverStatus, bool)
 	return status, true
 }
 
-// reportCodexLane is Codex's telemetry election, reported separately from
-// the settings.json-keyed loop above because it reads a different native
-// surface (config.toml). Renders nothing on a machine that has never run
-// `openbox init --provider codex`'s telemetry step, which is what keeps a
-// Claude-Code-only machine's `doctor` output unchanged.
+// codexPresent reports whether OpenBox has anything installed for Codex that
+// doctor should describe: an owned [otel] block, or a system-PAC record that
+// lists Codex.
+func (a *app) codexPresent() bool {
+	if providers.HasOwnedCodexOtel(providers.CodexConfigTOMLPath()) {
+		return true
+	}
+	entry, err := activation.LoadSystemEntry(a.homeDir())
+	return err == nil && entry != nil && slices.Contains(entry.Providers, string(provider.Codex))
+}
+
+// codexPaths are the three files Codex's election reads, resolved the way the
+// daemons resolve them, so doctor reports the answer the daemons are acting on.
+func (a *app) codexPaths() codexElectionPaths {
+	return newCodexElectionPaths(providers.CodexConfigTOMLPath(), activation.RecordPath(a.homeDir()), nil)
+}
+
+// proxy is the relay's half of Codex's election and why it is or is not routed.
+func (p codexElectionPaths) proxy() activation.CodexProxyStatus {
+	return activation.ResolveCodexProxy(p.config, p.pacRecord, p.marker)
+}
+
+// reportCodexLane is Codex's election, reported separately from the
+// settings.json-keyed loop above because it reads different native surfaces
+// (config.toml and the system-PAC record). Renders nothing on a machine that
+// has never run `openbox init --provider codex`'s telemetry step, which is
+// what keeps a Claude-Code-only machine's `doctor` output unchanged.
 func (a *app) reportCodexLane() {
 	configPath := providers.CodexConfigTOMLPath()
 	if !providers.HasOwnedCodexOtel(configPath) {
 		return
 	}
-	election := newCodexElectionPaths(configPath, activation.RecordPath(a.homeDir()), nil).resolve()
+	election := a.codexPaths().resolve()
 	fmt.Fprintf(a.stdout, "\nCodex telemetry lane (config.toml, not settings.json)\n")
 	switch {
 	case election.SettingsProblem != "":
@@ -766,21 +802,99 @@ func (a *app) reportCodexLane() {
 	}
 }
 
-// reportCodexProxy: the Codex CLI/Desktop proxy arm is assumed to follow the
-// system PAC, unverified by this repo's own probes. Nothing is
-// installed for it (no env write, no shell-profile write); this line exists
-// so `openbox doctor` states the gap rather than implying transport parity
-// with Claude Code.
+// reportCodexProxy is the Codex proxy arm: the relay serves it through the
+// system PAC (macOS), and it is elected over telemetry only once the PAC is
+// committed and the relay has seen a Codex call. Says which of the two
+// Codex's model calls are recorded by, and why, plus the calls the relay
+// held but could not attribute.
 func (a *app) reportCodexProxy() {
-	if !providers.HasOwnedCodexOtel(providers.CodexConfigTOMLPath()) {
+	if !a.codexPresent() {
 		return
 	}
+	paths := a.codexPaths()
 	fmt.Fprintf(a.stdout, "\nCodex proxy/transport lane\n")
-	a.row("status", "UNVERIFIED; assumed routed by the system PAC, not this repo's in-path relay")
-	a.row("", "No env key, no shell-profile write and no in-path relay are installed for")
-	a.row("", "Codex's transport arm. Only the telemetry lane above is built.")
-	a.row("", "Codex surfaces are not intercepted by the system PAC activated above: CA")
-	a.row("", "acceptance by Codex/ChatGPT is unverified.")
+	if !systemPACSupportedFn() {
+		a.row("election", "telemetry only: there is no system PAC on %s, so Codex cannot be routed through the relay", runtime.GOOS)
+		return
+	}
+	entry, err := activation.LoadSystemEntryAt(paths.pacRecord)
+	switch {
+	case err != nil:
+		a.row("providers", "unreadable: %v", err)
+	case entry == nil || len(entry.Providers) == 0:
+		a.row("providers", "(none recorded)")
+	default:
+		a.row("providers", "%s (the system PAC's union)", strings.Join(entry.Providers, ", "))
+	}
+	proxy := paths.proxy()
+	election := paths.resolve()
+	switch {
+	case election.SettingsProblem != "":
+		a.row("election", "CANNOT BE DECIDED; %s", election.SettingsProblem)
+	case election.Elected == activation.LaneTransport:
+		a.row("election", "proxy elected; telemetry standing by")
+		traceDoctorFinding("codex:election", "proxy", "")
+		if listening, _ := portOccupied(transport.DefaultAddr); !listening {
+			a.row("WARNING", "the relay is ELECTED for Codex but nothing is listening on %s, so Codex's", transport.DefaultAddr)
+			a.row("", "model calls are not being recorded; `openbox init --provider codex` brings it back")
+		}
+	default:
+		reason := proxy.Reason
+		if reason == "" {
+			reason = "the relay is not routed for Codex"
+		}
+		a.row("election", "telemetry only: %s", reason)
+		traceDoctorFinding("codex:election", "telemetry", reason)
+	}
+	a.reportCarrierSkips()
+}
+
+// reportCarrierSkips counts the relayed calls the relay held but would not
+// attribute to a provider, from the local capture trace where the emitter
+// records every skip with its reason: no_provider_carrier (a shared host and
+// no carrier header: a browser, or a tool this build does not know) and
+// ambiguous_carrier (several providers' carriers at once). Never guessed at
+// emission, so this is the only place they surface.
+func (a *app) reportCarrierSkips() {
+	dir := trace.Dir()
+	if dir == "" {
+		return
+	}
+	none, ambiguous, err := countCarrierSkips(dir)
+	if err != nil {
+		a.row("unattributed", "unknown: the local trace could not be read: %v", err)
+		return
+	}
+	a.row("unattributed", "%d with no provider carrier, %d ambiguous (skipped, never guessed; local trace)", none, ambiguous)
+}
+
+// countCarrierSkips tallies the emitter's skipped-carrier outcomes in dir. The
+// line prefilter keeps the multi-hundred-KiB body lines of every other
+// capture out of the JSON decoder.
+func countCarrierSkips(dir string) (none, ambiguous int, err error) {
+	recs, _, err := trace.ReadFiltered(dir,
+		func(line []byte) bool { return bytes.Contains(line, []byte("_carrier")) },
+		func(r trace.Record) bool {
+			if r.Stage != trace.StageCapture || r.Outcome != "skipped" {
+				return false
+			}
+			reason, _ := r.Detail["reason"].(string)
+			return reason == sessionkey.SkipNoProviderCarrier || reason == sessionkey.SkipAmbiguousCarrier
+		})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	for _, r := range recs {
+		if reason, _ := r.Detail["reason"].(string); reason == sessionkey.SkipNoProviderCarrier {
+			none++
+		} else {
+			ambiguous++
+		}
+	}
+	return none, ambiguous, nil
 }
 
 // legacyTunnelledHosts names the host-table entries a legacy constrained CA
@@ -1037,9 +1151,9 @@ func (a *app) reportCoverage() {
 				label = "UN-ROUTED"
 			}
 			traceDoctorFinding("coverage:"+string(c.Lane), strings.ToLower(label), c.Describe())
-			// Lane-gated: laneCapable is provider.ClaudeCode only (initlanes.go), so
-			// every entry in `coverage` is a Claude Code lane and the literal
-			// "claude-code" below is not a missed provider case -- leave it.
+			// `coverage` reads the activation record's env-key lanes, which only
+			// Claude Code writes (Codex's routing is config.toml and the system PAC),
+			// so the literal "claude-code" below is not a missed provider case.
 			a.row(string(c.Lane), "%s: %s", label, c.Describe())
 			a.row("", "`openbox init --provider claude-code` rewrites them.")
 			a.row("", "Note: during an install this state is normal for a few seconds -")

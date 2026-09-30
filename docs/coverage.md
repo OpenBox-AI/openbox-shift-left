@@ -90,12 +90,14 @@ what each *lane* sees of a single model call, a separate axis from §1's hook
 table. `openbox init --provider claude-code` installs two lanes for Claude Code:
 `transport` (an in-path CONNECT/TLS relay, activity namespace `:proxy:`) and
 `telemetry` (a local OTLP receiver, namespace `:otel:`). `openbox init
---provider codex` installs `telemetry` only — Codex has no in-path relay.
+--provider codex` installs `telemetry` everywhere, and on macOS also the
+`transport` relay plus the system PAC that routes Codex to it; on Linux and
+Windows Codex stays telemetry-only.
 A legacy `gateway` lane (`:gateway:`) still exists in the codebase but is no
 longer installed by `init`; treat it as retired rather than as active
 coverage.
 
-| | `transport` (Claude Code only) | `telemetry` (Claude Code, Codex) |
+| | `transport` (Claude Code; Codex on macOS) | `telemetry` (Claude Code, Codex) |
 |---|---|---|
 | Model request/response body | captured | never — this lane binds no content at all |
 | Token counts + model id | yes | yes (its whole payload) |
@@ -111,7 +113,16 @@ See [Architecture](architecture.md) for the CA and PAC design this depends on.
 from the tool's own settings decides the producer (`transport` outranks
 `telemetry` when both are routed); the lanes' activity-id namespaces are kept
 disjoint so core's deduplication can never absorb one lane's event as
-another's. `openbox doctor` names the elected lane and warns when nothing is
+another's. Codex's election reads its own `config.toml` and the system-PAC
+record, and the relay outranks telemetry only when **both** hold: the PAC
+record is committed and lists Codex (with Codex's model host among the relay's
+hosts), and the relay has recorded evidence that Codex really routes through it
+— a marker file, `relay-observed/codex` in Codex's spool directory, written by
+the relay at request time when it sees a Codex model completion, holding the
+activation's commit time so a re-activation needs fresh evidence. Until both,
+telemetry stays the producer, so a Codex that ignores the PAC or does not trust
+the relay's CA is never silenced. Once the relay is elected, telemetry records
+nothing for Codex. `openbox doctor` names the elected lane and warns when nothing is
 listening behind it — the check to run before trusting a data gap as
 "nothing happened" rather than "nothing was recorded". `telemetry` ships only
 the model id, four token counts, a duration and a request id — never a

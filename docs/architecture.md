@@ -209,14 +209,18 @@ denied, the run is not halted.
 
 | Lane | What it is | Sees | Installed for |
 |---|---|---|---|
-| `transport` | local HTTPS proxy with a machine-generated CA | real request and response bytes | Claude Code |
+| `transport` | local HTTPS proxy with a machine-generated CA | real request and response bytes | Claude Code; Codex on macOS (through the system PAC) |
 | `telemetry` | local OTLP receiver | the tool's own usage report, no content | Claude Code, Codex |
 
 Rules that keep this correct:
 
 - **Only one lane reports each model call.** An election, derived from where
   the tool's settings route model calls, picks one. Two lanes reporting the
-  same call would double every token count.
+  same call would double every token count. Codex's is derived from its
+  `config.toml` and the system-PAC record, and the relay is elected over
+  telemetry only after the PAC is committed **and** the relay has seen a Codex
+  model call (a marker in Codex's spool directory). Both daemons resolve it
+  from paths in their unit (`--codex-settings`, `--pac-record`), per record.
 - **Each lane has its own `activity_id` namespace** (`:proxy:`, `:otel:`), so
   the platform's deduplication never merges one lane's record into another's.
 - **Install order is a safety property:** write the service unit, start it,
