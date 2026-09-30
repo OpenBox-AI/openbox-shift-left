@@ -162,8 +162,10 @@ The full walkthrough, with CI setup, approvals and troubleshooting, is in
 | Model calls recorded | yes (transport lane) | token usage; on macOS the request and reply too, once the relay has seen Codex | model, tokens and response id only (telemetry lane); each call is also checked before it is sent |
 | Org mandate file | managed settings | `requirements.toml` | hooks file and policy (unverified keys) |
 
-Muse Code's support is built from its documentation and has not been run
-against a Muse binary. Details: [Provider coverage](docs/coverage.md).
+Muse Code's hook payloads and refusal answers were observed on Muse 1.4.1;
+what is still unverified is listed in the
+[adapter README](internal/adapters/muse/README.md#unverified-and-what-would-settle-it).
+Details: [Provider coverage](docs/coverage.md).
 
 ## Documentation
 

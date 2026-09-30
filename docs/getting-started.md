@@ -167,8 +167,8 @@ A Muse that is not on your `PATH` installs with a warning.
   model calls are still gated: every model call is checked before it is sent.
 - A HALT verdict, a block and an unanswered approval all come back to Muse as
   a plain refusal.
-- Muse's hooks are built from its documentation and have not been run against
-  a Muse binary. A hook payload over 256 KiB is never delivered to any hook,
+- Muse's hook payloads and refusal answers were observed on Muse 1.4.1; what
+  is still unverified is listed in `internal/adapters/muse/README.md`. A hook payload over 256 KiB is never delivered to any hook,
   so that action is not gated; `doctor` counts such actions from Muse's own
   session log, it cannot stop them.
 - A commit made by Muse keeps its trailer, but no commit event is sent.

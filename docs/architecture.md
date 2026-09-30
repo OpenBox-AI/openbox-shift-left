@@ -210,7 +210,7 @@ denied, the run is not halted.
 | Lane | What it is | Sees | Installed for |
 |---|---|---|---|
 | `transport` | local HTTPS proxy with a machine-generated CA | real request and response bytes | Claude Code; Codex on macOS (through the system PAC) |
-| `telemetry` | local OTLP receiver | the tool's own usage report, no content | Claude Code, Codex |
+| `telemetry` | local OTLP receiver | the tool's own usage report, no content | Claude Code, Codex, Muse Code |
 
 Rules that keep this correct:
 

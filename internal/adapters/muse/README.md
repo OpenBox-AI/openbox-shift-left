@@ -11,9 +11,9 @@ lives in `adapters/common/hookflow`.
 **Status: read off Muse 1.4.1 captures, partly unverified.** The payload shapes
 and the fixtures in `testdata/` come from scrubbed real payloads of a Muse 1.4.1
 session (`testdata/README.md` says which keys were observed). What is still
-guessed is listed under [Unverified](#unverified-and-what-would-settle-it); the
-answer shapes Muse accepts (the `onFailure` JSON, what a `PreLLMCall` block looks
-like) have not been exercised against a binary that then refused one.
+guessed is listed under [Unverified](#unverified-and-what-would-settle-it). The
+four refusal shapes and the `onFailure` successor were observed on 1.4.1 too
+(see the fail-open table below).
 
 **The installer** (`installer.go`) merges OpenBox's handlers into
 `~/.config/muse/settings.json`; see [Installing](#installing) below. `openbox
