@@ -371,6 +371,12 @@ func (a *app) reportMuseModelCalls() {
 	}
 	a.row("", "proxy: %s", proxy)
 	traceDoctorFinding("muse:proxy-lane", "info", proxy)
+	// Why no telemetry lane: Muse documents no OpenTelemetry exporter that
+	// could be pointed at the loopback receiver. A third party claims one
+	// exists; until a real install shows its settings, nothing is written.
+	const telemetry = "not supported by this tool (no documented OpenTelemetry exporter to point at the loopback receiver)"
+	a.row("", "telemetry: %s", telemetry)
+	traceDoctorFinding("muse:telemetry-lane", "info", telemetry)
 	const mcp = "MCP gating: doc-verified, not empirically confirmed"
 	a.row("mcp", "%s", mcp)
 	traceDoctorFinding("muse:mcp", "info", mcp)

@@ -476,3 +476,12 @@ func TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls(t *testing.T) {
 		mustContain(t, section, tc.want)
 	}
 }
+
+// TestDoctorMuseSaysTelemetryIsNotSupported Muse documents no OpenTelemetry
+// exporter a loopback receiver could be pointed at, so no telemetry lane
+// exists; doctor says so rather than leaving the reader to wonder.
+func TestDoctorMuseSaysTelemetryIsNotSupported(t *testing.T) {
+	installedMuse(t)
+	withMuseRunner(t, healthyMuse())
+	mustContain(t, museDoctor(t), "telemetry: not supported by this tool (no documented OpenTelemetry exporter to point at the loopback receiver)")
+}
