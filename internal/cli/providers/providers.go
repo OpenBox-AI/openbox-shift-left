@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	claudecode "github.com/openbox-ai/openbox-shift-left/internal/adapters/claude-code"
 	codex "github.com/openbox-ai/openbox-shift-left/internal/adapters/codex"
@@ -204,6 +205,15 @@ func CheckMuseVersion() MuseVersionCheck { return muse.CheckVersion(MuseRunner) 
 // OpenBox handlers against the --home this machine's hooks need.
 func AuditMuseSettings(path string) (MuseSettingsAudit, error) {
 	return muse.AuditSettings(path, muse.BakedHome())
+}
+
+// MuseEvidenceSummary is what the session-log reconciler left in the local trace.
+type MuseEvidenceSummary = muse.EvidenceSummary
+
+// SummarizeMuseEvidence counts the reconciler's findings in the trace at dir
+// over the last week, without importing the adapter.
+func SummarizeMuseEvidence(traceDir string, now time.Time) (MuseEvidenceSummary, error) {
+	return muse.SummarizeEvidence(traceDir, now)
 }
 
 // MuseSettingsPath is Muse's user-wide settings file, where an install

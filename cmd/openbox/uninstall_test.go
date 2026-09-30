@@ -97,6 +97,9 @@ func newInstalledMachine(t *testing.T) *installedMachine {
 	writeFile(t, m.managedFile, "[policy]\n")
 	for _, dir := range m.spoolDirs {
 		writeFile(t, filepath.Join(dir, "pending-1.jsonl"), `{"event":"x"}`+"\n")
+		// The Muse session-journal reconciler keeps its cursors and gate
+		// ledger in a subdirectory of the spool; removing the spool removes it.
+		writeFile(t, filepath.Join(dir, "reconcile", "s-1.gates"), `{"tool_name":"Bash"}`+"\n")
 	}
 	writeFile(t, filepath.Join(sessions, "s1.json"), "{}")
 	writeFile(t, filepath.Join(pending, "p1.json"), "{}")
@@ -193,8 +196,8 @@ func TestUninstallRemovesEverySurface(t *testing.T) {
 		}
 	}
 	for _, dir := range m.spoolDirs {
-		if exists(dir) {
-			t.Errorf("spool survived at %s", dir)
+		if exists(dir) || exists(filepath.Join(dir, "reconcile")) {
+			t.Errorf("spool (or its reconcile state) survived at %s", dir)
 		}
 	}
 	for _, path := range []string{m.userHooks, m.localHooks, m.codexHooks} {

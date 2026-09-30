@@ -28,6 +28,14 @@ type positioned struct {
 // corrupt line (a torn write during a crash, mid-write during a concurrent
 // read) must not hide every other record in the trace.
 func Read(dir string, match func(Record) bool) (recs []Record, skipped int, err error) {
+	return ReadFiltered(dir, nil, match)
+}
+
+// ReadFiltered is Read with a cheap pre-decode filter: a line prefilter
+// rejects keeps out of the JSON decoder entirely, so a caller looking for a
+// few small records need not parse every multi-hundred-KiB body line in the
+// window. prefilter==nil keeps every line.
+func ReadFiltered(dir string, prefilter func(line []byte) bool, match func(Record) bool) (recs []Record, skipped int, err error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, 0, err
@@ -49,7 +57,7 @@ func Read(dir string, match func(Record) bool) (recs []Record, skipped int, err 
 
 	var all []positioned
 	for fi, name := range names {
-		n, s := readFile(filepath.Join(dir, name), fi, match, &all)
+		n, s := readFile(filepath.Join(dir, name), fi, prefilter, match, &all)
 		skipped += s
 		if n != nil {
 			err = n
@@ -77,7 +85,7 @@ func Read(dir string, match func(Record) bool) (recs []Record, skipped int, err 
 // encountered opening/decompressing it (an unreadable file is not the same
 // failure mode as a corrupt line: the former means the whole file's worth of
 // records is missing, the latter is counted as skipped and moves on).
-func readFile(path string, fileIdx int, match func(Record) bool, out *[]positioned) (error, int) {
+func readFile(path string, fileIdx int, prefilter func([]byte) bool, match func(Record) bool, out *[]positioned) (error, int) {
 	f, err := os.Open(path)
 	if err != nil {
 		return err, 0
@@ -103,6 +111,13 @@ func readFile(path string, fileIdx int, match func(Record) bool, out *[]position
 	for {
 		line, rerr := br.ReadBytes('\n')
 		if len(bytes.TrimSpace(line)) > 0 {
+			if prefilter != nil && !prefilter(line) {
+				lineIdx++
+				if rerr != nil {
+					break
+				}
+				continue
+			}
 			var rec Record
 			if jerr := json.Unmarshal(line, &rec); jerr != nil {
 				skipped++

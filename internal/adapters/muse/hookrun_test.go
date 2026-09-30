@@ -191,7 +191,7 @@ func TestUnreadablePayloadOnAGatedEventIsRefused(t *testing.T) {
 
 func TestUnmappedEventsAreSilentNoOps(t *testing.T) {
 	spool := setHookEnv(t)
-	for _, hook := range []string{"PreCompact", "PostCompact", "Notification", "PostToolBatch", "Interrupt", "Stop", "SubagentStop"} {
+	for _, hook := range []string{"PreCompact", "PostCompact", "Notification", "PostToolBatch", "Interrupt", "SubagentStop"} {
 		stdout, stderr := runHook(t, hook, fixture(t, "stop", "s-noop"))
 		if stdout != "" || strings.Contains(stderr, "unknown") {
 			t.Errorf("%s: stdout=%q stderr=%q", hook, stdout, stderr)

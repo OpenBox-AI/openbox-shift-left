@@ -66,7 +66,7 @@ func TestParseRefusesWhatIsNotAnObject(t *testing.T) {
 
 func TestHookClasses(t *testing.T) {
 	gated := map[HookName]bool{HookUserPromptSubmit: true, HookPreToolUse: true, HookPermissionRequest: true, HookPreLLMCall: true}
-	silent := map[HookName]bool{HookStop: true, HookSubagentStop: true, HookPreCompact: true, HookPostCompact: true, HookNotification: true, HookPostToolBatch: true, HookInterrupt: true}
+	silent := map[HookName]bool{HookSubagentStop: true, HookPreCompact: true, HookPostCompact: true, HookNotification: true, HookPostToolBatch: true, HookInterrupt: true}
 	for h := range hookNames {
 		if h.Gated() != gated[h] {
 			t.Errorf("%s: Gated() = %v", h, h.Gated())

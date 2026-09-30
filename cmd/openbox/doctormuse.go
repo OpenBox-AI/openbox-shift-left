@@ -16,6 +16,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // This file is doctor's Muse Code section. It reports what can be read without
@@ -64,6 +65,7 @@ func (a *app) reportMuse() {
 	a.reportMusePolicy(ver)
 	a.reportMuseModelCalls()
 	a.reportMuseSpool()
+	a.reportMuseEvidenceGaps()
 }
 
 // museInPlay reports whether this machine has been set up for Muse: an
@@ -380,5 +382,23 @@ func (a *app) reportMuseSpool() {
 		a.museFinding("spool", "warning", "spool", "WARNING: nothing waiting, but at least %d event(s) were discarded in %s", discarded, dir)
 	default:
 		a.museFinding("spool", "warning", "spool", "WARNING: %d event(s) waiting in %s; `openbox hook muse flush` delivers them now", backlog, dir)
+	}
+}
+
+// 8. tool actions Muse ran that no hook gated, found by reading Muse's own
+// session journal at Stop and SessionEnd. A count only: the findings are in
+// the local trace, and nothing here reaches core. Detection, not prevention.
+func (a *app) reportMuseEvidenceGaps() {
+	const label = "ungated"
+	sum, err := providers.SummarizeMuseEvidence(trace.Dir(), time.Now())
+	switch {
+	case err != nil:
+		a.museFinding("evidence-gaps", "unverified", label, "unverified: the local trace could not be read (%v)", err)
+	case sum.Unverified:
+		a.museFinding("evidence-gaps", "unverified", label, "unverified: the session-log reconciler stopped on a journal line it does not recognise, because Muse's session.jsonl format is not verified; %d ungated Muse action(s) in the last 7 days before that", sum.Gaps)
+	case sum.Gaps == 0:
+		a.museFinding("evidence-gaps", "ok", label, "ok: 0 ungated Muse actions in the last 7 days (see `openbox trace <session>`)")
+	default:
+		a.museFinding("evidence-gaps", "warning", label, "WARNING: %d ungated Muse actions in the last 7 days (see `openbox trace <session>`). The usual cause is a tool payload over Muse's 256 KiB hook limit, which skips every hook; this is found after the fact and cannot be prevented", sum.Gaps)
 	}
 }

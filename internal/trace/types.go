@@ -59,6 +59,10 @@ const (
 	StageRelay          = "relay"
 	StageLog            = "log"
 	StageGateVerdict    = "gate.verdict"
+	// StageEvidenceGap is a tool action a tool's own session log shows with no
+	// gate record; StageEvidenceReconcile is the outcome of one such pass.
+	StageEvidenceGap       = "evidence.gap"
+	StageEvidenceReconcile = "evidence.reconcile"
 )
 
 // Record is one trace line. Emit always overwrites TS/PID/Proc regardless of

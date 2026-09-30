@@ -37,6 +37,20 @@ Muse hook (stdin JSON)
    crash on a gated event → exit 2 (FaultExitCode) → Muse's onFailure successor denies
 ```
 
+## Coverage limit: detection, not prevention
+
+OpenBox cannot stop a tool action whose hook payload is over 256 KiB: Muse skips
+the hook entirely, so neither the gate nor its `onFailure` successor runs. What
+it can do is notice. At `Stop` and `SessionEnd` the reconciler reads the
+session's own append-only `session.jsonl` (and each subagent's) and joins its
+`side_effect_intent` records against a content-free ledger of the tool calls the
+gate was asked about (`reconcile.go`, `sessionlog.go`). Each intent with no gate
+record becomes a local `evidence.gap` trace finding, and `openbox doctor` shows
+the count. Nothing is blocked, latched or sent to core. The join is exact on
+`tool_use_id` when an intent carries one, otherwise on (tool name, ordinal), which
+finds how many calls went ungated but not always which. Only the join fields of a
+journal line are decoded; its content is never copied or logged.
+
 ## Event mapping
 
 | Muse hook | Contract type | Gated | Answer |
@@ -51,7 +65,8 @@ Muse hook (stdin JSON)
 | `SessionEnd` | `SessionEnded`, then an inline spool drain | no | none |
 | `PreLLMCall` | `ModelCallRequested` (started, evaluated) | yes | `{"decision":"block","reason":...}` |
 | `PostLLMCall` | `ModelCallFinished` (completed, metadata only) | no | none |
-| `Stop`, `SubagentStop` | nothing: no usage is taken from a hook payload, and no completion is fabricated | - | - |
+| `Stop` | nothing reported: no usage is taken from a hook payload, and no completion is fabricated. Runs the session-log reconciler (see below) | no | none |
+| `SubagentStop` | nothing; never installed | - | - |
 | `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | nothing: no contract type. Never installed; one that runs anyway is a no-op | - | - |
 
 ## The model-call gate
@@ -213,6 +228,16 @@ Guessed by the installer and doctor (Muse documents none of them by name):
 - `PostLLMCall`'s `status` and `error` value sets, and the `usage` inner keys.
 - Muse's shell-tool environment, so no commit is attributed to a Muse session.
 
+- The session journal: its location
+  (`~/.local/share/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl`, subagents
+  under `subagent/<id>/session.jsonl`), the `side_effect_intent` record type, and
+  every field the reconciler reads (`type`, `timestamp`, `tool_name`, optional
+  `tool_use_id`, `seq`) come from research, not a binary
+  (`testdata/session-jsonl-sample.jsonl`). A line that does not match stops the
+  pass and doctor says `unverified`. Also unknown: whether a subagent's hooks carry
+  the parent's or their own session id (the ledger is checked under both), and
+  whether a denied call writes an intent at all.
+
 ## Files
 
 | File | What |
@@ -224,6 +249,7 @@ Guessed by the installer and doctor (Muse documents none of them by name):
 | `promptgate.go`, `permissiongate.go`, `enforcetarget.go`, `enforce.go`, `enforceevaluate.go` | gate targets and the evaluator |
 | `hookrun.go` | `RunHook`: the gated and observed paths, the inline drain |
 | `usage.go` | usage and trace context, local trace only |
+| `sessionlog.go`, `reconcile.go` | the session-journal reader with its cursor, the gate ledger, the join and the `evidence.gap` findings |
 | `engine.go` | `Engine`, `FaultExitCode`, the ceilings (Gating 30s, Other 5s) |
 | `capabilities.go`, `posture.go`, `creds.go`, `adapter.go`, `paths.go` | profile, posture, credentials, spool |
 | `installer.go` | refuses until the installer phase |

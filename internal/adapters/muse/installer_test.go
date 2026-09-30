@@ -88,7 +88,7 @@ func TestInstalledEventsComeFromTheAdaptersOwnTable(t *testing.T) {
 		got = append(got, string(ev))
 	}
 	want := []string{"PermissionRequest", "PostLLMCall", "PostToolUse", "PostToolUseFailure", "PreLLMCall",
-		"PreToolUse", "SessionEnd", "SessionStart", "StopFailure", "SubagentStart", "UserPromptSubmit"}
+		"PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopFailure", "SubagentStart", "UserPromptSubmit"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("installed events = %v, want %v", got, want)
 	}

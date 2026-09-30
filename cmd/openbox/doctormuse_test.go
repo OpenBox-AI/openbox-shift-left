@@ -11,6 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // healthyMuse scripts a muse 1.4.0 whose hooks all load and whose policy is
@@ -18,7 +19,7 @@ import (
 func healthyMuse() museOutputs {
 	return museOutputs{
 		"--version":            {Stdout: []byte("muse 1.4.0\n")},
-		"exec --provider echo": {Stderr: []byte("Hooks: 11 runnable · 0 warnings\n")},
+		"exec --provider echo": {Stderr: []byte("Hooks: 12 runnable · 0 warnings\n")},
 		"config validate":      {ExitCode: 0},
 		"config status":        {Stdout: []byte("managed hooks lane required: false\n")},
 	}
@@ -105,13 +106,14 @@ func TestDoctorMuseAllSevenRowsHealthy(t *testing.T) {
 	section := museDoctor(t)
 	mustContain(t, section,
 		"ok: muse 1.4.0 (supported: >= 1.4.0, tested below 1.5.0)",
-		"ok: 11 of 11 OpenBox handlers registered, every gated one with a deny-only successor",
-		"ok: Muse found 11 runnable hooks (11 expected), 0 warnings",
+		"ok: 12 of 12 OpenBox handlers registered, every gated one with a deny-only successor",
+		"ok: Muse found 12 runnable hooks (12 expected), 0 warnings",
 		"unverified: no local-tracing log",
 		"ok: muse config validates. managed lane required: no",
 		"Muse model calls: not recorded (no proxy or telemetry lane can see them); tool, prompt and model-call gating still enforced",
 		"ok: 0 events waiting",
 		"MCP gating: doc-verified, not empirically confirmed",
+		"ok: 0 ungated Muse actions in the last 7 days (see `openbox trace <session>`)",
 	)
 	if strings.Contains(section, "not installed") {
 		t.Errorf("the model-call row must never read as not installed:\n%s", section)
@@ -155,9 +157,9 @@ func TestDoctorMuseLoadProbeStates(t *testing.T) {
 		result providers.MuseRunResult
 		want   string
 	}{
-		{"fewer than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 5 runnable · 0 warnings")}, "FAIL: Muse found 5 runnable hooks, fewer than the 11 OpenBox registered"},
-		{"more than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 14 runnable · 0 warnings")}, "ok: Muse found 14 runnable hooks (11 expected)"},
-		{"foreign warning", providers.MuseRunResult{Stderr: []byte("Hooks: 11 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 11 runnable hooks (11 expected) and 1 warning(s), none naming OpenBox"},
+		{"fewer than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 5 runnable · 0 warnings")}, "FAIL: Muse found 5 runnable hooks, fewer than the 12 OpenBox registered"},
+		{"more than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 14 runnable · 0 warnings")}, "ok: Muse found 14 runnable hooks (12 expected)"},
+		{"foreign warning", providers.MuseRunResult{Stderr: []byte("Hooks: 12 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 12 runnable hooks (12 expected) and 1 warning(s), none naming OpenBox"},
 		{"openbox warning", providers.MuseRunResult{Stderr: []byte("Hooks: 10 runnable · 1 warnings\nwarning: hook \"/o/openbox\" hook muse PreToolUse: unknown key")}, "FAIL: Muse loaded 10 hooks and warned about OpenBox's"},
 		{"no summary", providers.MuseRunResult{ExitCode: 3, Stderr: []byte("boom")}, "WARNING: the echo probe (exit 3) printed no `Hooks: N runnable` summary"},
 	}
@@ -247,13 +249,13 @@ func TestDoctorMuseReportsACountShortOfTheExpectedAndAMissingHome(t *testing.T) 
 		t.Fatal(err)
 	}
 	withMuseRunner(t, healthyMuse())
-	mustContain(t, museDoctor(t), "WARNING: 11 of 11 OpenBox handlers registered; --home does not match this machine's OpenBox home on")
+	mustContain(t, museDoctor(t), "WARNING: 12 of 12 OpenBox handlers registered; --home does not match this machine's OpenBox home on")
 
 	// And a handler that is simply gone.
 	if err := os.WriteFile(path, []byte(strings.Replace(stripped, "hook muse SessionEnd", "hook codex SessionEnd", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, museDoctor(t), "10 of 11 OpenBox handlers registered", "no OpenBox handler for [SessionEnd]")
+	mustContain(t, museDoctor(t), "11 of 12 OpenBox handlers registered", "no OpenBox handler for [SessionEnd]")
 }
 
 func TestDoctorMuseFlagsASettingsFileMuseCannotRead(t *testing.T) {
@@ -313,7 +315,7 @@ func TestDoctorMuseRatesAGatedHandlerThatCannotGovernAsFail(t *testing.T) {
 				t.Fatal(err)
 			}
 			withMuseRunner(t, healthyMuse())
-			mustContain(t, museDoctor(t), "FAIL: 11 of 11 OpenBox handlers registered, but a gated one can fail open or be skipped")
+			mustContain(t, museDoctor(t), "FAIL: 12 of 12 OpenBox handlers registered, but a gated one can fail open or be skipped")
 		})
 	}
 }
@@ -416,5 +418,40 @@ func TestParseMuseHookRuns(t *testing.T) {
 	c := parseMuseHookRuns("a\nhook.execution.terminal status=\"completed\"\nhook.execution.terminal {\"status\":\"completed\"}\nhook.execution.terminal status=\"timeout\"\n")
 	if c.Terminal != 3 || c.Completed != 2 {
 		t.Errorf("= %+v", c)
+	}
+}
+
+// evidenceTrace points the local trace at a scratch directory and returns it,
+// so a test can leave the reconciler's findings where doctor reads them.
+func evidenceTrace(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "trace")
+	t.Cleanup(trace.SetDefault(&trace.Writer{Dir: dir, Proc: "test"}))
+	return dir
+}
+
+func TestDoctorMuseCountsUngatedActions(t *testing.T) {
+	installedMuse(t)
+	withMuseRunner(t, healthyMuse())
+	evidenceTrace(t)
+	for i := 0; i < 3; i++ {
+		trace.Emit(trace.Record{Provider: "muse", SessionID: "s-1", Stage: trace.StageEvidenceGap, Outcome: "no_gate_record"})
+	}
+	section := museDoctor(t)
+	mustContain(t, section,
+		"WARNING: 3 ungated Muse actions in the last 7 days (see `openbox trace <session>`)",
+		"256 KiB hook limit",
+	)
+}
+
+func TestDoctorMuseSaysUnverifiedWhenTheReconcilerDisabledItself(t *testing.T) {
+	installedMuse(t)
+	withMuseRunner(t, healthyMuse())
+	evidenceTrace(t)
+	trace.Emit(trace.Record{Provider: "muse", SessionID: "s-1", Stage: trace.StageEvidenceReconcile, Outcome: "disabled"})
+	section := museDoctor(t)
+	mustContain(t, section, "unverified: the session-log reconciler stopped on a journal line it does not recognise")
+	if strings.Contains(section, "ok: 0 ungated") {
+		t.Errorf("an unverified reconciler reads as clean:\n%s", section)
 	}
 }

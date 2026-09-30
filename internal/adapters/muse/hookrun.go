@@ -176,12 +176,19 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		traceModelCall(hook, ev, devEv)
 	}
 	switch hook {
+	case HookStop:
+		// Nothing to report; the pass over the session's own journal is the
+		// whole of this handler.
+		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
 	case HookSessionStart:
 		// The session's own WorkflowStarted event is drained inline, under this
 		// session's own stripe, right after the append above, so no detached
 		// flusher's debounce window can let anything else of this run overtake it.
 		inlineAttempt(ad, logger, ev.SessionID, hookStart)
 	case HookSessionEnd:
+		// The journal pass comes first, on a budget far below the handler's
+		// ceiling, so it cannot eat the delivery window it precedes.
+		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
 		// The same inline attempt, within SessionEnd's own budget, falling back
 		// to the detached flusher when the window runs out.
 		inlineAttempt(ad, logger, ev.SessionID, hookStart)
@@ -223,6 +230,14 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 		dec, res := hookflow.SessionHaltReplay(logger, stdout, info, false, nil, toolName, c)
 		hookflow.RecordEnforcement(logger, ev.SessionID, toolKind, dec, res)
 		return res
+	}
+
+	if hook == HookPreToolUse {
+		// Before anything can end the call: whatever the verdict, a call whose
+		// hook started is one the journal join must find.
+		if err := RecordGateCall(DefaultSpoolDir(), ev.SessionID, ev.ToolName, ev.ToolUseID); err != nil {
+			logger.Printf("gate ledger: %v", err)
+		}
 	}
 
 	if info, halted := hookflow.SessionHalted(runID); halted {
