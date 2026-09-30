@@ -1,19 +1,12 @@
 {
   "schema_version": 1,
-  "settings": {
-    "execution": {
-      "approval_modes": [
-        "ask"
-      ],
-      "allow_user_approval_override": false
-    },
-    "extensions": {
-      "hooks": {
-        "require_managed_lane": true,
-        "allowed_env_vars": [
-          "OPENBOX_HOME"
-        ]
-      }
+  "execution": {
+    "allow_user_approval_override": false
+  },
+  "extensions": {
+    "hooks": {
+      "allowed_sources": ["managed"],
+      "allowed_env_vars": ["OPENBOX_HOME"]
     }
   }
 }

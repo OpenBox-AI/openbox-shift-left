@@ -71,25 +71,35 @@ func TestManagedPolicyIsJSONThatNamesItsOwnIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"allow_user_approval_override": false`, `"approval_modes"`, `"require_managed_lane": true`} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("policy.json lacks %s", want)
-		}
-	}
-	// The envelope the real binary demands of an enterprise plane document: a
-	// schema version and the settings under their own key.
+	// The shape muse 1.4.1's `config validate --plane policy` accepts: its
+	// sections at the top level beside schema_version (a "settings" wrapper
+	// belongs to the defaults plane and is refused here as unknown_member).
 	var doc struct {
-		SchemaVersion int            `json:"schema_version"`
-		Settings      map[string]any `json:"settings"`
+		SchemaVersion int `json:"schema_version"`
+		Execution     struct {
+			AllowUserApprovalOverride *bool `json:"allow_user_approval_override"`
+		} `json:"execution"`
+		Extensions struct {
+			Hooks struct {
+				AllowedSources []string `json:"allowed_sources"`
+			} `json:"hooks"`
+		} `json:"extensions"`
+		Settings json.RawMessage `json:"settings"`
 	}
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("policy.json does not decode: %v", err)
 	}
-	if doc.SchemaVersion != 1 || len(doc.Settings) == 0 {
-		t.Errorf("policy.json must be {\"schema_version\":1,\"settings\":{...}}, got version %d with %d settings", doc.SchemaVersion, len(doc.Settings))
+	if doc.SchemaVersion != 1 {
+		t.Errorf("policy.json schema_version = %d, want 1", doc.SchemaVersion)
 	}
-	if _, ok := doc.Settings["extensions"]; !ok {
-		t.Error("policy.json keeps its guessed keys under settings")
+	if doc.Settings != nil {
+		t.Error("policy.json wraps its sections in settings, which the policy plane refuses")
+	}
+	if v := doc.Execution.AllowUserApprovalOverride; v == nil || *v {
+		t.Error("policy.json must pin execution.allow_user_approval_override to false")
+	}
+	if got := doc.Extensions.Hooks.AllowedSources; len(got) != 1 || got[0] != "managed" {
+		t.Errorf("policy.json extensions.hooks.allowed_sources = %v, want [managed] so only the managed hook lane runs", got)
 	}
 	if readme, err := os.ReadFile(managedBundle + "README-mdm.md"); err != nil {
 		t.Fatal(err)

@@ -244,10 +244,10 @@ Still guessed by the installer and doctor (Muse documents none of them by name):
   a pattern and otherwise says `unknown`).
 - The local-tracing hook log path and its `hook.execution.terminal` records
   (one third-party source); doctor says `unverified` whenever it is absent.
-- The managed policy's setting keys in `deployments/managed/muse/policy.json`
-  (the `schema_version` envelope is verified), above all the name for "managed
-  lane required" and the values of `approval_modes`: run
-  `muse config validate --plane policy --file policy.json` before deploying.
+- The value format of `execution.approval_modes`, left out of
+  `deployments/managed/muse/policy.json`. The file itself validates on muse
+  1.4.1, with every member active (top-level sections, and
+  `extensions.hooks.allowed_sources: ["managed"]` as the managed-lane rule).
 
 - Whether an MCP call fires `PreToolUse` (catch-all install is the plan).
 - The exact `onFailure` JSON, whether invalid output triggers it on 1.4.0.

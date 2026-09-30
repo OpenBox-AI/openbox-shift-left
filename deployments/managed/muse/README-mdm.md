@@ -40,20 +40,19 @@ after `hook muse` in every command and successor in `hooks.json`
 
 | Key | Intent |
 |---|---|
-| `extensions.hooks.require_managed_lane: true` | Sessions are refused without the managed hook lane, and a locally disabled required managed hook is refused. This is Muse's counterpart of Claude Code's `allowManagedHooksOnly`. |
-| `execution.approval_modes` | Pins which approval modes a session may select. |
-| `execution.allow_user_approval_override: false` | A user cannot widen that set. |
+| `extensions.hooks.allowed_sources: ["managed"]` | Only the managed hook lane runs: user and project hook registrations are not admitted. This is Muse's counterpart of Claude Code's `allowManagedHooksOnly`. |
+| `execution.allow_user_approval_override: false` | A user cannot widen the org's approval settings. |
 | `extensions.hooks.allowed_env_vars` | The environment names a managed hook may receive. Muse clears a hook's environment; `OPENBOX_HOME` is listed so a non-default OpenBox home can reach it. **No credential goes here**, and Muse refuses provider credential names in it anyway. |
 
-**The envelope is verified; the setting keys are not.** Muse 1.4.1 rejects a
-policy document with no `schema_version` (`enterprise_document_invalid:
-plane=policy reason=missing_schema_version`), so `policy.json` is
-`{"schema_version": 1, "settings": {...}}`. The keys inside `settings` come from
-Muse's 1.4.0 changelog, which names the members but has no reference page: the
-exact key for "managed lane required" and the value names in `approval_modes`
-are guesses. **Run `muse config validate --plane policy --file policy.json` on
-the file before you roll it out** and fix what it rejects (exit 0 valid, 4 valid
-with inactive members, 1 rejected; exit 4 means a member did nothing).
+**Validated against muse 1.4.1.** `muse config validate --plane policy --file
+policy.json` reports the document valid and each of the three members
+`state=active binds=policy user_overridable=false`. A policy document puts its
+sections (`execution`, `extensions`) at the top level beside `schema_version`;
+a `settings` wrapper belongs to the defaults plane and is refused here as
+`unknown_member`. Pinning `execution.approval_modes` is left out: its value
+format was not established. **Run `muse config validate --plane policy --file
+policy.json` again before you roll it out**, since a later Muse may change the
+members it accepts.
 
 Where Muse reads the policy and managed hooks from is documented for Windows
 only (`%ProgramFiles%\muse\`). On macOS and Linux the location is not
