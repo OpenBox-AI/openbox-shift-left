@@ -151,8 +151,19 @@ A Muse that is not on your `PATH` installs with a warning.
   whether an edit reaches a running session is not documented, so `init` tells
   you to restart rather than promise it.
 
-- Hooks only: Muse's model calls are **not recorded**, because no proxy or
-  telemetry lane can see them (`doctor` says why). Prompts, tool calls and
+- **Muse's telemetry is redirected.** `init` also starts the local telemetry
+  receiver and, once it is listening, sets the `telemetry` key of
+  `~/.config/muse/settings.json` to `destination: "external"` with the
+  receiver as its endpoint. Muse then sends its own telemetry (model, token
+  counts and response ids; no prompts, tool content or replies) to OpenBox's
+  loopback receiver **instead of Meta's destinations**. The value that was there
+  is recorded first, and `openbox uninstall` puts it back exactly, or removes the
+  key if there was none; a value you changed after `init` is left alone. An
+  existing `telemetry` setting of your own is replaced, and `init` says so.
+  `doctor` reports whether the lane is routed, and why not when it is not. A
+  policy that forces `privacy.telemetry` off stops the export; `doctor` reports
+  it when Muse's status shows it. No proxy lane exists for Muse: it ignores the
+  system proxy and rejects the relay's certificate. Prompts, tool calls and
   model calls are still gated: every model call is checked before it is sent.
 - A HALT verdict, a block and an unanswered approval all come back to Muse as
   a plain refusal.
@@ -318,8 +329,8 @@ come up, fix that and run `init` again. A Codex that ignores the PAC never
 silences telemetry.
 
 Linux and Windows do not get this yet; `init` says so and changes nothing at
-the OS level. Codex there stays telemetry-only, and Muse has no lane on any
-platform.
+the OS level. Codex there stays telemetry-only, and Muse is telemetry-only on
+every platform.
 
 ## Enforcement in practice
 

@@ -25,10 +25,14 @@ provider branches in `cmd/openbox/main.go` (Codex's trust note, the
 hooks-only lane line), `attestProvider` (`attest.go`), `doctor.go`'s
 managed-config loop and `uninstall.go`'s hook-surface list still name their
 providers, deliberately, and a fourth tool needs each of them read. Three
-tools exist (Claude Code, Codex, Muse Code) and they differ on purpose: Muse is
-hooks-only with an evaluated model-call gate, so it has no lane arm and no
-commit-marker arm, and `doctor` reports it in its own `reportMuse` rather than
-the managed-config loop. An adapter is four things: its native hook shape, its
+tools exist (Claude Code, Codex, Muse Code) and they differ on purpose: Muse has
+the telemetry arm only (its own settings.json redirects its export to the
+receiver; it ignores the system PAC and rejects the relay's CA, so there is no
+transport arm) plus an evaluated model-call gate, and no commit-marker arm, and
+`doctor` reports it in its own `reportMuse` rather than the managed-config loop.
+Muse's telemetry pointer is a key in a file the developer owns, so it is
+recorded before it is written and restored by the recorded value
+(`adapters/muse/telemetrykeys.go`), never inferred. An adapter is four things: its native hook shape, its
 mapper, an `OutputContract`, its installer; everything else is the engine's.
 
 ## Where things live

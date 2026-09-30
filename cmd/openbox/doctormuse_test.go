@@ -13,6 +13,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
+	"github.com/tidwall/sjson"
 )
 
 // healthyMuse scripts a muse 1.4.0 whose hooks all load and whose policy is
@@ -84,6 +85,17 @@ func installedMuse(t *testing.T) {
 		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
 	}
 	withMuseTracingDir(t, filepath.Join(t.TempDir(), "no-tracing"))
+	withReceiverListening(t, true)
+}
+
+// withReceiverListening answers doctor's probe of the telemetry receiver's
+// port. The fake supervisor reports nothing listening; a healthy machine has
+// the receiver up.
+func withReceiverListening(t *testing.T, up bool) {
+	t.Helper()
+	prev := portOccupied
+	portOccupied = func(string) (bool, string) { return up, "" }
+	t.Cleanup(func() { portOccupied = prev })
 }
 
 // museDoctor runs doctor and returns the Muse section.
@@ -140,7 +152,7 @@ func TestDoctorMuseAllSevenRowsHealthy(t *testing.T) {
 		"ok: Muse loaded the hooks with 0 warnings and OpenBox's handlers ran during the probe",
 		"unverified: no local-tracing log",
 		"ok: no policy present (system_file absent, macos_managed_preferences absent). managed lane required: unknown",
-		"Muse model calls: not recorded (no proxy or telemetry lane can see them); tool, prompt and model-call gating still enforced",
+		"Muse model calls: recorded by the telemetry lane (metadata only: model, tokens, response id); tool, prompt and model-call gating still enforced",
 		"ok: 0 events waiting",
 		"MCP gating: doc-verified, not empirically confirmed",
 		"ok: 0 ungated Muse actions in the last 7 days (see `openbox trace <session>`)",
@@ -549,32 +561,112 @@ func TestDoctorMuseSaysUnverifiedWhenTheReconcilerDisabledItself(t *testing.T) {
 	}
 }
 
-// TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls the unrecorded row is
-// only actionable with its reason: whether the relay can see Muse at all
-// depends on the OS, and on macOS on what Muse was never shown to do.
-func TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls(t *testing.T) {
-	for _, tc := range []struct {
-		pac  bool
-		want string
-	}{
-		{true, "proxy: not built; Muse is not shown to trust the relay's CA or follow the system PAC, and sends no session carrier the relay could attribute"},
-		{false, "proxy: none; this OS has no system proxy activation, so the relay cannot see Muse"},
-	} {
+// TestDoctorMuseSaysWhyThereIsNoProxyLane: measured on Muse 1.4.1, so the same
+// on every OS.
+func TestDoctorMuseSaysWhyThereIsNoProxyLane(t *testing.T) {
+	for _, pac := range []bool{true, false} {
 		prev := systemPACSupportedFn
-		systemPACSupportedFn = func() bool { return tc.pac }
+		systemPACSupportedFn = func() bool { return pac }
 		installedMuse(t)
 		withProbedMuse(t, healthyMuse())
 		section := museDoctor(t)
 		systemPACSupportedFn = prev
-		mustContain(t, section, tc.want)
+		mustContain(t, section, "proxy: none: Muse ignores the system proxy and rejects the relay's certificate")
 	}
 }
 
-// TestDoctorMuseSaysTelemetryIsNotSupported Muse documents no OpenTelemetry
-// exporter a loopback receiver could be pointed at, so no telemetry lane
-// exists; doctor says so rather than leaving the reader to wonder.
-func TestDoctorMuseSaysTelemetryIsNotSupported(t *testing.T) {
+// TestDoctorMuseSaysWhyModelCallsAreNotRecorded: the model-call row is only
+// actionable with its reason, one per way the lane can be off.
+func TestDoctorMuseSaysWhyModelCallsAreNotRecorded(t *testing.T) {
+	const gating = "tool, prompt and model-call gating still enforced"
+	edit := func(t *testing.T, mutate func(string) string) {
+		t.Helper()
+		path := providers.MuseSettingsPath()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(mutate(string(raw))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(string) string
+		up     bool
+		muse   museOutputs
+		want   string
+	}{
+		{"the telemetry key was removed", func(s string) string { return sjsonDelete(t, s, "telemetry") }, true, healthyMuse(),
+			"WARNING: Muse model calls: not recorded by the telemetry lane: Muse's settings.json has no telemetry block, so Muse exports to its own destinations."},
+		{"the destination is Meta's", func(s string) string {
+			return strings.Replace(s, `"destination":"external"`, `"destination":"meta"`, 1)
+		}, true, healthyMuse(),
+			`Muse's telemetry.destination is "meta", not "external"`},
+		{"the endpoint left loopback", func(s string) string {
+			return strings.Replace(s, "http://127.0.0.1:8789", "https://otel.corp.example", 1)
+		}, true, healthyMuse(),
+			"is not a loopback URL"},
+		{"the endpoint points at another port", func(s string) string { return strings.Replace(s, "127.0.0.1:8789", "127.0.0.1:4318", 1) }, true, healthyMuse(),
+			"is not this receiver (127.0.0.1:8789)"},
+		{"telemetry is switched off", func(s string) string { return strings.Replace(s, `"enabled":true`, `"enabled":false`, 1) }, true, healthyMuse(),
+			"Muse's telemetry.enabled is not true"},
+		{"the receiver is not listening", func(s string) string { return s }, false, healthyMuse(),
+			"Muse's telemetry is pointed at this receiver but nothing is listening on 127.0.0.1:8789. `openbox init --provider muse` brings the receiver back; " + gating},
+		{"a policy forces telemetry off", func(s string) string { return s }, true,
+			with(healthyMuse(), "config status", providers.MuseRunResult{Stdout: []byte(absentPolicyStatus +
+				"  plane=policy source_class=file state=present\n  privacy.telemetry: force_off\n")}),
+			"WARNING: Muse model calls: not recorded; a policy forces privacy.telemetry off, so Muse exports nothing; " + gating},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			installedMuse(t)
+			withProbedMuse(t, tc.muse)
+			withReceiverListening(t, tc.up)
+			edit(t, tc.mutate)
+			section := museDoctor(t)
+			mustContain(t, section, tc.want)
+			if strings.Contains(flat(section), "Muse model calls: recorded by the telemetry lane") {
+				t.Errorf("a lane that is off reads as recording:\n%s", section)
+			}
+		})
+	}
+}
+
+// TestDoctorMuseSaysWhenAPolicyMayForceTelemetryOff: `muse config status`
+// names policy sources but not what they require, so a present policy is
+// unverified, never assumed to allow the export and never assumed to forbid it.
+func TestDoctorMuseSaysWhenAPolicyMayForceTelemetryOff(t *testing.T) {
 	installedMuse(t)
-	withProbedMuse(t, healthyMuse())
-	mustContain(t, museDoctor(t), "telemetry: not supported by this tool (no documented OpenTelemetry exporter to point at the loopback receiver)")
+	present := strings.Replace(absentPolicyStatus, "plane=policy source_class=system_file state=absent", "plane=policy source_class=system_file state=present", 1)
+	withProbedMuse(t, with(healthyMuse(), "config status", providers.MuseRunResult{Stdout: []byte(present)}))
+	section := museDoctor(t)
+	mustContain(t, section,
+		"unverified: whether a policy forces privacy.telemetry off",
+		"Muse model calls: recorded by the telemetry lane")
+}
+
+func TestParseMuseTelemetryPolicy(t *testing.T) {
+	for out, want := range map[string]string{
+		"privacy.telemetry: force_off":   museTelemetryPolicyForcedOff,
+		"privacy.telemetry = forced-off": museTelemetryPolicyForcedOff,
+		"privacy_telemetry force off":    museTelemetryPolicyForcedOff,
+		"privacy.telemetry: default":     museTelemetryPolicyUnknown,
+		"privacy.analytics: force_off":   museTelemetryPolicyUnknown,
+		absentPolicyStatus:               museTelemetryPolicyUnknown,
+		"":                               museTelemetryPolicyUnknown,
+	} {
+		if got := parseMuseTelemetryPolicy(out); got != want {
+			t.Errorf("parseMuseTelemetryPolicy(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
+// sjsonDelete removes one top-level key from a settings document.
+func sjsonDelete(t *testing.T, doc, key string) string {
+	t.Helper()
+	out, err := sjson.Delete(doc, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }

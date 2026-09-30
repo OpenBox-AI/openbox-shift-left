@@ -236,12 +236,27 @@ Rules that keep this correct:
 The code also contains a third, older lane, `gateway` (a base-URL relay),
 which `init` no longer installs.
 
-**Muse Code has no lane.** Nothing in Meta's documentation shows that it trusts
-a locally issued CA, follows the system PAC, carries a session header or
-exports OTLP, so `init --provider muse` installs hooks only and `doctor` says
-its model calls are not recorded. Its pre-send hook is evaluated as a
-`model_call_gate` activity instead: a policy check, not a record of the call
-(see [Coverage](coverage.md#1b-model-call-coverage-matrix)). `api.meta.ai` is a
+**Muse Code has the telemetry lane only.** It ignores the system PAC and
+rejects the relay's CA (measured on 1.4.1), so there is no transport arm. Its
+own `settings.json` can redirect its export: `telemetry` set to
+`{enabled: true, destination: "external", endpoint: "http://127.0.0.1:8789"}`
+makes Muse post OTLP to `<endpoint>/muse-code/telemetry/{logs,traces}` instead
+of Meta's destinations. `init --provider muse` therefore starts the receiver,
+proves it listens, **then** records Muse's previous `telemetry` value and writes
+that object; `uninstall` restores the recorded value (or deletes the key) and
+leaves one the developer changed since. The receiver serves Muse's two paths
+through a path-rewriting middleware on the one OTLP server, routes a record by
+its `session_id` attribute (Claude Code's is `session.id`, Codex's
+`conversation.id`; a record carrying more than one is refused), and maps only the
+`model_call` log to a model-call pair: the response id as the request id, model,
+provider, and input, output and cached token counts, which carry no content.
+There is nothing to outrank, so the election is whether Muse's settings point at
+this receiver on loopback, re-read per record from the path the unit's
+`--muse-settings` carries. A subagent's call folds into the session its
+`session_root_id` names, the way the hook path folds the same child. Its
+pre-send hook is also evaluated as a `model_call_gate` activity: a policy check,
+not a record of the call (see
+[Coverage](coverage.md#1b-model-call-coverage-matrix)). `api.meta.ai` is a
 host row of all three tools, so a relayed call on it is attributed by its
 carrier header and skipped when none or several match.
 

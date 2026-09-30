@@ -16,7 +16,9 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
@@ -64,8 +66,8 @@ func (a *app) reportMuse() {
 	audit, auditErr := a.reportMuseSettings()
 	a.reportMuseLoadProbe(ver, audit, auditErr)
 	a.reportMuseHookRuns(ver)
-	a.reportMusePolicy(ver)
-	a.reportMuseModelCalls()
+	telemetryPolicy := a.reportMusePolicy(ver)
+	a.reportMuseModelCalls(telemetryPolicy)
 	a.reportMuseSpool()
 	a.reportMuseEvidenceGaps()
 }
@@ -377,23 +379,24 @@ func parseMuseConfigStatus(out string) []museConfigSource {
 // `absent`; any other state is reported as Muse printed it, and one that names
 // an error is a FAIL, because a rejected policy can leave the managed lane
 // unenforced.
-func (a *app) reportMusePolicy(v providers.MuseVersionCheck) {
+func (a *app) reportMusePolicy(v providers.MuseVersionCheck) (telemetryPolicy string) {
 	const label = "policy"
+	telemetryPolicy = museTelemetryPolicyUnknown
 	if v.State == providers.MuseVersionNotOnPath {
 		a.museFinding("policy", "unverified", label, "not checked: muse is not on PATH")
-		return
+		return telemetryPolicy
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), museConfigTimeout)
 	defer cancel()
 	st, err := providers.MuseRunner(ctx, "", "config", "status")
 	if err != nil {
 		a.museFinding("policy", "warning", label, "WARNING: `muse config status` did not finish: %v", err)
-		return
+		return telemetryPolicy
 	}
 	out := string(st.Stdout) + "\n" + string(st.Stderr)
 	if st.ExitCode != 0 {
 		a.museFinding("policy", "warning", label, "WARNING: `muse config status` exited %d, so the policy plane could not be read. managed lane required: unknown", st.ExitCode)
-		return
+		return telemetryPolicy
 	}
 	var policy []museConfigSource
 	for _, src := range parseMuseConfigStatus(out) {
@@ -403,7 +406,7 @@ func (a *app) reportMusePolicy(v providers.MuseVersionCheck) {
 	}
 	if len(policy) == 0 {
 		a.museFinding("policy", "unverified", label, "unverified: `muse config status` listed no policy source. managed lane required: unknown")
-		return
+		return telemetryPolicy
 	}
 	var parts []string
 	present, broken := false, false
@@ -433,32 +436,61 @@ func (a *app) reportMusePolicy(v providers.MuseVersionCheck) {
 	default:
 		a.museFinding("policy", "ok", label, "ok: no policy present (%s). managed lane required: %s", strings.Join(parts, ", "), lane)
 	}
+	telemetryPolicy = parseMuseTelemetryPolicy(out)
+	switch {
+	case telemetryPolicy == museTelemetryPolicyForcedOff:
+		a.museFinding("policy-telemetry", "warning", "", "WARNING: a Muse policy forces privacy.telemetry off, so Muse exports nothing to the telemetry lane and no model call is recorded; tool, prompt and model-call gating are unaffected")
+	case present:
+		a.museFinding("policy-telemetry", "unverified", "", "unverified: whether a policy forces privacy.telemetry off (`muse config status` lists policy sources, not what they require). If it does, Muse exports nothing to the telemetry lane")
+	}
+	return telemetryPolicy
+}
+
+// What a Muse policy does to telemetry, as far as `muse config status` says.
+const (
+	museTelemetryPolicyUnknown   = "unknown"
+	museTelemetryPolicyForcedOff = "forced-off"
+)
+
+var museTelemetryForcedOff = regexp.MustCompile(`(?i)privacy[._]telemetry\W{0,6}(?:force[_ -]?off|forced[_ -]?off)`)
+
+// parseMuseTelemetryPolicy reads whether a policy forces privacy.telemetry off
+// from `muse config status` output. Muse 1.4.1 prints sources and their state,
+// never what a policy requires, so this answers "unknown" for everything it
+// has not been shown; the pattern exists for a release that prints the line.
+func parseMuseTelemetryPolicy(out string) string {
+	if museTelemetryForcedOff.MatchString(out) {
+		return museTelemetryPolicyForcedOff
+	}
+	return museTelemetryPolicyUnknown
 }
 
 // 6. what is and is not recorded. Said plainly, and never as "not installed":
-// the hooks are installed and gate; there is simply no lane that can see a
-// Muse model call's body.
-func (a *app) reportMuseModelCalls() {
-	// Unwrapped: the sentence is a fixed claim and is searched for verbatim.
-	const modelCalls = "Muse model calls: not recorded (no proxy or telemetry lane can see them); tool, prompt and model-call gating still enforced"
-	a.row("model calls", "%s", modelCalls)
-	traceDoctorFinding("muse:model-calls", "info", modelCalls)
-	// Why no proxy lane: on an OS with no system proxy activation the relay
-	// never sees Muse's traffic; on macOS the relay could, but Muse was never
-	// shown to trust its CA or follow the PAC, and without a session carrier
-	// a relayed Muse call could not be attributed anyway.
-	proxy := "none; this OS has no system proxy activation, so the relay cannot see Muse"
-	if systemPACSupportedFn() {
-		proxy = "not built; Muse is not shown to trust the relay's CA or follow the system PAC, and sends no session carrier the relay could attribute"
+// the hooks are installed and gate; the only lane that can see a Muse model call
+// is Muse's own telemetry export, pointed at the loopback receiver, and it
+// carries metadata only (model, token counts, response id), never a body.
+func (a *app) reportMuseModelCalls(telemetryPolicy string) {
+	const gating = "tool, prompt and model-call gating still enforced"
+	settings := providers.MuseSettingsPath()
+	election := activation.ResolveMuseElection(settings, telemetry.DefaultAddr)
+	listening, _ := portOccupied(telemetry.DefaultAddr)
+
+	switch {
+	case election.SettingsProblem != "":
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; whether Muse exports to the telemetry receiver CANNOT BE DECIDED (%s); %s", election.SettingsProblem, gating)
+	case election.Elected != activation.LaneTelemetry:
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded by the telemetry lane: %s. `openbox init --provider muse` points Muse's telemetry at the receiver; %s", election.Reason, gating)
+	case !listening:
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; Muse's telemetry is pointed at this receiver but nothing is listening on %s. `openbox init --provider muse` brings the receiver back; %s", telemetry.DefaultAddr, gating)
+	case telemetryPolicy == museTelemetryPolicyForcedOff:
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; a policy forces privacy.telemetry off, so Muse exports nothing; %s", gating)
+	default:
+		a.museFinding("model-calls", "info", "model calls", "Muse model calls: recorded by the telemetry lane (metadata only: model, tokens, response id); %s", gating)
 	}
+	// Why no proxy lane: measured on Muse 1.4.1, not assumed. Said whatever the OS.
+	const proxy = "none: Muse ignores the system proxy and rejects the relay's certificate"
 	a.row("", "proxy: %s", proxy)
 	traceDoctorFinding("muse:proxy-lane", "info", proxy)
-	// Why no telemetry lane: Muse documents no OpenTelemetry exporter that
-	// could be pointed at the loopback receiver. A third party claims one
-	// exists; until a real install shows its settings, nothing is written.
-	const telemetry = "not supported by this tool (no documented OpenTelemetry exporter to point at the loopback receiver)"
-	a.row("", "telemetry: %s", telemetry)
-	traceDoctorFinding("muse:telemetry-lane", "info", telemetry)
 	const mcp = "MCP gating: doc-verified, not empirically confirmed"
 	a.row("mcp", "%s", mcp)
 	traceDoctorFinding("muse:mcp", "info", mcp)

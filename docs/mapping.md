@@ -142,11 +142,12 @@ stored row.
 | `previous_request_id` | Claude Code (gateway/proxy lanes) | the prior call's upstream request id |
 | `is_subagent` | Claude Code (gateway/proxy lanes) | present and `true` only when confirmed; never a stored `false` |
 | `entrypoint` | Claude Code (gateway/proxy lanes) | `cli` / `sdk` / `desktop` |
+| `provider` | Muse (telemetry lane) | the model provider the export names (`gen_ai_provider_name`) |
 | `query_source` | Claude Code (telemetry lane) | the provider's own call-type discriminator; vendor-owned vocabulary, absent means unclassified |
 | `task_id` | Claude Code | correlates `TaskCreated`/`TaskCompleted`; never an activity pair |
 | `elicitation_id` | Claude Code | correlates `Elicitation`/`ElicitationResult` |
 | `turn_id`, `message_id` | Claude Code | `MessageDisplay`'s own correlation pair |
-| `agent_id`, `agent_type` | Claude Code | identifies the subagent an event occurred inside |
+| `agent_id`, `agent_type` | Claude Code, Muse (hooks and telemetry lane) | identifies the subagent an event occurred inside |
 | `turn_id` | Codex | per-turn correlation id |
 | `thread_id`, `root_session_id` | Codex | set only when a forked thread's id differs from the session id it continues |
 

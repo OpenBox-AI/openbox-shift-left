@@ -114,7 +114,8 @@ each *lane* sees of a single model call, a separate axis from §1's hook table.
 --provider codex` installs `telemetry` everywhere, and on macOS also the
 `transport` relay plus the system PAC that routes Codex to it; on Linux and
 Windows Codex stays telemetry-only. `openbox init --provider muse` installs
-hooks only.
+hooks and the `telemetry` lane (Muse's own export, redirected to the receiver
+through its `settings.json`), never `transport`.
 A legacy `gateway` lane (`:gateway:`) still exists in the codebase but is no
 longer installed by `init`; treat it as retired rather than as active
 coverage.
@@ -124,18 +125,31 @@ coverage.
 | Claude Code | `transport` and `telemetry`; one of them emits (below) | none |
 | Codex, macOS | `telemetry` until the relay is elected, then `transport` | election needs evidence (below) |
 | Codex, Linux and Windows | `telemetry` | no system proxy there |
-| Muse Code | **not recorded** | see below |
+| Muse Code | `telemetry`: metadata only (model, tokens, ids) | no proxy lane is possible (below) |
 
-**Muse Code's model calls are not recorded.** Three independent gaps, each
-stated as documented:
+**Muse Code's model calls are recorded by `telemetry` alone, and only as
+metadata.** Measured on Muse 1.4.1, not assumed:
 
-- *No proxy lane.* Nothing in Meta's documentation shows that Muse trusts a
-  locally issued CA or follows the macOS system PAC (only the `HTTP(S)_PROXY`
-  environment variables are documented), and no documented request header
-  carries a session id, so a relayed Muse call could not be tied to a session.
-  Linux and Windows have no system proxy in this project at all.
-- *No telemetry lane.* Muse documents no OTLP exporter and no endpoint setting
-  for one.
+- *The telemetry lane is Muse's own export.* With `telemetry` set to
+  `{enabled: true, destination: "external", endpoint: <loopback receiver>}` in
+  `~/.config/muse/settings.json`, Muse posts gzip OTLP protobuf to
+  `<endpoint>/muse-code/telemetry/logs` and `/traces`, instead of to Meta's
+  destinations. `OTEL_EXPORTER_OTLP_ENDPOINT` alone does nothing, and the echo
+  provider exports nothing. The receiver maps the `model_call` log to one
+  `llm_completion` pair (`:otel:` namespace, keyed on Muse's response id): model,
+  provider, duration, input, output and cached token counts (Muse's input count
+  includes the cached tokens, so the total is input plus output). Every other
+  event is skipped. A subagent's call is recorded in the session its
+  `session_root_id` names. Muse exports no body, so there is none to capture.
+  Routing is by the `session_id` attribute; the election is whether the
+  settings point at this receiver on loopback, so a settings file that does not
+  (key absent or changed, destination not `external`, telemetry disabled, another
+  port) records nothing and `doctor` says which. A policy forcing
+  `privacy.telemetry` off would stop the export; `doctor` reports it when
+  `muse config status` shows it, and otherwise says it is unverified.
+- *No proxy lane is possible.* Muse ignores the system PAC and rejects the
+  relay's CA even when `SSL_CERT_FILE` names it. Linux and Windows have no system
+  proxy in this project at all.
 - *The gate is not a record.* `PreLLMCall` and `PostLLMCall` produce the
   `model_call_gate` activity: the model, provider, message and tool counts,
   tool names and, under `content_capture` and after redaction, message
@@ -149,7 +163,7 @@ header, and with none or several it is skipped and counted (see
 [mapping.md](mapping.md#model-turns)), never guessed. No Muse carrier is
 known, so a Muse call through the relay is skipped.
 
-| | `transport` (Claude Code; Codex on macOS) | `telemetry` (Claude Code, Codex) |
+| | `transport` (Claude Code; Codex on macOS) | `telemetry` (Claude Code, Codex, Muse) |
 |---|---|---|
 | Model request/response body | captured | never — this lane binds no content at all |
 | Token counts + model id | yes | yes (its whole payload) |
@@ -261,7 +275,7 @@ These are documented gaps, not missing work:
 13. **Muse Code: no shell-profile proxying.** OpenBox never edits a shell
     profile to point Muse at a proxy.
 14. **No system proxy on Linux or Windows.** The PAC and CA trust exist on
-    macOS only, so Codex there is telemetry-only and Muse has no path at all.
+    macOS only, so Codex there is telemetry-only and Muse has no proxy path.
 15. **Muse Code older than 1.4.0 is refused.** `init` stops before writing
     anything, because the `onFailure` successor the install depends on is a
     1.4.0 feature.
@@ -401,7 +415,24 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | Two Muse `init` runs leave no stray posture key | E1 | `cmd/openbox/initmuse_test.go` · `TestInitMuseWritesNoStrayPostureKeyOnEitherRun` |
 | A tool action that never reached the gate becomes a local `evidence.gap` finding, with no journal content logged | E1 | `internal/adapters/muse/reconcilehook_test.go` · `TestStopReconcilesTheSessionJournalAgainstGatedCalls` |
 | Muse's usage and trace context stay in the local trace, never on a wire event | E2 | `internal/adapters/muse/hookrun_test.go` · `TestUsageAndTraceparentStayLocal` |
-| `doctor` says Muse has no proxy lane and no telemetry lane, and why | E1 | `cmd/openbox/doctormuse_test.go` · `TestDoctorMuseSaysWhyNoProxyLaneRecordsItsModelCalls` |
+| The receiver serves Muse's export paths and decodes a gzip protobuf export from them | E2 | `internal/telemetry/pathalias_test.go` · `TestReceiverServesMusePathsOverHTTP` |
+| Only Muse's two paths are rewritten, and the caller's request is left as received | E1 | `internal/telemetry/pathalias_test.go` · `TestPathAliasRewritesOnlyMusePaths` |
+| A record is routed by its tool's session attribute, and one carrying more than one tool's is refused | E1 | `cmd/openbox/telemetryroute_test.go` · `TestTelemetryRoutingTable` |
+| A Muse `model_call` becomes one `llm_completion` pair in the `:otel:` namespace with response id, model, provider and usage | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseModelCallBecomesOneLLMCompletionPair` |
+| Every other Muse event is skipped | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseEveryOtherEventIsSkipped` |
+| A Muse subagent's call is recorded in the session that spawned it | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt` |
+| No Muse content-shaped attribute reaches the wire, at either capture posture | E2 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseContentNeverReachesTheWire` |
+| A scrubbed Muse 1.4.1 export yields one pair per model call through decode, routing and mapping | E1 | `cmd/openbox/telemetrymuse_test.go` · `TestMuseFixtureThroughTheChainYieldsOnePairPerModelCall` |
+| The real telemetry command records a Muse export at core under Muse's own identity, with the election derived from `--muse-settings` | E2 | `cmd/openbox/telemetrymuse_test.go` · `TestTelemetryCommandRecordsMuseModelCalls` |
+| Muse's telemetry election is routed only when its settings export to this receiver on loopback | E1 | `internal/cli/activation/museelection_test.go` · `TestResolveMuseElection` |
+| Muse's telemetry pointer is written only after the daemon is proven listening | E1 | `cmd/openbox/initmuselane_test.go` · `TestMuseTelemetryIsWrittenOnlyAfterTheDaemonIsProvenUp` |
+| A Muse install that fails after the unit is written removes the unit and leaves settings untouched | E1 | `cmd/openbox/initmuselane_test.go` · `TestAMuseInstallThatFailsAfterTheUnitIsWrittenRemovesTheUnitAndTouchesNoSettings` |
+| A second Muse `init` changes neither settings, the restore record nor the unit | E1 | `cmd/openbox/initmuselane_test.go` · `TestInitMuseInstallsTheTelemetryLaneAndASecondInitChangesNothing` |
+| Muse's `telemetry` key is merged by path with every foreign byte kept, and restored byte-exact | E1 | `internal/adapters/muse/telemetrykeys_test.go` · `TestWriteTelemetryKeepsEveryForeignByte` |
+| A `telemetry` value the developer changed is neither overwritten nor restored over | E1 | `internal/adapters/muse/telemetrykeys_test.go` · `TestADeveloperEditAfterInitIsNeitherOverwrittenNorRestoredOver` |
+| Uninstall restores Muse's prior `telemetry` value, deletes it if there was none, and reports drift | E1 | `cmd/openbox/initmuselane_test.go` · `TestUninstallRestoresMusesTelemetryExactly` |
+| `doctor` says whether Muse's telemetry lane records, and why not when it does not | E1 | `cmd/openbox/doctormuse_test.go` · `TestDoctorMuseSaysWhyModelCallsAreNotRecorded` |
+| `doctor` says Muse has no proxy lane, and why | E1 | `cmd/openbox/doctormuse_test.go` · `TestDoctorMuseSaysWhyThereIsNoProxyLane` |
 | A call on a host several providers reach is attributed by carrier, else skipped | E1 | `internal/cli/sessionkey/attribute_test.go` · `TestAttributeProxy` |
 | A relayed shared-host call with no carrier is skipped, not recorded | E1 | `cmd/openbox/transportmultiprovider_test.go` · `TestRelaySkipsASharedHostCallWithNoCarrier` |
 | Codex's proxy election needs a committed PAC record listing Codex plus relay evidence | E1 | `internal/cli/activation/codexelection_test.go` · `TestResolveCodexElectionTable` |
@@ -410,7 +441,7 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | A Meta Model API key is redacted by shape | E1 | `internal/decision/secrets_test.go` · `TestRedact_MetaAPIKey` |
 | Windows behaves at runtime as it does on macOS and Linux | **E0** | Cross-compiled in CI only; not run. |
 | Muse's payload, answer and `onFailure` shapes match a real Muse | **E3** | Checked by hand on Muse 1.4.1: payloads captured (the fixtures are scrubbed copies), the four refusal shapes block, and a crash, unknown JSON shape or timeout runs the deny-only successor. CI cannot install Muse, so no automated test runs a real one; CI holds the recorded goldens (E1). |
-| A Muse model call is tied to a session, or recorded by any lane | **E3** | No lane exists for it; see §1b. |
+| Muse's export, its paths and the `telemetry` key behave as recorded | **E3** | Measured by hand on Muse 1.4.1 with real Meta calls (the fixture is a scrubbed copy of that export). CI cannot install Muse; the recorded fixture is E1. |
 | The control plane accepts, stores and keeps apart what the client sends | **E3** | Needs a live platform. |
 
 What nothing here proves: that the control plane accepts the wire, stores a

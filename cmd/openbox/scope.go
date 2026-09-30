@@ -91,7 +91,7 @@ func (a *app) printGovernedScope(o devinit.Options) {
 		a.printPosture(o)
 		// Muse reads settings.json at session start; whether an edit reaches a
 		// running session is undocumented, so promise only the safe claim.
-		a.row("restart", "open Muse sessions, so they load the new hooks")
+		a.row("restart", "open Muse sessions, so they load the new hooks and telemetry setting")
 		return
 	}
 

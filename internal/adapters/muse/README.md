@@ -109,6 +109,47 @@ record:
 **local trace only** (`usage.go`, stage `capture.outcome`), through an integer
 allowlist and a W3C format check. They never reach a DevEvent or the wire.
 
+## The telemetry lane
+
+The one lane that sees a Muse model call is Muse's own telemetry export,
+redirected to OpenBox's loopback receiver. Measured on Muse 1.4.1 with real Meta
+calls (`internal/telemetry/testdata/muse/logs.json` is a scrubbed copy of what it
+sent):
+
+- **The switch is one settings key.** `telemetry: {"enabled": true,
+  "destination": "external", "endpoint": "http://127.0.0.1:8789"}` in
+  `~/.config/muse/settings.json` makes Muse post gzip OTLP protobuf to
+  `<endpoint>/muse-code/telemetry/logs` and `/traces`, instead of to Meta's
+  destinations. `OTEL_EXPORTER_OTLP_ENDPOINT` alone does nothing, and the echo
+  provider exports nothing.
+- **Shape.** Attributes are snake_case and sit on the log record: the event is
+  `event_name` (also the body), the session `session_id`, its top session
+  `session_root_id` (different for a subagent, whose `session_kind` is
+  `reminder`). `model_call` carries `gen_ai_request_model`,
+  `gen_ai_response_id`, `gen_ai_provider_name`, `gen_ai_usage_input_tokens`,
+  `gen_ai_usage_output_tokens`, `tokens_cached`, `duration_ms` and
+  `message_id`. The input count **includes** the cached tokens. No prompt, tool
+  input, file body or reply is exported; `session_start`, `turn_*`, `tool_call`,
+  `hook_run`, `subagent_*` and the spans are received and skipped.
+- **Mapping** (`internal/cli/telemetryemit`, `MuseFieldMap`): one
+  `llm_completion` Started/Completed pair per `model_call`, `:otel:` activity id
+  from the response id (the message id if that is unusable), usage on the close.
+  A call from a subagent is recorded in the session `session_root_id` names, with
+  `agent_type: subagent` and `agent_id` from `session_kind`, the same tags the
+  hook path gives the same child (`subagentparent.go` finds the parent from the
+  journal; the export names it directly).
+- **Install** (`telemetrykeys.go`): the receiver is started and proven listening
+  first; then Muse's previous `telemetry` value is recorded in
+  `~/.openbox/muse-prior-settings.json` **before** the key is merged by path
+  (every other byte kept, atomic, read back). A second install writes nothing. A
+  value the developer changed after install is refused, not overwritten.
+  `RestoreTelemetry` puts the recorded value back exactly, or deletes the key,
+  and leaves a drifted value.
+- **Election.** Muse has no other lane, so it is whether the settings point at
+  this receiver (enabled, destination `external`, a loopback endpoint on the
+  receiver's port), re-read per record from the `--muse-settings` path the unit
+  carries.
+
 ## Output contract
 
 Muse discards an answer it does not accept, and a discarded answer is an allow.
@@ -322,6 +363,7 @@ Still guessed by the installer and doctor (Muse documents none of them by name):
 | `runlifecycle.go` | the per-session run record: resume and unlinked subagent sessions open a run before their first event |
 | `subagentparent.go` | the child-to-parent link read off the parent's journal, and the fold into the parent's session |
 | `usage.go` | usage and trace context, local trace only |
+| `telemetrykeys.go` | the telemetry lane's one settings key: write with a recorded prior value, restore, ownership |
 | `sessionlog.go`, `reconcile.go` | the session-journal reader with its cursor, the gate ledger, the join and the `evidence.gap` findings |
 | `engine.go` | `Engine`, `FaultExitCode`, the ceilings (Gating 30s, Other 5s) |
 | `capabilities.go`, `posture.go`, `creds.go`, `adapter.go`, `paths.go` | profile, posture, credentials, spool |

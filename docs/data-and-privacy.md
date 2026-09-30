@@ -37,7 +37,8 @@ that you cannot, for example, keep prompts and drop tool output.
 **Muse Code sends its own set.** Muse hooks carry the prompt, tool input and
 tool output (with error text on a failure), and each model call's request
 summary (see [Muse Code](#muse-code)); they carry no assistant reply or
-thinking, and Muse sends no token counts, so none of those leave the machine.
+thinking, and no hook carries token counts, so none of those leave through a hook.
+Token counts come from Muse's separate telemetry export, which is metadata only.
 
 **Codex sends less.** Codex hooks carry the prompt, the assistant reply and
 thinking, but not tool input or output. A gated Codex call sends its tool
@@ -106,7 +107,7 @@ other field with markers and checks none of them reach the wire.
 is never opened. Because reply text and thinking ride the turn event, turning
 `finops` off removes them too.
 
-Claude Code and Codex report usage per turn (Muse reports none). Codex derives each turn's counts from its
+Claude Code and Codex report usage per turn; Muse reports it only through its telemetry export, never a hook. Codex derives each turn's counts from its
 own rollout file; a Codex session that ends with no completed turn sends one
 per-session total instead.
 
@@ -214,10 +215,31 @@ traffic that is not a chat completion.
 
 ## Muse Code
 
-Muse's model calls are **not recorded** (no lane can see them; see
-[Coverage](coverage.md#1b-model-call-coverage-matrix)). What leaves the machine
-comes from its hooks, and each body is redacted before attachment and capped
-like any other:
+Muse's model calls are recorded by the **telemetry lane** only (see
+[Coverage](coverage.md#1b-model-call-coverage-matrix)); no proxy lane exists,
+because Muse ignores the system proxy and rejects the relay's certificate.
+Two things leave the machine: what its hooks send, and what its own telemetry
+export sends.
+
+- **Muse's telemetry export is redirected.** `openbox init --provider muse`
+  sets `telemetry` in `~/.config/muse/settings.json` to
+  `{enabled: true, destination: "external", endpoint: <the loopback receiver>}`.
+  `destination: external` **redirects Muse's own telemetry export to OpenBox's
+  receiver instead of Meta's destinations**, so while it is set Meta does not
+  receive that export. The previous value is recorded in
+  `~/.openbox/muse-prior-settings.json` and restored by `openbox uninstall`.
+- **That export is metadata only.** Muse exports no prompt, tool input, file
+  body or reply. OpenBox reads one event, `model_call`, and sends the model, the
+  provider, the response id (its activity id), the duration and the input,
+  output and cached token counts, for a session's subagents in that session.
+  Nothing in it is covered by `content_capture`, because nothing in it is
+  content; the session, turn and other events Muse exports are received and
+  skipped. The receiver also writes each record's attributes (ids and numbers)
+  to the local trace ([The local trace](#the-local-trace)), which never leaves
+  the machine. `telemetry: false` in Muse's dev config records nothing.
+
+What the hooks send leaves the machine like this; each body is redacted before
+attachment and capped like any other:
 
 - **Prompt, tool input and tool output**, under `content_capture`. A gated
   shell command and MCP arguments go to the platform verbatim so a policy can
@@ -229,7 +251,8 @@ like any other:
   16, each cut to 256 characters, after redaction. The closing `PostLLMCall`
   is metadata only (status, finish reason, response id, an error class).
 - **Stays local.** `PostLLMCall`'s usage numbers and the request's trace
-  context go to the local trace only, never to the platform.
+  context go to the local trace only, never to the platform. Usage reaches the
+  platform only through the telemetry lane above.
 - **Muse's session log is read locally.** At `Stop` and `SessionEnd`, OpenBox
   reads `~/.local/share/muse/sessions/…/session.jsonl` for the join fields of
   each recorded tool action (its type, name, time, and id where present) to

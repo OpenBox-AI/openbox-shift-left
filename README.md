@@ -52,8 +52,9 @@ finishes. `openbox init` registers itself as those hooks. On every hook call,
 
 Hooks cannot see the requests sent to the model, so on Claude Code and Codex
 `openbox` also runs small local background services, the **model-call lanes**,
-that record them. Muse Code has no lane: its model calls are checked before
-they are sent, but not recorded. See [Architecture](docs/architecture.md) for the full picture.
+that record them. Muse Code's calls are checked before they are sent, and
+recorded (model, token counts and ids only) by redirecting its own telemetry
+export to a local receiver. See [Architecture](docs/architecture.md) for the full picture.
 
 ## Quickstart
 
@@ -106,8 +107,10 @@ governed, in any folder, including sessions already open.
 
 Using Codex? Run `openbox init --provider codex` (and trust the new hooks with
 `/hooks` inside Codex). Using Muse Code 1.4.0 or newer? Run
-`openbox init --provider muse`; it installs hooks only, so Muse's model calls
-are not recorded. Run `init` once per tool; running it again is safe.
+`openbox init --provider muse`; it installs hooks and points Muse's own
+telemetry export at a local receiver instead of Meta's destinations (metadata
+only; `openbox uninstall` puts your previous setting back). Run `init` once per
+tool; running it again is safe.
 
 ### 4. Check it
 
@@ -156,7 +159,7 @@ The full walkthrough, with CI setup, approvals and troubleshooting, is in
 |---|---|---|---|
 | Session, prompt and tool events | yes | yes | yes |
 | Enforcement | block, approval, redact, halt | block, redact, halt (approval becomes block) | block, redact, halt (approval and halt render as a plain refusal) |
-| Model calls recorded | yes (transport lane) | token usage; on macOS the request and reply too, once the relay has seen Codex | **no**; each call is checked before it is sent |
+| Model calls recorded | yes (transport lane) | token usage; on macOS the request and reply too, once the relay has seen Codex | model, tokens and response id only (telemetry lane); each call is also checked before it is sent |
 | Org mandate file | managed settings | `requirements.toml` | hooks file and policy (unverified keys) |
 
 Muse Code's support is built from its documentation and has not been run
