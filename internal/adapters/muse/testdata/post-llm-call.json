@@ -1,0 +1,62 @@
+{
+  "hook_event_name": "PostLLMCall",
+  "session_id": "sess-0001",
+  "turn_id": "turn-0001",
+  "cwd": "/tmp/proj",
+  "transcript_path": "/tmp/proj/.muse-fixture/session.jsonl",
+  "model": "muse-spark-1.3",
+  "permission_mode": "default",
+  "model_provider": "meta",
+  "provider": "meta",
+  "request_id": "req-0001",
+  "attempt": 1,
+  "step": 1,
+  "messages": [
+    {
+      "role": "system",
+      "text_preview": "You are a coding agent working in /tmp/proj."
+    },
+    {
+      "role": "user",
+      "text_preview": "add a health endpoint to the api service"
+    }
+  ],
+  "message_count": 2,
+  "tools": [
+    {
+      "name": "Bash"
+    },
+    {
+      "name": "Read"
+    },
+    {
+      "name": "Write"
+    },
+    {
+      "name": "Edit"
+    },
+    {
+      "name": "mcp__docs__search"
+    }
+  ],
+  "tool_count": 5,
+  "options": {
+    "meta": {
+      "traceparent": "00-00000000000000000000000000000001-0000000000000001-01",
+      "reasoning": {
+        "effort": "medium"
+      }
+    }
+  },
+  "status": "completed",
+  "response_id": "resp-0001",
+  "usage": {
+    "input_tokens": 1200,
+    "output_tokens": 340,
+    "cache_read_tokens": 800,
+    "reasoning_tokens": 96
+  },
+  "finish_reason": "tool_calls",
+  "output_text_preview": "I will add a /health handler to the api server.",
+  "tool_call_count": 1
+}
