@@ -9,7 +9,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
-	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
 
 // traceRawCapture is the gateway.WithRawObserver callback every relay lane
@@ -51,10 +50,8 @@ const upstreamRequestIDHeader = "Request-Id"
 // which leaves the record findable only by time.
 func rawSessionKey(c gateway.RawCapture) (session, run string) {
 	host, path := hostOf(c.URL), pathOf(c.URL)
-	if providerName, ok := transport.ProviderForHost(host); ok {
-		if sessionID, ok := sessionkey.ResolveProxy(sessionkey.Provider(providerName), c.RequestHeaders); ok {
-			return sessionID, haltDecoratorRunID(sessionID)
-		}
+	if _, sessionID, ok := attributeRelayed(host, c.RequestHeaders); ok {
+		return sessionID, haltDecoratorRunID(sessionID)
 	}
 	if key, ok := sessionkey.ResolveChat(host, path); ok {
 		return key, key

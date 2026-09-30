@@ -1,5 +1,7 @@
 package sessionkey
 
+import "strings"
+
 // ccProxyHeader is Claude Code's own relayed-call session header.
 const ccProxyHeader = "X-Claude-Code-Session-Id"
 
@@ -60,4 +62,73 @@ func ResolveProxy(p Provider, headers map[string]string) (string, bool) {
 		return "", false
 	}
 	return id, true
+}
+
+// Skip reasons AttributeProxy reports instead of a provider. Both mean the
+// call is skipped and counted, never guessed.
+const (
+	// SkipNoProviderCarrier: no candidate's carrier resolved.
+	SkipNoProviderCarrier = "no_provider_carrier"
+	// SkipAmbiguousCarrier: more than one candidate's carrier resolved.
+	SkipAmbiguousCarrier = "ambiguous_carrier"
+)
+
+// codexOriginatorHeader and codexOriginatorPrefix are the Codex-only signal a
+// shared host needs on top of the request id. UNVERIFIED against a live
+// capture: the header is taken from the client's source. Without it a
+// generic-looking x-client-request-id cannot be told from another tool's, so
+// the call is skipped rather than attributed.
+const (
+	codexOriginatorHeader = "Originator"
+	codexOriginatorPrefix = "codex"
+)
+
+// CarrierHeader names the header a provider's proxy-lane session id rides on,
+// for messages that tell an operator what a call lacked: Claude Code's own
+// header, Codex's x-client-request-id thread id, and "" for a provider with no
+// known carrier.
+func CarrierHeader(p Provider) string {
+	if p == Codex {
+		return codexThreadIDHeader
+	}
+	return ProxyHeader(p)
+}
+
+// AttributeProxy picks the one provider a relayed call belongs to among the
+// providers whose host rows cover its host (candidates, most specific first),
+// by whose session carrier the call actually carries. It returns that
+// provider and its session id, or a skip reason and no provider:
+//
+//   - exactly one carrier resolves: that provider wins;
+//   - none resolves: SkipNoProviderCarrier;
+//   - more than one resolves: SkipAmbiguousCarrier.
+//
+// When the host is shared (more than one candidate), Codex's x-client-request-id
+// alone does not count, because another tool may send the same header; a
+// Codex-only originator header must accompany it. A single-candidate host has
+// no other claimant, so the request id alone is enough there. A provider with
+// no carrier (Muse) never resolves.
+func AttributeProxy(candidates []string, headers map[string]string) (Provider, string, string) {
+	var winner Provider
+	var winnerID string
+	resolved := 0
+	for _, name := range candidates {
+		p := Provider(name)
+		id, ok := ResolveProxy(p, headers)
+		if !ok {
+			continue
+		}
+		if p == Codex && len(candidates) > 1 && !strings.HasPrefix(strings.ToLower(headers[codexOriginatorHeader]), codexOriginatorPrefix) {
+			continue
+		}
+		resolved++
+		winner, winnerID = p, id
+	}
+	switch resolved {
+	case 0:
+		return "", "", SkipNoProviderCarrier
+	case 1:
+		return winner, winnerID, ""
+	}
+	return "", "", SkipAmbiguousCarrier
 }

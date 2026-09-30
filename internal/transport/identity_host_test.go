@@ -12,14 +12,14 @@ import "testing"
 func TestKeycloakIdentityHostIsNeverIntercepted(t *testing.T) {
 	const identityHost = "identity.example.com"
 
-	if provider, ok := ProviderForHost(identityHost); ok {
-		t.Fatalf("ProviderForHost(%q) = %q, true; want no provider to claim the identity host", identityHost, provider)
+	if got := CandidatesForHost(identityHost); len(got) > 0 {
+		t.Fatalf("CandidatesForHost(%q) = %v; want no provider to claim the identity host", identityHost, got)
 	}
 
 	// hostTableProviders, not provider.Supported(): this package's depguard
 	// allowlist admits no repo-local import beyond internal/gateway, so the
 	// provider set is this package's own unexported list, the same way
-	// ProviderForHost derives it (hosttable.go).
+	// CandidatesForHost derives it (hosttable.go).
 	for _, host := range []string{identityHost, "keycloak.example.com"} {
 		allow := AllowlistFor(hostTableProviders...)
 		if allow.Allows(host) {

@@ -168,6 +168,25 @@ probe as a real completion:
 | anything else on the intercepted host | `provider_request` | yes |
 | a provider's pre-send hook, evaluated through policy (no path: not a relayed call) | `model_call_gate` | no, metadata only |
 
+A relayed call is attributed to a provider by its host and then its carrier
+header (`internal/cli/sessionkey/proxy.go`, `AttributeProxy`). A host one
+provider reaches needs no disambiguation. On a host several providers reach
+(`api.meta.ai` is in the claude-code, muse and codex rows), exactly one
+provider's carrier must resolve:
+
+| Carrier present | Outcome |
+|---|---|
+| `X-Claude-Code-Session-Id` only | claude-code, session id is the header |
+| `X-Client-Request-Id` plus a Codex-only `Originator` header (`codex…`; unverified against a live capture) | codex, session id is the thread id |
+| `X-Client-Request-Id` alone on a shared host | skipped, `no_provider_carrier` (another tool may send the same header) |
+| none | skipped, `no_provider_carrier` |
+| more than one provider's | skipped, `ambiguous_carrier` |
+
+Muse has no known session carrier, so its row never attributes a call. A
+skipped call is counted in the local capture trace and never guessed. None of
+these headers is a credential, so none is redacted: the halt latch resolves a
+session off them.
+
 ### Model-call gate
 
 `ModelCallRequested`/`ModelCallFinished` ride the same `ActivityStarted`/

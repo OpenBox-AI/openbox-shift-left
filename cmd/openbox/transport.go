@@ -372,11 +372,7 @@ func (h haltDecorator) Evaluate(ctx context.Context, c gateway.Captured) (client
 // event carrying no RunID (gatewayemit/emitter.go's own emitChat never sets
 // one).
 func (h haltDecorator) haltedRun(c gateway.Captured) (string, hookflow.SessionHaltInfo, bool) {
-	providerName, ok := transport.ProviderForHost(hostOf(c.HTTPURL))
-	if !ok {
-		return "", hookflow.SessionHaltInfo{}, false
-	}
-	if sessionID, ok := sessionkey.ResolveProxy(sessionkey.Provider(providerName), c.RequestHeaders); ok {
+	if _, sessionID, ok := attributeRelayed(hostOf(c.HTTPURL), c.RequestHeaders); ok {
 		info, halted := hookflow.SessionHalted(haltDecoratorRunID(sessionID))
 		return sessionID, info, halted
 	}
@@ -385,6 +381,17 @@ func (h haltDecorator) haltedRun(c gateway.Captured) (string, hookflow.SessionHa
 		return chatKey, info, halted
 	}
 	return "", hookflow.SessionHaltInfo{}, false
+}
+
+// attributeRelayed names the one provider a relayed call belongs to and its
+// session id: the providers whose host rows cover host, narrowed to exactly
+// one by whose carrier header the call carries. ok is false when none or more
+// than one resolves; the caller never guesses, and the emitter counts the
+// skip. This is the same rule the emitter applies, so a refusal and a record
+// can never disagree about whose call it was.
+func attributeRelayed(host string, headers map[string]string) (sessionkey.Provider, string, bool) {
+	p, id, skip := sessionkey.AttributeProxy(transport.CandidatesForHost(host), headers)
+	return p, id, skip == ""
 }
 
 // haltDecoratorRunID resolves session to the run it CURRENTLY belongs to
@@ -402,7 +409,7 @@ func haltDecoratorRunID(sessionID string) string {
 	return rec.RunID
 }
 
-// hostOf extracts the host component transport.ProviderForHost matches
+// hostOf extracts the host component transport.CandidatesForHost matches
 // against, from the full upstream URL gateway.Captured.HTTPURL carries
 // (e.g. "https://api.anthropic.com/v1/messages", never carrying the query --
 // RequestCapture.ForGate's own URL is already stripped). An unparseable URL

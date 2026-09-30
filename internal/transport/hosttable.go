@@ -15,12 +15,15 @@ type HostRule struct {
 
 // hostTable carries the API and app hosts each provider's model-call traffic
 // and browser surface reach, keyed by provider rather than one shared list:
-// every consumer below -- the intercept allowlist
-// and the PAC body -- is built from the union of the rows of the providers a
-// caller names (Config.Providers), never from the whole table. The transport
-// daemon does not yet derive that set from what is installed, so it runs on
-// Config's claude-code default and the OpenAI rows are unreachable until it
-// does.
+// every consumer below -- the intercept allowlist and the PAC body -- is
+// built from the union of the rows of the providers a caller names
+// (Config.Providers), never from the whole table.
+//
+// A host may appear in more than one row (api.meta.ai is in claude-code,
+// muse and codex). Which provider owns a call on such a host is decided by
+// CandidatesForHost plus a carrier check in the caller, never by row order.
+// The muse row is inert until Muse has a session carrier: a call there
+// resolves no provider and is skipped and counted.
 //
 // auth.* is excluded by construction: the table lists no bare
 // "anthropic.com" or "openai.com", so nothing here ever widens to cover
@@ -29,10 +32,15 @@ var hostTable = map[string][]HostRule{
 	"claude-code": {
 		{Host: "api.anthropic.com"},
 		{Host: "claude.ai", IncludeSubdomains: true},
+		{Host: "api.meta.ai"},
+	},
+	"muse": {
+		{Host: "api.meta.ai"},
 	},
 	"codex": {
 		{Host: "api.openai.com"},
 		{Host: "chatgpt.com", IncludeSubdomains: true},
+		{Host: "api.meta.ai"},
 	},
 }
 
@@ -88,29 +96,32 @@ func exactHostFor(provider string) string {
 	return ""
 }
 
-// hostTableProviders lists hostTable's own keys in a fixed order, so
-// ProviderForHost's answer (and any other caller enumerating the whole
-// table) does not depend on Go's randomized map iteration. Named here rather
-// than derived from provider.Supported(): this package's import guard
-// (internal/depguard) allows no repo-local import beyond internal/gateway,
-// so the two provider names are written down directly, the same way
-// hostTable's own map keys already are.
-var hostTableProviders = []string{"claude-code", "codex"}
+// hostTableProviders lists hostTable's own keys in a fixed order, most
+// specific session carrier first (Claude Code's own header, then Muse's,
+// then Codex's generic request id), so CandidatesForHost's answer (and any
+// other caller enumerating the whole table) does not depend on Go's
+// randomized map iteration. Named here rather than derived from
+// provider.Supported(): this package's import guard (internal/depguard)
+// allows no repo-local import beyond internal/gateway, so the provider names
+// are written down directly, the same way hostTable's own map keys already
+// are.
+var hostTableProviders = []string{"claude-code", "muse", "codex"}
 
-// ProviderForHost reports which provider's host-table rows cover host --
-// exact match or a subdomain of a suffix row -- or ("", false) when none do.
-// A haltDecorator built outside this package (cmd/openbox/transport.go) has
-// no other way to ask "whose call is this" from a captured call's URL alone;
-// this reuses the same Allowlist matching a relayed call itself passed
-// through to reach this handler at all, rather than a second host-matching
-// rule that could drift from it.
-func ProviderForHost(host string) (string, bool) {
+// CandidatesForHost lists every provider whose host-table rows cover host --
+// exact match or a subdomain of a suffix row -- in hostTableProviders' order,
+// or nil when none do. More than one is normal (api.meta.ai): the caller
+// picks among them by session carrier and must skip, never guess, when zero
+// or several resolve. It reuses the same Allowlist matching a relayed call
+// itself passed through to reach the handler at all, rather than a second
+// host-matching rule that could drift from it.
+func CandidatesForHost(host string) []string {
+	var out []string
 	for _, name := range hostTableProviders {
 		if NewAllowlistFromRules(RowsFor(name)...).Allows(host) {
-			return name, true
+			out = append(out, name)
 		}
 	}
-	return "", false
+	return out
 }
 
 // pacBanner marks the body as generated; a hand edit would be silently
