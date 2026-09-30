@@ -37,14 +37,14 @@ var fixtureEvents = map[string]client.EventType{
 	"post-tool-use":               client.EventToolResult,
 	"post-tool-use-write":         client.EventToolResult,
 	"post-tool-use-failure":       client.EventToolResult,
-	"subagent-start":              client.EventSubagentStarted,
+	"subagent-start":              client.EventSessionStarted,
 	"stop-failure":                client.EventAPIError,
 	"session-end":                 client.EventSessionEnded,
 	"pre-llm-call":                client.EventModelCallRequested,
 	"pre-llm-call-subagent":       client.EventModelCallRequested,
 	"post-llm-call":               client.EventModelCallFinished,
 	"post-llm-call-tool-calls":    client.EventModelCallFinished,
-	"subagent-stop":               "",
+	"subagent-stop":               client.EventSessionEnded,
 	"stop":                        "",
 }
 
@@ -277,20 +277,45 @@ func TestMapDropsWhatItCannotPlace(t *testing.T) {
 	if _, ok := bad.Map(HookPreToolUse, &HookEvent{SessionID: "s"}); ok {
 		t.Error("an event under a bad DID mapped")
 	}
-	for _, h := range []HookName{HookStop, HookSubagentStop, HookPreCompact, HookNotification, HookInterrupt, HookPostToolBatch} {
+	for _, h := range []HookName{HookStop, HookPreCompact, HookNotification, HookInterrupt, HookPostToolBatch} {
 		if _, ok := m.Map(h, &HookEvent{SessionID: "s"}); ok {
 			t.Errorf("%s mapped; it has no contract type", h)
 		}
 	}
 }
 
-func TestSubagentAndStopFailureMappings(t *testing.T) {
+// A subagent is a session of its own under its own id, with no parent link in
+// any payload: its start and stop are that session's SessionStarted and
+// SessionEnded.
+func TestSubagentIsASessionOfItsOwn(t *testing.T) {
 	m := testMapper()
-	sub, _ := m.Map(HookSubagentStart, parseFixture(t, "subagent-start"))
-	if sub.Metadata["agent_id"] != "skill-reminder" {
-		t.Errorf("subagent metadata = %v", sub.Metadata)
+	start, ok := m.Map(HookSubagentStart, parseFixture(t, "subagent-start"))
+	if !ok || start.EventType != client.EventSessionStarted || start.SessionID != "sess-0002" {
+		t.Fatalf("SubagentStart = %+v %v", start, ok)
 	}
-	sf, _ := m.Map(HookStopFailure, parseFixture(t, "stop-failure"))
+	if start.Metadata["agent_id"] != "skill-reminder" || start.Metadata["agent_type"] != subagentAgentType {
+		t.Errorf("subagent start metadata = %v", start.Metadata)
+	}
+	for k := range start.Metadata {
+		if strings.Contains(k, "parent") {
+			t.Errorf("metadata names a parent (%s), which no payload carries", k)
+		}
+	}
+	stop, ok := m.Map(HookSubagentStop, parseFixture(t, "subagent-stop"))
+	if !ok || stop.EventType != client.EventSessionEnded || stop.SessionID != "sess-0002" || stop.EndedAt == "" {
+		t.Fatalf("SubagentStop = %+v %v", stop, ok)
+	}
+	if stop.Metadata["agent_id"] != "skill-reminder" || stop.Content != nil {
+		t.Errorf("subagent stop = %+v", stop)
+	}
+	sp := parseFixture(t, "subagent-start")
+	if sp.SessionID != sp.ChildSessionID || sp.SessionID != sp.TurnID {
+		t.Errorf("a subagent's session, child session and turn ids are one id: %q %q %q", sp.SessionID, sp.ChildSessionID, sp.TurnID)
+	}
+}
+
+func TestStopFailureMapping(t *testing.T) {
+	sf, _ := testMapper().Map(HookStopFailure, parseFixture(t, "stop-failure"))
 	if sf.EventType != client.EventAPIError || sf.Content != nil {
 		t.Errorf("StopFailure = %+v", sf)
 	}

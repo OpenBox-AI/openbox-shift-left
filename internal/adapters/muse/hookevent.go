@@ -67,13 +67,13 @@ func (h HookName) Gated() bool {
 }
 
 // Observed reports whether the hook produces anything at all. The rest have no
-// contract type, or (SubagentStop) nothing this adapter may report: a turn's
-// usage is never taken from a hook payload, and a completion is never
-// fabricated. Stop reports nothing either, but it is where the session-log
-// reconciler runs, so it is installed.
+// contract type: a turn's usage is never taken from a hook payload, and a
+// completion is never fabricated. Stop reports nothing either, but it is where
+// the session-log reconciler runs, so it is installed. SubagentStop is
+// observed: a subagent is a session of its own, and this is its SessionEnded.
 func (h HookName) Observed() bool {
 	switch h {
-	case HookSubagentStop, HookPreCompact, HookPostCompact,
+	case HookPreCompact, HookPostCompact,
 		HookNotification, HookPostToolBatch, HookInterrupt:
 		return false
 	}

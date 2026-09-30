@@ -158,9 +158,27 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Content = m.gatedToolOutput(outputText(e.Error))
 
 	case HookSubagentStart:
-		ev.EventType = client.EventSubagentStarted
+		// A subagent runs under its own session id, so its start is that
+		// session's SessionStarted. Muse names no parent session in any payload,
+		// so the child cannot be linked to the session that spawned it.
+		ev.EventType = client.EventSessionStarted
 		ev.Tool = agent
-		ev.Metadata = hookflow.Compact(map[string]any{"agent_id": capStr(e.SubagentID)})
+		ev.Metadata = mergeMetadata(sessionStartMetadata(e), subagentMetadata(e))
+		if m.Posture != nil {
+			ev.Metadata["posture"] = m.Posture.Metadata()
+		}
+		if m.Run != nil && m.Run.ContinuedFrom != "" {
+			ev.ContinuedFromRunID = m.Run.ContinuedFrom
+		}
+
+	case HookSubagentStop:
+		ev.EventType = client.EventSessionEnded
+		ev.EndedAt = ts
+		ev.Tool = agent
+		ev.Metadata = subagentMetadata(e)
+		if m.Evidence != nil {
+			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.Metadata())
+		}
 
 	case HookStopFailure:
 		// The provider's error text is undocumented and never bound, so the row
@@ -191,6 +209,20 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	ev.EventID = m.eventID(ev)
 	return ev, true
 }
+
+// subagentMetadata marks a session as a subagent's own: agent_id is Muse's
+// subagent_id (for example "skill-reminder") and agent_type says what kind of
+// session it is. The dev-event schema has no is_subagent or subagent_id
+// metadata key, and these two are the existing keys that carry the same facts.
+func subagentMetadata(e *HookEvent) map[string]any {
+	return hookflow.Compact(map[string]any{
+		"agent_id":   capStr(e.SubagentID),
+		"agent_type": subagentAgentType,
+	})
+}
+
+// subagentAgentType is the agent_type of every Muse subagent session.
+const subagentAgentType = "subagent"
 
 func mergeMetadata(dst, src map[string]any) map[string]any {
 	if len(src) == 0 {

@@ -88,7 +88,7 @@ func TestInstalledEventsComeFromTheAdaptersOwnTable(t *testing.T) {
 		got = append(got, string(ev))
 	}
 	want := []string{"PermissionRequest", "PostLLMCall", "PostToolUse", "PostToolUseFailure", "PreLLMCall",
-		"PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopFailure", "SubagentStart", "UserPromptSubmit"}
+		"PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "UserPromptSubmit"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("installed events = %v, want %v", got, want)
 	}
@@ -101,6 +101,29 @@ func TestInstalledEventsComeFromTheAdaptersOwnTable(t *testing.T) {
 	}
 	if ExpectedHandlers() != len(want) {
 		t.Errorf("ExpectedHandlers = %d", ExpectedHandlers())
+	}
+}
+
+// Muse refuses a synchronous Interrupt handler (it must be async: true), and
+// this adapter reports nothing for one, so the installer registers none.
+func TestInstallNeverRegistersInterrupt(t *testing.T) {
+	i, path := newTestInstaller(t)
+	if err := i.Install(testRef); err != nil {
+		t.Fatal(err)
+	}
+	raw := readFile(t, path)
+	if _, ok := decodeHooks(t, raw)[string(HookInterrupt)]; ok {
+		t.Errorf("Interrupt is registered:\n%s", raw)
+	}
+	if strings.Contains(raw, "hook muse Interrupt") {
+		t.Errorf("a handler runs the Interrupt hook:\n%s", raw)
+	}
+	managed, err := os.ReadFile(managedBundle + "hooks.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(managed), "Interrupt") {
+		t.Error("the managed hooks file registers Interrupt")
 	}
 }
 

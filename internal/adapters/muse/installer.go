@@ -47,8 +47,9 @@ func timeoutFor(ev HookName) int {
 // event the adapter produces something for (HookName.Observed), in name order.
 // It is derived from the adapter's own table, so an event added there reaches
 // the installer, the uninstall and doctor's expected count together. The five
-// events with no contract type are never registered, and neither are Stop and
-// SubagentStop, whose handler would start a process to report nothing.
+// events with no contract type are never registered. Interrupt in particular
+// must never be: Muse refuses a synchronous Interrupt handler (it has to be
+// async: true), and this adapter never writes an async handler.
 func installedEvents() []HookName {
 	events := make([]HookName, 0, len(hookNames))
 	for h := range hookNames {

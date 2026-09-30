@@ -195,6 +195,9 @@ func TestUnreadablePayloadOnAGatedEventIsRefused(t *testing.T) {
 			decodeStdout(t, stdout)
 		}
 	}
+	if latches := haltLatches(t); len(latches) != 0 {
+		t.Errorf("an unreadable payload latched the run: %v", latches)
+	}
 	// A non-gated event stays silent.
 	if stdout, _ := runHook(t, "PostToolUse", "{not json"); stdout != "" {
 		t.Errorf("PostToolUse wrote %q", stdout)
@@ -203,7 +206,7 @@ func TestUnreadablePayloadOnAGatedEventIsRefused(t *testing.T) {
 
 func TestUnmappedEventsAreSilentNoOps(t *testing.T) {
 	spool := setHookEnv(t)
-	for _, hook := range []string{"PreCompact", "PostCompact", "Notification", "PostToolBatch", "Interrupt", "SubagentStop"} {
+	for _, hook := range []string{"PreCompact", "PostCompact", "Notification", "PostToolBatch", "Interrupt"} {
 		stdout, stderr := runHook(t, hook, fixture(t, "stop", "s-noop"))
 		if stdout != "" || strings.Contains(stderr, "unknown") {
 			t.Errorf("%s: stdout=%q stderr=%q", hook, stdout, stderr)

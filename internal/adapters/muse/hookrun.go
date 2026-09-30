@@ -109,34 +109,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		hookflow.TraceHookOut(provider, string(hook), ev.SessionID, hookStart, &hookOut)
 	}()
 
-	// Run identity: resolved before New()/Record(), so the run id this hook's
-	// event(s) are stamped with and the latch this hook consults agree. A resume
-	// or a clear opens a new run of the session (continue-as-new), which is what
-	// leaves it unlatched. Absent, unreadable or corrupt records fall back to
-	// generation 0 with one stderr line: a run-identity lookup must never block
-	// a call or drop an event.
-	runStore := obgit.RunStore{Dir: obgit.RunDir(obgit.DefaultSessionDir())}
-	var run RunIdentity
-	if hook == HookSessionStart && isBumpSource(ev.Source) {
-		if rec, err := runStore.Bump(ev.SessionID); err != nil {
-			logger.Printf("run identity: bump failed, continuing at generation 0: %v", err)
-		} else {
-			run = RunIdentity{Generation: rec.Generation, RunID: rec.RunID, ContinuedFrom: rec.PreviousRunID}
-		}
-	} else if rec, err := runStore.Read(ev.SessionID); err != nil {
-		logger.Printf("run identity: record unreadable, continuing at generation 0: %v", err)
-	} else {
-		run = RunIdentity{Generation: rec.Generation, RunID: rec.RunID}
-	}
-	// The same selection client.runIDFor makes: the minted run id when one
-	// exists, else the bare session id.
-	runID := ev.SessionID
-	if run.RunID != "" {
-		runID = run.RunID
-	}
-
 	ad := New(id, DefaultSpoolDir())
-	ad.Mapper.Run = &run
 	ad.Mapper.CaptureContent = devconfig.ResolveContentCapture()
 	if devconfig.ResolveSecretDetection() {
 		redactor := decision.NewRedactor()
@@ -145,15 +118,63 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 	pinnedNow := nowFn()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
-	if hook == HookSessionEnd {
+	if hook.ends() {
 		ad.Mapper.Evidence = &EvidenceState{
 			Undelivered: ad.Spool.UndeliveredCountFor(ev.SessionID),
 			Discarded:   ad.Spool.DiscardedCount(),
 		}
 	}
-	if hook == HookSessionStart {
+	if hook == HookSessionStart || hook == HookSubagentStart {
 		posture := effectivePosture()
 		ad.Mapper.Posture = &posture
+	}
+
+	// Run identity, resolved before anything is mapped or spooled, so the run
+	// id this hook's event(s) are stamped with and the latch this hook consults
+	// agree. A resume continues the session as a new run (continue-as-new),
+	// which is what leaves it unlatched, and Muse sends no SessionStart for one:
+	// the lifecycle opens the run, and spools its SessionStarted ahead of this
+	// hook's own event, when the session's first event is not a SessionStart.
+	// Absent, unreadable or corrupt records fall back to generation 0 with one
+	// stderr line: a run-identity lookup must never block a call or drop an
+	// event.
+	lc := lifecycle{
+		Dir:  lifecycleDir(DefaultSpoolDir()),
+		Runs: obgit.RunStore{Dir: obgit.RunDir(obgit.DefaultSessionDir())},
+		Now:  func() time.Time { return pinnedNow },
+		Log:  logger,
+	}
+	var (
+		run  RunIdentity
+		tr   transition
+		lock func()
+	)
+	if hook == HookStop {
+		// Stop reports nothing, so it neither opens nor closes a run.
+		run = lc.current(ev.SessionID)
+	} else {
+		lock = lc.lock(ev.SessionID)
+		run, tr = lc.advance(hook, ev)
+		ad.Mapper.Run = &run
+		if tr.Open {
+			if ad.Mapper.Posture == nil {
+				posture := effectivePosture()
+				ad.Mapper.Posture = &posture
+			}
+			if start, ok := ad.Mapper.openEvent(hook, ev, tr.Resumed); ok {
+				if err := ad.Record(start); err != nil {
+					logger.Printf("spool the opening SessionStarted: %v", err)
+				}
+			}
+		}
+		lock()
+	}
+	ad.Mapper.Run = &run
+	// The same selection client.runIDFor makes: the minted run id when one
+	// exists, else the bare session id.
+	runID := ev.SessionID
+	if run.RunID != "" {
+		runID = run.RunID
 	}
 
 	nudgeFlush := func() {
@@ -167,6 +188,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 
 	// Every hook that reaches here is never gated: the observe-only path.
 	devEv, mapped := ad.Mapper.Map(hook, ev)
+	if tr.Drop {
+		mapped = false
+	}
 	if mapped {
 		if err := ad.Record(devEv); err != nil {
 			logger.Printf("spool %s event: %v", hook, err)
@@ -180,7 +204,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// Nothing to report; the pass over the session's own journal is the
 		// whole of this handler.
 		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
-	case HookSessionStart:
+	case HookSessionStart, HookSubagentStart:
 		// The session's own WorkflowStarted event is drained inline, under this
 		// session's own stripe, right after the append above, so no detached
 		// flusher's debounce window can let anything else of this run overtake it.
@@ -191,6 +215,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
 		// The same inline attempt, within SessionEnd's own budget, falling back
 		// to the detached flusher when the window runs out.
+		inlineAttempt(ad, logger, ev.SessionID, hookStart)
+	case HookSubagentStop:
+		// A subagent's own journal is not reconciled (it is the parent's tool
+		// actions that the journal join looks for); its end is delivered the same
+		// way a session's is.
 		inlineAttempt(ad, logger, ev.SessionID, hookStart)
 	default:
 		nudgeFlush()
