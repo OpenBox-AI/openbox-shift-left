@@ -65,6 +65,54 @@ func TestStopReconcilesTheSessionJournalAgainstGatedCalls(t *testing.T) {
 	}
 }
 
+// The synthetic journal's call ids are the ones the PreToolUse hooks carry, so
+// every call joins exactly; the one call with no hook is the single gap.
+func TestStopJoinsTheSampleJournalOnCallID(t *testing.T) {
+	setHookEnv(t)
+	root := pointSessionLogs(t)
+	const sid = "s-sample"
+	sample, err := os.ReadFile(filepath.Join("testdata", "session-jsonl-sample.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeLog(t, todaysLog(root, sid), string(sample))
+
+	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash", sid))           // call_0001
+	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash-escalated", sid)) // call_0002
+	runHook(t, "Stop", fixture(t, "stop", sid))
+
+	gaps := traceRecords(t, trace.StageEvidenceGap)
+	if len(gaps) != 1 || gaps[0].Detail["tool_use_id"] != "call_0003" || gaps[0].Detail["tool_name"] != "read_file" {
+		t.Fatalf("findings = %+v", gaps)
+	}
+	for _, r := range traceRecords(t, trace.StageEvidenceReconcile) {
+		if r.Outcome != "ok" {
+			t.Errorf("reconcile outcome = %q", r.Outcome)
+		}
+	}
+}
+
+func TestStopOverAFullyGatedJournalFindsNoGaps(t *testing.T) {
+	setHookEnv(t)
+	root := pointSessionLogs(t)
+	const sid = "s-clean"
+	writeLog(t, todaysLog(root, sid), frameHeader+
+		intentLine(1, "bash", "call_0001", t0, `{"command":"go test ./..."}`)+terminalLine(2, "bash", "call_0001", t1)+
+		intentLine(3, "bash", "call_0002", t1, `{"command":"ls"}`)+terminalLine(4, "bash", "call_0002", t2))
+
+	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash", sid))
+	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash-escalated", sid))
+	runHook(t, "Stop", fixture(t, "stop", sid))
+
+	if n := len(traceRecords(t, trace.StageEvidenceGap)); n != 0 {
+		t.Fatalf("%d findings over a journal whose every call was gated", n)
+	}
+	recs := traceRecords(t, trace.StageEvidenceReconcile)
+	if len(recs) != 1 || recs[0].Outcome != "ok" || recs[0].Detail["intents"] != float64(2) || recs[0].Detail["gaps"] != float64(0) {
+		t.Fatalf("reconcile records = %+v", recs)
+	}
+}
+
 func TestSessionEndAlsoReconciles(t *testing.T) {
 	setHookEnv(t)
 	root := pointSessionLogs(t)

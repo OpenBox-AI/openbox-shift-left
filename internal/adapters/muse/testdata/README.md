@@ -51,13 +51,26 @@ Shapes worth knowing (all observed):
 The message lists, tool lists and usage numbers are trimmed or set to round
 values; their structure is the captured one.
 
+## session-jsonl-sample.jsonl
+
+A **scrubbed, synthetic** journal in the envelope shape observed on Muse 1.4.1
+(`~/.local/share/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl`; subagents
+under `subagent/<id>/session.jsonl`). Nothing in it is copied from a real
+journal: ids are synthetic (`sess-0001`, `call_0001`), text is neutral, times are
+fixed. It holds a frame header (no `record_type`), a few unrelated payload kinds
+(`session_opened`, a `payload`-kind-less `runtime.user_intent.accepted`, `run`,
+`approval`, `reminder_cleanup`, `session_end`), two `tool_batch.effect.started` +
+`terminal` pairs (`call_0001` bash, `call_0002` write_file) and one started
+record (`call_0003` read_file) that no gate record matches. `call_0001` and
+`call_0002` are the `tool_use_id`s of `pre-tool-use-bash.json` and
+`pre-tool-use-bash-escalated.json`, which is how the end-to-end test joins them.
+`record.call_id` equals the hook's `tool_use_id` (observed).
+
 ## Not observed on 1.4.1 (still doc-derived, flagged)
 
 - `pre-tool-use-mcp.json`: no MCP server was configured, so the `mcp__<server>__<tool>`
   name and the tool's `tool_input` are doc-derived. Its common keys follow the capture.
 - `stop-failure.json`: no provider error occurred. Only its common keys follow the capture.
-- `session-jsonl-sample.jsonl`: Muse's session journal was not captured; every
-  field but `side_effect_intent` is a guess. See `sessionlog.go`.
 - PreCompact, PostCompact, Notification, PostToolBatch, Interrupt: never fired,
   and have no contract type.
 

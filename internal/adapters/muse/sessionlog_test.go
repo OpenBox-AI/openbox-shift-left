@@ -32,14 +32,38 @@ func appendLog(t *testing.T, path, content string) {
 	}
 }
 
+// envelopeLine is one journal line in the observed envelope shape, with the
+// payload given as raw JSON.
+func envelopeLine(seq int, payloadType, at, payload string) string {
+	ts, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf(`{"schema_version":1,"id":"u-%d","stream":{"kind":"session","id":"s"},"sequence":%d,"recorded_at":%d,`+
+		`"record_type":"event","durability":"durable","causation_id":null,"payload_type":%q,"payload_schema_version":1,"payload":%s}`+"\n",
+		seq, seq, ts.UnixMicro(), payloadType, payload)
+}
+
+// intentLine is a tool_batch.effect.started envelope; input is raw JSON that
+// stands in for the content a record may carry and must never be copied.
 func intentLine(seq int, tool, id, ts, input string) string {
 	idField := ""
 	if id != "" {
-		idField = fmt.Sprintf(`"tool_use_id": %q, `, id)
+		idField = fmt.Sprintf(`"call_id":%q,`, id)
 	}
-	return fmt.Sprintf(`{"seq": %d, "timestamp": %q, "type": "side_effect_intent", "session_id": "s", %s"tool_name": %q, "tool_input": %s}`+"\n",
-		seq, ts, idField, tool, input)
+	return envelopeLine(seq, "tool_batch.effect.started", ts, fmt.Sprintf(
+		`{"kind":"tool_batch_effect","run_id":"r","record":{"kind":"started","effect_id":"e%d","model_call_index":0,%s"tool_name":%q,"arguments":%s}}`,
+		seq, idField, tool, input))
 }
+
+// terminalLine is the matching tool_batch.effect.terminal envelope.
+func terminalLine(seq int, tool, id, ts string) string {
+	return envelopeLine(seq, "tool_batch.effect.terminal", ts, fmt.Sprintf(
+		`{"kind":"tool_batch_effect","run_id":"r","record":{"kind":"terminal","call_id":%q,"tool_name":%q,"outcome":"completed"}}`, id, tool))
+}
+
+// frameHeader is the first line Muse writes: no record_type.
+const frameHeader = `{"frame_schema_version":1,"outer_log_ordinal":1,"transaction_id":"f-1","children":[],"content_sha256":"00","retained_frame":"session_permission_transaction"}` + "\n"
 
 const (
 	t0 = "2026-09-30T00:00:01.000Z"
@@ -63,18 +87,66 @@ func TestReadLogDecodesTheFixtureJoinFields(t *testing.T) {
 	if out.DecodeErr != nil {
 		t.Fatalf("decode error: %v", out.DecodeErr)
 	}
-	var names []string
+	var got []string
 	for _, it := range out.Intents {
-		names = append(names, it.ToolName)
-		if it.ToolUseID != "" {
-			t.Errorf("the fixture carries no tool_use_id, got %q", it.ToolUseID)
-		}
+		got = append(got, it.ToolName+"/"+it.ToolUseID)
 	}
-	if strings.Join(names, ",") != "Bash,Write,mcp__docs__search" {
-		t.Errorf("intents = %v", names)
+	if strings.Join(got, ",") != "bash/call_0001,write_file/call_0002,read_file/call_0003" {
+		t.Errorf("intents = %v", got)
 	}
-	if out.Lines != 5 {
-		t.Errorf("lines = %d", out.Lines)
+	if out.Lines != 12 || out.Envelopes != 11 {
+		t.Errorf("lines = %d, envelopes = %d", out.Lines, out.Envelopes)
+	}
+}
+
+func TestReadLogSkipsTheFrameHeaderAndUnknownKinds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	marker := `{"schema_version":1,"stream":{"kind":"session","id":"s"},"position":3,"retained_marker":"x","omitted_record":{}}` + "\n"
+	writeLog(t, path, frameHeader+marker+
+		envelopeLine(1, "runtime.user_intent.accepted", t0, `{"text":"hello"}`)+
+		envelopeLine(2, "runtime.session", t0, `{"kind":"a-kind-nobody-has-seen","record":{"kind":"started","call_id":"c-x","tool_name":"bash"}}`)+
+		envelopeLine(3, "some.future.type", t0, `[1,2,3]`)+
+		intentLine(4, "bash", "call_ok", t0, `{}`)+
+		terminalLine(5, "bash", "call_ok", t1))
+	out := read(t, path, fileCursor{}, cutoffAfterAll)
+	if out.DecodeErr != nil {
+		t.Fatalf("an unknown kind disabled the reader: %v", out.DecodeErr)
+	}
+	if len(out.Intents) != 1 || out.Intents[0].ToolUseID != "call_ok" || out.Intents[0].ToolName != "bash" {
+		t.Fatalf("intents = %+v", out.Intents)
+	}
+	if out.Lines != 7 || out.Envelopes != 5 {
+		t.Errorf("lines = %d, envelopes = %d", out.Lines, out.Envelopes)
+	}
+	if want := time.UnixMicro(mustParse(t0).UnixMicro()); !out.Intents[0].At.Equal(want) {
+		t.Errorf("at = %v, want %v", out.Intents[0].At, want)
+	}
+}
+
+func mustParse(ts string) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		panic(err)
+	}
+	return at
+}
+
+// A pass over lines none of which is an envelope is a format change, not a
+// quiet log; one envelope among them is enough to rule that out.
+func TestReadLogZeroEnvelopesInAFullPassIsAFormatChange(t *testing.T) {
+	junk := strings.Repeat(`{"event":"something-else"}`+"\n", minProbeLines)
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeLog(t, path, junk)
+	if out := read(t, path, fileCursor{}, cutoffAfterAll); out.DecodeErr == nil {
+		t.Error("a pass with no envelope did not report a format change")
+	}
+	writeLog(t, path, frameHeader+strings.Repeat(`{"event":"something-else"}`+"\n", minProbeLines/2))
+	if out := read(t, path, fileCursor{}, cutoffAfterAll); out.DecodeErr != nil {
+		t.Errorf("a short header-only log was called a format change: %v", out.DecodeErr)
+	}
+	writeLog(t, path, junk+envelopeLine(1, "x.y", t0, `{}`))
+	if out := read(t, path, fileCursor{}, cutoffAfterAll); out.DecodeErr != nil {
+		t.Errorf("a log with an envelope was called a format change: %v", out.DecodeErr)
 	}
 }
 
@@ -203,16 +275,22 @@ func TestReadLogLeavesIntentsNotOlderThanTheCutoff(t *testing.T) {
 }
 
 func TestReadLogStopsBeforeALineOutsideTheSchema(t *testing.T) {
-	good := intentLine(1, "Bash", "tu-1", t0, `{}`)
+	good := intentLine(1, "bash", "tu-1", t0, `{}`)
+	startedAt := mustParse(t1).UnixMicro()
+	started := func(payload string, at int64) string {
+		return fmt.Sprintf(`{"schema_version":1,"recorded_at":%d,"record_type":"event","payload_type":"tool_batch.effect.started","payload":%s}`+"\n", at, payload)
+	}
 	for name, bad := range map[string]string{
-		"no type":          `{"seq": 2, "tool_name": "Bash"}` + "\n",
-		"not json":         "garbage\n",
-		"intent no name":   `{"type": "side_effect_intent", "timestamp": "` + t1 + `"}` + "\n",
-		"intent bad stamp": `{"type": "side_effect_intent", "tool_name": "Bash", "timestamp": "soon"}` + "\n",
-		"array":            "[1,2]\n",
+		"not json":            "garbage\n",
+		"array":               "[1,2]\n",
+		"envelope no payload": `{"schema_version":1,"record_type":"event","payload":{}}` + "\n",
+		"schema version 2":    `{"schema_version":2,"record_type":"event","payload_type":"x.y","payload":{}}` + "\n",
+		"started no name":     started(`{"kind":"tool_batch_effect","record":{"kind":"started","call_id":"c"}}`, startedAt),
+		"started no time":     started(`{"kind":"tool_batch_effect","record":{"kind":"started","call_id":"c","tool_name":"bash"}}`, 0),
+		"started wrong kind":  started(`{"kind":"other","record":{"kind":"started","call_id":"c","tool_name":"bash"}}`, startedAt),
 	} {
 		path := filepath.Join(t.TempDir(), "session.jsonl")
-		writeLog(t, path, good+bad+intentLine(3, "Bash", "tu-3", t2, `{}`))
+		writeLog(t, path, good+bad+intentLine(3, "bash", "tu-3", t2, `{}`))
 		out := read(t, path, fileCursor{}, cutoffAfterAll)
 		if out.DecodeErr == nil {
 			t.Errorf("%s: no decode error", name)
@@ -223,9 +301,9 @@ func TestReadLogStopsBeforeALineOutsideTheSchema(t *testing.T) {
 	}
 }
 
-func TestReadLogSkipsBlankLinesAndToleratesOtherRecordTypes(t *testing.T) {
+func TestReadLogSkipsBlankLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	writeLog(t, path, "\n"+`{"type":"model_call","messages":[{"role":"user","text":"hi"}]}`+"\n\n"+intentLine(1, "Bash", "tu-1", t0, `{}`))
+	writeLog(t, path, "\n"+envelopeLine(1, "run.model.configured", t0, `{"kind":"run_model","messages":[{"role":"user","text":"hi"}]}`)+"\n\n"+intentLine(2, "bash", "tu-1", t0, `{}`))
 	out := read(t, path, fileCursor{}, cutoffAfterAll)
 	if out.DecodeErr != nil || len(out.Intents) != 1 {
 		t.Fatalf("err=%v intents=%d", out.DecodeErr, len(out.Intents))
@@ -269,11 +347,12 @@ func TestLocateSessionLogs(t *testing.T) {
 
 func TestReadLogStepsOverALineOverTheCapAndCountsIt(t *testing.T) {
 	huge := strings.Repeat("x", maxLineBytes+1<<20)
-	good := intentLine(3, "Bash", "tu-3", t2, `{}`)
+	good := intentLine(3, "bash", "tu-3", t2, `{}`)
 
 	t.Run("fields before the cap still make an intent", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "session.jsonl")
-		line := `{"seq": 1, "timestamp": "` + t0 + `", "type": "side_effect_intent", "tool_name": "Write", "tool_use_id": "tu-huge", "tool_input": {"content": "` + huge + `"}}` + "\n"
+		line := envelopeLine(1, "tool_batch.effect.started", t0,
+			`{"kind":"tool_batch_effect","record":{"kind":"started","call_id":"tu-huge","tool_name":"write_file","arguments":{"content":"`+huge+`"}}}`)
 		writeLog(t, path, line+good)
 		out, err := readLog(path, fileCursor{}, cutoffAfterAll, time.Now().Add(time.Minute), 64<<20)
 		if err != nil || out.DecodeErr != nil || out.Oversize != 1 || len(out.Intents) != 2 {
@@ -289,7 +368,7 @@ func TestReadLogStepsOverALineOverTheCapAndCountsIt(t *testing.T) {
 
 	t.Run("fields only after the cap are skipped and the pass moves on", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "session.jsonl")
-		line := `{"tool_input": {"content": "` + huge + `"}, "type": "side_effect_intent", "tool_name": "Write", "timestamp": "` + t0 + `"}` + "\n"
+		line := `{"schema_version":1,"payload":{"content":"` + huge + `"},"record_type":"event","payload_type":"tool_batch.effect.started","recorded_at":1}` + "\n"
 		writeLog(t, path, line+good)
 		out, err := readLog(path, fileCursor{}, cutoffAfterAll, time.Now().Add(time.Minute), 64<<20)
 		if err != nil || out.DecodeErr != nil || out.Oversize != 1 || len(out.Intents) != 1 || out.Intents[0].ToolUseID != "tu-3" {
@@ -299,7 +378,7 @@ func TestReadLogStepsOverALineOverTheCapAndCountsIt(t *testing.T) {
 }
 
 func TestLineScannerChecksTheDeadlineInsideALine(t *testing.T) {
-	line := `{"type":"model_call","body":"` + strings.Repeat("y", 1<<20) + `"}` + "\n"
+	line := `{"record_type":"event","body":"` + strings.Repeat("y", 1<<20) + `"}` + "\n"
 	sc := &lineScanner{r: bufioReader(line), deadline: time.Now().Add(-time.Second)}
 	if _, st := sc.scan(); st != lineIncomplete {
 		t.Fatalf("status = %v, want the line left uncommitted", st)

@@ -8,25 +8,48 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Muse journals each session to an append-only `session.jsonl`, and records an
-// action's authorisation as a `side_effect_intent` record before it runs. That
-// file is how a tool action that never reached a hook (a payload over the
+// Muse journals each session to an append-only `session.jsonl`. Before it runs a
+// tool batch it records a `tool_batch.effect.started` envelope naming the call
+// (`payload.record.call_id`, which is the hook's own tool_use_id) and the tool.
+// That file is how a tool action that never reached a hook (a payload over the
 // hook's size cap skips the hook entirely) can still be seen. Everything here
 // is read-only, and only the join fields are ever decoded: a line's content
-// (tool inputs) is skipped byte by byte and never copied, logged or kept.
+// (prompts, tool arguments, model messages) is skipped byte by byte and never
+// copied, logged or kept.
 //
-// The location and the record shape come from research, not from a Muse
-// binary: see testdata/README.md. Nothing here may assume them; a line that
-// does not look as expected is a counted decode error, not a guess.
+// The format was observed on Muse 1.4.1 (testdata/README.md). Each line is one
+// of: a frame header or retained-marker object with no `record_type`, which is
+// skipped; or an envelope
+//
+//	{"schema_version":1, "stream":{..}, "recorded_at":<unix microseconds>,
+//	 "record_type":"event", "payload_type":"<dotted name>",
+//	 "payload":{"kind":"..", "record":{"kind":"started","call_id":"..","tool_name":".."}}}
+//
+// Unknown payload types and kinds are normal and skipped. The reader gives up
+// (the pass is "unverified", see readOutcome.DecodeErr) only when the format
+// looks changed: a line that is not a JSON object, an envelope without a
+// payload_type, an envelope whose schema_version is not 1, a started record
+// missing its tool name or time, or minProbeLines or more lines in a pass of
+// which none is an envelope at all.
 
 const (
 	sessionLogName = "session.jsonl"
 	subagentDir    = "subagent"
-	intentType     = "side_effect_intent"
+
+	payloadStarted = "tool_batch.effect.started"
+	kindToolBatch  = "tool_batch_effect"
+	kindStarted    = "started"
+	schemaVersion  = "1"
+
+	// minProbeLines is how many committed lines a pass needs before finding no
+	// envelope among them means the format changed rather than that the log has
+	// only just begun with its frame header.
+	minProbeLines = 8
 
 	// dateDirLookback is how many days back the session's date directory is
 	// searched for; a session older than that is found again through the
@@ -152,11 +175,12 @@ type fileCursor struct {
 	Inode  uint64 `json:"inode,omitempty"`
 }
 
-// intent is the join view of one side_effect_intent record.
+// intent is the join view of one tool_batch.effect.started record.
 type intent struct {
-	ToolName  string
+	ToolName string
+	// ToolUseID is record.call_id, which equals the hook's tool_use_id. Empty
+	// when the record carried none, which leaves the ordinal join.
 	ToolUseID string
-	Seq       string
 	At        time.Time
 }
 
@@ -170,12 +194,15 @@ type readOutcome struct {
 	BytesRead int64
 	// Lines counts the committed lines.
 	Lines int
+	// Envelopes counts the committed lines that were record envelopes.
+	Envelopes int
 	// Oversize counts lines over maxLineBytes that were stepped over.
 	Oversize int
 	// Rotated is set when the file was replaced or shortened and read afresh.
 	Rotated bool
-	// DecodeErr is set when a line did not look like the expected schema. The
-	// pass stopped before it and the cursor stays there.
+	// DecodeErr is set when the log does not look like the observed format (see
+	// the top of this file). For a bad line the pass stopped before it and the
+	// cursor stays there; for a pass with no envelope at all, it is past them.
 	DecodeErr error
 }
 
@@ -223,7 +250,10 @@ func readLog(path string, cur fileCursor, cutoff, deadline time.Time, maxBytes i
 				break
 			}
 			out.Oversize++
-			if it, ok := rec.intent(); ok && rec.Type == intentType && it.At.Before(cutoff) {
+			if rec.envelope() {
+				out.Envelopes++
+			}
+			if it, isIntent, ok := rec.intent(); isIntent && ok && it.At.Before(cutoff) {
 				out.Intents = append(out.Intents, it)
 			}
 			out.Cursor.Offset += sc.n
@@ -242,42 +272,62 @@ func readLog(path string, cur fileCursor, cutoff, deadline time.Time, maxBytes i
 			out.DecodeErr = errSchema
 			break
 		}
-		if rec.Type == "" {
-			out.DecodeErr = errSchema
-			break
-		}
-		if rec.Type == intentType {
-			it, ok := rec.intent()
-			if !ok {
+		if rec.RecordType != "" {
+			// An envelope. A frame header or retained marker has no record_type
+			// and is skipped.
+			if rec.PayloadType == "" || (rec.SchemaVersion != "" && rec.SchemaVersion != schemaVersion) {
 				out.DecodeErr = errSchema
 				break
 			}
-			if !it.At.Before(cutoff) {
-				break
+			out.Envelopes++
+			if it, isIntent, ok := rec.intent(); isIntent {
+				if !ok {
+					out.DecodeErr = errSchema
+					break
+				}
+				if !it.At.Before(cutoff) {
+					break
+				}
+				out.Intents = append(out.Intents, it)
 			}
-			out.Intents = append(out.Intents, it)
 		}
 		out.Cursor.Offset += sc.n
 		out.Lines++
+	}
+	if out.DecodeErr == nil && out.Lines >= minProbeLines && out.Envelopes == 0 {
+		out.DecodeErr = errSchema
 	}
 	return out, nil
 }
 
 // joinRecord holds the only fields of a log line that are ever decoded.
 type joinRecord struct {
-	Type      string
-	ToolUseID string
-	ToolName  string
-	Timestamp string
-	Seq       string
+	SchemaVersion string
+	RecordType    string
+	PayloadType   string
+	// RecordedAt is unix microseconds, as written.
+	RecordedAt  string
+	PayloadKind string
+	RecKind     string
+	CallID      string
+	ToolName    string
 }
 
-func (r joinRecord) intent() (intent, bool) {
-	at, err := time.Parse(time.RFC3339Nano, r.Timestamp)
-	if err != nil || r.ToolName == "" {
-		return intent{}, false
+// envelope reports whether the line carried the two envelope type fields.
+func (r joinRecord) envelope() bool { return r.RecordType != "" && r.PayloadType != "" }
+
+// intent reads the record as a tool-execution intent. isIntent is false for any
+// other line. ok is false when it is an intent the join cannot use, which means
+// the format is not the observed one.
+func (r joinRecord) intent() (it intent, isIntent, ok bool) {
+	if r.PayloadType != payloadStarted {
+		return intent{}, false, true
 	}
-	return intent{ToolName: r.ToolName, ToolUseID: r.ToolUseID, Seq: r.Seq, At: at}, true
+	us, err := strconv.ParseInt(r.RecordedAt, 10, 64)
+	if err != nil || us <= 0 || r.ToolName == "" || r.PayloadKind != kindToolBatch || r.RecKind != kindStarted {
+		return intent{}, true, false
+	}
+	return intent{ToolName: r.ToolName, ToolUseID: r.CallID, At: time.UnixMicro(us)}, true, true
 }
 
 type lineStatus int
@@ -358,7 +408,7 @@ func (s *lineScanner) scan() (joinRecord, lineStatus) {
 	case err == nil && b != '{':
 		err = errSyntax
 	case err == nil:
-		err = s.members(&rec)
+		err = s.members(&rec, pathRoot)
 	}
 	if err == nil {
 		err = s.endOfLine()
@@ -419,8 +469,58 @@ func (s *lineScanner) endOfLine() error {
 	}
 }
 
-// members reads the members of an object whose '{' is already consumed.
-func (s *lineScanner) members(rec *joinRecord) error {
+// Objects the scanner descends into; every other object is skipped whole.
+const (
+	pathRoot    = ""
+	pathPayload = "payload"
+	pathRecord  = "payload.record"
+)
+
+// target says what to do with one member: keep a short string or number in dst,
+// descend into an object at child, or (both zero) skip it.
+type target struct {
+	dst   *string
+	child string
+}
+
+func (r *joinRecord) target(path, key string) target {
+	switch path {
+	case pathRoot:
+		switch key {
+		case "schema_version":
+			return target{dst: &r.SchemaVersion}
+		case "record_type":
+			return target{dst: &r.RecordType}
+		case "payload_type":
+			return target{dst: &r.PayloadType}
+		case "recorded_at":
+			return target{dst: &r.RecordedAt}
+		case "payload":
+			return target{child: pathPayload}
+		}
+	case pathPayload:
+		switch key {
+		case "kind":
+			return target{dst: &r.PayloadKind}
+		case "record":
+			return target{child: pathRecord}
+		}
+	case pathRecord:
+		switch key {
+		case "kind":
+			return target{dst: &r.RecKind}
+		case "call_id":
+			return target{dst: &r.CallID}
+		case "tool_name":
+			return target{dst: &r.ToolName}
+		}
+	}
+	return target{}
+}
+
+// members reads the members of an object whose '{' is already consumed, at
+// path. Only the join fields are kept; everything else is stepped over.
+func (s *lineScanner) members(rec *joinRecord, path string) error {
 	for {
 		b, err := s.skipSpace()
 		if err != nil {
@@ -444,34 +544,26 @@ func (s *lineScanner) members(rec *joinRecord) error {
 		if b, err = s.skipSpace(); err != nil {
 			return err
 		}
-		var dst *string
-		switch key {
-		case "type":
-			dst = &rec.Type
-		case "tool_use_id":
-			dst = &rec.ToolUseID
-		case "tool_name":
-			dst = &rec.ToolName
-		case "timestamp":
-			dst = &rec.Timestamp
-		case "seq":
-			dst = &rec.Seq
-		}
+		tg := rec.target(path, key)
 		switch {
-		case dst != nil && b == '"' && key != "seq":
+		case tg.child != "" && b == '{':
+			if err := s.members(rec, tg.child); err != nil {
+				return err
+			}
+		case tg.dst != nil && b == '"':
 			val, truncated, serr := s.str(maxFieldLen)
 			if serr != nil {
 				return serr
 			}
 			if !truncated {
-				*dst = val
+				*tg.dst = val
 			}
-		case dst != nil && key == "seq" && b != '"' && b != '{' && b != '[':
+		case tg.dst != nil && b != '{' && b != '[':
 			tok, serr := s.literal(b, maxFieldLen)
 			if serr != nil {
 				return serr
 			}
-			*dst = tok
+			*tg.dst = tok
 		default:
 			if err := s.skipValue(b); err != nil {
 				return err

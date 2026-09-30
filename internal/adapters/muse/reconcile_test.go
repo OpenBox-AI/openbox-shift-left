@@ -198,10 +198,10 @@ func TestReconcileCoversSubagentLogs(t *testing.T) {
 	}
 }
 
-func TestReconcileDisablesItselfOnAnUnknownSchema(t *testing.T) {
+func TestReconcileDisablesItselfOnALineThatIsNotJSON(t *testing.T) {
 	e := newReconcileEnv(t)
 	writeLog(t, e.logPath(""),
-		intentLine(1, "Write", "tu-1", t0, `{}`)+`{"event":"something-else"}`+"\n"+intentLine(3, "Write", "tu-3", t1, `{}`))
+		intentLine(1, "Write", "tu-1", t0, `{}`)+"this is not json\n"+intentLine(3, "Write", "tu-3", t1, `{}`))
 	res := e.run(cutoffAfterAll)
 	if !res.Disabled || res.Intents != 1 || res.Gaps != 1 {
 		t.Fatalf("result = %+v", res)
@@ -215,6 +215,25 @@ func TestReconcileDisablesItselfOnAnUnknownSchema(t *testing.T) {
 	res = e.run(cutoffAfterAll)
 	if !res.Disabled || res.Gaps != 0 {
 		t.Fatalf("second pass = %+v", res)
+	}
+}
+
+// Kinds the reconciler has never heard of are the normal case in Muse's
+// journal: they are skipped, the pass stays enabled, and the joins still work.
+func TestReconcileSkipsUnknownKindsWithoutDisabling(t *testing.T) {
+	e := newReconcileEnv(t)
+	writeLog(t, e.logPath(""), frameHeader+
+		envelopeLine(1, "runtime.user_intent.accepted", t0, `{"text":"hi"}`)+
+		envelopeLine(2, "brand.new.type", t0, `{"kind":"never-seen"}`)+
+		intentLine(3, "bash", "call_gated", t0, `{}`)+terminalLine(4, "bash", "call_gated", t1)+
+		intentLine(5, "write_file", "call_ungated", t1, `{}`)+terminalLine(6, "write_file", "call_ungated", t2))
+	e.gate("bash", "call_gated")
+	res := e.run(cutoffAfterAll)
+	if res.Disabled || res.Intents != 2 || res.Gaps != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if g := e.gaps(); len(g) != 1 || g[0].Detail["tool_use_id"] != "call_ungated" || g[0].Detail["tool_name"] != "write_file" {
+		t.Fatalf("findings = %+v", g)
 	}
 }
 

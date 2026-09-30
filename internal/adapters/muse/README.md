@@ -42,13 +42,28 @@ OpenBox cannot stop a tool action whose hook payload is over 256 KiB: Muse skips
 the hook entirely, so neither the gate nor its `onFailure` successor runs. What
 it can do is notice. At `Stop` and `SessionEnd` the reconciler reads the
 session's own append-only `session.jsonl` (and each subagent's) and joins its
-`side_effect_intent` records against a content-free ledger of the tool calls the
-gate was asked about (`reconcile.go`, `sessionlog.go`). Each intent with no gate
-record becomes a local `evidence.gap` trace finding, and `openbox doctor` shows
-the count. Nothing is blocked, latched or sent to core. The join is exact on
-`tool_use_id` when an intent carries one, otherwise on (tool name, ordinal), which
-finds how many calls went ungated but not always which. Only the join fields of a
-journal line are decoded; its content is never copied or logged.
+`tool_batch.effect.started` envelopes against a content-free ledger of the tool
+calls the gate was asked about (`reconcile.go`, `sessionlog.go`). Each intent
+with no gate record becomes a local `evidence.gap` trace finding, and `openbox
+doctor` shows the count. Nothing is blocked, latched or sent to core.
+
+The format is observed on Muse 1.4.1. A line is a frame header or retained
+marker with no `record_type` (skipped), or an envelope
+(`schema_version`, `recorded_at` in unix microseconds, `record_type`,
+`payload_type`, `payload`). Envelopes of every other `payload_type` and
+`payload.kind` are normal and skipped. The join is on the `started` record's
+`payload.record.call_id`, which equals the hook's `tool_use_id`, so it is exact;
+only when a started record carries no `call_id` does the join fall back to (tool
+name, ordinal), which finds how many calls went ungated but not always which.
+The matching `tool_batch.effect.terminal` is not read. Only the join fields
+(`schema_version`, `record_type`, `payload_type`, `recorded_at`, `payload.kind`,
+`payload.record.{kind,call_id,tool_name}`) are decoded; a line's content is never
+copied or logged.
+
+The reader stops and doctor says `unverified` only when the format looks
+changed: a line that is not JSON, an envelope with no `payload_type`, a
+`schema_version` other than 1, a started record missing its tool name or time, or
+a pass of eight or more lines none of which is an envelope.
 
 ## Event mapping
 
@@ -269,14 +284,11 @@ Still guessed by the installer and doctor (Muse documents none of them by name):
   `PreToolUse`; if not, the answer is discarded and the write proceeds unredacted.
 - `PostLLMCall`'s `status` and `error` value sets.
 
-- The session journal: its location
-  (`~/.local/share/muse/sessions/YYYY/MM/DD/<session-id>/session.jsonl`, subagents
-  under `subagent/<id>/session.jsonl`), the `side_effect_intent` record type, and
-  every field the reconciler reads (`type`, `timestamp`, `tool_name`, optional
-  `tool_use_id`, `seq`) come from research, not a binary
-  (`testdata/session-jsonl-sample.jsonl`). A line that does not match stops the
-  pass and doctor says `unverified`. Also unknown: whether a denied call writes an
-  intent at all.
+- Whether a denied call writes a `tool_batch.effect.started` record at all (a
+  call the gate denies may never reach the batch), and whether every Muse
+  version keeps `call_id` equal to the hook's `tool_use_id`.
+- A started record over the 8 MiB line cap whose `call_id` or `tool_name` comes
+  after the cap cannot be joined; it is counted as oversize and skipped.
 
 ## Files
 

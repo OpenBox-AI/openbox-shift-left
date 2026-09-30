@@ -25,7 +25,7 @@ import (
 // usually one whose hook payload was over the hook's 256 KiB cap: Muse skips
 // the hook entirely, so neither the gate nor its fail-closed successor ran.
 // Nothing can refuse such a call. What can be done is notice it: at Stop and
-// SessionEnd the session's own journal is read for tool authorisations, and
+// SessionEnd the session's own journal is read for tool-execution intents, and
 // each one without a gate record becomes a content-free trace finding.
 //
 // The reconciler never blocks, latches or alters delivery, and never
@@ -86,7 +86,7 @@ type cursorState struct {
 	// Dir is the session directory the logs were found in.
 	Dir   string                `json:"dir,omitempty"`
 	Files map[string]fileCursor `json:"files"`
-	// Ordinals counts, per tool name, the intents carrying no tool_use_id that
+	// Ordinals counts, per tool name, the intents carrying no call_id that
 	// were already reconciled: the next one is that tool's next ordinal.
 	Ordinals map[string]int `json:"ordinals"`
 	// Claimed counts, per tool name, the gate records already matched exactly
@@ -247,8 +247,9 @@ type Result struct {
 	// Errors counts what was swallowed: an unreadable file, a cursor that could
 	// not be kept.
 	Errors int
-	// Disabled is set when a line did not match the expected schema, which
-	// stops the pass: the journal's format is unverified.
+	// Disabled is set when the journal no longer looks like the format observed
+	// on Muse 1.4.1 (see sessionlog.go), which stops the pass: the format is
+	// unverified.
 	Disabled  bool
 	BytesRead int64
 	// Oversize counts lines over the line cap that were stepped over.
@@ -372,7 +373,8 @@ func (r Reconciler) Run(sessionID, runID string, cutoff, deadline time.Time) (re
 	return res
 }
 
-// gapOf joins one intent. With a tool_use_id the join is exact; without one it
+// gapOf joins one intent. With a call_id (the hook's tool_use_id) the join is
+// exact, and Muse 1.4.1 writes one on every started record; without one it
 // is the intent's ordinal among this session's id-less intents of the same tool
 // against the gate records of that tool no exact join has claimed, so the pass
 // finds how many calls went ungated and not always which of them.

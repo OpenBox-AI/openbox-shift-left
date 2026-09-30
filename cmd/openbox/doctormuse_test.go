@@ -543,7 +543,7 @@ func TestDoctorMuseSaysUnverifiedWhenTheReconcilerDisabledItself(t *testing.T) {
 	evidenceTrace(t)
 	trace.Emit(trace.Record{Provider: "muse", SessionID: "s-1", Stage: trace.StageEvidenceReconcile, Outcome: "disabled"})
 	section := museDoctor(t)
-	mustContain(t, section, "unverified: the session-log reconciler stopped on a journal line it does not recognise")
+	mustContain(t, section, "unverified: the session-log reconciler stopped because Muse's session.jsonl no longer looks like the format observed")
 	if strings.Contains(section, "ok: 0 ungated") {
 		t.Errorf("an unverified reconciler reads as clean:\n%s", section)
 	}
