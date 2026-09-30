@@ -27,6 +27,8 @@ type laneInstall struct {
 	uninstallUnit func() error
 	activate      func() (activated, error)
 	envNotSet     string
+	// unitExisted is set by setupLane before it writes the unit.
+	unitExisted bool
 }
 
 // activated is what routing a lane changed. It is returned rather than
@@ -69,6 +71,9 @@ func (a *app) setupLane(in laneInstall) (int, error) {
 		}
 	}
 
+	// A unit that was already there is not ours to remove on a later failure: it
+	// is the shared receiver, and a working lane of another tool may depend on it.
+	in.unitExisted = in.unitPath != "" && fileExists(in.unitPath)
 	if err := in.installUnit(); err != nil {
 		traceUnit(in.label, "write", err, map[string]any{"unit": in.unitPath})
 		return 0, err
@@ -108,6 +113,13 @@ func (a *app) setupLane(in laneInstall) (int, error) {
 
 func (a *app) rollbackLaneUnit(in laneInstall) {
 	if in.unitPath == "" {
+		return
+	}
+	if in.unitExisted {
+		// Removing it would silently end a telemetry lane that still works for
+		// the tools whose settings point at its port. It was just rewritten with
+		// a superset of its old paths and restarted, so leaving it is safe.
+		a.row("kept", "%s: it was already installed, so a failure of this step does not remove it", in.unitPath)
 		return
 	}
 	a.unloadUnit(in.laneIdentity)
@@ -328,6 +340,11 @@ func (a *app) setupMuseTelemetry(homeDir, addr string, verbose bool) (int, error
 	}
 	settingsPath := providers.MuseSettingsPath()
 	endpoint := "http://" + addr
+	// Refusals that depend only on Muse's files are decided BEFORE the shared
+	// unit is rewritten, so they never disturb a telemetry lane that works.
+	if err := providers.CheckMuseTelemetry(settingsPath, homeDir, endpoint); err != nil {
+		return 0, fmt.Errorf("%w; nothing was changed, and the telemetry unit was not touched", err)
+	}
 
 	return a.setupLane(laneInstall{
 		label:         "telemetry",

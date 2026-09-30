@@ -98,10 +98,12 @@ func TestAMuseInstallThatFailsAfterTheUnitIsWrittenRemovesTheUnitAndTouchesNoSet
 		settings string
 		arrange  func(h *laneHarness)
 		wantErr  string
+		// unitNeverWritten: the refusal is decided before the unit is touched.
+		unitNeverWritten bool
 	}{
-		{"never listens", museOwnSettings, func(h *laneHarness) { h.listening = false }, "did not start listening"},
-		{"supervisor refuses", museOwnSettings, func(h *laneHarness) { h.startFails = true }, "NOT written"},
-		{"settings Muse cannot read", "{\"schema_version\": 1,", func(*laneHarness) {}, "refusing to modify"},
+		{"never listens", museOwnSettings, func(h *laneHarness) { h.listening = false }, "did not start listening", false},
+		{"supervisor refuses", museOwnSettings, func(h *laneHarness) { h.startFails = true }, "NOT written", false},
+		{"settings Muse cannot read", "{\"schema_version\": 1,", func(*laneHarness) {}, "refusing to modify", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, settings := museLaneHarness(t, tc.settings)
@@ -115,8 +117,11 @@ func TestAMuseInstallThatFailsAfterTheUnitIsWrittenRemovesTheUnitAndTouchesNoSet
 			if len(h.units) != 0 {
 				t.Errorf("a failed install left units behind: %v", h.units)
 			}
-			if !strings.Contains(out.String(), "rolled back") {
+			if !tc.unitNeverWritten && !strings.Contains(out.String(), "rolled back") {
 				t.Errorf("the rollback was silent:\n%s", out.String())
+			}
+			if tc.unitNeverWritten && len(h.commands) != 0 {
+				t.Errorf("a refusal decided from Muse's files still drove the supervisor: %v", h.commands)
 			}
 			if b, _ := os.ReadFile(settings); string(b) != tc.settings {
 				t.Errorf("settings.json changed on a failed install:\n%s", b)
@@ -371,5 +376,100 @@ func TestMuseUninstallKeepsTheRecordWhenTheRestoreCannotRun(t *testing.T) {
 	}
 	if !strings.Contains(combined.String(), "telemetry restore against") {
 		t.Errorf("the report does not say which restore is owed:\n%s", combined.String())
+	}
+}
+
+// TestARefusedMuseInstallLeavesAWorkingSharedTelemetryUnitAlone: a machine with
+// Claude Code's telemetry unit installed and listening, then a Muse install that
+// is refused for a reason that depends only on Muse's files. The refusal is
+// decided before the unit is touched, so the unit survives byte for byte and
+// nothing is restarted.
+func TestARefusedMuseInstallLeavesAWorkingSharedTelemetryUnitAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, h *laneHarness, settings string)
+	}{
+		{"settings Muse cannot read", func(t *testing.T, _ *laneHarness, settings string) {
+			if err := os.WriteFile(settings, []byte(`{"schema_version": 1,`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a telemetry value changed since OpenBox set it", func(t *testing.T, h *laneHarness, settings string) {
+			a, _, _ := testApp(map[string]string{"HOME": h.home})
+			if _, err := a.setupMuseTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+				t.Fatal(err)
+			}
+			b, _ := os.ReadFile(settings)
+			if err := os.WriteFile(settings, []byte(strings.Replace(string(b), "http://127.0.0.1:18789", "https://otel.corp.example", 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, settings := museLaneHarness(t, museOwnSettings)
+			t.Setenv("CODEX_HOME", filepath.Join(h.home, ".codex"))
+			a, _, _ := testApp(map[string]string{"HOME": h.home})
+			if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+				t.Fatal(err)
+			}
+			unitPath := laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, h.home)
+			before, err := os.ReadFile(unitPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.setup(t, h, settings)
+			// The setup above may itself have rewritten the unit; what must not
+			// change is what the refused install sees.
+			before, _ = os.ReadFile(unitPath)
+			h.commands = nil
+
+			if _, err := a.setupMuseTelemetry(h.home, "127.0.0.1:18789", false); err == nil {
+				t.Fatal("the install was not refused")
+			}
+			after, err := os.ReadFile(unitPath)
+			if err != nil {
+				t.Fatalf("the shared unit was removed by a refused Muse install: %v", err)
+			}
+			if string(after) != string(before) {
+				t.Errorf("the shared unit changed:\n%s\n---\n%s", before, after)
+			}
+			if len(h.units) == 0 {
+				t.Error("the unit is gone from the supervisor")
+			}
+			if len(h.commands) != 0 {
+				t.Errorf("a refused install still drove the supervisor: %v", h.commands)
+			}
+		})
+	}
+}
+
+// TestALaterFailureNeverRemovesAUnitThatWasAlreadyInstalled: for a refusal that
+// only shows once the unit is already rewritten (the pointer write), the unit
+// that existed before stays.
+func TestALaterFailureNeverRemovesAUnitThatWasAlreadyInstalled(t *testing.T) {
+	h, _ := museLaneHarness(t, museOwnSettings)
+	t.Setenv("CODEX_HOME", filepath.Join(h.home, ".codex"))
+	a, _, _ := testApp(map[string]string{"HOME": h.home})
+	if _, err := a.setupTelemetry(h.home, "127.0.0.1:18789", false); err != nil {
+		t.Fatal(err)
+	}
+	unitPath := laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, h.home)
+
+	// Codex's pointer is refused (a foreign [otel] block) only after the unit step.
+	codexConfig := providers.CodexConfigTOMLPath()
+	if err := os.MkdirAll(filepath.Dir(codexConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexConfig, []byte("[otel]\nenvironment = \"mine\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.setupCodexTelemetry(h.home, "127.0.0.1:18789", false); err == nil {
+		t.Fatal("a foreign [otel] block was overwritten")
+	}
+	if _, err := os.Stat(unitPath); err != nil {
+		t.Errorf("a refused Codex install removed the shared unit: %v", err)
+	}
+	if len(h.units) == 0 {
+		t.Error("the unit is gone from the supervisor")
 	}
 }

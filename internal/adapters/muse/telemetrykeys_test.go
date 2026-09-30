@@ -300,3 +300,83 @@ func TestTelemetryObjectEscapesTheEndpoint(t *testing.T) {
 		t.Error("an endpoint with quotes produced invalid JSON")
 	}
 }
+
+// TestAFailedWriteLeavesTheRecordAsItWas: the record is saved before the
+// settings, so a settings write that then fails must take the record back with
+// it. Otherwise it keeps OpenBox's intended value as "owned" and the next init
+// refuses the file as changed after OpenBox set it.
+func TestAFailedWriteLeavesTheRecordAsItWas(t *testing.T) {
+	path, home := telemetrySandbox(t, foreignSettings)
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Skip(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	if f, err := os.CreateTemp(dir, "probe"); err == nil {
+		f.Close()
+		t.Skip("directory permissions are not enforced here")
+	}
+
+	if _, err := WriteTelemetry(path, home, testEndpoint); err == nil {
+		t.Fatal("the write succeeded into a read-only directory")
+	}
+	if _, err := os.Stat(PriorSettingsPath(home)); !os.IsNotExist(err) {
+		t.Error("a record outlived a failed first write")
+	}
+	if readFile(t, path) != foreignSettings {
+		t.Error("settings changed")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteTelemetry(path, home, testEndpoint); err != nil {
+		t.Fatalf("the retry after a failed write: %v", err)
+	}
+
+	// And a failed endpoint change keeps the converged record, not the new owned value.
+	rec := readFile(t, PriorSettingsPath(home))
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteTelemetry(path, home, "http://127.0.0.1:9999"); err == nil {
+		t.Fatal("the endpoint change succeeded into a read-only directory")
+	}
+	if readFile(t, PriorSettingsPath(home)) != rec {
+		t.Error("a failed endpoint change left the record naming a value that never landed")
+	}
+	_ = os.Chmod(dir, 0o700)
+	if _, err := WriteTelemetry(path, home, testEndpoint); err != nil {
+		t.Errorf("the next init refuses after a failed change: %v", err)
+	}
+}
+
+// TestCheckTelemetryRefusesWhatWriteWouldAndTouchesNothing is the dry run the
+// installer runs before it touches the shared unit.
+func TestCheckTelemetryRefusesWhatWriteWouldAndTouchesNothing(t *testing.T) {
+	bad := `{"schema_version": 1,`
+	path, home := telemetrySandbox(t, bad)
+	if err := CheckTelemetry(path, home, testEndpoint); err == nil {
+		t.Error("an unreadable settings file passed the check")
+	}
+
+	path, home = telemetrySandbox(t, foreignSettings)
+	if err := CheckTelemetry(path, home, testEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	if readFile(t, path) != foreignSettings {
+		t.Error("the check wrote settings")
+	}
+	if _, err := os.Stat(PriorSettingsPath(home)); !os.IsNotExist(err) {
+		t.Error("the check wrote a record")
+	}
+	if _, err := WriteTelemetry(path, home, testEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	mine := strings.Replace(readFile(t, path), testEndpoint, "https://otel.corp.example", 1)
+	if err := os.WriteFile(path, []byte(mine), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckTelemetry(path, home, testEndpoint); err == nil || !strings.Contains(err.Error(), "changed after OpenBox set it") {
+		t.Errorf("a drifted value passed the check: %v", err)
+	}
+}

@@ -185,6 +185,12 @@ func WriteMuseTelemetry(settingsPath, homeDir, endpoint string) (replaced string
 	return muse.WriteTelemetry(settingsPath, homeDir, endpoint)
 }
 
+// CheckMuseTelemetry is WriteMuseTelemetry's refusal logic with nothing written,
+// for an installer to run before it touches anything shared.
+func CheckMuseTelemetry(settingsPath, homeDir, endpoint string) error {
+	return muse.CheckTelemetry(settingsPath, homeDir, endpoint)
+}
+
 // HasOwnedMuseTelemetry reports whether Muse's settings still carry the
 // telemetry value OpenBox set.
 func HasOwnedMuseTelemetry(settingsPath, homeDir string) bool {

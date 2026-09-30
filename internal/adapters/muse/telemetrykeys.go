@@ -142,88 +142,149 @@ func resolvedSettings(path string) (resolved string, before []byte, existed bool
 	return resolved, before, existed, perm, nil
 }
 
+// telemetryPlan is a write worked out but not yet made: everything a refusal
+// depends on has been read and decided, nothing has been touched.
+type telemetryPlan struct {
+	path      string
+	before    []byte
+	out       []byte
+	existed   bool
+	perm      os.FileMode
+	desired   string
+	replaced  string
+	current   gjson.Result
+	rec       priorSettings // the record as it should be once the write lands
+	prevKeys  map[string]priorValue
+	prevPath  string
+	unchanged bool // settings already say it
+}
+
+func (p *telemetryPlan) previousRecord(homeDir string) priorSettings {
+	keys := make(map[string]priorValue, len(p.prevKeys))
+	for k, v := range p.prevKeys {
+		keys[k] = v
+	}
+	return priorSettings{Schema: priorSettingsSchema, SettingsPath: p.prevPath, Keys: keys}
+}
+
+func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, error) {
+	path, before, existed, perm, err := resolvedSettings(settingsPath)
+	if err != nil {
+		return nil, err
+	}
+	rec, err := loadPriorSettings(homeDir)
+	if err != nil {
+		return nil, err
+	}
+	p := &telemetryPlan{path: path, before: before, existed: existed, perm: perm, prevKeys: map[string]priorValue{}, prevPath: rec.SettingsPath}
+	for k, v := range rec.Keys {
+		p.prevKeys[k] = v
+	}
+	p.rec = rec
+	doc := before
+	if !existed {
+		if doc, err = sjson.SetBytes([]byte("{}"), "schema_version", settingsSchemaVersion); err != nil {
+			return nil, fmt.Errorf("muse: schema_version: %w", err)
+		}
+	}
+	p.desired = telemetryObject(endpoint)
+	p.current = gjson.GetBytes(doc, TelemetryKey)
+	entry, captured := rec.Keys[TelemetryKey]
+
+	switch {
+	case captured && p.current.Exists() && !canonicalJSONEqual([]byte(p.current.Raw), []byte(entry.Owned)):
+		return nil, fmt.Errorf("muse: %s holds a %q value that changed after OpenBox set it (%s); leaving it alone. "+
+			"Remove the key, or restore OpenBox's value, and run init again", path, TelemetryKey, p.current.Raw)
+	case captured && p.current.Exists():
+		// Ours. Only the endpoint can differ, and the original prior value stays.
+		entry.Owned = p.desired
+	default:
+		entry = priorValue{Present: p.current.Exists(), Raw: p.current.Raw, Owned: p.desired}
+		if p.current.Exists() {
+			p.replaced = p.current.Raw
+		}
+	}
+	keys := make(map[string]priorValue, len(rec.Keys)+1)
+	for k, v := range rec.Keys {
+		keys[k] = v
+	}
+	keys[TelemetryKey] = entry
+	p.rec = priorSettings{Schema: priorSettingsSchema, SettingsPath: path, Keys: keys}
+	if p.current.Exists() && canonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)) {
+		p.unchanged = true
+		return p, nil
+	}
+	out, err := sjson.SetRawBytes(doc, TelemetryKey, []byte(p.desired))
+	if err != nil {
+		return nil, fmt.Errorf("muse: setting %s in %s: %w", TelemetryKey, path, err)
+	}
+	p.out = finishSettingsWrite(out, before, existed)
+	if _, err := ValidateSettings(p.out); err != nil {
+		return nil, fmt.Errorf("muse: refusing to write %s: %w", path, err)
+	}
+	return p, nil
+}
+
+// CheckTelemetry is WriteTelemetry's refusal logic with nothing written: an
+// unreadable settings file, a record that cannot be used, or a `telemetry` value
+// changed since OpenBox set it all fail here exactly as they would there. The
+// installer runs it before it touches the shared telemetry unit, so a refusal
+// never disturbs a lane that already works.
+func CheckTelemetry(settingsPath, homeDir, endpoint string) error {
+	_, err := planTelemetry(settingsPath, homeDir, endpoint)
+	return err
+}
+
 // WriteTelemetry points Muse's own telemetry export at endpoint. homeDir is the
 // developer's home, where the restore record lives.
 //
 // The record is written BEFORE the settings ("install ordering is a safety
-// property"): record-then-fail leaves a record uninstall treats as drift and
-// drops; settings-then-fail leaves a forced key with no way home. A re-run on a
-// converged file writes nothing, to either file. A `telemetry` value the
-// developer changed after OpenBox set it is theirs: it is refused, untouched,
-// rather than overwritten.
+// property"): a record with no settings behind it is treated by uninstall as
+// drift, while settings with no record would have no way home. If anything
+// after the record fails, the record goes back to what it was, so a failed run
+// leaves neither file changed and the next init does not mistake OpenBox's own
+// intended value for the developer's. A re-run on a converged file writes
+// nothing, to either file. A `telemetry` value the developer changed after
+// OpenBox set it is theirs: it is refused, untouched, rather than overwritten.
 //
 // replaced is the developer's previous value when this write displaced one that
 // was not already OpenBox's own, raw, for the install report; "" otherwise.
 func WriteTelemetry(settingsPath, homeDir, endpoint string) (replaced string, err error) {
-	path, before, existed, perm, err := resolvedSettings(settingsPath)
+	p, err := planTelemetry(settingsPath, homeDir, endpoint)
 	if err != nil {
 		return "", err
 	}
-	rec, err := loadPriorSettings(homeDir)
-	if err != nil {
+	if err := savePriorSettings(homeDir, p.rec); err != nil {
 		return "", err
 	}
-	doc := before
-	if !existed {
-		if doc, err = sjson.SetBytes([]byte("{}"), "schema_version", settingsSchemaVersion); err != nil {
-			return "", fmt.Errorf("muse: schema_version: %w", err)
-		}
-	}
-	desired := telemetryObject(endpoint)
-	current := gjson.GetBytes(doc, TelemetryKey)
-	entry, captured := rec.Keys[TelemetryKey]
-
-	switch {
-	case captured && current.Exists() && !canonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned)):
-		return "", fmt.Errorf("muse: %s holds a %q value that changed after OpenBox set it (%s); leaving it alone. "+
-			"Remove the key, or restore OpenBox's value, and run init again", path, TelemetryKey, current.Raw)
-	case captured && current.Exists():
-		// Ours. Only the endpoint can differ, and the original prior value stays.
-		entry.Owned = desired
-	default:
-		entry = priorValue{Present: current.Exists(), Raw: current.Raw, Owned: desired}
-		if current.Exists() {
-			replaced = current.Raw
-		}
-	}
-	rec.Keys[TelemetryKey] = entry
-	rec.SettingsPath = path
-	if err := savePriorSettings(homeDir, rec); err != nil {
-		return "", err
-	}
-	if current.Exists() && canonicalJSONEqual([]byte(current.Raw), []byte(desired)) {
+	if p.unchanged {
 		return "", nil
 	}
-
-	out, err := sjson.SetRawBytes(doc, TelemetryKey, []byte(desired))
-	if err != nil {
-		return "", fmt.Errorf("muse: setting %s in %s: %w", TelemetryKey, path, err)
+	fail := func(format string, args ...any) (string, error) {
+		_ = savePriorSettings(homeDir, p.previousRecord(homeDir))
+		return "", fmt.Errorf(format, args...)
 	}
-	out = finishSettingsWrite(out, before, existed)
-	if _, err := ValidateSettings(out); err != nil {
-		return "", fmt.Errorf("muse: refusing to write %s: %w", path, err)
+	if err := os.MkdirAll(filepath.Dir(p.path), 0o700); err != nil {
+		return fail("muse: settings dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("muse: settings dir: %w", err)
-	}
-	if err := hookflow.AtomicWriteFile(path, out, perm); err != nil {
-		return "", fmt.Errorf("muse: commit %s: %w", path, err)
+	if err := hookflow.AtomicWriteFile(p.path, p.out, p.perm); err != nil {
+		return fail("muse: commit %s: %w", p.path, err)
 	}
 	// Re-read what landed: a short or altered write is a machine that reads as
 	// exporting to OpenBox and does not.
-	written, rerr := os.ReadFile(path)
+	written, rerr := os.ReadFile(p.path)
 	if rerr == nil {
 		if _, rerr = ValidateSettings(written); rerr == nil {
-			if got := gjson.GetBytes(written, TelemetryKey); !got.Exists() || !canonicalJSONEqual([]byte(got.Raw), []byte(desired)) {
+			if got := gjson.GetBytes(written, TelemetryKey); !got.Exists() || !canonicalJSONEqual([]byte(got.Raw), []byte(p.desired)) {
 				rerr = errors.New("the telemetry value did not land as written")
 			}
 		}
 	}
 	if rerr != nil {
-		restoreSettingsFile(path, before, existed, perm)
-		return "", fmt.Errorf("muse: %s did not read back as written (%w); the previous file was restored", path, rerr)
+		restoreSettingsFile(p.path, p.before, p.existed, p.perm)
+		return fail("muse: %s did not read back as written (%w); the previous file was restored", p.path, rerr)
 	}
-	return replaced, nil
+	return p.replaced, nil
 }
 
 // finishSettingsWrite keeps a file's final whitespace, and gives a file this
