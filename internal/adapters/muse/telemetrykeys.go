@@ -198,6 +198,13 @@ func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, erro
 	case captured && p.current.Exists():
 		// Ours. Only the endpoint can differ, and the original prior value stays.
 		entry.Owned = p.desired
+	case p.current.Exists() && canonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)):
+		// No record, yet the key already holds exactly the value this lane
+		// writes: a lost record, or a settings file synced from a machine where
+		// OpenBox had set it. That value is OpenBox's, not the developer's, so it
+		// is recorded as absent; recording it as the prior value would have
+		// uninstall "restore" it and leave Muse exporting to a closed port.
+		entry = priorValue{Present: false, Owned: p.desired}
 	default:
 		entry = priorValue{Present: p.current.Exists(), Raw: p.current.Raw, Owned: p.desired}
 		if p.current.Exists() {

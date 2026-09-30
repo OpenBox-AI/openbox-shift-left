@@ -380,3 +380,26 @@ func TestCheckTelemetryRefusesWhatWriteWouldAndTouchesNothing(t *testing.T) {
 		t.Errorf("a drifted value passed the check: %v", err)
 	}
 }
+
+// With no record, a key that already holds exactly the lane's value is
+// OpenBox's (a lost record, a synced settings file), never the developer's:
+// uninstall deletes it rather than restoring a pointer at a receiver it is
+// about to remove.
+func TestWriteTelemetryWithNoRecordDoesNotAdoptItsOwnValueAsPrior(t *testing.T) {
+	ours := "{\n  \"schema_version\": 1,\n  \"telemetry\": " + telemetryObject(testEndpoint) + "\n}\n"
+	path, home := telemetrySandbox(t, ours)
+	replaced, err := WriteTelemetry(path, home, testEndpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced != "" {
+		t.Errorf("init reports replacing the developer's value %q; it was OpenBox's own", replaced)
+	}
+	res, err := RestoreTelemetry(path, home)
+	if err != nil || !res.Recorded || res.Present {
+		t.Fatalf("restore = %+v, %v; want the key deleted as absent before init", res, err)
+	}
+	if gjson.Get(readFile(t, path), "telemetry").Exists() {
+		t.Errorf("uninstall left the lane's pointer behind: %s", readFile(t, path))
+	}
+}
