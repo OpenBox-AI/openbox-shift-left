@@ -198,7 +198,7 @@ func TestReconcileCoversSubagentLogs(t *testing.T) {
 	}
 }
 
-func TestReconcileDisablesItselfOnALineThatIsNotJSON(t *testing.T) {
+func TestReconcileStepsOverALineThatIsNotJSON(t *testing.T) {
 	e := newReconcileEnv(t)
 	writeLog(t, e.logPath(""),
 		intentLine(1, "Write", "tu-1", t0, `{}`)+"this is not json\n"+intentLine(3, "Write", "tu-3", t1, `{}`))
@@ -210,10 +210,26 @@ func TestReconcileDisablesItselfOnALineThatIsNotJSON(t *testing.T) {
 	if last.Stage != trace.StageEvidenceReconcile || last.Outcome != "disabled" {
 		t.Errorf("last record = %+v", last)
 	}
-	// Stuck at the line it cannot read: the next pass is disabled again and
-	// reports nothing twice.
+	// One torn line blinds one pass, not the rest of the session: the next
+	// pass starts after it and still finds the gap behind it.
 	res = e.run(cutoffAfterAll)
-	if !res.Disabled || res.Gaps != 0 {
+	if res.Disabled || res.Intents != 1 || res.Gaps != 1 {
+		t.Fatalf("second pass = %+v", res)
+	}
+}
+
+// A line outside the schema is a format change, not a torn write: the pass
+// stops before it and stays there, and every later pass is unverified too.
+func TestReconcileStaysDisabledOnALineOutsideTheSchema(t *testing.T) {
+	e := newReconcileEnv(t)
+	writeLog(t, e.logPath(""),
+		intentLine(1, "Write", "tu-1", t0, `{}`)+
+			`{"schema_version":2,"record_type":"event","payload_type":"x.y","payload":{}}`+"\n"+
+			intentLine(3, "Write", "tu-3", t1, `{}`))
+	if res := e.run(cutoffAfterAll); !res.Disabled || res.Gaps != 1 {
+		t.Fatalf("first pass = %+v", res)
+	}
+	if res := e.run(cutoffAfterAll); !res.Disabled || res.Gaps != 0 {
 		t.Fatalf("second pass = %+v", res)
 	}
 }

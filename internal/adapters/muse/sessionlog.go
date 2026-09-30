@@ -32,10 +32,16 @@ import (
 //
 // Unknown payload types and kinds are normal and skipped. The reader gives up
 // (the pass is "unverified", see readOutcome.DecodeErr) only when the format
-// looks changed: a line that is not a JSON object, an envelope without a
-// payload_type, an envelope whose schema_version is not 1, a started record
-// missing its tool name or time, or minProbeLines or more lines in a pass of
-// which none is an envelope at all.
+// looks changed: an envelope without a payload_type, an envelope whose
+// schema_version is not 1, a started record missing its tool name or time, or
+// minProbeLines or more lines in a pass of which none is an envelope at all.
+// It stops BEFORE such a line and stays there, so every later pass is
+// unverified too until the adapter learns the new format.
+//
+// A complete line that is not a JSON object at all is a torn or corrupt write
+// (a crash mid-line, then an append), not a new format: the pass stops AFTER it,
+// counts it and is unverified, and the next pass goes on. Staying before it
+// would blind the reconciler for the rest of that session over one line.
 
 const (
 	sessionLogName = "session.jsonl"
@@ -201,9 +207,12 @@ type readOutcome struct {
 	// Rotated is set when the file was replaced or shortened and read afresh.
 	Rotated bool
 	// DecodeErr is set when the log does not look like the observed format (see
-	// the top of this file). For a bad line the pass stopped before it and the
-	// cursor stays there; for a pass with no envelope at all, it is past them.
+	// the top of this file). For a line outside the schema the pass stopped
+	// before it and the cursor stays there; for a corrupt line (Corrupt) and for
+	// a pass with no envelope at all, it is past them.
 	DecodeErr error
+	// Corrupt counts complete lines that were not a JSON object, stepped over.
+	Corrupt int
 }
 
 // errSchema is a line that could be read but does not have the join fields.
@@ -267,6 +276,13 @@ func readLog(path string, cur fileCursor, cutoff, deadline time.Time, maxBytes i
 		if st == lineBlank {
 			out.Cursor.Offset += sc.n
 			continue
+		}
+		if st == lineBad {
+			out.DecodeErr = errSchema
+			out.Corrupt++
+			out.Cursor.Offset += sc.n
+			out.Lines++
+			break
 		}
 		if st != lineOK {
 			out.DecodeErr = errSchema

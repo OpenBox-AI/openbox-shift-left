@@ -274,6 +274,31 @@ func TestReadLogLeavesIntentsNotOlderThanTheCutoff(t *testing.T) {
 	}
 }
 
+// A line that is not a JSON object is a torn write: the pass stops after it,
+// counts it and is unverified, and the next pass starts past it.
+func TestReadLogStepsOverACorruptLine(t *testing.T) {
+	good := intentLine(1, "bash", "tu-1", t0, `{}`)
+	for name, bad := range map[string]string{
+		"not json":   "garbage\n",
+		"array":      "[1,2]\n",
+		"torn value": `{"schema_version":1,"record_type":"ev` + "\n",
+	} {
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		writeLog(t, path, good+bad+intentLine(3, "bash", "tu-3", t2, `{}`))
+		out := read(t, path, fileCursor{}, cutoffAfterAll)
+		if out.DecodeErr == nil || out.Corrupt != 1 {
+			t.Errorf("%s: decode error %v, corrupt %d; want an unverified pass counting one", name, out.DecodeErr, out.Corrupt)
+		}
+		if len(out.Intents) != 1 || out.Cursor.Offset != int64(len(good+bad)) {
+			t.Errorf("%s: intents=%d cursor=%d, want the pass to stop just past the line", name, len(out.Intents), out.Cursor.Offset)
+		}
+		next := read(t, path, out.Cursor, cutoffAfterAll)
+		if next.DecodeErr != nil || len(next.Intents) != 1 || next.Intents[0].ToolUseID != "tu-3" {
+			t.Errorf("%s: next pass = %+v, want it to read tu-3 cleanly", name, next)
+		}
+	}
+}
+
 func TestReadLogStopsBeforeALineOutsideTheSchema(t *testing.T) {
 	good := intentLine(1, "bash", "tu-1", t0, `{}`)
 	startedAt := mustParse(t1).UnixMicro()
@@ -281,8 +306,6 @@ func TestReadLogStopsBeforeALineOutsideTheSchema(t *testing.T) {
 		return fmt.Sprintf(`{"schema_version":1,"recorded_at":%d,"record_type":"event","payload_type":"tool_batch.effect.started","payload":%s}`+"\n", at, payload)
 	}
 	for name, bad := range map[string]string{
-		"not json":            "garbage\n",
-		"array":               "[1,2]\n",
 		"envelope no payload": `{"schema_version":1,"record_type":"event","payload":{}}` + "\n",
 		"schema version 2":    `{"schema_version":2,"record_type":"event","payload_type":"x.y","payload":{}}` + "\n",
 		"started no name":     started(`{"kind":"tool_batch_effect","record":{"kind":"started","call_id":"c"}}`, startedAt),

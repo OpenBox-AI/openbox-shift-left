@@ -525,7 +525,7 @@ func (a *app) reportMuseEvidenceGaps() {
 	case err != nil:
 		a.museFinding("evidence-gaps", "unverified", label, "unverified: the local trace could not be read (%v)", err)
 	case sum.Unverified:
-		a.museFinding("evidence-gaps", "unverified", label, "unverified: the session-log reconciler stopped because Muse's session.jsonl no longer looks like the format observed on Muse 1.4.1 (a line that is not JSON, an unexpected schema_version, or no record envelopes at all); %d ungated Muse action(s) in the last 7 days before that", sum.Gaps)
+		a.museFinding("evidence-gaps", "unverified", label, "unverified: the session-log reconciler stopped because Muse's session.jsonl no longer looks like the format observed on Muse 1.4.1 (an unexpected schema_version or no record envelopes at all; or one corrupt line, which the next pass steps past); %d ungated Muse action(s) in the last 7 days before that", sum.Gaps)
 	case sum.Gaps == 0:
 		a.museFinding("evidence-gaps", "ok", label, "ok: 0 ungated Muse actions in the last 7 days (see `openbox trace <session>`)")
 	default:

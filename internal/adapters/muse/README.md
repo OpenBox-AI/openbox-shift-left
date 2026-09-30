@@ -61,9 +61,11 @@ The matching `tool_batch.effect.terminal` is not read. Only the join fields
 copied or logged.
 
 The reader stops and doctor says `unverified` only when the format looks
-changed: a line that is not JSON, an envelope with no `payload_type`, a
-`schema_version` other than 1, a started record missing its tool name or time, or
-a pass of eight or more lines none of which is an envelope.
+changed: an envelope with no `payload_type`, a `schema_version` other than 1, a
+started record missing its tool name or time, or a pass of eight or more lines
+none of which is an envelope. It stays stopped there until the adapter learns the
+new format. A line that is not JSON at all is a torn write, not a new format:
+that pass is `unverified`, and the next one starts past the line.
 
 ## Event mapping
 
