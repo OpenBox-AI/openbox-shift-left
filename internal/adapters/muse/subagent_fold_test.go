@@ -37,7 +37,7 @@ func rowMeta(r fakecore.Received) map[string]any {
 // A subagent's events land in the session that spawned it, as a Claude Code
 // subagent's do: one run, one WorkflowStarted, the subagent's start as a
 // subagent_started signal, every one of its rows tagged with agent_id and
-// agent_type, and its end closing nothing. The parent's run stays open.
+// agent_type, and its end (SubagentStop or its own SessionEnd) closing nothing. The parent's run stays open.
 func TestSubagentEventsFoldIntoTheParentSession(t *testing.T) {
 	root := pointSessionLogs(t)
 	writeParentJournal(t, root, "sess-0001", linkRecord("sess-0001", "sess-0002", "skill-reminder"))
@@ -50,6 +50,9 @@ func TestSubagentEventsFoldIntoTheParentSession(t *testing.T) {
 	runHook(t, "SubagentStart", fixture(t, "subagent-start", ""))
 	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-bash", "sess-0002"))
 	runHook(t, "SubagentStop", fixture(t, "subagent-stop", ""))
+	// Whether Muse fires SessionEnd under a child's own id is unobserved; if it
+	// does, it must not end the parent either.
+	runHook(t, "SessionEnd", fixture(t, "session-end", "sess-0002"))
 	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-read", ""))
 	flushSession(t, "sess-0001")
 

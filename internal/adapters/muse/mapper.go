@@ -74,7 +74,7 @@ func NewMapper(id Identity) Mapper {
 // A folded subagent event (foldSubagent) is mapped under its parent's session
 // and tagged the way Claude Code tags a subagent's events: agent_id and
 // agent_type on every event, SubagentStart as the SubagentStarted signal, and
-// no SessionEnded for SubagentStop.
+// no SessionEnded for its SubagentStop or SessionEnd.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 	ev, ok := m.mapHook(hook, e)
 	if ok && e.folded() {
@@ -215,6 +215,12 @@ func (m Mapper) mapHook(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.Metadata = hookflow.Compact(map[string]any{"turn_id": capStr(e.TurnID)})
 
 	case HookSessionEnd:
+		// A child session ending is not its parent ending: folded, it would
+		// close the parent's workflow mid-session, so it maps to nothing, the
+		// same as a folded SubagentStop.
+		if e.folded() {
+			return client.DevEvent{}, false
+		}
 		ev.EventType = client.EventSessionEnded
 		ev.EndedAt = ts
 		ev.Tool = agent
