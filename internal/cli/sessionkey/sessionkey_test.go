@@ -3,7 +3,8 @@ package sessionkey
 import "testing"
 
 // TestOTelAttrPerProviderCell pins the OTel attribute per provider: Claude
-// Code exports session.id, Codex exports conversation.id instead.
+// Code exports session.id, Codex exports conversation.id instead, and Muse
+// session_id.
 func TestOTelAttrPerProviderCell(t *testing.T) {
 	for _, tc := range []struct {
 		provider Provider
@@ -11,6 +12,7 @@ func TestOTelAttrPerProviderCell(t *testing.T) {
 	}{
 		{ClaudeCode, "session.id"},
 		{Codex, "conversation.id"},
+		{Muse, "session_id"},                         // underscore, not the dotted CC key: the three never overlap
 		{Provider("some-future-tool"), "session.id"}, // unnamed provider ⇒ the default every caller had
 	} {
 		if got := OTelAttr(tc.provider); got != tc.want {

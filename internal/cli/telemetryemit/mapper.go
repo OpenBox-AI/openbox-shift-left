@@ -96,6 +96,10 @@ type Mapper struct {
 	// a caller that WANTS that surface opts in with WithSessionAttr; the
 	// default path here is untouched.
 	sessionAttr string
+	// fields is which attributes of the record this mapper reads. The zero
+	// value is Claude Code's (defaultFieldMap), which Codex shares, so every
+	// existing caller keeps its byte-identical output.
+	fields FieldMap
 }
 
 // New builds a mapper for one developer identity. It takes no redactor,
@@ -119,6 +123,83 @@ func (m *Mapper) WithToolName(name string) *Mapper {
 func (m *Mapper) WithSessionAttr(attr string) *Mapper {
 	m.sessionAttr = attr
 	return m
+}
+
+// FieldMap names where one tool's model-call record keeps the facts the
+// mapper needs. The mapper's logic is the same for every tool; only the
+// attribute names differ, so a tool is a FieldMap rather than a second mapper.
+// A key left empty is a fact the tool does not export, and is not read.
+type FieldMap struct {
+	// Event is the event name that IS a model call; every other is skipped.
+	Event string
+	// RequestIDKeys are tried in order for the id that becomes the activity id.
+	RequestIDKeys []string
+	// ModelKey, DurationKey (milliseconds) and the token keys name the numbers.
+	ModelKey    string
+	DurationKey string
+	InputTokens, OutputTokens,
+	CacheReadTokens, CacheCreationTokens string
+	// InputIncludesCache is true when the input count already contains the
+	// cache-read tokens (the OpenAI and GenAI-semconv convention), so the total
+	// must not add them a second time. Anthropic reports them separately.
+	InputIncludesCache bool
+	// ProviderKey, when set, is copied into metadata as `provider`.
+	ProviderKey string
+	// RootSessionKey, when set and naming a usable session other than the
+	// record's own, folds the call into that session: a subagent's calls are
+	// recorded in the session that spawned it, tagged as a subagent's, the way
+	// the hook path folds the same child. KindKey names what kind of session the
+	// record's own is, and becomes the subagent's agent_id.
+	RootSessionKey string
+	KindKey        string
+	// URL is the synthesized stand-in for the call's endpoint on the span.
+	URL string
+}
+
+// defaultFieldMap is Claude Code's api_request, and Codex's too.
+var defaultFieldMap = FieldMap{
+	Event:               eventAPIRequest,
+	RequestIDKeys:       []string{"request_id", "client_request_id"},
+	ModelKey:            "model",
+	DurationKey:         "duration_ms",
+	InputTokens:         "input_tokens",
+	OutputTokens:        "output_tokens",
+	CacheReadTokens:     "cache_read_tokens",
+	CacheCreationTokens: "cache_creation_tokens",
+	URL:                 synthesizedLLMURL,
+}
+
+// MuseFieldMap is Muse Code's `model_call` log record, read off Muse 1.4.1's
+// own export (GenAI semconv 1.34, snake_case): the provider's response id with
+// Muse's message id as the fallback, and metadata only -- no content is ever
+// exported, so none can be read. Its input count includes the cached tokens.
+var MuseFieldMap = FieldMap{
+	Event:              "model_call",
+	RequestIDKeys:      []string{"gen_ai_response_id", "message_id"},
+	ModelKey:           "gen_ai_request_model",
+	DurationKey:        "duration_ms",
+	InputTokens:        "gen_ai_usage_input_tokens",
+	OutputTokens:       "gen_ai_usage_output_tokens",
+	CacheReadTokens:    "tokens_cached",
+	InputIncludesCache: true,
+	ProviderKey:        "gen_ai_provider_name",
+	RootSessionKey:     "session_root_id",
+	KindKey:            "session_kind",
+	URL:                "https://api.meta.ai/",
+}
+
+// WithFieldMap selects which attributes this mapper reads; the zero FieldMap
+// keeps Claude Code's. Returns the receiver so a caller can chain it.
+func (m *Mapper) WithFieldMap(f FieldMap) *Mapper {
+	m.fields = f
+	return m
+}
+
+func (m *Mapper) fieldMap() FieldMap {
+	if m.fields.Event == "" {
+		return defaultFieldMap
+	}
+	return m.fields
 }
 
 // defaultToolName is what an unset Mapper.toolName resolves to.
@@ -152,10 +233,11 @@ func (m *Mapper) EventsFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 	if m == nil || !m.policy.elected() {
 		return nil, SkipNotElected
 	}
-	if rec.EventName != eventAPIRequest {
+	fm := m.fieldMap()
+	if rec.EventName != fm.Event {
 		return nil, SkipUnhandledEvent
 	}
-	return m.turnFor(rec)
+	return m.turnFor(rec, fm)
 }
 
 const eventAPIRequest = "api_request"
@@ -164,7 +246,7 @@ const maxRequestIDLen = 128
 
 const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
-func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
+func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, Outcome) {
 	session := rec.Attrs[m.sessionAttrOrDefault()]
 	if !safeSessionID(session) {
 		return nil, DropBadSession
@@ -172,14 +254,24 @@ func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 	if rec.Timestamp.IsZero() {
 		return nil, DropNoTimestamp
 	}
-	reqID, ok := requestIDFrom(rec.Attrs)
+	reqID, ok := requestIDFrom(rec.Attrs, fm.RequestIDKeys)
 	if !ok {
 		return nil, DropNoRequestID
 	}
 
+	// The fold is decided before the run is read, so a subagent's call lands in
+	// the parent's run and the parent's halt latch. A record that names no usable
+	// other session stays in its own, exactly as an unlinked hook child does.
+	folded := false
+	if fm.RootSessionKey != "" {
+		if root := rec.Attrs[fm.RootSessionKey]; root != session && safeSessionID(root) {
+			session, folded = root, true
+		}
+	}
+
 	end := rec.Timestamp.UTC()
 	start := end
-	if d, ok := parseInt(rec.Attrs["duration_ms"]); ok && d > 0 {
+	if d, ok := parseInt(rec.Attrs[fm.DurationKey]); fm.DurationKey != "" && ok && d > 0 {
 		start = end.Add(-time.Duration(d) * time.Millisecond)
 	}
 
@@ -208,20 +300,20 @@ func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 			StartedAt:     start.Format(time.RFC3339Nano),
 			Tool:          client.Tool{Name: m.toolNameOrDefault(), Kind: client.ToolShell},
 			ActivityType:  client.ActivityTypeLLMCompletion,
-			Model:         rec.Attrs["model"],
+			Model:         rec.Attrs[fm.ModelKey],
 			OtelRequestID: reqID,
-			Metadata:      attributionMetadata(rec.Attrs),
+			Metadata:      metadataFor(rec.Attrs, fm, folded),
 			Span: &client.Span{
 				SemanticType: client.ActivityTypeLLMCompletion,
 				Stage:        stage,
 				HTTPMethod:   "POST",
-				HTTPURL:      synthesizedLLMURL,
+				HTTPURL:      fm.URL,
 			},
 		}
 		// Usage is known only at the close; zero-filling would claim no spend.
 		if eventType == client.EventTurnCompleted {
 			ev.EndedAt = end.Format(time.RFC3339Nano)
-			ev.Tokens = tokensFrom(rec.Attrs)
+			ev.Tokens = tokensFrom(rec.Attrs, fm)
 		}
 		ev.EventID = eventID(session, reqID, string(ev.EventType), ev.Timestamp)
 		return ev
@@ -235,8 +327,8 @@ func (m *Mapper) turnFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
 
 // requestIDFrom picks the id that becomes part of activity_id, and validates
 // it.
-func requestIDFrom(attrs map[string]string) (string, bool) {
-	for _, key := range []string{"request_id", "client_request_id"} {
+func requestIDFrom(attrs map[string]string, keys []string) (string, bool) {
+	for _, key := range keys {
 		if id := attrs[key]; safeRequestID(id) {
 			return id, true
 		}
@@ -272,7 +364,7 @@ func safeRequestID(s string) bool {
 // tokensFrom malformed means a number was reported and could not be read: the
 // field stays nil AND the total is withheld, because a sum that silently omits
 // a component reads as authoritative and is wrong.
-func tokensFrom(attrs map[string]string) *client.Tokens {
+func tokensFrom(attrs map[string]string, fm FieldMap) *client.Tokens {
 	var (
 		t       client.Tokens
 		sum     int
@@ -280,14 +372,19 @@ func tokensFrom(attrs map[string]string) *client.Tokens {
 		unknown bool
 	)
 	for _, f := range []struct {
-		key  string
-		dest **int
+		key      string
+		dest     **int
+		addToSum bool
 	}{
-		{"input_tokens", &t.Input},
-		{"output_tokens", &t.Output},
-		{"cache_read_tokens", &t.CacheRead},
-		{"cache_creation_tokens", &t.CacheCreationInput},
+		{fm.InputTokens, &t.Input, true},
+		{fm.OutputTokens, &t.Output, true},
+		// A cache read already inside the input count is not a second spend.
+		{fm.CacheReadTokens, &t.CacheRead, !fm.InputIncludesCache},
+		{fm.CacheCreationTokens, &t.CacheCreationInput, true},
 	} {
+		if f.key == "" {
+			continue
+		}
 		raw, present := attrs[f.key]
 		if !present {
 			continue
@@ -299,7 +396,9 @@ func tokensFrom(attrs map[string]string) *client.Tokens {
 		}
 		v := n
 		*f.dest = &v
-		sum += n
+		if f.addToSum {
+			sum += n
+		}
 		any = true
 	}
 	if !any {
@@ -380,6 +479,37 @@ func attributionMetadata(attrs map[string]string) map[string]any {
 	}
 	if len(m) == 0 {
 		return nil
+	}
+	return m
+}
+
+// subagentAgentType is the agent_type the hook path tags a folded Muse child
+// with; the same two keys (agent_type, agent_id) carry it here.
+const subagentAgentType = "subagent"
+
+// metadataFor is attributionMetadata plus what a tool's FieldMap adds: the
+// provider, and -- for a call folded into its parent's session -- the subagent
+// tags. Each value is an identifier bounded by capIdentifier, never content. A
+// map with neither extra is attributionMetadata exactly.
+func metadataFor(attrs map[string]string, fm FieldMap, folded bool) map[string]any {
+	m := attributionMetadata(attrs)
+	add := func(key, value string) {
+		if value == "" {
+			return
+		}
+		if m == nil {
+			m = make(map[string]any, 3)
+		}
+		m[key] = capIdentifier(value)
+	}
+	if fm.ProviderKey != "" {
+		add("provider", attrs[fm.ProviderKey])
+	}
+	if folded {
+		add("agent_type", subagentAgentType)
+		if fm.KindKey != "" {
+			add("agent_id", attrs[fm.KindKey])
+		}
 	}
 	return m
 }

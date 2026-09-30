@@ -1,0 +1,1342 @@
+{
+ "resourceLogs": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "fb.logs.scuba.table",
+      "value": {
+       "stringValue": "tbh_logs"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "tbh"
+      }
+     },
+     {
+      "key": "surface",
+      "value": {
+       "stringValue": "exec"
+      }
+     },
+     {
+      "key": "app_version",
+      "value": {
+       "stringValue": "1.4.1"
+      }
+     },
+     {
+      "key": "app_build_sha",
+      "value": {
+       "stringValue": "0000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "key": "platform",
+      "value": {
+       "stringValue": "macos"
+      }
+     },
+     {
+      "key": "arch",
+      "value": {
+       "stringValue": "aarch64"
+      }
+     },
+     {
+      "key": "gen_ai_semconv_version",
+      "value": {
+       "stringValue": "1.34.0"
+      }
+     }
+    ]
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "tbh"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1790792628037000000",
+       "severityNumber": 9,
+       "severityText": "INFO",
+       "body": {
+        "stringValue": "session_start"
+       },
+       "attributes": [
+        {
+         "key": "event_name",
+         "value": {
+          "stringValue": "session_start"
+         }
+        },
+        {
+         "key": "schema_version",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "session_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "mode",
+         "value": {
+          "stringValue": "new"
+         }
+        },
+        {
+         "key": "model_id",
+         "value": {
+          "stringValue": "muse-spark-1.3-contributor"
+         }
+        },
+        {
+         "key": "credential_backend",
+         "value": {
+          "stringValue": "keychain"
+         }
+        },
+        {
+         "key": "keychain_fallback_reason",
+         "value": {
+          "stringValue": "none"
+         }
+        },
+        {
+         "key": "security_mode",
+         "value": {
+          "stringValue": "normal"
+         }
+        },
+        {
+         "key": "disk_workspace_free_bytes",
+         "value": {
+          "intValue": "212403617792"
+         }
+        },
+        {
+         "key": "disk_data_dir_free_bytes",
+         "value": {
+          "intValue": "212403617792"
+         }
+        },
+        {
+         "key": "turn_index",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "trajectory_id",
+         "value": {
+          "stringValue": "trajectory_feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "session_kind",
+         "value": {
+          "stringValue": "main"
+         }
+        },
+        {
+         "key": "session_root_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "step_id",
+         "value": {
+          "intValue": "4"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "fb.logs.scuba.table",
+      "value": {
+       "stringValue": "tbh_logs"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "tbh"
+      }
+     },
+     {
+      "key": "surface",
+      "value": {
+       "stringValue": "exec"
+      }
+     },
+     {
+      "key": "app_version",
+      "value": {
+       "stringValue": "1.4.1"
+      }
+     },
+     {
+      "key": "app_build_sha",
+      "value": {
+       "stringValue": "0000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "key": "platform",
+      "value": {
+       "stringValue": "macos"
+      }
+     },
+     {
+      "key": "arch",
+      "value": {
+       "stringValue": "aarch64"
+      }
+     },
+     {
+      "key": "gen_ai_semconv_version",
+      "value": {
+       "stringValue": "1.34.0"
+      }
+     }
+    ]
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "tbh"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1790792635622000000",
+       "severityNumber": 9,
+       "severityText": "INFO",
+       "body": {
+        "stringValue": "model_call"
+       },
+       "attributes": [
+        {
+         "key": "event_name",
+         "value": {
+          "stringValue": "model_call"
+         }
+        },
+        {
+         "key": "schema_version",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "session_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "gen_ai_response_id",
+         "value": {
+          "stringValue": "resp_scrubbedfeed0002"
+         }
+        },
+        {
+         "key": "message_id",
+         "value": {
+          "stringValue": "feed0003-0000-4000-8000-000000000003"
+         }
+        },
+        {
+         "key": "gen_ai_provider_name",
+         "value": {
+          "stringValue": "meta"
+         }
+        },
+        {
+         "key": "gen_ai_request_model",
+         "value": {
+          "stringValue": "muse-spark-1.3-contributor"
+         }
+        },
+        {
+         "key": "gen_ai_response_finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool-calls"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "has_tool_calls",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "gen_ai_usage_input_tokens",
+         "value": {
+          "intValue": "29300"
+         }
+        },
+        {
+         "key": "gen_ai_usage_output_tokens",
+         "value": {
+          "intValue": "119"
+         }
+        },
+        {
+         "key": "attempts_used",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "retry_time_lost_ms",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "bytes_received",
+         "value": {
+          "intValue": "218279"
+         }
+        },
+        {
+         "key": "stream_events_received",
+         "value": {
+          "intValue": "10"
+         }
+        },
+        {
+         "key": "time_to_first_event_ms",
+         "value": {
+          "intValue": "479"
+         }
+        },
+        {
+         "key": "eof_clean",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": "4358"
+         }
+        },
+        {
+         "key": "tokens_cached",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "turn_index",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "trajectory_id",
+         "value": {
+          "stringValue": "trajectory_feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "session_kind",
+         "value": {
+          "stringValue": "main"
+         }
+        },
+        {
+         "key": "session_root_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "step_id",
+         "value": {
+          "intValue": "62"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "fb.logs.scuba.table",
+      "value": {
+       "stringValue": "tbh_logs"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "tbh"
+      }
+     },
+     {
+      "key": "surface",
+      "value": {
+       "stringValue": "exec"
+      }
+     },
+     {
+      "key": "app_version",
+      "value": {
+       "stringValue": "1.4.1"
+      }
+     },
+     {
+      "key": "app_build_sha",
+      "value": {
+       "stringValue": "0000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "key": "platform",
+      "value": {
+       "stringValue": "macos"
+      }
+     },
+     {
+      "key": "arch",
+      "value": {
+       "stringValue": "aarch64"
+      }
+     },
+     {
+      "key": "gen_ai_semconv_version",
+      "value": {
+       "stringValue": "1.34.0"
+      }
+     }
+    ]
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "tbh"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1790792636765000000",
+       "severityNumber": 9,
+       "severityText": "INFO",
+       "body": {
+        "stringValue": "tool_call"
+       },
+       "attributes": [
+        {
+         "key": "event_name",
+         "value": {
+          "stringValue": "tool_call"
+         }
+        },
+        {
+         "key": "schema_version",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "session_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "gen_ai_tool_name",
+         "value": {
+          "stringValue": "bash"
+         }
+        },
+        {
+         "key": "tool_source",
+         "value": {
+          "stringValue": "builtin"
+         }
+        },
+        {
+         "key": "status",
+         "value": {
+          "stringValue": "success"
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": "84"
+         }
+        },
+        {
+         "key": "backgrounded",
+         "value": {
+          "stringValue": "none"
+         }
+        },
+        {
+         "key": "turn_id",
+         "value": {
+          "stringValue": "feed0004-0000-4000-8000-000000000004"
+         }
+        },
+        {
+         "key": "gen_ai_tool_call_id",
+         "value": {
+          "stringValue": "call_scrubbedfeed0005"
+         }
+        },
+        {
+         "key": "message_id",
+         "value": {
+          "stringValue": "feed0003-0000-4000-8000-000000000003"
+         }
+        },
+        {
+         "key": "turn_index",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "trajectory_id",
+         "value": {
+          "stringValue": "trajectory_feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "session_kind",
+         "value": {
+          "stringValue": "main"
+         }
+        },
+        {
+         "key": "session_root_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "step_id",
+         "value": {
+          "intValue": "77"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "fb.logs.scuba.table",
+      "value": {
+       "stringValue": "tbh_logs"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "tbh"
+      }
+     },
+     {
+      "key": "surface",
+      "value": {
+       "stringValue": "exec"
+      }
+     },
+     {
+      "key": "app_version",
+      "value": {
+       "stringValue": "1.4.1"
+      }
+     },
+     {
+      "key": "app_build_sha",
+      "value": {
+       "stringValue": "0000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "key": "platform",
+      "value": {
+       "stringValue": "macos"
+      }
+     },
+     {
+      "key": "arch",
+      "value": {
+       "stringValue": "aarch64"
+      }
+     },
+     {
+      "key": "gen_ai_semconv_version",
+      "value": {
+       "stringValue": "1.34.0"
+      }
+     }
+    ]
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "tbh"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1790792640572000000",
+       "severityNumber": 9,
+       "severityText": "INFO",
+       "body": {
+        "stringValue": "model_call"
+       },
+       "attributes": [
+        {
+         "key": "event_name",
+         "value": {
+          "stringValue": "model_call"
+         }
+        },
+        {
+         "key": "schema_version",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "session_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "gen_ai_response_id",
+         "value": {
+          "stringValue": "resp_scrubbedfeed0006"
+         }
+        },
+        {
+         "key": "message_id",
+         "value": {
+          "stringValue": "feed0007-0000-4000-8000-000000000007"
+         }
+        },
+        {
+         "key": "gen_ai_provider_name",
+         "value": {
+          "stringValue": "meta"
+         }
+        },
+        {
+         "key": "gen_ai_request_model",
+         "value": {
+          "stringValue": "muse-spark-1.3-contributor"
+         }
+        },
+        {
+         "key": "has_tool_calls",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "gen_ai_usage_input_tokens",
+         "value": {
+          "intValue": "29513"
+         }
+        },
+        {
+         "key": "gen_ai_usage_output_tokens",
+         "value": {
+          "intValue": "38"
+         }
+        },
+        {
+         "key": "attempts_used",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "retry_time_lost_ms",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "bytes_received",
+         "value": {
+          "intValue": "218343"
+         }
+        },
+        {
+         "key": "stream_events_received",
+         "value": {
+          "intValue": "12"
+         }
+        },
+        {
+         "key": "time_to_first_event_ms",
+         "value": {
+          "intValue": "304"
+         }
+        },
+        {
+         "key": "eof_clean",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": "2687"
+         }
+        },
+        {
+         "key": "tokens_cached",
+         "value": {
+          "intValue": "29297"
+         }
+        },
+        {
+         "key": "turn_index",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "trajectory_id",
+         "value": {
+          "stringValue": "trajectory_feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "session_kind",
+         "value": {
+          "stringValue": "main"
+         }
+        },
+        {
+         "key": "session_root_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "step_id",
+         "value": {
+          "intValue": "102"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "fb.logs.scuba.table",
+      "value": {
+       "stringValue": "tbh_logs"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "tbh"
+      }
+     },
+     {
+      "key": "surface",
+      "value": {
+       "stringValue": "exec"
+      }
+     },
+     {
+      "key": "app_version",
+      "value": {
+       "stringValue": "1.4.1"
+      }
+     },
+     {
+      "key": "app_build_sha",
+      "value": {
+       "stringValue": "0000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "key": "platform",
+      "value": {
+       "stringValue": "macos"
+      }
+     },
+     {
+      "key": "arch",
+      "value": {
+       "stringValue": "aarch64"
+      }
+     },
+     {
+      "key": "gen_ai_semconv_version",
+      "value": {
+       "stringValue": "1.34.0"
+      }
+     }
+    ]
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "tbh"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1790792666695000000",
+       "severityNumber": 9,
+       "severityText": "INFO",
+       "body": {
+        "stringValue": "model_call"
+       },
+       "attributes": [
+        {
+         "key": "event_name",
+         "value": {
+          "stringValue": "model_call"
+         }
+        },
+        {
+         "key": "schema_version",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "session_id",
+         "value": {
+          "stringValue": "feed0008-0000-4000-8000-000000000008"
+         }
+        },
+        {
+         "key": "gen_ai_response_id",
+         "value": {
+          "stringValue": "resp_scrubbedfeed0009"
+         }
+        },
+        {
+         "key": "message_id",
+         "value": {
+          "stringValue": "feed000a-0000-4000-8000-00000000000a"
+         }
+        },
+        {
+         "key": "gen_ai_provider_name",
+         "value": {
+          "stringValue": "meta"
+         }
+        },
+        {
+         "key": "gen_ai_request_model",
+         "value": {
+          "stringValue": "muse-spark-1.3-contributor"
+         }
+        },
+        {
+         "key": "gen_ai_response_finish_reasons",
+         "value": {
+          "arrayValue": {
+           "values": [
+            {
+             "stringValue": "tool-calls"
+            }
+           ]
+          }
+         }
+        },
+        {
+         "key": "has_tool_calls",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "gen_ai_usage_input_tokens",
+         "value": {
+          "intValue": "3511"
+         }
+        },
+        {
+         "key": "gen_ai_usage_output_tokens",
+         "value": {
+          "intValue": "1424"
+         }
+        },
+        {
+         "key": "attempts_used",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "retry_time_lost_ms",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "bytes_received",
+         "value": {
+          "intValue": "63834"
+         }
+        },
+        {
+         "key": "stream_events_received",
+         "value": {
+          "intValue": "22"
+         }
+        },
+        {
+         "key": "time_to_first_event_ms",
+         "value": {
+          "intValue": "9"
+         }
+        },
+        {
+         "key": "eof_clean",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "duration_ms",
+         "value": {
+          "intValue": "22104"
+         }
+        },
+        {
+         "key": "tokens_cached",
+         "value": {
+          "intValue": "2929"
+         }
+        },
+        {
+         "key": "turn_index",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "trajectory_id",
+         "value": {
+          "stringValue": "trajectory_feed0008-0000-4000-8000-000000000008"
+         }
+        },
+        {
+         "key": "trajectory_parent_id",
+         "value": {
+          "stringValue": "trajectory_feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "session_kind",
+         "value": {
+          "stringValue": "reminder"
+         }
+        },
+        {
+         "key": "session_root_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "step_id",
+         "value": {
+          "intValue": "29"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "fb.logs.scuba.table",
+      "value": {
+       "stringValue": "tbh_logs"
+      }
+     },
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "tbh"
+      }
+     },
+     {
+      "key": "surface",
+      "value": {
+       "stringValue": "exec"
+      }
+     },
+     {
+      "key": "app_version",
+      "value": {
+       "stringValue": "1.4.1"
+      }
+     },
+     {
+      "key": "app_build_sha",
+      "value": {
+       "stringValue": "0000000000000000000000000000000000000000"
+      }
+     },
+     {
+      "key": "platform",
+      "value": {
+       "stringValue": "macos"
+      }
+     },
+     {
+      "key": "arch",
+      "value": {
+       "stringValue": "aarch64"
+      }
+     },
+     {
+      "key": "gen_ai_semconv_version",
+      "value": {
+       "stringValue": "1.34.0"
+      }
+     }
+    ]
+   },
+   "scopeLogs": [
+    {
+     "scope": {
+      "name": "tbh"
+     },
+     "logRecords": [
+      {
+       "timeUnixNano": "1790792669110000000",
+       "severityNumber": 9,
+       "severityText": "INFO",
+       "body": {
+        "stringValue": "turn_end"
+       },
+       "attributes": [
+        {
+         "key": "event_name",
+         "value": {
+          "stringValue": "turn_end"
+         }
+        },
+        {
+         "key": "schema_version",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "session_id",
+         "value": {
+          "stringValue": "feed0008-0000-4000-8000-000000000008"
+         }
+        },
+        {
+         "key": "outcome",
+         "value": {
+          "stringValue": "completed"
+         }
+        },
+        {
+         "key": "turn_id",
+         "value": {
+          "stringValue": "feed0008-0000-4000-8000-000000000008"
+         }
+        },
+        {
+         "key": "wall_ms",
+         "value": {
+          "intValue": "28261"
+         }
+        },
+        {
+         "key": "session_elapsed_ms",
+         "value": {
+          "intValue": "41889"
+         }
+        },
+        {
+         "key": "time_to_first_token_ms",
+         "value": {
+          "intValue": "8445"
+         }
+        },
+        {
+         "key": "tool_calls",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "model_calls",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tokens_input",
+         "value": {
+          "intValue": "3511"
+         }
+        },
+        {
+         "key": "tokens_output",
+         "value": {
+          "intValue": "1424"
+         }
+        },
+        {
+         "key": "steers",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "todo_revisions",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "retries",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_exec",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_file_change",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_search_read",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_mcp",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_subagent",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_web",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tools_other",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tokens_cached",
+         "value": {
+          "intValue": "2929"
+         }
+        },
+        {
+         "key": "tokens_reasoning",
+         "value": {
+          "intValue": "1274"
+         }
+        },
+        {
+         "key": "phase_before_first_sampling_ms",
+         "value": {
+          "intValue": "3683"
+         }
+        },
+        {
+         "key": "phase_sampling_ms",
+         "value": {
+          "intValue": "22148"
+         }
+        },
+        {
+         "key": "phase_inter_sampling_overhead_ms",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "phase_tool_blocking_ms",
+         "value": {
+          "intValue": "8"
+         }
+        },
+        {
+         "key": "phase_after_last_sampling_ms",
+         "value": {
+          "intValue": "2428"
+         }
+        },
+        {
+         "key": "signals_interrupts",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "signals_approval_denials",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "compaction_count",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "rss_self_bytes",
+         "value": {
+          "intValue": "143572992"
+         }
+        },
+        {
+         "key": "rss_tree_bytes",
+         "value": {
+          "intValue": "143572992"
+         }
+        },
+        {
+         "key": "cpu_self_ms",
+         "value": {
+          "intValue": "753"
+         }
+        },
+        {
+         "key": "cpu_children_ms",
+         "value": {
+          "intValue": "1098"
+         }
+        },
+        {
+         "key": "fds_open",
+         "value": {
+          "intValue": "320"
+         }
+        },
+        {
+         "key": "procs_live",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "unified_exec_live_sessions",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "turn_index",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "trajectory_id",
+         "value": {
+          "stringValue": "trajectory_feed0008-0000-4000-8000-000000000008"
+         }
+        },
+        {
+         "key": "trajectory_parent_id",
+         "value": {
+          "stringValue": "trajectory_feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "session_kind",
+         "value": {
+          "stringValue": "reminder"
+         }
+        },
+        {
+         "key": "session_root_id",
+         "value": {
+          "stringValue": "feed0001-0000-4000-8000-000000000001"
+         }
+        },
+        {
+         "key": "step_id",
+         "value": {
+          "intValue": "50"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

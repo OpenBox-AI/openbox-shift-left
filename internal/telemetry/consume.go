@@ -62,8 +62,10 @@ func (r *Receiver) deliver(ctx context.Context, rec Record) {
 }
 
 func eventName(attrs pcommon.Map) string {
-	if v, ok := attrs.Get(eventNameAttr); ok {
-		return truncate(v.AsString())
+	for _, key := range eventNameAttrs {
+		if v, ok := attrs.Get(key); ok {
+			return truncate(v.AsString())
+		}
 	}
 	return ""
 }

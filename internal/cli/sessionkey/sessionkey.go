@@ -78,13 +78,21 @@ const defaultOTelAttr = "session.id"
 // no `session.id` attribute at all, only `conversation.id`.
 const codexOTelAttr = "conversation.id"
 
+// museOTelAttr is what Muse's own telemetry export carries: `session_id`, with
+// an underscore (Muse's attributes are snake_case, not dotted), on every log
+// record of a session.
+const museOTelAttr = "session_id"
+
 // OTelAttr returns the OTel attribute a provider's turn exports its session
 // identity under: "session.id" for Claude Code (and any provider this table
 // does not otherwise name -- the default every caller had before this
-// function existed), "conversation.id" for Codex.
+// function existed), "conversation.id" for Codex, "session_id" for Muse.
 func OTelAttr(p Provider) string {
-	if p == Codex {
+	switch p {
+	case Codex:
 		return codexOTelAttr
+	case Muse:
+		return museOTelAttr
 	}
 	return defaultOTelAttr
 }

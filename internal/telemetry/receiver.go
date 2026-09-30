@@ -91,6 +91,7 @@ func (r *Receiver) Start(ctx context.Context, host component.Host) error {
 	if err != nil {
 		return err
 	}
+	host = aliasHost{host}
 
 	for i, c := range built {
 		if err := c.Start(ctx, host); err != nil {
@@ -122,6 +123,7 @@ func (r *Receiver) build(ctx context.Context) ([]component.Component, error) {
 	httpCfg.NetAddr.Endpoint = r.cfg.Addr
 	httpCfg.MaxRequestBodySize = MaxRequestBodyBytes
 	httpCfg.ReadHeaderTimeout = 10 * time.Second
+	httpCfg.Middlewares = aliasMiddleware
 
 	cfg.Protocols.HTTP = configoptional.Some(otlpreceiver.HTTPConfig{
 		ServerConfig:   httpCfg,

@@ -10,7 +10,8 @@ type Record struct {
 	Signal Signal
 
 	// EventName is the provider's own event discriminator (its `event.name`
-	// attribute; "api_request", "tool_decision", "user_prompt", …). The mapper
+	// attribute, or `event_name` for a tool that snake_cases its attributes
+	// like Muse; "api_request", "model_call", "tool_decision", …). The mapper
 	// dispatches on it, so an unrecognized value must reach the mapper intact
 	// rather than being normalized away here.
 	EventName string
@@ -33,6 +34,10 @@ const (
 	SignalTraces  Signal = "traces"
 	SignalMetrics Signal = "metrics"
 )
+
+// eventNameAttrs are the keys an event's name may arrive under, dotted first:
+// Claude Code and Codex use `event.name`, Muse `event_name`.
+var eventNameAttrs = []string{eventNameAttr, "event_name"}
 
 const eventNameAttr = "event.name"
 

@@ -56,14 +56,17 @@ func guards() []subtreeGuard {
 		{
 			name: "internal/telemetry",
 			external: map[string]bool{
-				"go.opentelemetry.io/collector/component":             true,
-				"go.opentelemetry.io/collector/config/configgrpc":     true,
-				"go.opentelemetry.io/collector/config/confighttp":     true,
-				"go.opentelemetry.io/collector/config/configoptional": true,
-				"go.opentelemetry.io/collector/consumer":              true,
-				"go.opentelemetry.io/collector/pdata":                 true,
-				"go.opentelemetry.io/collector/receiver":              true,
-				"go.opentelemetry.io/collector/receiver/otlpreceiver": true,
+				"go.opentelemetry.io/collector/component":         true,
+				"go.opentelemetry.io/collector/config/configgrpc": true,
+				"go.opentelemetry.io/collector/config/confighttp": true,
+				// Names the path-alias middleware in the HTTP server config, which is
+				// how Muse's own export paths reach the one OTLP handler.
+				"go.opentelemetry.io/collector/config/configmiddleware": true,
+				"go.opentelemetry.io/collector/config/configoptional":   true,
+				"go.opentelemetry.io/collector/consumer":                true,
+				"go.opentelemetry.io/collector/pdata":                   true,
+				"go.opentelemetry.io/collector/receiver":                true,
+				"go.opentelemetry.io/collector/receiver/otlpreceiver":   true,
 				// component.TelemetrySettings types its fields as *zap.Logger,
 				// trace.TracerProvider and metric.MeterProvider, so a non-nil value
 				// cannot be supplied without naming these. The zero value crashed
