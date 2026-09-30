@@ -39,10 +39,16 @@ func TestEveryLaneUnitArgvIsAcceptedByItsOwnCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	pacRecord := filepath.Join(t.TempDir(), "activation.json")
+	// Muse's settings path rides the telemetry unit only; an unparsable file is
+	// the loud case that proves the daemon READ --muse-settings.
+	museConfig := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(museConfig, []byte(`{"telemetry":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	for name, spec := range map[string]laneservice.Spec{
 		"telemetry": laneservice.Telemetry(telemetry.DefaultAddr, settings, true).
-			WithCodexSettings(codexConfig).WithPACRecord(pacRecord),
+			WithCodexSettings(codexConfig).WithPACRecord(pacRecord).WithMuseSettings(museConfig),
 		"transport": laneservice.Transport(transport.DefaultAddr, settings, true).
 			WithProviders([]string{"claude-code", "codex"}).
 			WithCodexSettings(codexConfig).WithPACRecord(pacRecord),
@@ -102,6 +108,10 @@ func TestEveryLaneUnitArgvIsAcceptedByItsOwnCommand(t *testing.T) {
 			if !strings.Contains(errb.String(), "CANNOT DECIDE whether to emit Codex model-call turns") {
 				t.Errorf("%s did not report the unreadable Codex config it was handed, so it is "+
 					"not reading --codex-settings; stderr: %s", name, errb.String())
+			}
+			if name == "telemetry" && !strings.Contains(errb.String(), "CANNOT DECIDE whether to emit Muse model-call turns") {
+				t.Errorf("telemetry did not report the unreadable Muse settings it was handed, so it is "+
+					"not reading --muse-settings; stderr: %s", errb.String())
 			}
 		})
 	}

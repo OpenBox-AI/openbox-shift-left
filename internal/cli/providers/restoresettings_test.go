@@ -140,3 +140,48 @@ func TestRestoreProviderSettingsOnAMachineWithNoRecordIsANoOp(t *testing.T) {
 		t.Errorf("a no-record restore rewrote the settings file: %s", raw)
 	}
 }
+
+// TestRestoreProviderSettingsMuseRestoresTelemetry exercises the Muse arm
+// through the registry door: init's write, then the restore to the exact
+// prior bytes, deleting the key when there was none.
+func TestRestoreProviderSettingsMuseRestoresTelemetry(t *testing.T) {
+	for _, tc := range []struct {
+		name, before string
+		wantPresent  bool
+	}{
+		{"absent before", "{\n  \"schema_version\": 1\n}\n", false},
+		{"present before", "{\n  \"schema_version\": 1,\n  \"telemetry\": {\"enabled\": false}\n}\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			settingsPath := filepath.Join(t.TempDir(), "settings.json")
+			if err := os.WriteFile(settingsPath, []byte(tc.before), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			replaced, err := providers.WriteMuseTelemetry(settingsPath, home, "http://127.0.0.1:8789")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (replaced != "") != tc.wantPresent {
+				t.Errorf("replaced = %q, want a displaced value reported exactly when one existed", replaced)
+			}
+			if !providers.HasOwnedMuseTelemetry(settingsPath, home) {
+				t.Fatal("the written value is not reported as owned")
+			}
+			res, err := providers.RestoreProviderSettings("muse", settingsPath, home)
+			if err != nil || !res.Recorded || res.Drifted || res.Present != tc.wantPresent {
+				t.Fatalf("result = %+v, %v", res, err)
+			}
+			if got, _ := os.ReadFile(settingsPath); string(got) != tc.before {
+				t.Errorf("settings after restore = %q, want %q", got, tc.before)
+			}
+			if _, err := os.Stat(providers.MusePriorSettingsPath(home)); !os.IsNotExist(err) {
+				t.Error("the restore record outlived a completed restore")
+			}
+			// Nothing recorded any more: a second uninstall is a quiet no-op.
+			if res, err := providers.RestoreProviderSettings("muse", settingsPath, home); err != nil || res.Recorded {
+				t.Errorf("second restore = %+v, %v", res, err)
+			}
+		})
+	}
+}

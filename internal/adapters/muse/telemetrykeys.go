@@ -1,0 +1,348 @@
+package muse
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+)
+
+// Muse's telemetry lane is one key of its own settings.json. Setting
+// `telemetry` to {enabled, destination:"external", endpoint} makes Muse export
+// OTLP/HTTP to that endpoint instead of Meta's own destinations; nothing in the
+// environment does it (OTEL_EXPORTER_OTLP_ENDPOINT alone is ignored, measured
+// on Muse 1.4.1). So the lane is a write to a file the developer owns, and
+// this file is the whole of it: record what was there first, merge one key by
+// path so every other byte survives, read it back, and on uninstall put back
+// exactly what was recorded -- or leave a value the developer has since
+// changed.
+
+// TelemetryKey is the settings.json key the lane owns.
+const TelemetryKey = "telemetry"
+
+// priorSettingsSchema versions the restore record.
+const priorSettingsSchema = "openbox.muse.prior-settings/v1"
+
+// priorValue is the key's value from before OpenBox first wrote it, plus what
+// OpenBox wrote. Present distinguishes "the key was absent, so restore means
+// delete" from "the key held some JSON value, restore verbatim"; Raw is
+// gjson's raw form, so a prior `false` or `null` or a whole object goes back
+// as the bytes the developer typed. Owned is the value OpenBox set: a current
+// value that is not it is the developer's, and is never overwritten or
+// restored over.
+type priorValue struct {
+	Present bool   `json:"present"`
+	Raw     string `json:"raw,omitempty"`
+	Owned   string `json:"owned"`
+}
+
+// priorSettings is the whole restore record: one file of its own under
+// ~/.openbox (not dev.json, which holds coordinates only, and not .env, which
+// holds secrets only).
+type priorSettings struct {
+	Schema       string                `json:"schema"`
+	SettingsPath string                `json:"settings_path,omitempty"`
+	Keys         map[string]priorValue `json:"keys"`
+}
+
+// PriorSettingsPath is where the restore record lives, exported so uninstall
+// can name and purge it without importing the rest of this adapter.
+func PriorSettingsPath(homeDir string) string {
+	return filepath.Join(homeDir, ".openbox", "muse-prior-settings.json")
+}
+
+func loadPriorSettings(homeDir string) (priorSettings, error) {
+	path := PriorSettingsPath(homeDir)
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return priorSettings{Schema: priorSettingsSchema, Keys: map[string]priorValue{}}, nil
+	}
+	if err != nil {
+		return priorSettings{}, fmt.Errorf("muse: reading %s: %w", path, err)
+	}
+	var rec priorSettings
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		// Refused rather than replaced: continuing without knowing what an earlier
+		// run captured would let a later init take its own forced value for the
+		// developer's original.
+		return priorSettings{}, fmt.Errorf("muse: %s is not valid JSON, refusing to continue without knowing "+
+			"what was in Muse's settings before OpenBox: %w", path, err)
+	}
+	if rec.Keys == nil {
+		rec.Keys = map[string]priorValue{}
+	}
+	rec.Schema = priorSettingsSchema
+	return rec, nil
+}
+
+func savePriorSettings(homeDir string, rec priorSettings) error {
+	path := PriorSettingsPath(homeDir)
+	if len(rec.Keys) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("muse: removing %s: %w", path, err)
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("muse: creating %s: %w", filepath.Dir(path), err)
+	}
+	raw, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("muse: encoding %s: %w", path, err)
+	}
+	if err := hookflow.AtomicWriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("muse: writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// telemetryObject is the value the lane owns. The endpoint is the receiver's
+// base URL: Muse appends /muse-code/telemetry/{logs,traces} itself.
+func telemetryObject(endpoint string) string {
+	raw, _ := json.Marshal(struct {
+		Enabled     bool   `json:"enabled"`
+		Destination string `json:"destination"`
+		Endpoint    string `json:"endpoint"`
+	}{true, "external", endpoint})
+	return string(raw)
+}
+
+// resolvedSettings returns the real path behind a settings file (a dotfiles
+// manager often makes it a symlink, and renaming over the link would replace
+// it with a regular file), its bytes, whether it exists, and its permissions.
+// A file Muse could not read is refused, because Muse drops every hook in it.
+func resolvedSettings(path string) (resolved string, before []byte, existed bool, perm os.FileMode, err error) {
+	resolved, perm = path, 0o600
+	if r, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
+		resolved = r
+	}
+	before, err = os.ReadFile(resolved)
+	switch {
+	case err == nil:
+		existed = true
+		if info, statErr := os.Stat(resolved); statErr == nil {
+			perm = info.Mode().Perm()
+		}
+		if _, vErr := ValidateSettings(before); vErr != nil {
+			return "", nil, false, 0, fmt.Errorf("muse: refusing to modify %s: %w; Muse drops every setting in a file it "+
+				"cannot read, so fix or remove it and run init again. Nothing was written", resolved, vErr)
+		}
+	case os.IsNotExist(err):
+		before, err = nil, nil
+	default:
+		return "", nil, false, 0, fmt.Errorf("muse: read %s: %w", resolved, err)
+	}
+	return resolved, before, existed, perm, nil
+}
+
+// WriteTelemetry points Muse's own telemetry export at endpoint. homeDir is the
+// developer's home, where the restore record lives.
+//
+// The record is written BEFORE the settings ("install ordering is a safety
+// property"): record-then-fail leaves a record uninstall treats as drift and
+// drops; settings-then-fail leaves a forced key with no way home. A re-run on a
+// converged file writes nothing, to either file. A `telemetry` value the
+// developer changed after OpenBox set it is theirs: it is refused, untouched,
+// rather than overwritten.
+//
+// replaced is the developer's previous value when this write displaced one that
+// was not already OpenBox's own, raw, for the install report; "" otherwise.
+func WriteTelemetry(settingsPath, homeDir, endpoint string) (replaced string, err error) {
+	path, before, existed, perm, err := resolvedSettings(settingsPath)
+	if err != nil {
+		return "", err
+	}
+	rec, err := loadPriorSettings(homeDir)
+	if err != nil {
+		return "", err
+	}
+	doc := before
+	if !existed {
+		if doc, err = sjson.SetBytes([]byte("{}"), "schema_version", settingsSchemaVersion); err != nil {
+			return "", fmt.Errorf("muse: schema_version: %w", err)
+		}
+	}
+	desired := telemetryObject(endpoint)
+	current := gjson.GetBytes(doc, TelemetryKey)
+	entry, captured := rec.Keys[TelemetryKey]
+
+	switch {
+	case captured && current.Exists() && !canonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned)):
+		return "", fmt.Errorf("muse: %s holds a %q value that changed after OpenBox set it (%s); leaving it alone. "+
+			"Remove the key, or restore OpenBox's value, and run init again", path, TelemetryKey, current.Raw)
+	case captured && current.Exists():
+		// Ours. Only the endpoint can differ, and the original prior value stays.
+		entry.Owned = desired
+	default:
+		entry = priorValue{Present: current.Exists(), Raw: current.Raw, Owned: desired}
+		if current.Exists() {
+			replaced = current.Raw
+		}
+	}
+	rec.Keys[TelemetryKey] = entry
+	rec.SettingsPath = path
+	if err := savePriorSettings(homeDir, rec); err != nil {
+		return "", err
+	}
+	if current.Exists() && canonicalJSONEqual([]byte(current.Raw), []byte(desired)) {
+		return "", nil
+	}
+
+	out, err := sjson.SetRawBytes(doc, TelemetryKey, []byte(desired))
+	if err != nil {
+		return "", fmt.Errorf("muse: setting %s in %s: %w", TelemetryKey, path, err)
+	}
+	out = finishSettingsWrite(out, before, existed)
+	if _, err := ValidateSettings(out); err != nil {
+		return "", fmt.Errorf("muse: refusing to write %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("muse: settings dir: %w", err)
+	}
+	if err := hookflow.AtomicWriteFile(path, out, perm); err != nil {
+		return "", fmt.Errorf("muse: commit %s: %w", path, err)
+	}
+	// Re-read what landed: a short or altered write is a machine that reads as
+	// exporting to OpenBox and does not.
+	written, rerr := os.ReadFile(path)
+	if rerr == nil {
+		if _, rerr = ValidateSettings(written); rerr == nil {
+			if got := gjson.GetBytes(written, TelemetryKey); !got.Exists() || !canonicalJSONEqual([]byte(got.Raw), []byte(desired)) {
+				rerr = errors.New("the telemetry value did not land as written")
+			}
+		}
+	}
+	if rerr != nil {
+		restoreSettingsFile(path, before, existed, perm)
+		return "", fmt.Errorf("muse: %s did not read back as written (%w); the previous file was restored", path, rerr)
+	}
+	return replaced, nil
+}
+
+// finishSettingsWrite keeps a file's final whitespace, and gives a file this
+// write created readable indentation.
+func finishSettingsWrite(out, before []byte, existed bool) []byte {
+	if existed {
+		return keepTrailingSpace(out, before)
+	}
+	var indented bytes.Buffer
+	if json.Indent(&indented, out, "", "  ") == nil {
+		return append(indented.Bytes(), '\n')
+	}
+	return out
+}
+
+func restoreSettingsFile(path string, before []byte, existed bool, perm os.FileMode) {
+	if !existed {
+		_ = os.Remove(path)
+		return
+	}
+	_ = hookflow.AtomicWriteFile(path, before, perm)
+}
+
+// HasOwnedTelemetry reports whether settingsPath still carries the value
+// OpenBox set: the record exists and the current value is it. False for a
+// value the developer wrote or changed, which is not OpenBox's to sweep.
+func HasOwnedTelemetry(settingsPath, homeDir string) bool {
+	rec, err := loadPriorSettings(homeDir)
+	if err != nil {
+		return false
+	}
+	entry, ok := rec.Keys[TelemetryKey]
+	if !ok {
+		return false
+	}
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return false
+	}
+	current := gjson.GetBytes(raw, TelemetryKey)
+	return current.Exists() && canonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned))
+}
+
+// TelemetryRestored reports what RestoreTelemetry did, so uninstall can say
+// exactly one of: nothing recorded, restored to a recorded value, deleted (it
+// was absent before init), or left alone because the developer changed it.
+type TelemetryRestored struct {
+	// Recorded is false when no record exists: init never wrote the key here, or
+	// an earlier uninstall already restored it. The ordinary case.
+	Recorded bool
+	// Drifted is true when the current value is not the one OpenBox wrote; Current
+	// is its raw form ("<absent>" when the key is gone). Nothing was touched.
+	Drifted bool
+	Current string
+	// Present is the recorded prior value's shape: true means the key went back to
+	// Value, false means it was absent before init and is now deleted.
+	Present bool
+	Value   string
+}
+
+// RestoreTelemetry puts `telemetry` back to what WriteTelemetry found, or
+// deletes it when there was none, and drops its record. A value that is no
+// longer the one OpenBox wrote is reported and left alone: drift is not an
+// error, because uninstall must finish whatever one key looks like now. A
+// record that cannot be used is an error, and is kept.
+func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
+	rec, err := loadPriorSettings(homeDir)
+	if err != nil {
+		return TelemetryRestored{}, err
+	}
+	entry, ok := rec.Keys[TelemetryKey]
+	if !ok {
+		return TelemetryRestored{}, nil
+	}
+	forget := func() error {
+		delete(rec.Keys, TelemetryKey)
+		return savePriorSettings(homeDir, rec)
+	}
+
+	path, before, existed, perm, err := resolvedSettings(settingsPath)
+	if err != nil {
+		return TelemetryRestored{}, err
+	}
+	current := gjson.GetBytes(before, TelemetryKey)
+	if !existed || !current.Exists() || !canonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned)) {
+		out := TelemetryRestored{Recorded: true, Drifted: true, Current: "<absent>"}
+		if current.Exists() {
+			out.Current = current.Raw
+		}
+		return out, forget()
+	}
+
+	var next []byte
+	if entry.Present {
+		// The record's Raw is a string field; a truncated or hand-edited one can
+		// hold bytes that are not a complete JSON value, and splicing them into the
+		// developer's settings would corrupt it while reporting success.
+		if !gjson.Valid(entry.Raw) {
+			recPath := PriorSettingsPath(homeDir)
+			return TelemetryRestored{}, fmt.Errorf("muse: %s holds a corrupted value for %s (%q is not valid JSON); "+
+				"refusing to write it into %s. Fix or delete the %q entry in %s, then run `openbox uninstall` again",
+				recPath, TelemetryKey, entry.Raw, path, TelemetryKey, recPath)
+		}
+		next, err = sjson.SetRawBytes(before, TelemetryKey, []byte(entry.Raw))
+	} else {
+		next, err = sjson.DeleteBytes(before, TelemetryKey)
+	}
+	if err != nil {
+		return TelemetryRestored{}, fmt.Errorf("muse: restoring %s in %s: %w", TelemetryKey, path, err)
+	}
+	next = keepTrailingSpace(next, before)
+	if _, err := ValidateSettings(next); err != nil {
+		return TelemetryRestored{}, fmt.Errorf("muse: refusing to write %s: %w", path, err)
+	}
+	if err := hookflow.AtomicWriteFile(path, next, perm); err != nil {
+		return TelemetryRestored{}, fmt.Errorf("muse: writing %s: %w", path, err)
+	}
+	if err := forget(); err != nil {
+		return TelemetryRestored{}, err
+	}
+	return TelemetryRestored{Recorded: true, Present: entry.Present, Value: entry.Raw}, nil
+}

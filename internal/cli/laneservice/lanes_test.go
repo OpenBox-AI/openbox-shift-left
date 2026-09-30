@@ -342,3 +342,33 @@ func TestWithCodexSettingsDoesNotAliasItsCallersArgs(t *testing.T) {
 		t.Fatal("WithCodexSettings did not add anything")
 	}
 }
+
+// TestTelemetryUnitCarriesMuseSettingsWhenAdded: Muse's settings path rides the
+// same unit as the other two tools', and never displaces either.
+func TestTelemetryUnitCarriesMuseSettingsWhenAdded(t *testing.T) {
+	const museSettings = "/Users/dev/.config/muse/settings.json"
+	spec := Telemetry("127.0.0.1:8789", "/Users/dev/.claude/settings.json", false).
+		WithCodexSettings("/Users/dev/.codex/config.toml").WithMuseSettings(museSettings)
+	argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+	for _, want := range []string{SettingsFlag + " /Users/dev/.claude/settings.json", CodexSettingsFlag + " /Users/dev/.codex/config.toml", MuseSettingsFlag + " " + museSettings} {
+		if !strings.Contains(argv, want) {
+			t.Errorf("argv lost %q: %s", want, argv)
+		}
+	}
+}
+
+func TestWithMuseSettingsOmitsTheFlagWhenThereIsNoPath(t *testing.T) {
+	spec := Telemetry("127.0.0.1:8789", "", false).WithMuseSettings("")
+	if argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " "); strings.Contains(argv, MuseSettingsFlag) {
+		t.Errorf("argv carries an empty %s: %s", MuseSettingsFlag, argv)
+	}
+}
+
+func TestWithMuseSettingsDoesNotAliasItsCallersArgs(t *testing.T) {
+	base := Telemetry("127.0.0.1:8789", "/a/settings.json", false)
+	baseLen := len(base.Args)
+	with := base.WithMuseSettings("/a/muse.json")
+	if len(base.Args) != baseLen || len(with.Args) == baseLen {
+		t.Fatalf("base %d -> %d args, derived %d", baseLen, len(base.Args), len(with.Args))
+	}
+}

@@ -133,8 +133,9 @@ type SettingsRestoreResult struct {
 }
 
 // RestoreProviderSettings puts back whatever a bare settings key held before
-// `openbox init` forced it -- Claude Code's showThinkingSummaries today.
-// Codex has no equivalent key, so it is a no-op, not an error: uninstall
+// `openbox init` forced it: Claude Code's showThinkingSummaries, and Muse's
+// `telemetry` object (deleted again when there was none). Codex has no
+// equivalent key, so it is a no-op, not an error: uninstall
 // walks every surface unconditionally rather than branching on a detected
 // provider. An unknown provider name still errors, mirroring
 // RemoveProviderHooks's contract: a typo must not read as "nothing was
@@ -150,12 +151,44 @@ func RestoreProviderSettings(name, settingsPath, homeDir string) (SettingsRestor
 			Present:  r.Present,
 			Value:    r.Value,
 		}, err
-	case provider.Codex, provider.Muse:
-		// Neither forces a bare settings key at install time.
+	case provider.Muse:
+		r, err := muse.RestoreTelemetry(settingsPath, homeDir)
+		return SettingsRestoreResult{
+			Recorded: r.Recorded,
+			Drifted:  r.Drifted,
+			Current:  r.Current,
+			Present:  r.Present,
+			Value:    r.Value,
+		}, err
+	case provider.Codex:
+		// Codex forces no bare settings key at install time.
 		return SettingsRestoreResult{}, nil
 	default:
 		return SettingsRestoreResult{}, unknownProvider(name)
 	}
+}
+
+// MuseTelemetryKey names the Muse settings key RestoreProviderSettings
+// restores, so command output can name it without importing the adapter.
+const MuseTelemetryKey = muse.TelemetryKey
+
+// MusePriorSettingsPath is where the Muse adapter records `telemetry`'s value
+// from before `openbox init` pointed it at the receiver, so uninstall can find
+// and purge it after restoring.
+func MusePriorSettingsPath(homeDir string) string { return muse.PriorSettingsPath(homeDir) }
+
+// WriteMuseTelemetry points Muse's own telemetry export at endpoint (the
+// receiver's base URL), recording the prior value first. replaced is the
+// developer's previous value when one was displaced. Refuses rather than
+// overwrites a value the developer changed after OpenBox set it.
+func WriteMuseTelemetry(settingsPath, homeDir, endpoint string) (replaced string, err error) {
+	return muse.WriteTelemetry(settingsPath, homeDir, endpoint)
+}
+
+// HasOwnedMuseTelemetry reports whether Muse's settings still carry the
+// telemetry value OpenBox set.
+func HasOwnedMuseTelemetry(settingsPath, homeDir string) bool {
+	return muse.HasOwnedTelemetry(settingsPath, homeDir)
 }
 
 // ClaudePriorSettingsPath is where the Claude Code adapter records a

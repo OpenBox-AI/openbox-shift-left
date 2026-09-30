@@ -52,17 +52,43 @@ type uninstallState struct {
 	// contamination instead of a delete to retry.
 	undeleted []string
 	backlog   int // events in the spool that no flush could deliver
-	// keepPriorRecord is true when the showThinkingSummaries restore did not
-	// run to completion this pass -- the settings file would not parse, so
-	// removeHookSurfaces never reached the restore call, or the restore
-	// itself errored. removeArtifacts must not purge the prior-value record
-	// in that case: it is the only thing a later `uninstall`, once the
-	// blocker is fixed, can restore the developer's original value from. A
-	// restore that ran and found drift is not this case -- see
-	// restoreProviderSettings. keepPriorRecordPath names the settings surface
-	// involved, for the report.
-	keepPriorRecord     bool
-	keepPriorRecordPath string
+	// keepPriorRecords holds, by record path, the prior-value records whose
+	// restore did not run to completion this pass -- the settings file would
+	// not parse, so removeHookSurfaces never reached the restore call, or the
+	// restore itself errored. removeArtifacts must not purge such a record: it
+	// is the only thing a later `uninstall`, once the blocker is fixed, can
+	// restore the developer's original value from. A restore that ran and found
+	// drift is not this case -- see restoreProviderSettings.
+	keepPriorRecords map[string]keptPriorRecord
+}
+
+// keptPriorRecord names, for the report, the settings surface and the key whose
+// restore is still owed.
+type keptPriorRecord struct{ settingsPath, key string }
+
+// priorRecordFor is the prior-value record and the settings key a provider's
+// install forced, or "" for a provider that forces none. One table, so the
+// restore, its error naming and the purge that must spare the record cannot
+// disagree.
+func priorRecordFor(name, home string) (recordPath, key string) {
+	switch provider.Name(name) {
+	case provider.ClaudeCode:
+		return providers.ClaudePriorSettingsPath(home), providers.ClaudeThinkingSummariesKey
+	case provider.Muse:
+		return providers.MusePriorSettingsPath(home), providers.MuseTelemetryKey
+	}
+	return "", ""
+}
+
+func (st *uninstallState) keepPriorRecord(name, home, settingsPath string) {
+	recPath, key := priorRecordFor(name, home)
+	if recPath == "" {
+		return
+	}
+	if st.keepPriorRecords == nil {
+		st.keepPriorRecords = map[string]keptPriorRecord{}
+	}
+	st.keepPriorRecords[recPath] = keptPriorRecord{settingsPath: settingsPath, key: key}
 }
 
 func (a *app) runUninstall(args []string) int {
@@ -197,12 +223,15 @@ type uninstallInventory struct {
 // install on macOS runs the relay too, and it routes Codex by the system PAC
 // rather than by an activation-record lane, so a transport unit with no
 // record is that install's normal shape.
-func laneResidue(home string, codexOwnsTelemetry bool) bool {
+func laneResidue(home string, codexOwnsTelemetry, museOwnsTelemetry bool) bool {
 	specs := []laneservice.Spec{laneservice.Gateway("", "", "", false)}
 	if !(codexOwnsTelemetry && systemPACSupportedFn()) {
 		specs = append(specs, laneservice.Transport("", "", false))
 	}
-	if !codexOwnsTelemetry {
+	// A Muse-only install is the same shape as a Codex-only one: the telemetry
+	// unit with no activation-record lane, because Muse's pointer is its own
+	// settings.json telemetry object, recorded in a prior-value file instead.
+	if !codexOwnsTelemetry && !museOwnsTelemetry {
 		specs = append(specs, laneservice.Telemetry("", "", false))
 	}
 	for _, spec := range specs {
@@ -236,11 +265,11 @@ type hookSurface struct {
 	provider string
 	path     string
 	present  bool
-	// restoreSettings marks the one surface where `openbox init` also forces
-	// a bare settings key (Claude Code's showThinkingSummaries): the
-	// user-scope file. The project-scope file and Codex's hooks file never
-	// had it, so restoring against either would look for a key that was
-	// never forced there.
+	// restoreSettings marks the surfaces where `openbox init` also forces a
+	// bare settings key: Claude Code's showThinkingSummaries in the user-scope
+	// file, and Muse's telemetry object in its one settings file. The
+	// project-scope file and Codex's hooks file never had one, so restoring
+	// against either would look for a key that was never forced there.
 	restoreSettings bool
 }
 
@@ -271,7 +300,7 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 		{provider: string(provider.ClaudeCode), path: gatewayservice.SettingsPath(home), restoreSettings: true},
 		{provider: string(provider.ClaudeCode), path: filepath.Join(".claude", "settings.local.json")},
 		{provider: string(provider.Codex), path: providers.CodexHooksPath()},
-		{provider: string(provider.Muse), path: providers.MuseSettingsPath()},
+		{provider: string(provider.Muse), path: providers.MuseSettingsPath(), restoreSettings: true},
 	} {
 		if abs, err := filepath.Abs(s.path); err == nil {
 			s.path = abs
@@ -293,7 +322,7 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	// unit file or a routed env key with no record at all -- and treating that
 	// machine as clean is how "nothing to remove" gets printed at a daemon that
 	// is still intercepting model calls.
-	if len(inv.lanes) == 0 && laneResidue(home, inv.codexOtelPresent) {
+	if len(inv.lanes) == 0 && laneResidue(home, inv.codexOtelPresent, providers.HasOwnedMuseTelemetry(providers.MuseSettingsPath(), home)) {
 		inv.unrecordedLane = true
 	}
 	for _, resolve := range []func() (string, error){devconfig.DevConfigPath, devconfig.DevConfigWritePath} {
@@ -329,8 +358,10 @@ func (a *app) uninstallInventory(home string) uninstallInventory {
 	// removed recursively (safeToRemoveAll below refuses it), so this has to
 	// be swept by name like the rest of posture, and only after
 	// removeHookSurfaces has had a chance to restore from it.
-	if p := providers.ClaudePriorSettingsPath(home); fileExists(p) {
-		inv.posture = appendUnique(inv.posture, p)
+	for _, name := range []string{string(provider.ClaudeCode), string(provider.Muse)} {
+		if p, _ := priorRecordFor(name, home); fileExists(p) {
+			inv.posture = appendUnique(inv.posture, p)
+		}
 	}
 	for _, dir := range append(providers.OwnedSpoolDirs(),
 		obgit.DefaultSessionDir(), hookflow.PendingApprovalDir(), hookflow.DefaultHaltDir()) {
@@ -603,8 +634,7 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 			// this run, or the developer's original value is unrecoverable
 			// once this file is deleted unconditionally further down.
 			if s.restoreSettings {
-				st.keepPriorRecord = true
-				st.keepPriorRecordPath = s.path
+				st.keepPriorRecord(s.provider, inv.home, s.path)
 			}
 			continue
 		}
@@ -645,17 +675,18 @@ func (a *app) removeHookSurfaces(st *uninstallState, inv uninstallInventory) {
 }
 
 // restoreProviderSettings puts a bare settings key (Claude Code's
-// showThinkingSummaries) back to whatever it held before `openbox init`
-// forced it. A restore failure is recorded the same way a hook-removal
-// failure is, immediately above: reported, not fatal, so the remaining
-// uninstall steps still run. Drift -- the developer changed the value after
-// `init` -- is reported too, but is not a failure: it is not this command's
-// place to overwrite a value someone deliberately changed.
+// showThinkingSummaries, Muse's telemetry) back to whatever it held before
+// `openbox init` forced it. A restore failure is recorded the same way a
+// hook-removal failure is, immediately above: reported, not fatal, so the
+// remaining uninstall steps still run. Drift -- the developer changed the value
+// after `init` -- is reported too, but is not a failure: it is not this
+// command's place to overwrite a value someone deliberately changed.
 func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSurface) {
 	res, err := providers.RestoreProviderSettings(s.provider, s.path, home)
 	defer func() {
 		traceUninstallStep("settings-restore", err, map[string]any{"provider": s.provider, "path": s.path})
 	}()
+	recPath, key := priorRecordFor(s.provider, home)
 	if err != nil {
 		// The failure can be s.path itself, or the internal prior-settings
 		// record RestoreProviderSettings reads before ever touching s.path --
@@ -665,10 +696,10 @@ func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSur
 		// name the file they came from in their own text, so pick whichever
 		// one the message actually mentions rather than assuming s.path.
 		failedPath := s.path
-		if recPath := providers.ClaudePriorSettingsPath(home); recPath != "" && strings.Contains(err.Error(), recPath) {
+		if recPath != "" && strings.Contains(err.Error(), recPath) {
 			failedPath = recPath
 		}
-		fmt.Fprintf(a.stderr, "warning: %s: could not restore %s: %v\n", failedPath, providers.ClaudeThinkingSummariesKey, err)
+		fmt.Fprintf(a.stderr, "warning: %s: could not restore %s: %v\n", failedPath, key, err)
 		st.hookFailed = append(st.hookFailed, hookFailure{
 			path:           failedPath,
 			unparsable:     strings.Contains(err.Error(), "not valid JSON"),
@@ -679,20 +710,20 @@ func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSur
 		// The restore did not complete -- e.g. the prior-value record itself
 		// is corrupt -- so it must survive this run for a later `uninstall`
 		// to finish the job. Unlike drift below, nothing here is finished.
-		st.keepPriorRecord = true
-		st.keepPriorRecordPath = s.path
+		st.keepPriorRecord(s.provider, home, s.path)
 		return
 	}
 	switch {
 	case !res.Recorded:
 		return // the ordinary case: never installed here, or already uninstalled
+	case res.Drifted && provider.Name(s.provider) == provider.Muse:
+		a.row("left alone", "%s in %s (now %s; changed since `init` set it)", key, s.path, res.Current)
 	case res.Drifted:
-		a.row("left alone", "%s in %s (now %s; changed since `init` set it to true)",
-			providers.ClaudeThinkingSummariesKey, s.path, res.Current)
+		a.row("left alone", "%s in %s (now %s; changed since `init` set it to true)", key, s.path, res.Current)
 	case res.Present:
-		a.row("restored", "%s in %s to %s", providers.ClaudeThinkingSummariesKey, s.path, res.Value)
+		a.row("restored", "%s in %s to %s", key, s.path, res.Value)
 	default:
-		a.row("removed", "%s from %s", providers.ClaudeThinkingSummariesKey, s.path)
+		a.row("removed", "%s from %s", key, s.path)
 	}
 }
 
@@ -731,11 +762,10 @@ func (a *app) removeArtifacts(st *uninstallState, inv uninstallInventory) {
 	// Drift (the developer changed the value after `init`) does NOT set this
 	// flag: there the restore ran, found the current value authoritative,
 	// and is genuinely finished, so the record purges as normal.
-	recPath := providers.ClaudePriorSettingsPath(inv.home)
 	for _, p := range inv.posture {
-		if st.keepPriorRecord && p == recPath {
+		if kept, isKept := st.keepPriorRecords[p]; isKept {
 			a.row("kept", "%s", p)
-			a.row("", "the showThinkingSummaries restore against %s did not complete;", st.keepPriorRecordPath)
+			a.row("", "the %s restore against %s did not complete;", kept.key, kept.settingsPath)
 			a.row("", "see the warning above for what to fix. Fix it, then run `openbox")
 			a.row("", "uninstall` again to finish the restore and remove this record.")
 			st.kept = appendUnique(st.kept, p)

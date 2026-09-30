@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,38 +26,70 @@ const (
 )
 
 // dualProviderTelemetryEmitter fans one telemetry.Record out to whichever
-// provider's mapper can key it: Claude Code exports session.id, Codex exports
-// conversation.id instead, so presence of the attribute is the discriminator
-// -- never a reused CC-specific key -- and a record carrying both is refused
-// rather than signed by either tool. codex is nil when the
-// machine has no Codex identity yet; in that case a Codex-shaped record still
-// reaches cc's Emit so its drop is counted and reported rather than silently
-// swallowed.
+// tool's mapper can key it. Each tool exports its session identity under an
+// attribute of its own (sessionkey.OTelAttr: Claude Code `session.id`, Codex
+// `conversation.id`, Muse `session_id`), so presence of the attribute is the
+// discriminator -- never a reused CC-specific key -- and a record carrying more
+// than one is refused rather than signed by any of them. A tool with no
+// emitter (no identity yet) is absent from the table; a record keyed for it
+// still reaches Claude Code's Emit so its drop is counted and reported rather
+// than silently swallowed.
+//
+// The name predates the third tool; the table is what generalizes it.
 type dualProviderTelemetryEmitter struct {
-	cc    *telemetryemit.Emitter
-	codex *telemetryemit.Emitter
+	emitters map[sessionkey.Provider]*telemetryemit.Emitter
 }
 
-// errAmbiguousTelemetryProvider refuses a record that names both tools'
-// session keys. The receiver logs it and moves on; no client signs it.
-var errAmbiguousTelemetryProvider = errors.New("record carries both session.id and conversation.id; " +
-	"refusing to guess which tool's identity signs it")
+// telemetryRouteOrder is the routing table: one row per tool that exports
+// OTLP, in the order they are reported. Claude Code is first because it is
+// also the fallback.
+var telemetryRouteOrder = []sessionkey.Provider{sessionkey.ClaudeCode, sessionkey.Codex, sessionkey.Muse}
+
+// newTelemetryRouter builds the router from emitters keyed by provider name.
+func newTelemetryRouter(byName map[string]*telemetryemit.Emitter) *dualProviderTelemetryEmitter {
+	d := &dualProviderTelemetryEmitter{emitters: map[sessionkey.Provider]*telemetryemit.Emitter{}}
+	for _, p := range telemetryRouteOrder {
+		if e := byName[string(p)]; e != nil {
+			d.emitters[p] = e
+		}
+	}
+	return d
+}
+
+// errAmbiguousTelemetryProvider refuses a record that names more than one
+// tool's session key. The receiver logs it and moves on; no client signs it.
+var errAmbiguousTelemetryProvider = errors.New("record carries more than one tool's session key " +
+	"(session.id, conversation.id, session_id); refusing to guess which tool's identity signs it")
 
 func (d *dualProviderTelemetryEmitter) Emit(ctx context.Context, rec telemetry.Record) error {
-	if rec.Attrs["session.id"] != "" && rec.Attrs["conversation.id"] != "" {
+	var matched []sessionkey.Provider
+	for _, p := range telemetryRouteOrder {
+		if rec.Attrs[sessionkey.OTelAttr(p)] != "" {
+			matched = append(matched, p)
+		}
+	}
+	if len(matched) > 1 {
 		return errAmbiguousTelemetryProvider
 	}
-	if rec.Attrs["session.id"] == "" && rec.Attrs["conversation.id"] != "" && d.codex != nil {
-		return d.codex.Emit(ctx, rec)
+	if len(matched) == 1 {
+		if e := d.emitters[matched[0]]; e != nil {
+			return e.Emit(ctx, rec)
+		}
 	}
-	return d.cc.Emit(ctx, rec)
+	return d.emitters[sessionkey.ClaudeCode].Emit(ctx, rec)
 }
 
 func (d *dualProviderTelemetryEmitter) String() string {
-	if d.codex == nil {
-		return d.cc.String()
+	if len(d.emitters) == 1 && d.emitters[sessionkey.ClaudeCode] != nil {
+		return d.emitters[sessionkey.ClaudeCode].String()
 	}
-	return fmt.Sprintf("claude-code: %s; codex: %s", d.cc, d.codex)
+	var parts []string
+	for _, p := range telemetryRouteOrder {
+		if e := d.emitters[p]; e != nil {
+			parts = append(parts, fmt.Sprintf("%s: %s", p, e))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (a *app) runTelemetry(args []string) int {
@@ -84,6 +117,7 @@ func (a *app) runTelemetry(args []string) int {
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to Claude Code's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
 	codexSettings := fs.String("codex-settings", "", "absolute path to Codex's config.toml, written into the unit at install time when Codex's telemetry lane is installed")
+	museSettings := fs.String("muse-settings", "", "absolute path to Muse's settings.json, written into the unit at install time when Muse's telemetry lane is installed. Muse's election reads its telemetry block from it")
 	pacRecord := fs.String("pac-record", "", "absolute path to the activation record that holds the system-PAC entry, written into the unit at install time. Codex's election reads it to tell whether the transport relay has taken over Codex's model calls")
 	if code, ok := parseFlags(fs, args); !ok {
 		return code
@@ -160,11 +194,23 @@ func (a *app) runTelemetry(args []string) int {
 		codexEmitter = newCodexTelemetryEmitter(codexPaths, codexRecording, elected,
 			func() string { return identities[string(provider.Codex)].DID }, deliver, logger.Printf)
 	}
-	em := &dualProviderTelemetryEmitter{cc: ccEmitter, codex: codexEmitter}
+	var museEmitter *telemetryemit.Emitter
+	var museRecording func() bool
+	if *museSettings != "" {
+		museRecording = telemetryPostureFor(string(provider.Muse), logger.Printf)
+		museEmitter = newMuseTelemetryEmitter(*museSettings, *addr, museRecording, elected,
+			func() string { return identities[string(provider.Muse)].DID }, deliver, logger.Printf)
+	}
+	em := newTelemetryRouter(map[string]*telemetryemit.Emitter{
+		string(provider.ClaudeCode): ccEmitter,
+		string(provider.Codex):      codexEmitter,
+		string(provider.Muse):       museEmitter,
+	})
 	if *verbose {
-		ccEmitter.Verbose = logger.Printf
-		if codexEmitter != nil {
-			codexEmitter.Verbose = logger.Printf
+		for _, e := range []*telemetryemit.Emitter{ccEmitter, codexEmitter, museEmitter} {
+			if e != nil {
+				e.Verbose = logger.Printf
+			}
 		}
 	}
 
@@ -210,6 +256,12 @@ func (a *app) runTelemetry(args []string) int {
 		reportCodexElection(logger, codexPaths, activation.LaneTelemetry, *elected)
 		if !codexRecording() {
 			logger.Printf("openbox telemetry: codex's own posture telemetry=false; receiving exports and recording NOTHING for codex (its dev.json `telemetry` or %s)", devconfig.EnvTelemetry)
+		}
+	}
+	if museEmitter != nil {
+		reportMuseElection(logger, *museSettings, *addr, *elected)
+		if !museRecording() {
+			logger.Printf("openbox telemetry: muse's own posture telemetry=false; receiving exports and recording NOTHING for muse (its dev.json `telemetry` or %s)", devconfig.EnvTelemetry)
 		}
 	}
 
@@ -347,6 +399,26 @@ func newCodexTelemetryEmitter(paths codexElectionPaths, recording func() bool, o
 	return &telemetryemit.Emitter{
 		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}).
 			WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)),
+		DID:     did,
+		Warn:    warn,
+		Deliver: deliver,
+	}
+}
+
+// newMuseTelemetryEmitter is the telemetry daemon's Muse producer: a
+// session_id-keyed mapper over Muse's model_call log record, emitting only
+// while Muse's own settings export to this receiver. Telemetry is the only
+// lane Muse has, so the election answers "is the export pointed here", and is
+// re-resolved per record from the settings path the unit carried. receiverAddr
+// is this daemon's own listen address.
+func newMuseTelemetryEmitter(settingsPath, receiverAddr string, recording func() bool, override *bool,
+	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any)) *telemetryemit.Emitter {
+	elect := museElectedFn(settingsPath, receiverAddr, override)
+	electedNow := func() bool { return recording() && elect() }
+	return &telemetryemit.Emitter{
+		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}).
+			WithSessionAttr(sessionkey.OTelAttr(sessionkey.Muse)).WithToolName(string(provider.Muse)).
+			WithFieldMap(telemetryemit.MuseFieldMap),
 		DID:     did,
 		Warn:    warn,
 		Deliver: deliver,

@@ -12,6 +12,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/transport"
 )
@@ -21,12 +22,12 @@ import (
 // in-path relay of the Anthropic Messages API). Codex gets telemetry (it reads
 // its own config.toml) and, where a system PAC exists (macOS), the same relay,
 // which it reaches through the PAC rather than an env block -- see
-// hasTransportArm. Muse is hooks-only: no lane has been
-// shown to see its model calls (no documented OTel exporter, and no proof it
-// follows the system PAC or trusts the relay's CA), so it has none.
+// hasTransportArm. Muse gets telemetry only: its own settings.json can redirect
+// its export to the loopback receiver, but it ignores the system PAC and
+// rejects the relay's certificate, so there is no transport arm.
 func laneCapable(name string) bool {
 	switch provider.Name(name) {
-	case provider.ClaudeCode, provider.Codex:
+	case provider.ClaudeCode, provider.Codex, provider.Muse:
 		return true
 	default:
 		return false
@@ -39,8 +40,9 @@ type laneRequest struct {
 	verbose                      bool
 	// provider selects which activation this request performs when telemetry
 	// installs: Claude Code writes settings.json env keys, Codex writes an
-	// owned config.toml [otel] block. "" defaults to Claude Code so an older
-	// caller (there is only one) is unaffected.
+	// owned config.toml [otel] block, Muse writes the `telemetry` object of its
+	// own settings.json. "" defaults to Claude Code so an older caller (there is
+	// only one) is unaffected.
 	provider string
 }
 
@@ -63,6 +65,10 @@ type laneReport struct {
 	// codex is whether this install was Codex's, which changes what the system
 	// PAC disclosure and its fallback line say.
 	codex bool
+	// muse is whether this install was Muse's: its telemetry lane writes Muse's
+	// own settings.json, exports metadata only, and redirects an export that
+	// would otherwise go to Meta's destinations.
+	muse bool
 }
 
 // row prints one label/value line of the install report. The whole report is
@@ -140,7 +146,11 @@ func (r laneReport) print(a *app) {
 	}
 	if len(r.installed) > 0 {
 		a.row("lanes", "%s (running)", strings.Join(r.running(), ", "))
-		a.row("env", "%d lane keys in %s", r.keys, r.settings)
+		if r.muse {
+			a.row("settings", "Muse's telemetry export redirected in %s", r.settings)
+		} else {
+			a.row("env", "%d lane keys in %s", r.keys, r.settings)
+		}
 		// The one thing an install must never leave to doctor: routing these
 		// lanes is what turns capture on, and that is a decision only the
 		// person reading this can make. Said per lane that actually came up --
@@ -161,12 +171,20 @@ func (r laneReport) print(a *app) {
 func (r laneReport) captureNotes() []string {
 	var out []string
 	for _, lane := range r.installed {
-		switch lane {
-		case "telemetry":
+		switch {
+		case lane == "telemetry" && r.muse:
+			// Muse's export is metadata only (model, token counts, response id): it
+			// carries no prompt, tool or file content, whatever content_capture says.
+			// What the developer must be told instead is where it used to go.
+			out = append(out,
+				"Muse's own telemetry is REDIRECTED from Meta's destinations to that",
+				"receiver (model, token counts and response ids only; no content).",
+				"`openbox uninstall` puts the previous setting back.")
+		case lane == "telemetry":
 			out = append(out,
 				"The tool EXPORTS its own telemetry to that receiver, prompt and tool",
 				"content included.")
-		case "transport":
+		case lane == "transport":
 			out = append(out,
 				"The relay INTERCEPTS the provider's TLS on this machine; every other host",
 				"is tunnelled uninspected.")
@@ -188,6 +206,7 @@ func (r laneReport) running() []string {
 func (a *app) setupLanes(req laneRequest) laneReport {
 	var report laneReport
 	report.codex = provider.Name(req.provider) == provider.Codex
+	report.muse = provider.Name(req.provider) == provider.Muse
 	if !req.telemetry && !req.transport {
 		return report
 	}
@@ -228,6 +247,9 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 	}
 
 	report.settings = gatewayservice.SettingsPath(home)
+	if report.muse {
+		report.settings = providers.MuseSettingsPath()
+	}
 	report.addrs = map[string]string{}
 
 	installTelemetry := func() {
@@ -235,8 +257,11 @@ func (a *app) setupLanes(req laneRequest) laneReport {
 			return
 		}
 		setup := a.setupTelemetry
-		if codex {
+		switch {
+		case codex:
 			setup = a.setupCodexTelemetry
+		case report.muse:
+			setup = a.setupMuseTelemetry
 		}
 		keys, err := setup(home, req.telemetryAddr, req.verbose)
 		if err != nil {

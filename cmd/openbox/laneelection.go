@@ -89,6 +89,41 @@ func electionProblemFn(settingsPath string, override *bool) func() string {
 	}
 }
 
+// museElectedFn is electedFn's Muse counterpart: it reads Muse's settings.json
+// telemetry block through activation.ResolveMuseElection. Muse has one lane, so
+// the answer is whether Muse's own export is pointed at THIS receiver
+// (receiverAddr); the settings path comes from the unit's argv, never from
+// $HOME, which a daemon does not have.
+func museElectedFn(settingsPath, receiverAddr string, override *bool) func() bool {
+	return func() bool {
+		if override != nil && *override {
+			return true
+		}
+		return activation.ResolveMuseElection(settingsPath, receiverAddr).Elected == activation.LaneTelemetry
+	}
+}
+
+// reportMuseElection logs the telemetry daemon's startup view of Muse's
+// election, the way reportCodexElection does for Codex.
+func reportMuseElection(logger *log.Logger, settingsPath, receiverAddr string, override bool) {
+	e := activation.ResolveMuseElection(settingsPath, receiverAddr)
+	switch {
+	case override:
+		logger.Printf("openbox telemetry: emitting Muse model-call turns because --elected was passed, "+
+			"overriding the election (which currently names %q)", orNone(string(e.Elected)))
+	case e.SettingsProblem != "":
+		logger.Printf("openbox telemetry: CANNOT DECIDE whether to emit Muse model-call turns: %s. "+
+			"Reinstall with `openbox init --provider muse` so the unit carries --muse-settings, or pass --elected.",
+			e.SettingsProblem)
+	case e.Elected == activation.LaneTelemetry:
+		logger.Printf("openbox telemetry: elected producer of Muse model-call turns; %s", e.Reason)
+	default:
+		logger.Printf("openbox telemetry: NOT the elected producer of Muse model-call turns (%s); "+
+			"emitting none. Re-checked per call, so this changes on its own once Muse's settings "+
+			"are written -- install starts this daemon before they are.", e.Reason)
+	}
+}
+
 // codexRelaySpoolSubdir and codexObservedMarker name where the relay's
 // evidence that it has seen Codex lives: inside Codex's own spool directory,
 // the same place (and the same resolution, laneSpoolDir) the run-started

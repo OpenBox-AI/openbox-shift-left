@@ -213,27 +213,35 @@ var uninstallLaneUnitFn = func(spec laneservice.Spec, goos, homeDir string) erro
 	return spec.Uninstall(goos, homeDir)
 }
 
+// telemetrySpec is the ONE shared telemetry unit, for whichever tool's install
+// is building it. The unit carries every tool's settings path, because one
+// receiver serves them all and a daemon has no $HOME to re-derive any of them:
+// an install for one tool must therefore keep the paths of the tools already
+// installed, or the later install silently strips the earlier tool's election.
+//
+// A tool's path rides the unit when that tool is the one installing, or when
+// OpenBox already owns its telemetry surface (Codex's [otel] block, Muse's
+// telemetry object): CodexConfigTOMLPath and MuseSettingsPath always resolve to
+// a path, so passing them unconditionally would bake each tool's whole wiring
+// into the unit of a machine that never touched it. Either install order gives
+// the same unit.
+func (a *app) telemetrySpec(homeDir, addr string, verbose bool, installing provider.Name) laneservice.Spec {
+	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
+		WithEnv(a.laneUnitEnv())
+	if codexConfigPath := providers.CodexConfigTOMLPath(); installing == provider.Codex || providers.HasOwnedCodexOtel(codexConfigPath) {
+		// The record path rides with the config path: Codex's election reads both.
+		spec = spec.WithCodexSettings(codexConfigPath).WithPACRecord(activation.RecordPath(homeDir))
+	}
+	if musePath := providers.MuseSettingsPath(); installing == provider.Muse || providers.HasOwnedMuseTelemetry(musePath, homeDir) {
+		spec = spec.WithMuseSettings(musePath)
+	}
+	return spec
+}
+
 // setupTelemetry installs the local OTLP receiver and points the tool's own
 // telemetry at it.
 func (a *app) setupTelemetry(homeDir, addr string, verbose bool) (int, error) {
-	// The settings path goes INTO the unit: only the install path knows the real
-	// home. Codex's config.toml path rides the same unit too: one receiver
-	// serves both tools, and a daemon has no $HOME to re-derive either surface
-	// from. Gated on an OWNED [otel] block actually existing: CodexConfigTOMLPath
-	// always resolves to a path (there is no "Codex has no home" case the way an
-	// absent file is), so passing it unconditionally baked --codex-settings, and
-	// telemetry.go's whole codexEmitter/codexElectedFn wiring, into every unit --
-	// including a pure Claude-Code-only machine that never touched Codex. This
-	// still updates on either install order: a later `init --provider codex`
-	// reinstalls the same shared unit through setupCodexTelemetry, which always
-	// carries its own settings.
-	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
-		WithEnv(a.laneUnitEnv())
-	if codexConfigPath := providers.CodexConfigTOMLPath(); providers.HasOwnedCodexOtel(codexConfigPath) {
-		// The record path rides with the config path: Codex's election reads both,
-		// and a daemon has no $HOME to find either.
-		spec = spec.WithCodexSettings(codexConfigPath).WithPACRecord(activation.RecordPath(homeDir))
-	}
+	spec := a.telemetrySpec(homeDir, addr, verbose, provider.ClaudeCode)
 	binPath, err := a.selfPath()
 	if err != nil {
 		return 0, err
@@ -280,10 +288,7 @@ func (a *app) removeTelemetry(homeDir string, force bool) error {
 // listening -> write the pointer, and any failure after WriteUnit removes
 // the unit.
 func (a *app) setupCodexTelemetry(homeDir, addr string, verbose bool) (int, error) {
-	spec := laneservice.Telemetry(addr, claudeSettingsPath(homeDir), verbose).
-		WithCodexSettings(providers.CodexConfigTOMLPath()).
-		WithPACRecord(activation.RecordPath(homeDir)).
-		WithEnv(a.laneUnitEnv())
+	spec := a.telemetrySpec(homeDir, addr, verbose, provider.Codex)
 	binPath, err := a.selfPath()
 	if err != nil {
 		return 0, err
@@ -305,6 +310,45 @@ func (a *app) setupCodexTelemetry(homeDir, addr string, verbose bool) (int, erro
 				return activated{}, err
 			}
 			return activated{keys: 1}, nil
+		},
+	})
+}
+
+// setupMuseTelemetry installs the SAME local OTLP receiver and points Muse's
+// own telemetry export at it by merging an owned `telemetry` object into Muse's
+// settings.json -- never Claude Code's, never an env var (Muse ignores
+// OTEL_EXPORTER_OTLP_ENDPOINT). Install ordering is setupLane's: unit -> start
+// -> prove listening -> write the pointer, and any failure after WriteUnit
+// removes the unit. The pointer write records Muse's previous value first.
+func (a *app) setupMuseTelemetry(homeDir, addr string, verbose bool) (int, error) {
+	spec := a.telemetrySpec(homeDir, addr, verbose, provider.Muse)
+	binPath, err := a.selfPath()
+	if err != nil {
+		return 0, err
+	}
+	settingsPath := providers.MuseSettingsPath()
+	endpoint := "http://" + addr
+
+	return a.setupLane(laneInstall{
+		label:         "telemetry",
+		addr:          addr,
+		homeDir:       homeDir,
+		laneIdentity:  identityOf(spec, homeDir),
+		installUnit:   func() error { return installLaneUnitFn(spec, runtime.GOOS, homeDir, binPath) },
+		uninstallUnit: func() error { return uninstallLaneUnitFn(spec, runtime.GOOS, homeDir) },
+		envNotSet: "Muse's telemetry setting was NOT written, so Muse exports nothing to this machine and this " +
+			"lane records nothing for it; Muse's hooks and the other tools' lanes are unaffected",
+		activate: func() (activated, error) {
+			replaced, err := providers.WriteMuseTelemetry(settingsPath, homeDir, endpoint)
+			if err != nil {
+				return activated{}, err
+			}
+			res := activated{keys: 1}
+			if replaced != "" {
+				res.replaced = []string{fmt.Sprintf("Muse's telemetry setting %s in %s; `openbox uninstall` puts it back",
+					replaced, settingsPath)}
+			}
+			return res, nil
 		},
 	})
 }

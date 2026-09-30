@@ -107,6 +107,24 @@ func (s Spec) WithCodexSettings(configPath string) Spec {
 	return s
 }
 
+// MuseSettingsFlag carries Muse's settings.json path into the telemetry unit,
+// the third settings surface one receiver serves. Muse's election reads its
+// telemetry block from it per record, and a daemon has no $HOME to derive it
+// from. Empty is omitted, like every other optional path flag.
+const MuseSettingsFlag = "--muse-settings"
+
+// WithMuseSettings returns a copy of s whose Args carry Muse's settings.json
+// path, the same trailing-optional-flag shape WithCodexSettings uses.
+func (s Spec) WithMuseSettings(settingsPath string) Spec {
+	if settingsPath == "" {
+		return s
+	}
+	args := make([]Arg, len(s.Args), len(s.Args)+2)
+	copy(args, s.Args)
+	s.Args = append(args, Literal(MuseSettingsFlag), Value(settingsPath))
+	return s
+}
+
 // PACRecordFlag carries the absolute path of the activation record (which
 // holds the system-PAC entry) into a lane unit. Both daemons resolve Codex's
 // election from it per call, and a daemon has no $HOME to derive it from.
