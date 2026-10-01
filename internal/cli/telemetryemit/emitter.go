@@ -120,7 +120,7 @@ func traceOutcomeName(o Outcome) string {
 	switch {
 	case o == Emitted:
 		return "recorded"
-	case o == SkipNotElected:
+	case o == SkipNotElected || o == SkipIncompleteCall:
 		return "skipped"
 	default:
 		return "dropped"

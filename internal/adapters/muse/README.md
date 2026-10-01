@@ -152,6 +152,14 @@ sent):
   from the response id, usage on the close. There is no fallback id: Muse's
   `message_id` can recur across calls, so a record with no usable response id is
   dropped and counted rather than risk one call deduping another.
+  The only outcome the record carries is `eof_clean` (`1` on every call of the
+  scrubbed export; no status, error or HTTP code). A call with `eof_clean` of `0`
+  or `false` (a value not yet observed) is partial: the contract's failed status
+  exists for a tool result and a model-call finish, not for a turn's close, so it
+  is emitted as its pair with `response_incomplete: true` on the close, and when
+  it has no response id (a failed call usually has none) it is skipped, counted
+  as `incomplete-call` and not as a lost record. A failed call is therefore not
+  visible as failed to core.
   A call from a subagent is recorded in the parent session **the hook path
   recorded for that child** (`telemetryemit.MuseParentOf` reads the per-child
   file `subagentparent.go` writes under `<muse-spool>/lifecycle/subagents/`, in

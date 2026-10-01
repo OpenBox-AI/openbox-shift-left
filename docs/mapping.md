@@ -148,6 +148,7 @@ stored row.
 | `elicitation_id` | Claude Code | correlates `Elicitation`/`ElicitationResult` |
 | `turn_id`, `message_id` | Claude Code | `MessageDisplay`'s own correlation pair |
 | `agent_id`, `agent_type` | Claude Code, Muse (hooks) | identifies the subagent an event occurred inside |
+| `response_incomplete` | Muse (telemetry lane) | `true` on the close of a call whose `eof_clean` is false; the contract has no failed status for a turn's close. A partial call with no response id is skipped (`incomplete-call`), not counted as lost |
 | `agent_type`, `subagent_kind` | Muse (telemetry lane) | `subagent`, and the export's `session_kind` (for example `reminder`); no `agent_id`, because the export does not carry the subagent's own id |
 | `turn_id` | Codex | per-turn correlation id |
 | `thread_id`, `root_session_id` | Codex | set only when a forked thread's id differs from the session id it continues |

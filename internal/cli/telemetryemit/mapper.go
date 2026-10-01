@@ -47,6 +47,10 @@ const (
 	DropNoRequestID
 	// DropNoTimestamp: the record carries no time of its own.
 	DropNoTimestamp
+	// SkipIncompleteCall: the call is observably incomplete and carries no
+	// request id, which a failed call usually has not. That is the call failing,
+	// not the lane losing a record, so it is not a drop.
+	SkipIncompleteCall
 )
 
 // IsDrop reports whether this outcome lost a record the lane wanted.
@@ -70,6 +74,8 @@ func (o Outcome) String() string {
 		return "no-request-id"
 	case DropNoTimestamp:
 		return "no-timestamp"
+	case SkipIncompleteCall:
+		return "incomplete-call"
 	}
 	return "unknown"
 }
@@ -154,6 +160,14 @@ type FieldMap struct {
 	KindKey string
 	// URL is the synthesized stand-in for the call's endpoint on the span.
 	URL string
+	// CleanKey, when set, names a flag that says the call's stream ended cleanly
+	// (Muse: eof_clean, "1" on every call of the scrubbed export). Only an
+	// explicit false marks the call incomplete; absent or unreadable is unknown,
+	// and unknown is not a failure. The tool exports no other outcome (no status,
+	// error or HTTP code on the model_call record). The "not clean" value has not
+	// been observed, so false is read as 0 or false, the encoding the same
+	// record uses for has_tool_calls.
+	CleanKey string
 }
 
 // defaultFieldMap is Claude Code's api_request, and Codex's too.
@@ -185,6 +199,7 @@ var MuseFieldMap = FieldMap{
 	InputIncludesCache: true,
 	ProviderKey:        "gen_ai_provider_name",
 	KindKey:            "session_kind",
+	CleanKey:           "eof_clean",
 	URL:                "https://api.meta.ai/",
 }
 
@@ -267,8 +282,12 @@ func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, 
 	if rec.Timestamp.IsZero() {
 		return nil, DropNoTimestamp
 	}
+	incomplete := fm.CleanKey != "" && notClean(rec.Attrs[fm.CleanKey])
 	reqID, ok := requestIDFrom(rec.Attrs, fm.RequestIDKeys)
 	if !ok {
+		if incomplete {
+			return nil, SkipIncompleteCall
+		}
 		return nil, DropNoRequestID
 	}
 
@@ -327,6 +346,17 @@ func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, 
 		if eventType == client.EventTurnCompleted {
 			ev.EndedAt = end.Format(time.RFC3339Nano)
 			ev.Tokens = tokensFrom(rec.Attrs, fm)
+			// The contract carries a failed status for a tool result and a model-call
+			// finish, not for a turn's close, so a partial call is marked here
+			// instead of reading as a clean turn.
+			if incomplete {
+				marked := make(map[string]any, len(ev.Metadata)+1)
+				for k, v := range ev.Metadata {
+					marked[k] = v
+				}
+				marked["response_incomplete"] = true
+				ev.Metadata = marked
+			}
 		}
 		ev.EventID = eventID(session, reqID, string(ev.EventType), ev.Timestamp)
 		return ev
@@ -336,6 +366,15 @@ func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, 
 		half(client.EventTurnStarted, "started", start),
 		half(client.EventTurnCompleted, "completed", end),
 	}, Emitted
+}
+
+// notClean reports an explicit "no" from a clean-completion flag.
+func notClean(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "0", "false":
+		return true
+	}
+	return false
 }
 
 // requestIDFrom picks the id that becomes part of activity_id, and validates

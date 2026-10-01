@@ -138,7 +138,10 @@ metadata.** Measured on Muse 1.4.1, not assumed:
   provider exports nothing. The receiver maps the `model_call` log to one
   `llm_completion` pair (`:otel:` namespace, keyed on Muse's response id): model,
   provider, duration, input, output and cached token counts (Muse's input count
-  includes the cached tokens, so the total is input plus output). Every other
+  includes the cached tokens, so the total is input plus output). A call whose
+  `eof_clean` is false is marked `response_incomplete` on its close (core cannot
+  be told it failed: a turn's close has no failed status), and with no response
+  id it is skipped and counted apart from lost records. Every other
   event is skipped. A subagent's call is recorded in the parent session
   the hook path recorded for that child (a child nothing links stays a session of
   its own, as its hook rows do). Muse exports no body, so there is none to capture.
