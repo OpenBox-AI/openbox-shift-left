@@ -183,10 +183,13 @@ sent):
   receiver's port), re-read per record from the `--muse-settings` path the unit
   carries.
 - **Doctor** reports the lane in the Muse section's `model calls` row: routed and
-  elected with the receiver listening, or why not. It checks the receiver only at
-  `telemetry.DefaultAddr` (127.0.0.1:8789), the same convention as Codex's
-  reachability row, so a receiver started on another `--addr` reads as not
-  listening.
+  elected with the receiver listening, or why not. It reads the installed
+  telemetry unit's own arguments (launchd plist or systemd unit; Windows has no
+  unit file to read, so the row says `unverified`): the unit's `--addr` is the
+  address the election and the port probe use, and a unit without
+  `--muse-settings` (or reading another settings file) is reported as recording
+  nothing, because the daemon builds a Muse emitter only when that flag is
+  present. Muse's own posture `telemetry=false` is reported too.
 
 ## Output contract
 

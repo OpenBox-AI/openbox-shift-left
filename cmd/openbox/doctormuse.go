@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +19,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
@@ -472,16 +476,33 @@ func parseMuseTelemetryPolicy(out string) string {
 func (a *app) reportMuseModelCalls(telemetryPolicy string) {
 	const gating = "tool, prompt and model-call gating still enforced"
 	settings := providers.MuseSettingsPath()
-	election := activation.ResolveMuseElection(settings, telemetry.DefaultAddr)
-	listening, _ := portOccupied(telemetry.DefaultAddr)
+	unit := a.readTelemetryUnit()
+	// The daemon matches Muse's endpoint against its own --addr, not the default.
+	addr := telemetry.DefaultAddr
+	if v, ok := unit.flag("--addr"); ok && v != "" {
+		addr = v
+	}
+	election := activation.ResolveMuseElection(settings, addr)
+	listening, _ := portOccupied(addr)
+	unitMuseSettings, unitHasMuse := unit.flag(laneservice.MuseSettingsFlag)
 
 	switch {
 	case election.SettingsProblem != "":
 		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; whether Muse exports to the telemetry receiver CANNOT BE DECIDED (%s); %s", election.SettingsProblem, gating)
 	case election.Elected != activation.LaneTelemetry:
 		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded by the telemetry lane: %s. `openbox init --provider muse` points Muse's telemetry at the receiver; %s", election.Reason, gating)
+	case unit.state == unitAbsent:
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; Muse's telemetry is pointed at this receiver but the telemetry unit is not installed (%s). `openbox init --provider muse` installs it; %s", unit.path, gating)
+	case unit.state == unitUnreadable:
+		a.museFinding("model-calls", "unverified", "model calls", "unverified: Muse model calls: whether the telemetry daemon was installed with Muse's settings cannot be read (%s); %s", unit.problem, gating)
+	case !unitHasMuse || unitMuseSettings == "":
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; the telemetry unit (%s) carries no %s, so its daemon builds no Muse emitter and drops every Muse export. `openbox init --provider muse` reinstalls it; %s", unit.path, laneservice.MuseSettingsFlag, gating)
+	case unitMuseSettings != settings:
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; the telemetry unit reads Muse's settings from %s, not %s, so its election is not this file's. `openbox init --provider muse` reinstalls it; %s", unitMuseSettings, settings, gating)
 	case !listening:
-		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; Muse's telemetry is pointed at this receiver but nothing is listening on %s. `openbox init --provider muse` brings the receiver back; %s", telemetry.DefaultAddr, gating)
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; Muse's telemetry is pointed at this receiver but nothing is listening on %s. `openbox init --provider muse` brings the receiver back; %s", addr, gating)
+	case !museTelemetryPostureOn():
+		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; Muse's own posture telemetry=false (its dev.json `telemetry` or %s), so the daemon receives the export and records nothing; %s", devconfig.EnvTelemetry, gating)
 	case telemetryPolicy == museTelemetryPolicyForcedOff:
 		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; a policy forces privacy.telemetry off, so Muse exports nothing; %s", gating)
 	default:
@@ -531,4 +552,137 @@ func (a *app) reportMuseEvidenceGaps() {
 	default:
 		a.museFinding("evidence-gaps", "warning", label, "WARNING: %d ungated Muse actions in the last 7 days (see `openbox trace <session>`). The usual cause is a tool payload over Muse's 256 KiB hook limit, which skips every hook; this is found after the fact and cannot be prevented", sum.Gaps)
 	}
+}
+
+// museTelemetryPostureOn is the posture the daemon applies to Muse's records,
+// resolved the way the daemon does (telemetryPostureFor): an unresolvable home
+// fails open, on.
+func museTelemetryPostureOn() bool {
+	on, err := devconfig.ResolveTelemetryFor(string(provider.Muse))
+	return err != nil || on
+}
+
+type telemetryUnitState int
+
+const (
+	// unitRead: the unit file was found and its argv parsed.
+	unitRead telemetryUnitState = iota
+	// unitAbsent: this OS has a unit file and none is installed.
+	unitAbsent
+	// unitUnreadable: no way to read the argv here (no unit file on this OS, or
+	// the file could not be read or parsed), so nothing is claimed about it.
+	unitUnreadable
+)
+
+// telemetryUnit is what the installed telemetry daemon was told to run with.
+// doctor cannot ask a running daemon, so the unit's argv is the evidence of
+// which settings paths and listen address it carries.
+type telemetryUnit struct {
+	state   telemetryUnitState
+	path    string
+	problem string
+	args    []string
+}
+
+// flag returns the value following name in the unit's argv.
+func (u telemetryUnit) flag(name string) (string, bool) {
+	for i, arg := range u.args {
+		if arg == name && i+1 < len(u.args) {
+			return u.args[i+1], true
+		}
+	}
+	return "", false
+}
+
+func (a *app) readTelemetryUnit() telemetryUnit {
+	spec := laneservice.Telemetry(telemetry.DefaultAddr, "", false)
+	path := spec.UnitPath(runtime.GOOS, a.homeDir())
+	if path == "" {
+		return telemetryUnit{state: unitUnreadable, problem: "no unit file on " + runtime.GOOS}
+	}
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return telemetryUnit{state: unitAbsent, path: path}
+	}
+	if err != nil {
+		return telemetryUnit{state: unitUnreadable, path: path, problem: err.Error()}
+	}
+	args := parseUnitArgs(runtime.GOOS, string(raw))
+	if len(args) == 0 {
+		return telemetryUnit{state: unitUnreadable, path: path, problem: "no program arguments found in " + path}
+	}
+	return telemetryUnit{state: unitRead, path: path, args: args}
+}
+
+// parseUnitArgs recovers the argv laneservice rendered: the ProgramArguments
+// strings of a launchd plist, or the ExecStart words of a systemd unit.
+func parseUnitArgs(goos, text string) []string {
+	switch goos {
+	case "darwin":
+		_, rest, ok := strings.Cut(text, "<key>ProgramArguments</key>")
+		if !ok {
+			return nil
+		}
+		body, _, _ := strings.Cut(rest, "</array>")
+		var out []string
+		for {
+			_, after, ok := strings.Cut(body, "<string>")
+			if !ok {
+				return out
+			}
+			v, next, ok := strings.Cut(after, "</string>")
+			if !ok {
+				return out
+			}
+			out = append(out, html.UnescapeString(v))
+			body = next
+		}
+	case "linux":
+		for _, line := range strings.Split(text, "\n") {
+			if exec, ok := strings.CutPrefix(line, "ExecStart="); ok {
+				return splitSystemdWords(exec)
+			}
+		}
+	}
+	return nil
+}
+
+// splitSystemdWords splits an ExecStart line the way laneservice writes it:
+// words separated by spaces, a quoted word using \\ and \" escapes, and %%
+// for a literal percent.
+func splitSystemdWords(s string) []string {
+	var (
+		out    []string
+		cur    strings.Builder
+		quoted bool
+		inWord bool
+	)
+	rs := []rune(s)
+	for i := 0; i < len(rs); i++ {
+		r := rs[i]
+		switch {
+		case quoted && r == '\\' && i+1 < len(rs):
+			i++
+			cur.WriteRune(rs[i])
+		case r == '"':
+			quoted, inWord = !quoted, true
+		case !quoted && r == ' ':
+			if inWord {
+				out = append(out, cur.String())
+				cur.Reset()
+				inWord = false
+			}
+		case r == '%' && i+1 < len(rs) && rs[i+1] == '%':
+			i++
+			cur.WriteRune('%')
+			inWord = true
+		default:
+			cur.WriteRune(r)
+			inWord = true
+		}
+	}
+	if inWord {
+		out = append(out, cur.String())
+	}
+	return out
 }
