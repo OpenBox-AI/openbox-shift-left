@@ -47,6 +47,32 @@ func (d DurationStash) TakeStart(sessionID, key string) string {
 	return strings.TrimSpace(string(data))
 }
 
+// modelCallKey is the stash key of one model-call gate: its request id, which
+// both halves carry and no tool call's pairing key can equal.
+func modelCallKey(requestID string) string { return "model_call\x1f" + requestID }
+
+// PutModelCallStart records a model-call gate's start timestamp under the
+// session, keyed by the gate's request id, so the finished half (a separate
+// hook process) can recover it. Atomic and a no-op on an empty start or
+// request id, like PutStart.
+func (d DurationStash) PutModelCallStart(sessionID, requestID, startedAt string) error {
+	if requestID == "" {
+		return nil
+	}
+	return d.PutStart(sessionID, modelCallKey(requestID), startedAt)
+}
+
+// TakeModelCallStart reads and removes the start timestamp PutModelCallStart
+// recorded, or "" when the started half never recorded one (a gate that never
+// ran, or a lost record): the finished row then carries no duration, never an
+// invented one.
+func (d DurationStash) TakeModelCallStart(sessionID, requestID string) string {
+	if requestID == "" {
+		return ""
+	}
+	return d.TakeStart(sessionID, modelCallKey(requestID))
+}
+
 // pairRecord is what a started (ToolCall) event stashes for its paired
 // completed (ToolResult) event to recover: the wall-clock start time, and the
 // started half's own operation id. Post adopts OperationID when its own

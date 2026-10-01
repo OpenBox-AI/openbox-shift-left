@@ -565,3 +565,39 @@ func TestUsageAndTraceparentStayLocal(t *testing.T) {
 		}
 	}
 }
+
+// The completed half of a model-call gate carries the time since its started
+// half, recovered across the two hook processes; a completed half with no
+// recorded start carries none.
+func TestModelCallFinishedCarriesTheGateDuration(t *testing.T) {
+	setHookEnv(t)
+	f := serveCore(t, fakecore.Script{Default: allowJSON})
+	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	defer func(prev func() time.Time) { nowFn = prev }(nowFn)
+
+	nowFn = func() time.Time { return base }
+	runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", "s-dur"))
+	nowFn = func() time.Time { return base.Add(250 * time.Millisecond) }
+	runHook(t, "PostLLMCall", fixture(t, "post-llm-call", "s-dur"))
+	// A finished half whose gate has no recorded start.
+	runHook(t, "PostLLMCall", fixture(t, "post-llm-call", "s-dur"))
+	endSession(t, fixture(t, "session-end", "s-dur"), "s-dur")
+
+	var completed []fakecore.Received
+	for _, r := range gateRows(f) {
+		if r.EventType() == fakecore.WireActivityCompleted {
+			completed = append(completed, r)
+		}
+	}
+	if len(completed) == 0 {
+		t.Fatal("no completed gate row")
+	}
+	if got, ok := completed[0].Body["duration_ms"].(float64); !ok || got != 250 {
+		t.Errorf("completed gate row duration_ms = %v, want 250", completed[0].Body["duration_ms"])
+	}
+	if len(completed) > 1 {
+		if d, has := completed[1].Body["duration_ms"]; has {
+			t.Errorf("a completed half with no recorded start carries duration_ms %v", d)
+		}
+	}
+}

@@ -253,6 +253,23 @@ func errorClass(raw json.RawMessage) string {
 	return ""
 }
 
+// threadModelCallDuration bridges a model-call gate's start time from its
+// PreLLMCall process to its PostLLMCall process, as hookflow's ThreadDuration
+// does for a tool call (which it handles for tool events only): the started
+// half stashes its start under the gate's request id, and the finished half
+// adopts it, which the client turns into the completed row's duration_ms. A
+// finished half whose started half never recorded one keeps no duration.
+func threadModelCallDuration(d hookflow.DurationStash, ev *client.DevEvent) {
+	switch ev.EventType {
+	case client.EventModelCallRequested:
+		_ = d.PutModelCallStart(ev.SessionID, ev.ModelCallRequestID, ev.StartedAt)
+	case client.EventModelCallFinished:
+		if started := d.TakeModelCallStart(ev.SessionID, ev.ModelCallRequestID); started != "" {
+			ev.StartedAt = started
+		}
+	}
+}
+
 // llmTarget is the gate's view of a PreLLMCall.
 type llmTarget struct {
 	id     Identity

@@ -148,3 +148,27 @@ func TestPairKey_FallsBackToToolCallStartKeyWithoutAnInvocationID(t *testing.T) 
 		t.Error("two different invocation ids collided")
 	}
 }
+
+// A model-call gate's start is recovered once, by request id, and never crosses
+// into a tool call's pairing keys or another gate.
+func TestModelCallStartRoundTrip(t *testing.T) {
+	d := DurationStash{Dir: t.TempDir()}
+	if err := d.PutModelCallStart("s", "req.0", "2026-10-01T12:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.TakeModelCallStart("s", "other.0"); got != "" {
+		t.Errorf("another gate's start = %q, want none", got)
+	}
+	if got := d.TakeStart("s", "req.0"); got != "" {
+		t.Errorf("a tool pairing key read a model-call start: %q", got)
+	}
+	if got := d.TakeModelCallStart("s", "req.0"); got != "2026-10-01T12:00:00Z" {
+		t.Errorf("start = %q", got)
+	}
+	if got := d.TakeModelCallStart("s", "req.0"); got != "" {
+		t.Errorf("a start was readable twice: %q", got)
+	}
+	if err := d.PutModelCallStart("s", "", "2026-10-01T12:00:00Z"); err != nil || d.TakeModelCallStart("s", "") != "" {
+		t.Error("an empty request id must record nothing")
+	}
+}

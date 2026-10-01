@@ -197,6 +197,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		mapped = false
 	}
 	if mapped {
+		threadModelCallDuration(ad.Durations, &devEv)
 		if err := ad.Record(devEv); err != nil {
 			logger.Printf("spool %s event: %v", hook, err)
 		}
@@ -290,6 +291,7 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 		// the SAME already-threaded event, and threading it twice would double-put
 		// its duration-pairing entry.
 		ad.ThreadDuration(&devEv)
+		threadModelCallDuration(ad.Durations, &devEv)
 		if hook == HookPreLLMCall {
 			traceModelCall(hook, ev, devEv)
 		}
