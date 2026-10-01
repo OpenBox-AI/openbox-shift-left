@@ -39,6 +39,10 @@ func runs(t *testing.T, counter string) int {
 // start `muse --version` again; one past the TTL reads it afresh.
 func TestProviderVersionIsCached(t *testing.T) {
 	counter := fakeMuse(t, "echo 1.4.1")
+	// The bound is not what this test is about, and a loaded -race run can take
+	// longer than it to start a shell script.
+	defer func(prev time.Duration) { providerVersionTimeout = prev }(providerVersionTimeout)
+	providerVersionTimeout = 30 * time.Second
 	dir := t.TempDir()
 	now := time.Now()
 
