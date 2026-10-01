@@ -36,6 +36,13 @@ func museFixtureJSON(t *testing.T) []byte {
 func TestMuseFixtureThroughTheChainYieldsOnePairPerModelCall(t *testing.T) {
 	delivered := &deliveredEvents{}
 	emitters := routedEmitters(delivered, "claude-code", "codex", "muse")
+	// The hook path recorded the subagent's parent.
+	emitters["muse"].Mapper.WithParentOf(func(child string) string {
+		if child == "feed0008-0000-4000-8000-000000000008" {
+			return "feed0001-0000-4000-8000-000000000001"
+		}
+		return ""
+	})
 	rec, err := telemetry.New(telemetry.Config{Addr: "127.0.0.1:0"}, telemetry.WithEmitter(newTelemetryRouter(emitters)))
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +73,28 @@ func TestMuseFixtureThroughTheChainYieldsOnePairPerModelCall(t *testing.T) {
 	}
 	if _, drops := emitters["claude-code"].Stats(); len(drops) != 0 {
 		t.Errorf("the Claude Code emitter saw Muse records: %v", drops)
+	}
+}
+
+// TestMuseFixtureSubagentWithNoRecordedLinkStaysItsOwnSession: the export names
+// a root for the subagent, but the hook path recorded no parent, so its hook
+// rows are in a session of its own and its model calls must be too.
+func TestMuseFixtureSubagentWithNoRecordedLinkStaysItsOwnSession(t *testing.T) {
+	delivered := &deliveredEvents{}
+	emitters := routedEmitters(delivered, "muse")
+	rec, err := telemetry.New(telemetry.Config{Addr: "127.0.0.1:0"}, telemetry.WithEmitter(newTelemetryRouter(emitters)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rec.ConsumeLogsJSON(context.Background(), museFixtureJSON(t)); err != nil {
+		t.Fatal(err)
+	}
+	sessions := map[string]int{}
+	for _, ev := range delivered.asMaps(t) {
+		sessions[ev["openbox_session_id"].(string)]++
+	}
+	if len(sessions) != 2 {
+		t.Errorf("events span sessions %v; a child nothing links stays a session of its own", sessions)
 	}
 }
 
@@ -227,7 +256,7 @@ func TestTelemetryCommandRecordsNothingForMuseWhenTheExportPointsElsewhere(t *te
 func TestMuseEmitterStaysIdleUntilSettingsPointAtIt(t *testing.T) {
 	delivered := &deliveredEvents{}
 	settings := filepath.Join(t.TempDir(), "settings.json")
-	em := newMuseTelemetryEmitter(settings, "127.0.0.1:8789", func() bool { return true }, nil,
+	em := newMuseTelemetryEmitter(settings, "127.0.0.1:8789", t.TempDir(), func() bool { return true }, nil,
 		func() string { return routeDID }, delivered.Deliver, func(string, ...any) {})
 	rec := museRecord
 
@@ -243,7 +272,7 @@ func TestMuseEmitterStaysIdleUntilSettingsPointAtIt(t *testing.T) {
 		t.Fatalf("emitted %d events once the settings point here, want the pair", n)
 	}
 	// And the posture gate: recording=false suppresses even an elected lane.
-	quiet := newMuseTelemetryEmitter(settings, "127.0.0.1:8789", func() bool { return false }, nil,
+	quiet := newMuseTelemetryEmitter(settings, "127.0.0.1:8789", t.TempDir(), func() bool { return false }, nil,
 		func() string { return routeDID }, delivered.Deliver, func(string, ...any) {})
 	_ = quiet.Emit(context.Background(), rec)
 	if n := len(delivered.asMaps(t)); n != 2 {

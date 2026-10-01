@@ -198,7 +198,7 @@ func (a *app) runTelemetry(args []string) int {
 	var museRecording func() bool
 	if *museSettings != "" {
 		museRecording = telemetryPostureFor(string(provider.Muse), logger.Printf)
-		museEmitter = newMuseTelemetryEmitter(*museSettings, *addr, museRecording, elected,
+		museEmitter = newMuseTelemetryEmitter(*museSettings, *addr, museHookSpool.Dir, museRecording, elected,
 			func() string { return identities[string(provider.Muse)].DID }, deliver, logger.Printf)
 	}
 	em := newTelemetryRouter(map[string]*telemetryemit.Emitter{
@@ -411,14 +411,14 @@ func newCodexTelemetryEmitter(paths codexElectionPaths, recording func() bool, o
 // lane Muse has, so the election answers "is the export pointed here", and is
 // re-resolved per record from the settings path the unit carried. receiverAddr
 // is this daemon's own listen address.
-func newMuseTelemetryEmitter(settingsPath, receiverAddr string, recording func() bool, override *bool,
+func newMuseTelemetryEmitter(settingsPath, receiverAddr, spoolDir string, recording func() bool, override *bool,
 	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any)) *telemetryemit.Emitter {
 	elect := museElectedFn(settingsPath, receiverAddr, override)
 	electedNow := func() bool { return recording() && elect() }
 	return &telemetryemit.Emitter{
 		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}).
 			WithSessionAttr(sessionkey.OTelAttr(sessionkey.Muse)).WithToolName(string(provider.Muse)).
-			WithFieldMap(telemetryemit.MuseFieldMap),
+			WithFieldMap(telemetryemit.MuseFieldMap).WithParentOf(telemetryemit.MuseParentOf(spoolDir)),
 		DID:     did,
 		Warn:    warn,
 		Deliver: deliver,

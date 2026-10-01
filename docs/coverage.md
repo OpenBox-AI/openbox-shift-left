@@ -139,8 +139,9 @@ metadata.** Measured on Muse 1.4.1, not assumed:
   `llm_completion` pair (`:otel:` namespace, keyed on Muse's response id): model,
   provider, duration, input, output and cached token counts (Muse's input count
   includes the cached tokens, so the total is input plus output). Every other
-  event is skipped. A subagent's call is recorded in the session its
-  `session_root_id` names. Muse exports no body, so there is none to capture.
+  event is skipped. A subagent's call is recorded in the parent session
+  the hook path recorded for that child (a child nothing links stays a session of
+  its own, as its hook rows do). Muse exports no body, so there is none to capture.
   Routing is by the `session_id` attribute; the election is whether the
   settings point at this receiver on loopback, so a settings file that does not
   (key absent or changed, destination not `external`, telemetry disabled, another
@@ -420,7 +421,7 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | A record is routed by its tool's session attribute, and one carrying more than one tool's is refused | E1 | `cmd/openbox/telemetryroute_test.go` · `TestTelemetryRoutingTable` |
 | A Muse `model_call` becomes one `llm_completion` pair in the `:otel:` namespace with response id, model, provider and usage | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseModelCallBecomesOneLLMCompletionPair` |
 | Every other Muse event is skipped | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseEveryOtherEventIsSkipped` |
-| A Muse subagent's call is recorded in the session that spawned it | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt` |
+| A Muse subagent's call is recorded in the session that spawned it | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseSubagentCallFollowsTheRecordedFold` |
 | No Muse content-shaped attribute reaches the wire, at either capture posture | E2 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseContentNeverReachesTheWire` |
 | A scrubbed Muse 1.4.1 export yields one pair per model call through decode, routing and mapping | E1 | `cmd/openbox/telemetrymuse_test.go` · `TestMuseFixtureThroughTheChainYieldsOnePairPerModelCall` |
 | The real telemetry command records a Muse export at core under Muse's own identity, with the election derived from `--muse-settings` | E2 | `cmd/openbox/telemetrymuse_test.go` · `TestTelemetryCommandRecordsMuseModelCalls` |

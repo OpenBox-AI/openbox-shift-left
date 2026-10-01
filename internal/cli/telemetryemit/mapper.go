@@ -100,6 +100,9 @@ type Mapper struct {
 	// value is Claude Code's (defaultFieldMap), which Codex shares, so every
 	// existing caller keeps its byte-identical output.
 	fields FieldMap
+	// parentOf names the session a child's calls fold into, "" for none. It
+	// reads the decision the hook path recorded; see WithParentOf.
+	parentOf func(child string) string
 }
 
 // New builds a mapper for one developer identity. It takes no redactor,
@@ -145,13 +148,10 @@ type FieldMap struct {
 	InputIncludesCache bool
 	// ProviderKey, when set, is copied into metadata as `provider`.
 	ProviderKey string
-	// RootSessionKey, when set and naming a usable session other than the
-	// record's own, folds the call into that session: a subagent's calls are
-	// recorded in the session that spawned it, tagged as a subagent's, the way
-	// the hook path folds the same child. KindKey names what kind of session the
-	// record's own is (Muse: reminder), carried as metadata subagent_kind.
-	RootSessionKey string
-	KindKey        string
+	// KindKey names what kind of session the record's own is (Muse: reminder),
+	// carried as metadata subagent_kind on a call folded into its parent's
+	// session. Whether a call folds is not a field of the record: see WithParentOf.
+	KindKey string
 	// URL is the synthesized stand-in for the call's endpoint on the span.
 	URL string
 }
@@ -184,9 +184,21 @@ var MuseFieldMap = FieldMap{
 	CacheReadTokens:    "tokens_cached",
 	InputIncludesCache: true,
 	ProviderKey:        "gen_ai_provider_name",
-	RootSessionKey:     "session_root_id",
 	KindKey:            "session_kind",
 	URL:                "https://api.meta.ai/",
+}
+
+// WithParentOf sets how a record's session is folded into a parent's: the
+// function returns the parent a child session was recorded under, or "" when
+// none was. A call folds only when it names a usable session other than the
+// record's own, so a child nothing links stays a session of its own -- the hook
+// path's decision, which this must follow rather than re-derive from the
+// record: the export's own root attribute names a root for a child the hook
+// path never folded, and the two lanes would then put one session's rows in
+// different sessions and runs. Nil never folds.
+func (m *Mapper) WithParentOf(f func(child string) string) *Mapper {
+	m.parentOf = f
+	return m
 }
 
 // WithFieldMap selects which attributes this mapper reads; the zero FieldMap
@@ -261,12 +273,12 @@ func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, 
 	}
 
 	// The fold is decided before the run is read, so a subagent's call lands in
-	// the parent's run and the parent's halt latch. A record that names no usable
-	// other session stays in its own, exactly as an unlinked hook child does.
+	// the parent's run and the parent's halt latch. A session with no recorded
+	// parent stays in its own, exactly as an unlinked hook child does.
 	folded := false
-	if fm.RootSessionKey != "" {
-		if root := rec.Attrs[fm.RootSessionKey]; root != session && safeSessionID(root) {
-			session, folded = root, true
+	if m.parentOf != nil {
+		if parent := m.parentOf(session); parent != session && safeSessionID(parent) {
+			session, folded = parent, true
 		}
 	}
 

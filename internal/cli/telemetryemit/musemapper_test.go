@@ -1,6 +1,8 @@
 package telemetryemit
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
+
+// goldenLinkHash is the hook path's fnv32a suffix for museChild's state file.
+const goldenLinkHash = "4045008d"
 
 const (
 	museMain  = "feed0001-0000-4000-8000-000000000001"
@@ -144,13 +149,21 @@ func TestMuseEveryOtherEventIsSkipped(t *testing.T) {
 	}
 }
 
-// TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt: a subagent runs under a
-// session id of its own and names the session at the top as session_root_id.
-// The call is recorded in that session, tagged as a subagent's, the way the
-// hook path folds the same child.
-func TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt(t *testing.T) {
+// TestMuseSubagentCallFollowsTheRecordedFold: a subagent runs under a session id
+// of its own. The call is recorded in the session the hook path recorded as its
+// parent, tagged as a subagent's; a child nothing links stays a session of its
+// own, whatever root the export names, exactly as the hook path leaves it.
+func TestMuseSubagentCallFollowsTheRecordedFold(t *testing.T) {
+	linked := func(m *Mapper) *Mapper {
+		return m.WithParentOf(func(child string) string {
+			if child == museChild {
+				return museMain
+			}
+			return ""
+		})
+	}
 	rec := museModelCall(map[string]string{"session_id": museChild, "session_kind": "reminder"})
-	events, out := museMapper().EventsFor(rec)
+	events, out := linked(museMapper()).EventsFor(rec)
 	if out != Emitted {
 		t.Fatalf("outcome %v", out)
 	}
@@ -166,19 +179,26 @@ func TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt(t *testing.T) {
 		}
 	}
 
-	// A main session (root equals id), and a record naming no root, are not folded.
-	for name, o := range map[string]map[string]string{
-		"main":          nil,
-		"no root":       {"session_id": museChild, "session_root_id": ""},
-		"unusable root": {"session_id": museChild, "session_root_id": "../../x"},
+	// Not folded: a main session; a child the export roots elsewhere but no link
+	// records (the hook path leaves it a session of its own); no resolver at all;
+	// an unusable recorded parent.
+	unusable := func(m *Mapper) *Mapper { return m.WithParentOf(func(string) string { return "../../x" }) }
+	for name, c := range map[string]struct {
+		m   *Mapper
+		rec map[string]string
+	}{
+		"main":        {linked(museMapper()), nil},
+		"linkless":    {linked(museMapper()), map[string]string{"session_id": "feed0009-0000-4000-8000-000000000009", "session_root_id": museMain}},
+		"no resolver": {museMapper(), map[string]string{"session_id": museChild}},
+		"unusable":    {unusable(museMapper()), map[string]string{"session_id": museChild}},
 	} {
-		ev, out := completedHalf(museMapper().EventsFor(museModelCall(o)))
+		ev, out := completedHalf(c.m.EventsFor(museModelCall(c.rec)))
 		if out != Emitted {
 			t.Fatalf("%s: outcome %v", name, out)
 		}
-		want := museMain
-		if name != "main" {
-			want = museChild
+		want := c.rec["session_id"]
+		if want == "" {
+			want = museMain
 		}
 		if ev.SessionID != want {
 			t.Errorf("%s: session = %q, want %q", name, ev.SessionID, want)
@@ -186,6 +206,52 @@ func TestMuseSubagentCallFoldsIntoTheSessionThatSpawnedIt(t *testing.T) {
 		if _, tagged := ev.Metadata["agent_type"]; tagged {
 			t.Errorf("%s: an unfolded call is tagged as a subagent's: %v", name, ev.Metadata)
 		}
+	}
+}
+
+// TestMuseParentOfReadsTheHookPathsRecord pins the file layout the hook path
+// writes: a positive record folds; a negative one, an absent one and one naming
+// a different child do not. The golden name is the hook path's statePath for
+// this child; if it moves, this reader goes blind and every child falls back to
+// a session of its own.
+func TestMuseParentOfReadsTheHookPathsRecord(t *testing.T) {
+	dir := t.TempDir()
+	got := museLinkPath(dir, museChild)
+	if base := filepath.Base(got); base != museChild+"-"+goldenLinkHash+".json" {
+		t.Fatalf("link file = %s, want the hook path's name for the child", base)
+	}
+	write := func(child, body string) {
+		t.Helper()
+		p := museLinkPath(dir, child)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parentOf := MuseParentOf(dir)
+	if got := parentOf(museChild); got != "" {
+		t.Errorf("absent record: parent %q, want none", got)
+	}
+	write(museChild, `{"child_session_id":"`+museChild+`","parent_session_id":"`+museMain+`","updated_at":1}`)
+	if got := parentOf(museChild); got != museMain {
+		t.Errorf("positive record: parent %q, want %q", got, museMain)
+	}
+	write(museChild, `{"child_session_id":"`+museChild+`","updated_at":1}`)
+	if got := parentOf(museChild); got != "" {
+		t.Errorf("negative record: parent %q, want none", got)
+	}
+	write(museChild, `{"child_session_id":"someone-else","parent_session_id":"`+museMain+`"}`)
+	if got := parentOf(museChild); got != "" {
+		t.Errorf("record of another child: parent %q, want none", got)
+	}
+	write(museChild, `not json`)
+	if got := parentOf(museChild); got != "" {
+		t.Errorf("corrupt record: parent %q, want none", got)
+	}
+	if got := MuseParentOf("")(museChild); got != "" {
+		t.Errorf("no spool dir: parent %q, want none", got)
 	}
 }
 

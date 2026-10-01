@@ -152,13 +152,23 @@ sent):
   from the response id, usage on the close. There is no fallback id: Muse's
   `message_id` can recur across calls, so a record with no usable response id is
   dropped and counted rather than risk one call deduping another.
-  A call from a subagent is recorded in the session `session_root_id` names, with
-  `agent_type: subagent` (the hook path's tag) and `subagent_kind` from
-  `session_kind`. `agent_id` is deliberately not set: the hook path's is the
-  subagent's own id (for example `skill-reminder`), which the export does not
-  carry, and a kind under that key would make the two lanes disagree
-  (`subagentparent.go` finds the parent from the journal; the export names it
-  directly).
+  A call from a subagent is recorded in the parent session **the hook path
+  recorded for that child** (`telemetryemit.MuseParentOf` reads the per-child
+  file `subagentparent.go` writes under `<muse-spool>/lifecycle/subagents/`, in
+  the spool directory the daemon's unit carries), with `agent_type: subagent`
+  (the hook path's tag) and `subagent_kind` from `session_kind`. The export's
+  `session_root_id` is deliberately not used to fold: it names a root for a
+  child the hook path never linked (a reminder, a resumed or forked session),
+  and that child's hook rows stay a session of its own, so following the export
+  would put one session's rows in two sessions and runs. No recorded link, or a
+  negative one, means a session of its own, the hook path's default; the link is
+  written on the child's first hook, before its first model call is exported.
+  `agent_id` is deliberately not set: the hook path's is the subagent's own id
+  (for example `skill-reminder`), which the export does not carry, and a kind
+  under that key would make the two lanes disagree. The link file name and JSON
+  are the hook path's format, read here without sharing code (this package is
+  not importable from `telemetryemit`); `TestMuseParentOfReadsTheHookPathsRecord`
+  pins the name.
 - **Install** (`telemetrykeys.go`): the receiver is started and proven listening
   first; then Muse's previous `telemetry` value is recorded in
   `~/.openbox/muse-prior-settings.json` **before** the key is merged by path
