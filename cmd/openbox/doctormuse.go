@@ -598,7 +598,10 @@ func (a *app) readTelemetryUnit() telemetryUnit {
 	spec := laneservice.Telemetry(telemetry.DefaultAddr, "", false)
 	path := spec.UnitPath(runtime.GOOS, a.homeDir())
 	if path == "" {
-		return telemetryUnit{state: unitUnreadable, problem: "no unit file on " + runtime.GOOS}
+		// Windows keeps a service's argv in the service manager, not a file.
+		// Windows is not supported at runtime, so doctor does not read it there
+		// and says so rather than guessing.
+		return telemetryUnit{state: unitUnreadable, problem: "doctor does not read service arguments on " + runtime.GOOS + ", which is not supported at runtime"}
 	}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

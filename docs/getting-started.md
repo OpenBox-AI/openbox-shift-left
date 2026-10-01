@@ -43,7 +43,9 @@ amd64 or arm64), verifies its checksum and installs it to `~/.local/bin`
 from source, which needs Go 1.27+.
 
 **Windows:** the binary builds, but `install.sh` is bash and nothing tests
-Windows at runtime. Build from source with `go build ./cmd/openbox`.
+Windows at runtime. Build from source with `go build ./cmd/openbox`. `doctor`
+cannot confirm there that Muse's telemetry lane is recording, and says
+`unverified`.
 
 ## 2. Get the right credential
 
