@@ -165,7 +165,9 @@ sent):
   (every other byte kept, atomic, read back). A second install writes nothing. A
   value the developer changed after install is refused, not overwritten.
   `RestoreTelemetry` puts the recorded value back exactly, or deletes the key,
-  and leaves a drifted value.
+  and leaves a drifted value. The record names the settings file it was made
+  for; a run against a different file (another HOME or user) refuses and names
+  both files rather than applying it.
 - **Election.** Muse has no other lane, so it is whether the settings point at
   this receiver (enabled, destination `external`, a loopback endpoint on the
   receiver's port), re-read per record from the `--muse-settings` path the unit
@@ -268,11 +270,21 @@ govern nothing.
   previous file is restored.
 - **Uninstall** (`RemoveHooks`) removes exactly the owned handlers, and the event
   or `hooks` object it emptied, so install then uninstall gives back the original
-  bytes. `schema_version` stays.
+  bytes. `schema_version` stays in a file that was the developer's. When the
+  install created `settings.json` (noted in the restore record before the file is
+  written), `RestoreTelemetry`, the last uninstall step for that file, removes it
+  once nothing but that `schema_version` is left; a file that gained anything
+  since is kept. If Muse's pointer cannot be restored (an unreadable or
+  future-schema `settings.json`, a corrupt record), `openbox uninstall` keeps the
+  shared telemetry daemon running and says so, since removing it would leave
+  Muse exporting to a dead port; fix the file and run it again.
 - **Version gate.** `muse --version` (2 s bound) below 1.4.0 refuses, as does a
   version that cannot be read (timeout, non-zero exit, no number: nothing proves
-  it is new enough) and a prerelease of 1.4.0; absent from PATH, or at 1.5.0 and
-  above, installs with a warning. Doctor rates an unreadable version FAIL.
+  it is new enough) and a prerelease of 1.4.0 (`1.4.0-rc.N` sorts below the
+  floor, on purpose); absent from PATH, or at 1.5.0 and above (a prerelease of
+  1.5.0 included), installs with a warning. Prereleases compare by semver
+  precedence (`rc.2` before `rc.10`), and a describe-style suffix such as
+  `-3-gabc1234` is build metadata, not a prerelease. Doctor rates an unreadable version FAIL.
   Every `muse` subprocess goes through a `Runner`, so tests never run a real one.
 - **Posture** goes through `devconfig.WriteConfig(ConfigUpdate(ref))` like the
   other adapters; a bool the run says nothing about stays unset.

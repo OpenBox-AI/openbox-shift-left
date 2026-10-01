@@ -29,6 +29,7 @@ func newTestInstaller(t *testing.T) (Installer, string) {
 		SettingsPath: path,
 		ConfigPath:   filepath.Join(dir, "dev.json"),
 		Runner:       versionRunner("muse 1.4.0"),
+		HomeDir:      filepath.Join(dir, "home"),
 	}, path
 }
 
@@ -541,4 +542,78 @@ func TestInlineDeliveryFitsInsideEveryHandlerThatRunsIt(t *testing.T) {
 			t.Errorf("%s: inline delivery may take %s but Muse kills the handler at %s", ev, inlineWindow, ceiling)
 		}
 	}
+}
+
+// TestUninstallRemovesASettingsFileTheInstallCreatedAndNothingElse: an install
+// into a machine with no settings.json, then an uninstall, leaves no file
+// behind -- but only while nothing but what OpenBox wrote remains. A file the
+// developer already had, or one that gained a key since, is theirs and stays.
+func TestUninstallRemovesASettingsFileTheInstallCreatedAndNothingElse(t *testing.T) {
+	uninstall := func(t *testing.T, i Installer) {
+		t.Helper()
+		if _, err := RemoveHooks(i.SettingsPath); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := RestoreTelemetry(i.SettingsPath, i.HomeDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	install := func(t *testing.T, i Installer) {
+		t.Helper()
+		if err := i.Install(testRef); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := WriteTelemetry(i.SettingsPath, i.HomeDir, testEndpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("created by the install", func(t *testing.T) {
+		i, path := newTestInstaller(t)
+		install(t, i)
+		install(t, i) // a second init must not forget that the file is ours
+		uninstall(t, i)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("uninstall left the file the install created: %v", err)
+		}
+		if _, err := os.Stat(PriorSettingsPath(i.HomeDir)); !os.IsNotExist(err) {
+			t.Errorf("the restore record survived: %v", err)
+		}
+	})
+	t.Run("hooks only, no telemetry lane", func(t *testing.T) {
+		i, path := newTestInstaller(t)
+		if err := i.Install(testRef); err != nil {
+			t.Fatal(err)
+		}
+		uninstall(t, i)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("uninstall left the file the install created: %v", err)
+		}
+		if _, err := os.Stat(PriorSettingsPath(i.HomeDir)); !os.IsNotExist(err) {
+			t.Errorf("the restore record survived: %v", err)
+		}
+	})
+	t.Run("gained a key since", func(t *testing.T) {
+		i, path := newTestInstaller(t)
+		install(t, i)
+		writeFile(t, path, strings.Replace(readFile(t, path), `"schema_version": 1`, `"schema_version": 1, "theme": "dark"`, 1))
+		uninstall(t, i)
+		got := readFile(t, path)
+		if !strings.Contains(got, `"theme": "dark"`) || strings.Contains(got, "hook muse") || strings.Contains(got, "telemetry") {
+			t.Errorf("the developer's file was not left as theirs, minus OpenBox:\n%s", got)
+		}
+		if _, err := os.Stat(PriorSettingsPath(i.HomeDir)); !os.IsNotExist(err) {
+			t.Errorf("the restore record survived: %v", err)
+		}
+	})
+	t.Run("the developer's own file", func(t *testing.T) {
+		i, path := newTestInstaller(t)
+		const own = "{\n  \"schema_version\": 1\n}\n"
+		writeFile(t, path, own)
+		install(t, i)
+		uninstall(t, i)
+		if got := readFile(t, path); got != own {
+			t.Errorf("a file the install did not create changed:\n%s", got)
+		}
+	})
 }

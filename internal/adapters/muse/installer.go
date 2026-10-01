@@ -74,6 +74,9 @@ type Installer struct {
 	ConfigPath string
 	// Runner runs `muse` for the version gate (default: ExecRunner).
 	Runner Runner
+	// HomeDir is the developer's home, where the restore record lives (default:
+	// the user's home directory).
+	HomeDir string
 }
 
 // Name reports the provider this installer serves.
@@ -122,10 +125,34 @@ func (i Installer) Install(ref CredentialRef) error {
 	if err != nil {
 		return err
 	}
+	// A file this install creates is noted first, so uninstall can remove it
+	// again; the note goes back if anything after it fails.
+	undoNote := func() {}
+	if !plan.existed {
+		if undoNote, err = noteCreatedSettings(i.homeDir(), plan.path); err != nil {
+			return fmt.Errorf("muse install: recording that OpenBox creates %s: %w. Nothing was written", plan.path, err)
+		}
+	}
 	if err := devconfig.WriteConfig(i.configPath(), providerspi.ConfigUpdate(ref)); err != nil {
+		undoNote()
 		return fmt.Errorf("muse install: %w", err)
 	}
-	return i.commitSettings(plan)
+	if err := i.commitSettings(plan); err != nil {
+		undoNote()
+		return err
+	}
+	return nil
+}
+
+func (i Installer) homeDir() string {
+	if i.HomeDir != "" {
+		return i.HomeDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home
 }
 
 // ownedHandler is the JSON of one handler the installer writes. Field order is

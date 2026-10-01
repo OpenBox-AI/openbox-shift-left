@@ -73,8 +73,11 @@ func dropOwned(doc []byte, event string) ([]byte, []removal, error) {
 // line on ownership: a handler is OpenBox's only when its command parses to
 // `<engine> hook muse ...`. schema_version and every other key, handler and
 // byte of formatting stay as they were. An event or hooks block that this
-// removal emptied goes with it, so an install followed by an uninstall leaves
-// the file as it was.
+// removal emptied goes with it, so what is left is the file without OpenBox's
+// handlers. A file the install itself created is not deleted here: it still
+// holds the telemetry key, and RestoreTelemetry, the last uninstall step for
+// this file, removes it once nothing but the schema_version OpenBox wrote is
+// left.
 //
 // An absent file is success: uninstall walks every surface unconditionally. A
 // file Muse cannot read is refused untouched, since editing it would only make

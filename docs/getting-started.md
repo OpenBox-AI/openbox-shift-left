@@ -158,7 +158,12 @@ A Muse that is not on your `PATH` installs with a warning.
   counts and response ids; no prompts, tool content or replies) to OpenBox's
   loopback receiver **instead of Meta's destinations**. The value that was there
   is recorded first, and `openbox uninstall` puts it back exactly, or removes the
-  key if there was none; a value you changed after `init` is left alone. An
+  key if there was none; a value you changed after `init` is left alone. If
+  `init` created `~/.config/muse/settings.json`, uninstall removes it again once
+  only OpenBox's own `schema_version` is left. If Muse's settings cannot be
+  restored (the file is unreadable, or a newer Muse changed its schema),
+  uninstall keeps the telemetry daemon running and says so, so Muse never points
+  at a dead port; fix the file and run `openbox uninstall` again. An
   existing `telemetry` setting of your own is replaced, and `init` says so.
   `doctor` reports whether the lane is routed, and why not when it is not. A
   policy that forces `privacy.telemetry` off stops the export; `doctor` reports

@@ -47,9 +47,13 @@ type priorValue struct {
 // ~/.openbox (not dev.json, which holds coordinates only, and not .env, which
 // holds secrets only).
 type priorSettings struct {
-	Schema       string                `json:"schema"`
-	SettingsPath string                `json:"settings_path,omitempty"`
-	Keys         map[string]priorValue `json:"keys"`
+	Schema       string `json:"schema"`
+	SettingsPath string `json:"settings_path,omitempty"`
+	// SettingsCreated is true when OpenBox's install created SettingsPath
+	// rather than merging into a file the developer already had. Uninstall then
+	// removes the file once nothing but what OpenBox wrote is left in it.
+	SettingsCreated bool                  `json:"settings_created,omitempty"`
+	Keys            map[string]priorValue `json:"keys"`
 }
 
 // PriorSettingsPath is where the restore record lives, exported so uninstall
@@ -84,7 +88,7 @@ func loadPriorSettings(homeDir string) (priorSettings, error) {
 
 func savePriorSettings(homeDir string, rec priorSettings) error {
 	path := PriorSettingsPath(homeDir)
-	if len(rec.Keys) == 0 {
+	if len(rec.Keys) == 0 && !rec.SettingsCreated {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("muse: removing %s: %w", path, err)
 		}
@@ -193,6 +197,7 @@ type telemetryPlan struct {
 	rec       priorSettings // the record as it should be once the write lands
 	prevKeys  map[string]priorValue
 	prevPath  string
+	prevMade  bool // the previous record said OpenBox created the settings file
 	unchanged bool // settings already say it
 }
 
@@ -201,7 +206,7 @@ func (p *telemetryPlan) previousRecord(homeDir string) priorSettings {
 	for k, v := range p.prevKeys {
 		keys[k] = v
 	}
-	return priorSettings{Schema: priorSettingsSchema, SettingsPath: p.prevPath, Keys: keys}
+	return priorSettings{Schema: priorSettingsSchema, SettingsPath: p.prevPath, SettingsCreated: p.prevMade, Keys: keys}
 }
 
 func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, error) {
@@ -216,7 +221,7 @@ func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, erro
 	if rec.isElsewhere(path) {
 		return nil, recordElsewhere(rec, path)
 	}
-	p := &telemetryPlan{path: path, before: before, existed: existed, perm: perm, prevKeys: map[string]priorValue{}, prevPath: rec.SettingsPath}
+	p := &telemetryPlan{path: path, before: before, existed: existed, perm: perm, prevKeys: map[string]priorValue{}, prevPath: rec.SettingsPath, prevMade: rec.SettingsCreated}
 	for k, v := range rec.Keys {
 		p.prevKeys[k] = v
 	}
@@ -256,7 +261,9 @@ func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, erro
 		keys[k] = v
 	}
 	keys[TelemetryKey] = entry
-	p.rec = priorSettings{Schema: priorSettingsSchema, SettingsPath: path, Keys: keys}
+	// The creation note belongs to the file it was made for, and only that one.
+	created := rec.SettingsCreated && (rec.SettingsPath == "" || samePath(rec.SettingsPath, path))
+	p.rec = priorSettings{Schema: priorSettingsSchema, SettingsPath: path, SettingsCreated: created, Keys: keys}
 	if p.current.Exists() && canonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)) {
 		p.unchanged = true
 		return p, nil
@@ -404,6 +411,9 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 	}
 	entry, ok := rec.Keys[TelemetryKey]
 	if !ok {
+		if rec.SettingsCreated {
+			return TelemetryRestored{}, settleCreatedSettings(homeDir, rec, resolveSettingsPath(settingsPath))
+		}
 		return TelemetryRestored{}, nil
 	}
 	if rec.isElsewhere(resolveSettingsPath(settingsPath)) {
@@ -411,7 +421,7 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 	}
 	forget := func() error {
 		delete(rec.Keys, TelemetryKey)
-		return savePriorSettings(homeDir, rec)
+		return settleCreatedSettings(homeDir, rec, resolveSettingsPath(settingsPath))
 	}
 
 	path, before, existed, perm, err := resolvedSettings(settingsPath)
@@ -456,4 +466,69 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 		return TelemetryRestored{}, err
 	}
 	return TelemetryRestored{Recorded: true, Present: entry.Present, Value: entry.Raw}, nil
+}
+
+// noteCreatedSettings records, before the install creates the settings file at
+// path, that OpenBox is the one creating it, so uninstall can take the file
+// away again instead of leaving a bare schema_version behind. It returns what
+// puts the record back as it was, for an install that fails afterwards. A record
+// that belongs to another settings file is left alone and noted nothing about:
+// it may still be owed a restore there, and one file holds one note.
+func noteCreatedSettings(homeDir, path string) (undo func(), err error) {
+	noop := func() {}
+	if homeDir == "" {
+		return noop, nil
+	}
+	rec, err := loadPriorSettings(homeDir)
+	if err != nil {
+		return noop, err
+	}
+	if rec.SettingsPath != "" && !samePath(rec.SettingsPath, path) && (len(rec.Keys) > 0 || rec.SettingsCreated) {
+		return noop, nil
+	}
+	before := rec
+	next := priorSettings{Schema: priorSettingsSchema, SettingsPath: path, SettingsCreated: true, Keys: rec.Keys}
+	if err := savePriorSettings(homeDir, next); err != nil {
+		return noop, err
+	}
+	return func() { _ = savePriorSettings(homeDir, before) }, nil
+}
+
+// settleCreatedSettings is the last step of an uninstall, run once the hooks
+// and the telemetry key are out: when OpenBox created the file at path and it
+// holds nothing but the schema_version OpenBox wrote, the file goes. A file
+// that gained anything since is the developer's now and stays. The note is
+// cleared either way, and the record goes with it once nothing else is in it.
+func settleCreatedSettings(homeDir string, rec priorSettings, path string) error {
+	if rec.SettingsCreated && rec.SettingsPath != "" && samePath(rec.SettingsPath, path) {
+		if err := removeSettingsIfOnlySchema(path); err != nil {
+			return err
+		}
+		rec.SettingsCreated = false
+	}
+	return savePriorSettings(homeDir, rec)
+}
+
+// removeSettingsIfOnlySchema deletes a settings file whose whole content is the
+// schema_version key this adapter writes into a file it creates.
+func removeSettingsIfOnlySchema(path string) error {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("muse: reading %s: %w", path, err)
+	}
+	root := gjson.ParseBytes(raw)
+	if !gjson.ValidBytes(raw) || !root.IsObject() {
+		return nil
+	}
+	fields := root.Map()
+	if len(fields) != 1 || !fields["schema_version"].Exists() {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("muse: removing %s: %w", path, err)
+	}
+	return nil
 }

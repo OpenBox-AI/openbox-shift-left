@@ -524,3 +524,31 @@ func TestMuseUninstallKeepsTheTelemetryUnitWhileMusePointsAtIt(t *testing.T) {
 		t.Errorf("settings.json was edited despite the refusal:\n%s", got)
 	}
 }
+
+// TestMuseInitThenUninstallOnAMachineWithoutSettingsLeavesNone: init creates
+// Muse's settings.json, so uninstall takes it away again rather than leaving a
+// bare schema_version behind.
+func TestMuseInitThenUninstallOnAMachineWithoutSettingsLeavesNone(t *testing.T) {
+	skipUnlessSupervised(t)
+	isolateHome(t)
+	seedCredentials(t, "muse")
+	withMuseRunner(t, museVersion("1.4.0"))
+	path := providers.MuseSettingsPath()
+	a, _, errb := testApp(nil)
+	if code := a.run([]string{"init", "--provider", "muse"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
+	}
+	if !fileExists(path) {
+		t.Fatal("init did not create settings.json")
+	}
+	u, _, _ := testApp(nil)
+	var combined strings.Builder
+	u.stdout, u.stderr = &combined, &combined
+	if code := u.runUninstall(nil); code != exitOK {
+		t.Fatalf("uninstall exit = %d:\n%s", code, combined.String())
+	}
+	if fileExists(path) {
+		got, _ := os.ReadFile(path)
+		t.Errorf("uninstall left the settings file init created:\n%s", got)
+	}
+}
