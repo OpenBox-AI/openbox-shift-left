@@ -136,7 +136,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}
 	}
 	if hook == HookSessionStart || (hook == HookSubagentStart && !ev.folded()) {
-		posture := effectivePosture()
+		posture := effectivePosture(lc.Dir)
 		ad.Mapper.Posture = &posture
 	}
 
@@ -163,7 +163,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		ad.Mapper.Run = &run
 		if tr.Open {
 			if ad.Mapper.Posture == nil {
-				posture := effectivePosture()
+				posture := effectivePosture(lc.Dir)
 				ad.Mapper.Posture = &posture
 			}
 			if start, ok := ad.Mapper.openEvent(hook, ev, tr.Resumed); ok {
