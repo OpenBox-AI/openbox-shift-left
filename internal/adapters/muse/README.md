@@ -298,10 +298,16 @@ sealed it:
 
 - **`muse resume` fires no `SessionStart`.** It sends `UserPromptSubmit` and the
   rest under the old session id after that session already got `SessionEnd`. The
-  first event of a session whose run was sealed opens a new run (continue-as-new,
-  the same as a Claude Code `SessionStart` `source=resume`) and its
-  `SessionStarted` is spooled before the event. The halt latch is keyed by run,
-  so the resumed session starts unlatched.
+  first `UserPromptSubmit` of a session whose run was sealed opens a new run
+  (continue-as-new, the same as a Claude Code `SessionStart` `source=resume`) and
+  its `SessionStarted` is spooled before the event. The halt latch is keyed by
+  run, so the resumed session starts unlatched. Only that prompt reopens: a
+  resume cannot reach a model call or a tool before the user has typed, so any
+  other event of a sealed session is a straggler (a hook racing teardown, a late
+  observer, a folded subagent's event). A straggler that is only observed is
+  dropped; a gated one is still evaluated, under the sealed run (its latch is
+  consulted first), and opens nothing, so a late event can never mint a run that
+  no `SessionEnd` will close.
 - **A subagent runs under its own session id** (`SubagentStart`/`SubagentStop`
   carry `session_id == child_session_id == turn_id` and a `subagent_id`, never a
   parent id). The parent's journal names it: a record carrying

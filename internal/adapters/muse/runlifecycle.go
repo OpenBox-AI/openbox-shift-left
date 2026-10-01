@@ -32,13 +32,15 @@ import (
 // Core must never receive a run's events without that run's WorkflowStarted
 // first, so the adapter keeps one small record per session (runState) saying
 // which run the session is on and whether SessionEnd or SubagentStop sealed it.
-// The first event of a session with no record, or whose run was sealed, opens a
-// run: a session never seen starts at its current run (generation 0 unless a
-// resume already continued it), a sealed one continues as a new run
-// (continue-as-new, the same Bump a Claude Code SessionStart source=resume
-// does), and that run's SessionStarted is spooled BEFORE the event itself. A
-// new run id is also what leaves a resumed session unlatched, because the halt
-// latch is keyed by run.
+// The first event of a session with no record opens a run at its current run
+// (generation 0 unless a resume already continued it). A sealed session is
+// reopened only by a UserPromptSubmit, the one event `muse resume` can start
+// with: it continues as a new run (continue-as-new, the same Bump a Claude Code
+// SessionStart source=resume does). Every other event of a sealed session is a
+// straggler: an observed one is dropped, a gated one is evaluated under the
+// sealed run and opens nothing. A run's SessionStarted is spooled BEFORE the
+// event that opened it. A new run id is also what leaves a resumed session
+// unlatched, because the halt latch is keyed by run.
 
 // runState is one session's lifecycle record.
 type runState struct {
@@ -237,8 +239,23 @@ func (l lifecycle) advance(hook HookName, ev *HookEvent) (RunIdentity, transitio
 		return l.current(sid), transition{Drop: true}
 	}
 
-	// No run, or a sealed one: open a run. Whatever the hook is, the session
-	// is live again (a resume sends no SessionStart of its own).
+	// A sealed run is reopened only by what a resumed session starts with: the
+	// prompt that resumed it. Anything else of a sealed session is a straggler
+	// (a hook racing teardown, a late observer, a folded subagent's event) and
+	// would otherwise mint a run nothing ever ends.
+	if have && st.Sealed && !(hook == HookUserPromptSubmit && !folded) {
+		if hook.Gated() {
+			// Still answered, and fail-closed: /evaluate decides under the run
+			// the session last had, whose latch (if any) is consulted first. No
+			// run is opened, so there is no SessionStarted to spool, and the
+			// call neither denies without a verdict nor escapes evaluation.
+			return l.current(sid), transition{}
+		}
+		return l.current(sid), transition{Drop: true}
+	}
+
+	// No run, or a sealed one a prompt resumed: open a run (a resume sends no
+	// SessionStart of its own).
 	resumed := have && st.Sealed
 	var run RunIdentity
 	if resumed {

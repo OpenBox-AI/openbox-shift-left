@@ -1,10 +1,11 @@
 package muse
 
 import (
-	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"strings"
 	"testing"
 
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
@@ -189,5 +190,68 @@ func TestEndingAndSubagentHooksLeaveDeliveryToTheFlusher(t *testing.T) {
 	flushSession(t, "sess-0002")
 	if n := rowCount(f, fakecore.WireWorkflowCompleted); n != 2 {
 		t.Errorf("after the flusher ran, WorkflowCompleted rows = %d, want 2", n)
+	}
+}
+
+// A straggler of a session SessionEnd already sealed (a PostToolUse racing
+// teardown) opens no run and spools nothing: only a prompt resumes a session.
+func TestStragglerAfterSessionEndDoesNotReopenTheRun(t *testing.T) {
+	setHookEnv(t)
+	const sess = "s-straggler"
+	f := serveCore(t, fakecore.Script{Default: allowJSON})
+	runHook(t, "SessionStart", fixture(t, "session-start-startup", sess))
+	endSession(t, fixture(t, "session-end", sess), sess)
+
+	runHook(t, "PostToolUse", fixture(t, "post-tool-use", sess))
+	runHook(t, "PostLLMCall", fixture(t, "post-llm-call", sess))
+	flushSession(t, sess)
+
+	if n := rowCount(f, fakecore.WireWorkflowStarted); n != 1 {
+		t.Errorf("WorkflowStarted rows = %d, want 1: a straggler reopened the run", n)
+	}
+	if runs := startedFirst(t, f); len(runs) != 1 || runs[0] != sess {
+		t.Errorf("runs started = %v, want only the session's own", runs)
+	}
+	l := lifecycle{Dir: lifecycleDir(DefaultSpoolDir())}
+	if st, ok := l.load(sess); !ok || !st.Sealed || st.RunID != sess {
+		t.Errorf("state after stragglers = %+v, want the original run still sealed", st)
+	}
+}
+
+// A gated straggler of a sealed session is still evaluated by core, under the
+// sealed run, and opens no run.
+func TestGatedStragglerIsEvaluatedUnderTheSealedRun(t *testing.T) {
+	setHookEnv(t)
+	const sess = "s-gated-straggler"
+	f := serveCore(t, fakecore.Script{Default: allowJSON})
+	runHook(t, "SessionStart", fixture(t, "session-start-startup", sess))
+	endSession(t, fixture(t, "session-end", sess), sess)
+
+	before := f.Hits()
+	runHook(t, "PreToolUse", fixture(t, "pre-tool-use-read", sess))
+	if f.Hits() == before {
+		t.Error("a gated straggler never reached /evaluate")
+	}
+	if n := rowCount(f, fakecore.WireWorkflowStarted); n != 1 {
+		t.Errorf("WorkflowStarted rows = %d, want 1", n)
+	}
+	l := lifecycle{Dir: lifecycleDir(DefaultSpoolDir())}
+	if st, _ := l.load(sess); !st.Sealed || st.RunID != sess {
+		t.Errorf("a gated straggler reopened the run: %+v", st)
+	}
+}
+
+// A folded subagent's event never reopens a sealed parent, even a
+// prompt-shaped one; the session's own prompt does.
+func TestFoldedEventNeverReopensASealedParent(t *testing.T) {
+	l := lifecycle{Dir: t.TempDir(), Runs: obgit.RunStore{Dir: t.TempDir()}}
+	l.save("sess-p", RunIdentity{}, true)
+	ev := &HookEvent{SessionID: "sess-p", SubagentSessionID: "sess-c"}
+	if _, tr := l.advance(HookUserPromptSubmit, ev); tr.Open || tr.Resumed {
+		t.Errorf("a folded event reopened the sealed parent: %+v", tr)
+	}
+	ev = &HookEvent{SessionID: "sess-p"}
+	if _, tr := l.advance(HookUserPromptSubmit, ev); !tr.Open || !tr.Resumed {
+		t.Errorf("the session's own prompt did not resume it: %+v", tr)
 	}
 }
