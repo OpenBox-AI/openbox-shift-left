@@ -205,3 +205,17 @@ func TestModelCallPreviewsAreTheNewestMessages(t *testing.T) {
 		t.Errorf("previews run %q..%q, want msg 5..msg 20", previews[0], previews[maxPreviews-1])
 	}
 }
+
+// With a request id the contract cannot carry, the surrogate id of a parent's
+// call and of a folded child's call with the same turn, step and attempt differ.
+func TestFallbackRequestIDSeparatesAFoldedChildFromItsParent(t *testing.T) {
+	parent := &HookEvent{SessionID: "sess-p", TurnID: "t1", Step: json.RawMessage(`1`)}
+	child := &HookEvent{SessionID: "sess-p", TurnID: "t1", Step: json.RawMessage(`1`), SubagentSessionID: "sess-c"}
+	pid, cid := modelCallRequestID(parent), modelCallRequestID(child)
+	if !strings.HasPrefix(pid, "h-") || !strings.HasPrefix(cid, "h-") {
+		t.Fatalf("expected surrogate ids, got %q and %q", pid, cid)
+	}
+	if pid == cid {
+		t.Errorf("a parent and its folded child share the gate id %q", pid)
+	}
+}

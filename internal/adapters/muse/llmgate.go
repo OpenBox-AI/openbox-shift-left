@@ -48,9 +48,14 @@ func modelCallRequestID(e *HookEvent) string {
 	if id := e.RequestID + "." + attempt; e.RequestID != "" && client.UsableModelCallRequestID(id) {
 		return id
 	}
-	sum := sha256.Sum256([]byte(strings.Join([]string{
-		e.SessionID, e.TurnID, str(e.Step), e.RequestID, attempt,
-	}, "\x1f")))
+	parts := []string{e.SessionID, e.TurnID, str(e.Step), e.RequestID, attempt}
+	// A folded child shares its parent's session id, and a turn id and step
+	// that match the parent's would collide: the child's own id keeps them
+	// apart. Left out when empty so an unfolded call keeps its existing id.
+	if e.SubagentSessionID != "" {
+		parts = append(parts, e.SubagentSessionID)
+	}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
 	return "h-" + hex.EncodeToString(sum[:16])
 }
 
