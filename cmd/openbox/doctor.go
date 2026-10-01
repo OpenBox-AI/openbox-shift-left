@@ -622,6 +622,16 @@ func (a *app) reportLanes() {
 		lane.unit = lane.spec.UnitPath(runtime.GOOS, home)
 		lane.routed = slices.Contains(election.Routed, activation.Lane(lane.name))
 		lane.inPath = slices.Contains(election.Candidates, activation.Lane(lane.name))
+		if lane.name == "telemetry" {
+			// settings.json is Claude Code's election alone. Codex and Muse export
+			// to this receiver from their own config, straight to it, so a machine
+			// where they use it has the lane configured and in path whatever
+			// settings.json says.
+			lane.usedBy = a.otherTelemetryLaneUsers()
+			if len(lane.usedBy) > 0 {
+				lane.routed, lane.inPath = true, true
+			}
+		}
 		if lane.name == "transport" && codexProxyCommitted {
 			// Codex is routed to the relay by the system PAC, not by settings.json,
 			// so a Codex-only machine's relay is configured and in path too.
@@ -669,7 +679,7 @@ func (a *app) reportLanes() {
 		default:
 			a.row("unit", "not installed")
 		}
-		a.row("configured", "%s", map[bool]string{true: "yes; " + settingsPath, false: "no; the tool is not pointed at it"}[lane.routed])
+		a.row("configured", "%s", lane.configured(settingsPath, election.Routed))
 		if lane.listening {
 			a.row("reachable", "yes (%s)", lane.addr)
 		} else {
@@ -981,6 +991,42 @@ type laneCheck struct {
 	routed    bool
 	inPath    bool
 	listening bool
+	// usedBy names the tools other than Claude Code that use this lane through
+	// their own config.
+	usedBy []string
+}
+
+// configured is the "configured" row's value: Claude Code's settings.json when
+// it routes the lane, otherwise the tools that use it from their own config.
+// The transport lane's Codex-by-PAC case keeps its old reading (routed true,
+// settings.json named), which this does not change.
+func (l laneCheck) configured(settingsPath string, ccRouted []activation.Lane) string {
+	ccUses := slices.Contains(ccRouted, activation.Lane(l.name))
+	switch {
+	case ccUses && len(l.usedBy) > 0:
+		return "yes; " + settingsPath + ", and " + strings.Join(l.usedBy, ", ") + " from their own config"
+	case ccUses:
+		return "yes; " + settingsPath
+	case len(l.usedBy) > 0:
+		return "yes; " + strings.Join(l.usedBy, ", ") + " from their own config"
+	case l.routed:
+		return "yes; " + settingsPath
+	}
+	return "no; the tool is not pointed at it"
+}
+
+// otherTelemetryLaneUsers names the tools, besides Claude Code, whose own
+// config points their export at the telemetry receiver: Codex when OpenBox owns
+// an [otel] block in its config.toml, Muse when its settings elect the lane.
+func (a *app) otherTelemetryLaneUsers() []string {
+	var users []string
+	if providers.HasOwnedCodexOtel(providers.CodexConfigTOMLPath()) {
+		users = append(users, string(provider.Codex))
+	}
+	if a.museInPlay() && activation.ResolveMuseElection(providers.MuseSettingsPath(), telemetry.DefaultAddr).Elected == activation.LaneTelemetry {
+		users = append(users, string(provider.Muse))
+	}
+	return users
 }
 
 // healthy is a lane doing its job: installed, pointed at, able to see the
