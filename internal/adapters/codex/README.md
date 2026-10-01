@@ -415,7 +415,7 @@ never overrides another hook's `deny`. Confirmed at the tag in
 approval is resolved solely by the local actor via
 `Op::ExecApproval`/`PatchApproval`, and a hook `allow` is not an approval
 verb, so no live interactive check is required to establish this. **Blast radius is still bounded in code to
-`apply_patch` writes only:** `buildDecisionRequest` populates `Content` (hence
+`apply_patch` writes only:** `buildDecisionRequest` (through `hookflow.ToolCall.Request`) populates `Content` (hence
 any `RedactedContent`, hence any `allow`) only when `IsFileSemantic(sem)`; Bash
 and `mcp__*` are non-file, carry no `Content`, and can only ever receive `deny`
 or a silent proceed; they are **never** auto-allowed.

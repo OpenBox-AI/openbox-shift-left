@@ -289,7 +289,7 @@ needs a stable URL and GitHub requires its own path.
 | Package | What it owns |
 |---|---|
 | `provider/` | the adapter interface: `Installer` (install time) and `HookEngine` (runtime) |
-| `adapters/common/hookflow/` | **the engine**: queue, delivery, enforcement, approvals, halts |
+| `adapters/common/hookflow/` | **the engine**: queue, delivery, enforcement, approvals, halts, plus the plumbing every adapter shares (hook prologue, tool classification, identity, mapper base) |
 | `adapters/claude-code/`, `adapters/codex/`, `adapters/muse/` | one thin adapter each |
 | `adapters/common/devconfig/` | settings and where each value comes from |
 | `adapters/common/git/` | commit trailer, notes mirror, commit event |
