@@ -32,7 +32,7 @@ import (
 // says. Every `muse` subprocess goes through providers.MuseRunner, so a test
 // scripts each answer and never reaches a real binary.
 //
-// Muse 1.4.1 prints the load probe's `Hooks: N runnable · M warnings` line only
+// Muse 1.4.2 prints the load probe's `Hooks: N runnable · M warnings` line only
 // when there is a warning, and `muse config status` lists policy sources but
 // not what a policy requires. The local-tracing log is still documented by a
 // third party only; the parsers fail soft, to "unverified" or a warning, never
@@ -72,6 +72,7 @@ func (a *app) reportMuse() {
 	a.reportMuseHookRuns(ver)
 	telemetryPolicy := a.reportMusePolicy(ver)
 	a.reportMuseModelCalls(telemetryPolicy)
+	a.reportMuseContent(ver)
 	a.reportMuseSpool()
 	a.reportMuseEvidenceGaps()
 }
@@ -472,7 +473,8 @@ func parseMuseTelemetryPolicy(out string) string {
 // 6. what is and is not recorded. Said plainly, and never as "not installed":
 // the hooks are installed and gate; the only lane that can see a Muse model call
 // is Muse's own telemetry export, pointed at the loopback receiver, and it
-// carries metadata only (model, token counts, response id), never a body.
+// carries model, token counts and response id; the bodies are joined onto it
+// from Muse's session journal and the hook-side request stash (reportMuseContent).
 func (a *app) reportMuseModelCalls(telemetryPolicy string) {
 	const gating = "tool, prompt and model-call gating still enforced"
 	settings := providers.MuseSettingsPath()
@@ -506,7 +508,7 @@ func (a *app) reportMuseModelCalls(telemetryPolicy string) {
 	case telemetryPolicy == museTelemetryPolicyForcedOff:
 		a.museFinding("model-calls", "warning", "model calls", "WARNING: Muse model calls: not recorded; a policy forces privacy.telemetry off, so Muse exports nothing; %s", gating)
 	default:
-		a.museFinding("model-calls", "info", "model calls", "Muse model calls: recorded by the telemetry lane (metadata only: model, tokens, response id); %s", gating)
+		a.museFinding("model-calls", "info", "model calls", "Muse model calls: recorded by the telemetry lane (model, tokens, response id; bodies are reported in the content rows below); %s", gating)
 	}
 	// Why no proxy lane: measured on Muse 1.4.1, not assumed. Said whatever the OS.
 	const proxy = "none: Muse ignores the system proxy and rejects the relay's certificate"
@@ -515,6 +517,116 @@ func (a *app) reportMuseModelCalls(telemetryPolicy string) {
 	const mcp = "MCP gating: doc-verified, not empirically confirmed"
 	a.row("mcp", "%s", mcp)
 	traceDoctorFinding("muse:mcp", "info", mcp)
+}
+
+// contentWindow is how far back the content rows read the local trace.
+const contentWindow = 7 * 24 * time.Hour
+
+// contentMisses is what one provider's content enrichers left in the local
+// trace: how many times a body could not be attached, by reason. A call that
+// joined cleanly leaves no record, so there is no rate against successes.
+type contentMisses struct {
+	total    int
+	byReason map[string]int
+}
+
+// summarizeContentMisses counts capture.outcome records carrying outcome (the
+// label an enricher or the Stop hook files: "muse.content", "codex.content")
+// over the last week. Matching is on the outcome alone: the daemon's lane
+// findings carry no provider. A missing trace directory is no misses.
+func summarizeContentMisses(traceDir, outcome string, now time.Time) (contentMisses, error) {
+	sum := contentMisses{byReason: map[string]int{}}
+	if traceDir == "" {
+		return sum, nil
+	}
+	since := now.Add(-contentWindow)
+	needle := []byte(`"` + outcome + `"`)
+	recs, _, err := trace.ReadFiltered(traceDir,
+		func(line []byte) bool { return bytes.Contains(line, needle) },
+		func(r trace.Record) bool {
+			return r.Stage == trace.StageCapture && r.Outcome == outcome && r.TS.After(since)
+		})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return sum, nil
+		}
+		return sum, err
+	}
+	for _, r := range recs {
+		reason, _ := r.Detail["reason"].(string)
+		if reason == "" {
+			reason = "unspecified"
+		}
+		sum.total++
+		sum.byReason[reason]++
+	}
+	return sum, nil
+}
+
+// reasons renders the counts as "stash_absent 1, timeout 2", reasons sorted.
+func (c contentMisses) reasons() string {
+	keys := make([]string, 0, len(c.byReason))
+	for k := range c.byReason {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s %d", k, c.byReason[k]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// contentRateMessage is the informational count of bodies a provider's
+// enrichers could not attach, shared by the Muse and Codex content-rate rows.
+func contentRateMessage(sum contentMisses) string {
+	if sum.total == 0 {
+		return "ok: no content misses recorded in the last 7 days"
+	}
+	return fmt.Sprintf("%d content miss record(s) in the last 7 days (%s); a call that joined cleanly leaves no record, so this counts misses, not a rate", sum.total, sum.reasons())
+}
+
+// 6b. what the model-call rows carry beyond metadata: the bodies. Three rows,
+// each reading what a component already left behind (the installed unit, the
+// local trace); none reads a session journal itself.
+func (a *app) reportMuseContent(ver providers.MuseVersionCheck) {
+	a.reportMuseContentSource()
+	const label = "content format"
+	sum, err := summarizeContentMisses(trace.Dir(), "muse.content", time.Now())
+	switch {
+	case err != nil:
+		a.museFinding("content-format", "unverified", label, "unverified: the local trace could not be read (%v)", err)
+		return
+	case sum.byReason["unverified"] > 0:
+		a.museFinding("content-format", "unverified", label, "unverified: Muse's session journal no longer looks like the format the content reader was built on (%d finding(s) in the last 7 days); reply, thinking and model-call bodies are skipped until the reader is updated", sum.byReason["unverified"])
+	case ver.State == providers.MuseVersionUntested:
+		a.museFinding("content-format", "unverified", label, "unverified: Muse %s is above the tested range, so its session journal has not been checked against the content reader; content is unverified until the reader is updated", ver.Version)
+	default:
+		a.museFinding("content-format", "ok", label, "ok: no drift in Muse's session journal recorded in the last 7 days")
+	}
+	a.museFinding("content-rate", "info", "content rate", "%s", contentRateMessage(sum))
+}
+
+// reportMuseContentSource says whether the installed telemetry daemon can read
+// Muse's session journal at all: it has no $HOME to derive the path from, so
+// the unit's --muse-sessions is the only way it gets one.
+func (a *app) reportMuseContentSource() {
+	const label = "content source"
+	if capture, err := devconfig.ResolveContentCaptureFor(string(provider.Muse)); err == nil && !capture {
+		a.museFinding("content-source", "info", label, "Muse model-call content: not recorded because content_capture is off")
+		return
+	}
+	unit := a.readTelemetryUnit()
+	if _, hasMuse := unit.flag(laneservice.MuseSettingsFlag); unit.state != unitRead || !hasMuse {
+		// The model-calls row already says why Muse has no telemetry daemon.
+		return
+	}
+	sessions, _ := unit.flag(laneservice.MuseSessionsFlag)
+	if sessions == "" {
+		a.museFinding("content-source", "warning", label, "WARNING: Muse model-call content: not recorded; the telemetry unit (%s) carries no %s, so its daemon cannot read Muse's session journal and every model call ships without its request and response. `openbox init --provider muse` reinstalls it", unit.path, laneservice.MuseSessionsFlag)
+		return
+	}
+	a.museFinding("content-source", "ok", label, "ok: Muse model-call content: the telemetry unit reads Muse's session journal from %s", sessions)
 }
 
 // 7. the spool backlog the hooks left. The details are in the machine-wide
@@ -546,7 +658,7 @@ func (a *app) reportMuseEvidenceGaps() {
 	case err != nil:
 		a.museFinding("evidence-gaps", "unverified", label, "unverified: the local trace could not be read (%v)", err)
 	case sum.Unverified:
-		a.museFinding("evidence-gaps", "unverified", label, "unverified: the session-log reconciler stopped because Muse's session.jsonl no longer looks like the format observed on Muse 1.4.1 (an unexpected schema_version or no record envelopes at all; or one corrupt line, which the next pass steps past); %d ungated Muse action(s) in the last 7 days before that", sum.Gaps)
+		a.museFinding("evidence-gaps", "unverified", label, "unverified: the session-log reconciler stopped because Muse's session.jsonl no longer looks like the format observed on Muse 1.4.2 (an unexpected schema_version or no record envelopes at all; or one corrupt line, which the next pass steps past); %d ungated Muse action(s) in the last 7 days before that", sum.Gaps)
 	case sum.Gaps == 0:
 		a.museFinding("evidence-gaps", "ok", label, "ok: 0 ungated Muse actions in the last 7 days (see `openbox trace <session>`)")
 	default:

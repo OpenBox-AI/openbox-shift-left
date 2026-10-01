@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/muse"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 	"github.com/tidwall/sjson"
@@ -148,11 +150,11 @@ func TestDoctorMuseAllSevenRowsHealthy(t *testing.T) {
 	section := museDoctor(t)
 	mustContain(t, section,
 		"ok: muse 1.4.0 (supported: >= 1.4.0, tested below 1.5.0)",
-		"ok: 13 of 13 OpenBox handlers registered, every gated one with a deny-only successor",
+		"ok: "+museHandlers(0)+" OpenBox handlers registered, every gated one with a deny-only successor",
 		"ok: Muse loaded the hooks with 0 warnings and OpenBox's handlers ran during the probe",
 		"unverified: no local-tracing log",
 		"ok: no policy present (system_file absent, macos_managed_preferences absent). managed lane required: unknown",
-		"Muse model calls: recorded by the telemetry lane (metadata only: model, tokens, response id); tool, prompt and model-call gating still enforced",
+		"Muse model calls: recorded by the telemetry lane (model, tokens, response id; bodies are reported in the content rows below); tool, prompt and model-call gating still enforced",
 		"ok: 0 events waiting",
 		"MCP gating: doc-verified, not empirically confirmed",
 		"ok: 0 ungated Muse actions in the last 7 days (see `openbox trace <session>`)",
@@ -194,14 +196,15 @@ func TestDoctorMuseLoadProbeRunsEchoInAScratchDirectory(t *testing.T) {
 }
 
 func TestDoctorMuseLoadProbeStates(t *testing.T) {
+	n := muse.ExpectedHandlers()
 	cases := []struct {
 		name   string
 		result providers.MuseRunResult
 		want   string
 	}{
-		{"fewer than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 5 runnable · 1 warnings")}, "FAIL: Muse found 5 runnable hooks, fewer than the 13 OpenBox registered"},
-		{"more than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 14 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 14 runnable hooks (13 expected) and 1 warning(s), none naming OpenBox"},
-		{"foreign warning", providers.MuseRunResult{Stderr: []byte("Hooks: 13 runnable · 1 warnings\nwarning: team hook x has a bad matcher")}, "WARNING: Muse found 13 runnable hooks (13 expected) and 1 warning(s), none naming OpenBox"},
+		{"fewer than registered", providers.MuseRunResult{Stderr: []byte("Hooks: 5 runnable · 1 warnings")}, fmt.Sprintf("FAIL: Muse found 5 runnable hooks, fewer than the %d OpenBox registered", n)},
+		{"more than registered", providers.MuseRunResult{Stderr: []byte(fmt.Sprintf("Hooks: %d runnable · 1 warnings\nwarning: team hook x has a bad matcher", n+1))}, fmt.Sprintf("WARNING: Muse found %d runnable hooks (%d expected) and 1 warning(s), none naming OpenBox", n+1, n)},
+		{"foreign warning", providers.MuseRunResult{Stderr: []byte(fmt.Sprintf("Hooks: %d runnable · 1 warnings\nwarning: team hook x has a bad matcher", n))}, fmt.Sprintf("WARNING: Muse found %d runnable hooks (%d expected) and 1 warning(s), none naming OpenBox", n, n)},
 		{"openbox warning", providers.MuseRunResult{Stderr: []byte("Hooks: 10 runnable · 1 warnings\nwarning: hook \"/o/openbox\" hook muse PreToolUse: unknown key")}, "FAIL: Muse loaded 10 hooks and warned about OpenBox's"},
 		{"clean load prints nothing", providers.MuseRunResult{}, "ok: Muse loaded the hooks with 0 warnings and OpenBox's handlers ran during the probe"},
 		{"failed with no summary", providers.MuseRunResult{ExitCode: 3, Stderr: []byte("boom")}, "WARNING: the echo probe exited 3 without a `Hooks: N runnable` summary"},
@@ -341,13 +344,13 @@ func TestDoctorMuseReportsACountShortOfTheExpectedAndAMissingHome(t *testing.T) 
 		t.Fatal(err)
 	}
 	withProbedMuse(t, healthyMuse())
-	mustContain(t, museDoctor(t), "WARNING: 13 of 13 OpenBox handlers registered; --home does not match this machine's OpenBox home on")
+	mustContain(t, museDoctor(t), "WARNING: "+museHandlers(0)+" OpenBox handlers registered; --home does not match this machine's OpenBox home on")
 
 	// And a handler that is simply gone.
 	if err := os.WriteFile(path, []byte(strings.Replace(stripped, "hook muse SessionEnd", "hook codex SessionEnd", 1)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, museDoctor(t), "12 of 13 OpenBox handlers registered", "no OpenBox handler for [SessionEnd]")
+	mustContain(t, museDoctor(t), museHandlers(1)+" OpenBox handlers registered", "no OpenBox handler for [SessionEnd]")
 }
 
 func TestDoctorMuseFlagsASettingsFileMuseCannotRead(t *testing.T) {
@@ -407,7 +410,7 @@ func TestDoctorMuseRatesAGatedHandlerThatCannotGovernAsFail(t *testing.T) {
 				t.Fatal(err)
 			}
 			withProbedMuse(t, healthyMuse())
-			mustContain(t, museDoctor(t), "FAIL: 13 of 13 OpenBox handlers registered, but a gated one can fail open or be skipped")
+			mustContain(t, museDoctor(t), "FAIL: "+museHandlers(0)+" OpenBox handlers registered, but a gated one can fail open or be skipped")
 		})
 	}
 }
@@ -669,4 +672,12 @@ func sjsonDelete(t *testing.T, doc, key string) string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// museHandlers renders doctor's "N of M" for a machine missing `missing`
+// handlers, from the adapter's own count rather than a literal that every new
+// hook would stale.
+func museHandlers(missing int) string {
+	n := muse.ExpectedHandlers()
+	return fmt.Sprintf("%d of %d", n-missing, n)
 }

@@ -154,8 +154,8 @@ func TestTheSharedTelemetryUnitKeepsEveryToolsSettingsPath(t *testing.T) {
 		if _, err := a.setupTelemetry(h.home, addr, false); err != nil {
 			t.Fatal(err)
 		}
-		if u := unit(t, h); strings.Contains(u, laneservice.MuseSettingsFlag) {
-			t.Errorf("unit carries %s with no Muse install behind it:\n%s", laneservice.MuseSettingsFlag, u)
+		if u := unit(t, h); strings.Contains(u, laneservice.MuseSettingsFlag) || strings.Contains(u, laneservice.MuseSessionsFlag) {
+			t.Errorf("unit carries a Muse flag with no Muse install behind it:\n%s", u)
 		}
 	})
 
@@ -173,6 +173,10 @@ func TestTheSharedTelemetryUnitKeepsEveryToolsSettingsPath(t *testing.T) {
 		if strings.Contains(u, laneservice.CodexSettingsFlag) {
 			t.Errorf("a Muse-only install carries Codex's path:\n%s", u)
 		}
+		wantSessions := filepath.Join(h.home, ".local", "share", "muse", "sessions")
+		if !strings.Contains(u, laneservice.MuseSessionsFlag) || !strings.Contains(u, wantSessions) {
+			t.Errorf("the unit does not carry Muse's sessions directory %s:\n%s", wantSessions, u)
+		}
 	})
 
 	t.Run("a later Claude Code or Codex install keeps it", func(t *testing.T) {
@@ -188,7 +192,7 @@ func TestTheSharedTelemetryUnitKeepsEveryToolsSettingsPath(t *testing.T) {
 			if _, err := setup(h.home, addr, false); err != nil {
 				t.Fatalf("%s: %v", name, err)
 			}
-			if u := unit(t, h); !strings.Contains(u, laneservice.MuseSettingsFlag) || !strings.Contains(u, settings) {
+			if u := unit(t, h); !strings.Contains(u, laneservice.MuseSettingsFlag) || !strings.Contains(u, settings) || !strings.Contains(u, laneservice.MuseSessionsFlag) {
 				t.Errorf("a %s install stripped Muse's settings path from the shared unit:\n%s", name, u)
 			}
 		}

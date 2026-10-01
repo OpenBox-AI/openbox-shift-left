@@ -817,6 +817,8 @@ func (a *app) reportCodexLane() {
 	}
 	election := a.codexPaths().resolve()
 	fmt.Fprintf(a.stdout, "\nCodex telemetry lane (config.toml, not settings.json)\n")
+	// Below the election rows whichever way the reachability check returns.
+	defer a.reportCodexContent()
 	switch {
 	case election.SettingsProblem != "":
 		a.row("elected", "CANNOT BE DECIDED; %s", election.SettingsProblem)
@@ -1528,3 +1530,55 @@ func (a *app) reportStoreReachability(tool string) {
 // doctorReachTimeout keeps the check short. Doctor is a report, and a report
 // that blocks on a dead endpoint is worse than one that says it timed out.
 const doctorReachTimeout = 5 * time.Second
+
+// reportCodexContent is what the Codex telemetry lane's content reader left in
+// the local trace: whether Codex's rollout still looks like the format the
+// reader was built on, and how many bodies could not be attached.
+func (a *app) reportCodexContent() {
+	a.reportCodexContentSource()
+	sum, err := summarizeContentMisses(trace.Dir(), "codex.content", time.Now())
+	var msg, status string
+	switch {
+	case err != nil:
+		status, msg = "unverified", fmt.Sprintf("unverified: the local trace could not be read (%v)", err)
+	case sum.byReason["unverified"] > 0:
+		status, msg = "unverified", fmt.Sprintf("unverified: Codex's rollout no longer looks like the format the content reader was built on (%d finding(s) in the last 7 days); model-call bodies are skipped until the reader is updated", sum.byReason["unverified"])
+	default:
+		status, msg = "ok", "ok: no drift in Codex's rollout recorded in the last 7 days"
+	}
+	a.wrapRow("content format", "%s", msg)
+	traceDoctorFinding("codex:content-format", status, msg)
+	if err != nil {
+		return
+	}
+	rate := contentRateMessage(sum)
+	a.wrapRow("content rate", "%s", rate)
+	traceDoctorFinding("codex:content-rate", "info", rate)
+}
+
+// reportCodexContentSource says whether the installed telemetry daemon can read
+// Codex's rollout at all: it has no $HOME or $CODEX_HOME to derive the path
+// from, so the unit's --codex-sessions is the only way it gets one.
+func (a *app) reportCodexContentSource() {
+	row := func(status, format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		a.wrapRow("content source", "%s", msg)
+		traceDoctorFinding("codex:content-source", status, msg)
+	}
+	if capture, err := devconfig.ResolveContentCaptureFor(string(provider.Codex)); err == nil && !capture {
+		row("info", "Codex model-call content: not recorded because content_capture is off")
+		return
+	}
+	unit := a.readTelemetryUnit()
+	if _, hasCodex := unit.flag(laneservice.CodexSettingsFlag); unit.state != unitRead || !hasCodex {
+		// No unit to read, or one that builds no Codex emitter: the lane rows
+		// above already say why Codex has no telemetry daemon.
+		return
+	}
+	sessions, _ := unit.flag(laneservice.CodexSessionsFlag)
+	if sessions == "" {
+		row("warning", "WARNING: Codex model-call content: not recorded; the telemetry unit (%s) carries no %s, so its daemon cannot read Codex's rollout and every model call ships without its request and response. `openbox init --provider codex` reinstalls it", unit.path, laneservice.CodexSessionsFlag)
+		return
+	}
+	row("ok", "ok: Codex model-call content: the telemetry unit reads Codex's rollout from %s", sessions)
+}
