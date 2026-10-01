@@ -125,6 +125,43 @@ func (s Spec) WithMuseSettings(settingsPath string) Spec {
 	return s
 }
 
+// MuseSessionsFlag carries the absolute path of Muse's sessions directory into
+// the telemetry unit. The daemon reads a model call's reply from the journals
+// under it, and has no $HOME to derive it from. Empty is omitted: without the
+// flag the daemon reads no Muse content.
+const MuseSessionsFlag = "--muse-sessions"
+
+// WithMuseSessions returns a copy of s whose Args carry Muse's sessions
+// directory, the same trailing-optional-flag shape WithMuseSettings uses.
+func (s Spec) WithMuseSessions(sessionsDir string) Spec {
+	if sessionsDir == "" {
+		return s
+	}
+	args := make([]Arg, len(s.Args), len(s.Args)+2)
+	copy(args, s.Args)
+	s.Args = append(args, Literal(MuseSessionsFlag), Value(sessionsDir))
+	return s
+}
+
+// CodexSessionsFlag carries the absolute path of Codex's sessions directory
+// (<CODEX_HOME>/sessions) into the telemetry unit. The daemon reads a model
+// call's request and response from the rollout under it, and has no $HOME to
+// derive it from. Empty is omitted: without the flag the daemon reads no Codex
+// content.
+const CodexSessionsFlag = "--codex-sessions"
+
+// WithCodexSessions returns a copy of s whose Args carry Codex's sessions
+// directory, the same trailing-optional-flag shape WithMuseSessions uses.
+func (s Spec) WithCodexSessions(sessionsDir string) Spec {
+	if sessionsDir == "" {
+		return s
+	}
+	args := make([]Arg, len(s.Args), len(s.Args)+2)
+	copy(args, s.Args)
+	s.Args = append(args, Literal(CodexSessionsFlag), Value(sessionsDir))
+	return s
+}
+
 // PACRecordFlag carries the absolute path of the activation record (which
 // holds the system-PAC entry) into a lane unit. Both daemons resolve Codex's
 // election from it per call, and a daemon has no $HOME to derive it from.

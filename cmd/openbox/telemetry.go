@@ -117,7 +117,9 @@ func (a *app) runTelemetry(args []string) int {
 	verbose := fs.Bool("verbose", false, "report the outcome of every record (recorded, skipped, dropped)")
 	elected := fs.Bool("elected", false, "force this lane to emit model-call turns, overriding the automatic producer election. Normally unnecessary: the election is derived from where the tool's settings route model calls")
 	settings := fs.String("settings", "", "absolute path to Claude Code's settings file, written into the unit at install time. Empty falls back to deriving it from $HOME, which a daemon does not reliably have")
+	codexSessions := fs.String("codex-sessions", "", "absolute path to Codex's sessions directory (<CODEX_HOME>/sessions), written into the unit at install time when Codex's telemetry lane is installed. Codex's model-call content (request and response) is read from the rollouts under it; empty disables that content")
 	codexSettings := fs.String("codex-settings", "", "absolute path to Codex's config.toml, written into the unit at install time when Codex's telemetry lane is installed")
+	museSessions := fs.String("muse-sessions", "", "absolute path to Muse's sessions directory, written into the unit at install time when Muse's telemetry lane is installed. Muse's model-call content (the reply) is read from the journals under it; empty disables that content")
 	museSettings := fs.String("muse-settings", "", "absolute path to Muse's settings.json, written into the unit at install time when Muse's telemetry lane is installed. Muse's election reads its telemetry block from it")
 	pacRecord := fs.String("pac-record", "", "absolute path to the activation record that holds the system-PAC entry, written into the unit at install time. Codex's election reads it to tell whether the transport relay has taken over Codex's model calls")
 	if code, ok := parseFlags(fs, args); !ok {
@@ -192,15 +194,24 @@ func (a *app) runTelemetry(args []string) int {
 	codexPaths := newCodexElectionPaths(*codexSettings, *pacRecord, logger)
 	if *codexSettings != "" {
 		codexRecording = telemetryPostureFor(string(provider.Codex), logger.Printf)
+		content := &codexContentSource{
+			SessionsRoot: *codexSessions,
+			Capture:      contentCaptureFor(provider.Codex, logger.Printf),
+		}
 		codexEmitter = newCodexTelemetryEmitter(codexPaths, codexRecording, elected,
-			func() string { return identities[string(provider.Codex)].DID }, deliver, logger.Printf)
+			func() string { return identities[string(provider.Codex)].DID }, deliver, logger.Printf, content.Enricher())
 	}
 	var museEmitter *telemetryemit.Emitter
 	var museRecording func() bool
 	if *museSettings != "" {
 		museRecording = telemetryPostureFor(string(provider.Muse), logger.Printf)
+		content := &museContentSource{
+			SessionsRoot: *museSessions,
+			SpoolDir:     museHookSpool.Dir,
+			Capture:      contentCaptureFor(provider.Muse, logger.Printf),
+		}
 		museEmitter = newMuseTelemetryEmitter(*museSettings, *addr, museHookSpool.Dir, museRecording, elected,
-			func() string { return identities[string(provider.Muse)].DID }, deliver, logger.Printf)
+			func() string { return identities[string(provider.Muse)].DID }, deliver, logger.Printf, content.Enricher())
 	}
 	em := newTelemetryRouter(map[string]*telemetryemit.Emitter{
 		string(provider.ClaudeCode): ccEmitter,
@@ -229,6 +240,13 @@ func (a *app) runTelemetry(args []string) int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		defer context.AfterFunc(a.telemetryCtx, cancel)()
+	}
+	// Pending enrichments end with the daemon, not with the export request
+	// that started them.
+	for _, e := range []*telemetryemit.Emitter{ccEmitter, codexEmitter, museEmitter} {
+		if e != nil {
+			e.Lifetime = ctx
+		}
 	}
 
 	go ccSweeper.Run(ctx, logger)
@@ -285,6 +303,17 @@ func (a *app) runTelemetry(args []string) int {
 	// LaneQueue.Close's own doc). The deadline stays at or under the
 	// single-attempt bound: waiting longer cannot help a delivery that has
 	// already given up on its own context.
+	//
+	// An enrichment still waiting on a tool's file is not delivered yet either:
+	// its pair is submitted from a goroutine that outlives the export call. The
+	// daemon's context is already cancelled, which ends each wait within one poll,
+	// so waiting for them is short; closing the queues first would refuse every
+	// one of those pairs.
+	for _, e := range []*telemetryemit.Emitter{ccEmitter, codexEmitter, museEmitter} {
+		if e != nil {
+			e.Close()
+		}
+	}
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), poolDrainDeadline(*grace))
 	closers := make([]shutdownCloser, 0, len(queues))
 	for _, q := range queues {
@@ -389,20 +418,30 @@ func onlyCancellation(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
 
+// codexTelemetryMapper is the one place Codex's mapper is configured: keyed on
+// conversation.id and reading codex.sse_event's response.completed, the one
+// record of Codex's export that is a model call.
+func codexTelemetryMapper(p telemetryemit.Policy) *telemetryemit.Mapper {
+	return telemetryemit.New("", p).WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).
+		WithToolName(string(provider.Codex)).WithFieldMap(telemetryemit.CodexFieldMap)
+}
+
 // newCodexTelemetryEmitter is the telemetry daemon's Codex producer: a
 // conversation.id-keyed mapper that emits only while telemetry is Codex's
 // elected lane, re-resolved per record from the same three files the relay's
-// Codex lane reads, so exactly one of the two records a given call.
+// Codex lane reads, so exactly one of the two records a given call. enrich, when
+// non-nil, attaches the call's bodies from the rollout.
 func newCodexTelemetryEmitter(paths codexElectionPaths, recording func() bool, override *bool,
-	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any)) *telemetryemit.Emitter {
+	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any),
+	enrich *telemetryemit.Enricher) *telemetryemit.Emitter {
 	elect := codexElectedFn(paths, activation.LaneTelemetry, override)
 	electedNow := func() bool { return recording() && elect() }
 	return &telemetryemit.Emitter{
-		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}).
-			WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)),
+		Mapper:  codexTelemetryMapper(telemetryemit.Policy{Elected: electedNow}),
 		DID:     did,
 		Warn:    warn,
 		Deliver: deliver,
+		Enrich:  enrich,
 	}
 }
 
@@ -413,7 +452,8 @@ func newCodexTelemetryEmitter(paths codexElectionPaths, recording func() bool, o
 // re-resolved per record from the settings path the unit carried. receiverAddr
 // is this daemon's own listen address.
 func newMuseTelemetryEmitter(settingsPath, receiverAddr, spoolDir string, recording func() bool, override *bool,
-	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any)) *telemetryemit.Emitter {
+	did func() string, deliver func(context.Context, client.DevEvent) bool, warn func(string, ...any),
+	enrich *telemetryemit.Enricher) *telemetryemit.Emitter {
 	elect := museElectedFn(settingsPath, receiverAddr, override)
 	electedNow := func() bool { return recording() && elect() }
 	return &telemetryemit.Emitter{
@@ -423,5 +463,6 @@ func newMuseTelemetryEmitter(settingsPath, receiverAddr, spoolDir string, record
 		DID:     did,
 		Warn:    warn,
 		Deliver: deliver,
+		Enrich:  enrich,
 	}
 }

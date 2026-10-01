@@ -168,6 +168,17 @@ type FieldMap struct {
 	// been observed, so false is read as 0 or false, the encoding the same
 	// record uses for has_tool_calls.
 	CleanKey string
+
+	// OnlyAttr/OnlyValue, when set, narrow Event to the records whose attribute
+	// OnlyAttr equals OnlyValue: a tool that exports one event name for several
+	// kinds of record (Codex's codex.sse_event carries every stream event) has
+	// exactly one that is a model call.
+	OnlyAttr, OnlyValue string
+	// MintRequestID derives the request id from the record instead of reading
+	// one, for a tool whose per-call record carries none (Codex). The id is a
+	// pure function of the thread, the record's own times and its token counts,
+	// so a restarted daemon reproduces it and no state is kept.
+	MintRequestID bool
 }
 
 // defaultFieldMap is Claude Code's api_request, and Codex's too.
@@ -186,8 +197,9 @@ var defaultFieldMap = FieldMap{
 // MuseFieldMap is Muse Code's `model_call` log record, read off Muse 1.4.1's
 // own export (GenAI semconv 1.34, snake_case): the provider's response id with
 // no fallback (Muse's message id can recur across calls, and a shared id would
-// let core's dedupe absorb one call as a duplicate of another), and metadata only -- no content is ever
-// exported, so none can be read. Its input count includes the cached tokens.
+// let core's dedupe absorb one call as a duplicate of another), and metadata only at the export level: Muse exports no
+// content, so none is read here. The enricher may attach bodies it joins locally
+// (session journal, request stash) under content_capture. Its input count includes the cached tokens.
 var MuseFieldMap = FieldMap{
 	Event:              "model_call",
 	RequestIDKeys:      []string{"gen_ai_response_id"},
@@ -201,6 +213,27 @@ var MuseFieldMap = FieldMap{
 	KindKey:            "session_kind",
 	CleanKey:           "eof_clean",
 	URL:                "https://api.meta.ai/",
+}
+
+// CodexFieldMap is Codex's `codex.sse_event` log record with
+// event.kind=response.completed, read off Codex 0.156.1's own export: the one
+// per-call record that carries the thread (conversation.id), the model and the
+// token counts. Its sibling codex.api_request carries none of those, and
+// Codex's model traffic is a websocket, so the HTTP-shaped record Claude Code
+// exports does not exist. No record carries a request id, so one is minted; the
+// input count includes the cached tokens (the OpenAI convention).
+var CodexFieldMap = FieldMap{
+	Event:               "codex.sse_event",
+	OnlyAttr:            "event.kind",
+	OnlyValue:           "response.completed",
+	MintRequestID:       true,
+	ModelKey:            "model",
+	InputTokens:         "input_token_count",
+	OutputTokens:        "output_token_count",
+	CacheReadTokens:     "cached_token_count",
+	CacheCreationTokens: "cache_write_token_count",
+	InputIncludesCache:  true,
+	URL:                 "https://api.openai.com/v1/responses",
 }
 
 // WithParentOf sets how a record's session is folded into a parent's: the
@@ -258,14 +291,35 @@ func (m *Mapper) sessionAttrOrDefault() string {
 // the point. Until 1.7 this lane returned the close alone, so every row it
 // produced was unpaired; returning one event again reintroduces that.
 func (m *Mapper) EventsFor(rec telemetry.Record) ([]client.DevEvent, Outcome) {
+	t, out := m.TurnFor(rec)
+	return t.Events, out
+}
+
+// Turn is one mapped model call: the pair, plus the session id as the record
+// named it BEFORE the parent fold. The pair's events carry the folded id (the
+// run they belong to); a producer that looks the call's content up in the
+// tool's own files needs the unfolded one, because a child's log is filed under
+// the child. Session is a side channel for in-process callers and never reaches
+// the wire.
+type Turn struct {
+	Events  []client.DevEvent
+	Session string
+}
+
+// TurnFor is EventsFor with the unfolded session id alongside the pair.
+func (m *Mapper) TurnFor(rec telemetry.Record) (Turn, Outcome) {
 	if m == nil || !m.policy.elected() {
-		return nil, SkipNotElected
+		return Turn{}, SkipNotElected
 	}
 	fm := m.fieldMap()
 	if rec.EventName != fm.Event {
-		return nil, SkipUnhandledEvent
+		return Turn{}, SkipUnhandledEvent
 	}
-	return m.turnFor(rec, fm)
+	if fm.OnlyAttr != "" && rec.Attrs[fm.OnlyAttr] != fm.OnlyValue {
+		return Turn{}, SkipUnhandledEvent
+	}
+	events, unfolded, out := m.turnFor(rec, fm)
+	return Turn{Events: events, Session: unfolded}, out
 }
 
 const eventAPIRequest = "api_request"
@@ -274,21 +328,25 @@ const maxRequestIDLen = 128
 
 const synthesizedLLMURL = "https://api.anthropic.com/v1/messages"
 
-func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, Outcome) {
+func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, string, Outcome) {
 	session := rec.Attrs[m.sessionAttrOrDefault()]
 	if !safeSessionID(session) {
-		return nil, DropBadSession
+		return nil, "", DropBadSession
 	}
+	unfolded := session
 	if rec.Timestamp.IsZero() {
-		return nil, DropNoTimestamp
+		return nil, "", DropNoTimestamp
 	}
 	incomplete := fm.CleanKey != "" && notClean(rec.Attrs[fm.CleanKey])
 	reqID, ok := requestIDFrom(rec.Attrs, fm.RequestIDKeys)
+	if fm.MintRequestID {
+		reqID, ok = mintRequestID(session, rec, fm), true
+	}
 	if !ok {
 		if incomplete {
-			return nil, SkipIncompleteCall
+			return nil, "", SkipIncompleteCall
 		}
-		return nil, DropNoRequestID
+		return nil, "", DropNoRequestID
 	}
 
 	// The fold is decided before the run is read, so a subagent's call lands in
@@ -365,7 +423,21 @@ func (m *Mapper) turnFor(rec telemetry.Record, fm FieldMap) ([]client.DevEvent, 
 	return []client.DevEvent{
 		half(client.EventTurnStarted, "started", start),
 		half(client.EventTurnCompleted, "completed", end),
-	}, Emitted
+	}, unfolded, Emitted
+}
+
+// mintRequestID names a call whose record carries no id: the thread, the
+// record's own time (the export's and the attribute's, so a clock that rounds
+// one still separates two calls) and the counts. Two calls of one thread cannot
+// share it unless they are the same record.
+func mintRequestID(session string, rec telemetry.Record, fm FieldMap) string {
+	h := sha256.New()
+	for _, part := range []string{session, strconv.FormatInt(rec.Timestamp.UnixNano(), 10), rec.Attrs["event.timestamp"],
+		rec.Attrs[fm.InputTokens], rec.Attrs[fm.OutputTokens], rec.Attrs[fm.CacheReadTokens]} {
+		h.Write([]byte(part))
+		h.Write([]byte{0x1f})
+	}
+	return "call-" + hex.EncodeToString(h.Sum(nil)[:12])
 }
 
 // notClean reports an explicit "no" from a clean-completion flag.
@@ -432,7 +504,7 @@ func tokensFrom(attrs map[string]string, fm FieldMap) *client.Tokens {
 		{fm.OutputTokens, &t.Output, true},
 		// A cache read already inside the input count is not a second spend.
 		{fm.CacheReadTokens, &t.CacheRead, !fm.InputIncludesCache},
-		{fm.CacheCreationTokens, &t.CacheCreationInput, true},
+		{fm.CacheCreationTokens, &t.CacheCreationInput, !fm.InputIncludesCache},
 	} {
 		if f.key == "" {
 			continue

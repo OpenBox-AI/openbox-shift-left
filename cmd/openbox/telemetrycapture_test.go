@@ -303,7 +303,7 @@ func TestTelemetryCommandRecordsCodexAndClaudeCodeSeparately(t *testing.T) {
 		}
 	}
 	post(t, otlpAPIRequest("cc-session", "req_cc_seam"))
-	post(t, otlpCodexAPIRequest("codex-conv-1", "req_codex_seam"))
+	post(t, otlpCodexSSECompleted("codex-conv-1", time.Now(), 4, 88, 0))
 
 	waitForInbox(ccFake, 2)
 	waitForInbox(codexFake, 2)
@@ -336,7 +336,7 @@ func TestTelemetryCommandRecordsCodexAndClaudeCodeSeparately(t *testing.T) {
 		if got := meta["tool_name"]; got != "claude-code" {
 			t.Errorf("claude-code's fake core received a record tagged %v, want claude-code", got)
 		}
-		if strings.Contains(r.Body["activity_id"].(string), "req_codex_seam") {
+		if strings.Contains(r.Body["activity_id"].(string), "codex-conv-1") {
 			t.Error("the Codex record was delivered to claude-code's core")
 		}
 	}
@@ -579,7 +579,7 @@ func TestTelemetryCommandHonoursEachToolsOwnRecordingPosture(t *testing.T) {
 		}
 	}
 	post(t, otlpAPIRequest("cc-session", "req_cc_posture"))
-	post(t, otlpCodexAPIRequest("codex-conv-posture", "req_codex_posture"))
+	post(t, otlpCodexSSECompleted("codex-conv-posture", time.Now(), 4, 88, 0))
 
 	// claude-code must still record (its own posture is untouched); wait for
 	// it, then give codex's silence a moment to prove it stays silent rather
@@ -611,11 +611,13 @@ func TestTelemetryCommandHonoursEachToolsOwnRecordingPosture(t *testing.T) {
 	}
 }
 
-// otlpCodexAPIRequest is otlpAPIRequest's Codex shape: conversation.id in
-// place of session.id, which is what Codex was observed to actually
-// exports -- a minimal, scoped attributability, not a full session-key
-// package.
-func otlpCodexAPIRequest(conversationID, requestID string) string {
+// otlpCodexSSECompleted is Codex 0.156.1's per-call export, attribute names as
+// captured live: a `codex.sse_event` log record with event.kind
+// response.completed, keyed by conversation.id, carrying the model and token
+// counts and no request id, duration or response id. Codex's model traffic is a
+// websocket, so the HTTP-shaped api_request Claude Code exports does not exist
+// there (codex.api_request carries neither the thread nor the counts).
+func otlpCodexSSECompleted(conversationID string, at time.Time, in, out, cached int) string {
 	attr := func(k, v string) string {
 		return fmt.Sprintf(`{"key":%q,"value":{"stringValue":%q}}`, k, v)
 	}
@@ -623,17 +625,25 @@ func otlpCodexAPIRequest(conversationID, requestID string) string {
 		return fmt.Sprintf(`{"key":%q,"value":{"intValue":"%d"}}`, k, v)
 	}
 	attrs := strings.Join([]string{
-		attr("event.name", "api_request"),
+		attr("event.name", "codex.sse_event"),
+		attr("event.kind", "response.completed"),
+		attr("event.timestamp", at.UTC().Format("2006-01-02T15:04:05.000Z")),
 		attr("conversation.id", conversationID),
-		attr("request_id", requestID),
-		attr("model", "gpt-5-codex"),
-		intAttr("input_tokens", 4),
-		intAttr("output_tokens", 88),
-		intAttr("duration_ms", 1000),
+		attr("model", "gpt-5.3-codex"),
+		attr("app.version", "0.156.1"),
+		attr("originator", "codex_cli_rs"),
+		attr("terminal.type", "iTerm.app"),
+		attr("auth_mode", "Chatgpt"),
+		attr("user.email", "dev@example.invalid"),
+		intAttr("input_token_count", in),
+		intAttr("output_token_count", out),
+		intAttr("cached_token_count", cached),
+		intAttr("cache_write_token_count", 0),
+		intAttr("reasoning_token_count", 0),
+		intAttr("tool_token_count", 0),
 	}, ",")
-	now := time.Now().UnixNano()
 	return fmt.Sprintf(`{"resourceLogs":[{"resource":{"attributes":[%s]},"scopeLogs":[{"logRecords":[{"timeUnixNano":"%d","attributes":[%s]}]}]}]}`,
-		attr("service.name", "codex-cli"), now, attrs)
+		attr("service.name", "codex_cli_rs"), at.UnixNano(), attrs)
 }
 
 // seedV3EnvIdentity sets a complete v3 identity purely through the

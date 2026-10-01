@@ -372,3 +372,59 @@ func TestWithMuseSettingsDoesNotAliasItsCallersArgs(t *testing.T) {
 		t.Fatalf("base %d -> %d args, derived %d", baseLen, len(base.Args), len(with.Args))
 	}
 }
+
+func TestTelemetryUnitCarriesMuseSessionsWhenAdded(t *testing.T) {
+	const sessions = "/Users/dev/.local/share/muse/sessions"
+	spec := Telemetry("127.0.0.1:8789", "/Users/dev/.claude/settings.json", false).
+		WithMuseSettings("/Users/dev/.muse/settings.json").WithMuseSessions(sessions)
+	argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+	if !strings.Contains(argv, MuseSessionsFlag+" "+sessions) {
+		t.Errorf("argv lacks %s %s: %s", MuseSessionsFlag, sessions, argv)
+	}
+}
+
+func TestWithMuseSessionsOmitsTheFlagWhenThereIsNoPath(t *testing.T) {
+	spec := Telemetry("127.0.0.1:8789", "", false).WithMuseSessions("")
+	if argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " "); strings.Contains(argv, MuseSessionsFlag) {
+		t.Errorf("argv carries an empty %s: %s", MuseSessionsFlag, argv)
+	}
+}
+
+func TestWithMuseSessionsDoesNotAliasItsCallersArgs(t *testing.T) {
+	base := Telemetry("127.0.0.1:8789", "", false)
+	with := base.WithMuseSessions("/a/sessions")
+	if strings.Contains(strings.Join(base.Argv("/bin/openbox"), " "), MuseSessionsFlag) {
+		t.Error("WithMuseSessions mutated the receiver")
+	}
+	if !strings.Contains(strings.Join(with.Argv("/bin/openbox"), " "), MuseSessionsFlag) {
+		t.Error("the copy lacks the flag")
+	}
+}
+
+func TestTelemetryUnitCarriesCodexSessionsWhenAdded(t *testing.T) {
+	const sessions = "/Users/dev/.codex/sessions"
+	spec := Telemetry("127.0.0.1:8789", "/Users/dev/.claude/settings.json", false).
+		WithCodexSettings("/Users/dev/.codex/config.toml").WithCodexSessions(sessions)
+	argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " ")
+	if !strings.Contains(argv, CodexSessionsFlag+" "+sessions) {
+		t.Errorf("argv lacks %s %s: %s", CodexSessionsFlag, sessions, argv)
+	}
+}
+
+func TestWithCodexSessionsOmitsTheFlagWhenThereIsNoPath(t *testing.T) {
+	spec := Telemetry("127.0.0.1:8789", "", false).WithCodexSessions("")
+	if argv := strings.Join(spec.Argv("/usr/local/bin/openbox"), " "); strings.Contains(argv, CodexSessionsFlag) {
+		t.Errorf("argv carries an empty %s: %s", CodexSessionsFlag, argv)
+	}
+}
+
+func TestWithCodexSessionsDoesNotAliasItsCallersArgs(t *testing.T) {
+	base := Telemetry("127.0.0.1:8789", "", false)
+	with := base.WithCodexSessions("/a/sessions")
+	if strings.Contains(strings.Join(base.Argv("/bin/openbox"), " "), CodexSessionsFlag) {
+		t.Error("WithCodexSessions mutated the receiver")
+	}
+	if !strings.Contains(strings.Join(with.Argv("/bin/openbox"), " "), CodexSessionsFlag) {
+		t.Error("the copy lacks the flag")
+	}
+}

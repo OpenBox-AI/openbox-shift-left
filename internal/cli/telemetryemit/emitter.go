@@ -34,7 +34,21 @@ type Emitter struct {
 	Warn    func(format string, args ...any)
 	Verbose func(format string, args ...any)
 
-	mu       sync.Mutex
+	// Enrich, when set, lets a provider attach a model call's request and
+	// response bodies to the pair before it ships (see Enricher). Nil leaves
+	// the lane exactly as it was.
+	Enrich *Enricher
+	// Lifetime bounds the enrichments pending when the daemon stops. It is the
+	// daemon's context, not the export request's, which ends before an
+	// enrichment does. Nil means never cancelled.
+	Lifetime context.Context
+
+	mu      sync.Mutex
+	semOnce sync.Once
+	sem     chan struct{}
+	wg      sync.WaitGroup
+	// closed (under mu) refuses new enrichments: see Close.
+	closed   bool
 	drops    map[string]int
 	emitted  int
 	lastWarn time.Time
@@ -53,7 +67,8 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 	if e == nil {
 		return nil
 	}
-	events, outcome := e.Mapper.EventsFor(rec)
+	turn, outcome := e.Mapper.TurnFor(rec)
+	events := turn.Events
 	if outcome != Emitted || len(events) == 0 {
 		e.record(outcome, rec)
 		e.traceOutcome(traceOutcomeName(outcome), reasonName(outcome), rec)
@@ -79,14 +94,26 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 		return nil
 	}
 
-	// Order matters twice: Started must be SUBMITTED first, and the loop STOPS
-	// when a submission is refused (the pool is saturated), because submitting
-	// Completed after Started was dropped files the single-sided activity this
-	// pairing eliminates. Delivery itself happens off this goroutine; accepted
-	// here means queued for one attempt, not confirmed on the wire.
-	accepted := 0
 	for i := range events {
 		events[i].DeveloperDID = did
+	}
+	if e.Enrich.active() {
+		e.emitEnriched(ctx, turn, rec)
+		return nil
+	}
+	e.deliverPair(ctx, events, rec)
+	return nil
+}
+
+// deliverPair submits the pair. Order matters twice: Started must be SUBMITTED
+// first, and the loop STOPS when a submission is refused (the pool is
+// saturated), because submitting Completed after Started was dropped files the
+// single-sided activity this pairing eliminates. Delivery itself happens off
+// this goroutine; accepted here means queued for one attempt, not confirmed on
+// the wire.
+func (e *Emitter) deliverPair(ctx context.Context, events []client.DevEvent, rec telemetry.Record) {
+	accepted := 0
+	for i := range events {
 		if ok := e.Deliver(ctx, events[i]); !ok {
 			e.record(dropSpoolFailed, rec)
 			e.warnThrottled("openbox telemetry: dropped a model-call turn (%s) for activity %s: "+
@@ -100,7 +127,7 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 		e.mu.Unlock()
 	}
 	if accepted < len(events) {
-		return nil
+		return
 	}
 
 	if e.Verbose != nil {
@@ -108,7 +135,6 @@ func (e *Emitter) Emit(ctx context.Context, rec telemetry.Record) error {
 			rec.EventName, events[0].OtelRequestID, len(events))
 	}
 	e.traceOutcome("recorded", "", rec)
-	return nil
 }
 
 // traceOutcomeName folds a Mapper Outcome into the three-way capture.outcome

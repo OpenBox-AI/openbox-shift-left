@@ -23,7 +23,8 @@ func routedEmitters(delivered *deliveredEvents, tools ...provider.Name) map[stri
 		m := telemetryemit.New(routeDID, telemetryemit.Policy{Elected: func() bool { return true }})
 		switch tool {
 		case provider.Codex:
-			m = m.WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex))
+			m = m.WithSessionAttr(sessionkey.OTelAttr(sessionkey.Codex)).WithToolName(string(provider.Codex)).
+				WithFieldMap(telemetryemit.CodexFieldMap)
 		case provider.Muse:
 			m = m.WithSessionAttr(sessionkey.OTelAttr(sessionkey.Muse)).WithToolName(string(provider.Muse)).
 				WithFieldMap(telemetryemit.MuseFieldMap)
@@ -41,8 +42,8 @@ func routeRecord(event string, attrs map[string]string) telemetry.Record {
 var (
 	ccRecord = routeRecord("api_request", map[string]string{
 		"session.id": "cc-1", "request_id": "req-cc", "model": "claude-opus-4-8", "input_tokens": "1"})
-	codexRecord = routeRecord("api_request", map[string]string{
-		"conversation.id": "thread-1", "request_id": "req-codex", "model": "gpt-5-codex", "input_tokens": "1"})
+	codexRecord = routeRecord("codex.sse_event", map[string]string{
+		"event.kind": "response.completed", "conversation.id": "thread-1", "model": "gpt-5-codex", "input_token_count": "1"})
 	museRecord = routeRecord("model_call", map[string]string{
 		"session_id": "muse-1", "gen_ai_response_id": "resp-muse", "gen_ai_request_model": "muse-spark",
 		"gen_ai_usage_input_tokens": "1"})

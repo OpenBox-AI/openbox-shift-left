@@ -141,3 +141,48 @@ func TestContentFieldsAreUnsetOnTheEvent(t *testing.T) {
 		t.Errorf("metadata is populated (%v); every content key would route around the gate", ev.Metadata)
 	}
 }
+
+// TestEnrichedBodiesReachTheWireOnlyThroughTheSeam is the sentinel's second
+// half: poisoned attributes still never egress, while a body the enricher
+// supplies does, under capture, as activity_input/activity_output content, and
+// is stripped by the client with capture off.
+func TestEnrichedBodiesReachTheWireOnlyThroughTheSeam(t *testing.T) {
+	const reqBody, respBody = "SEAM_REQUEST_BODY", "SEAM_RESPONSE_BODY"
+	attrs := map[string]string{}
+	for k, v := range sentinels {
+		attrs[k] = v
+	}
+	rec := museModelCall(attrs)
+
+	var halves []client.DevEvent
+	em := &Emitter{
+		Mapper: museMapper(),
+		DID:    func() string { return testDID },
+		Deliver: func(_ context.Context, ev client.DevEvent) bool {
+			halves = append(halves, ev)
+			return true
+		},
+		Enrich: &Enricher{Enrich: func(context.Context, Call) Result {
+			return Result{Request: reqBody, Response: respBody}
+		}},
+	}
+	_ = em.Emit(context.Background(), rec)
+	em.Wait()
+	if len(halves) != 2 {
+		t.Fatalf("delivered %d halves", len(halves))
+	}
+
+	for _, captureOn := range []bool{false, true} {
+		started := emitThrough(t, captureOn, halves[0])
+		completed := emitThrough(t, captureOn, halves[1])
+		for attr, marker := range sentinels {
+			if strings.Contains(started+completed, marker) {
+				t.Errorf("capture=%v: attribute %q leaked next to the enriched bodies", captureOn, attr)
+			}
+		}
+		gotReq, gotResp := strings.Contains(started, reqBody), strings.Contains(completed, respBody)
+		if gotReq != captureOn || gotResp != captureOn {
+			t.Errorf("capture=%v: request on wire=%v response on wire=%v; both must follow the content gate", captureOn, gotReq, gotResp)
+		}
+	}
+}
