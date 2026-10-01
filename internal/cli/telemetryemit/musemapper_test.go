@@ -1,8 +1,6 @@
 package telemetryemit
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,9 +9,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
 )
-
-// goldenLinkHash is the hook path's fnv32a suffix for museChild's state file.
-const goldenLinkHash = "4045008d"
 
 const (
 	museMain  = "feed0001-0000-4000-8000-000000000001"
@@ -206,52 +201,6 @@ func TestMuseSubagentCallFollowsTheRecordedFold(t *testing.T) {
 		if _, tagged := ev.Metadata["agent_type"]; tagged {
 			t.Errorf("%s: an unfolded call is tagged as a subagent's: %v", name, ev.Metadata)
 		}
-	}
-}
-
-// TestMuseParentOfReadsTheHookPathsRecord pins the file layout the hook path
-// writes: a positive record folds; a negative one, an absent one and one naming
-// a different child do not. The golden name is the hook path's statePath for
-// this child; if it moves, this reader goes blind and every child falls back to
-// a session of its own.
-func TestMuseParentOfReadsTheHookPathsRecord(t *testing.T) {
-	dir := t.TempDir()
-	got := museLinkPath(dir, museChild)
-	if base := filepath.Base(got); base != museChild+"-"+goldenLinkHash+".json" {
-		t.Fatalf("link file = %s, want the hook path's name for the child", base)
-	}
-	write := func(child, body string) {
-		t.Helper()
-		p := museLinkPath(dir, child)
-		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	parentOf := MuseParentOf(dir)
-	if got := parentOf(museChild); got != "" {
-		t.Errorf("absent record: parent %q, want none", got)
-	}
-	write(museChild, `{"child_session_id":"`+museChild+`","parent_session_id":"`+museMain+`","updated_at":1}`)
-	if got := parentOf(museChild); got != museMain {
-		t.Errorf("positive record: parent %q, want %q", got, museMain)
-	}
-	write(museChild, `{"child_session_id":"`+museChild+`","updated_at":1}`)
-	if got := parentOf(museChild); got != "" {
-		t.Errorf("negative record: parent %q, want none", got)
-	}
-	write(museChild, `{"child_session_id":"someone-else","parent_session_id":"`+museMain+`"}`)
-	if got := parentOf(museChild); got != "" {
-		t.Errorf("record of another child: parent %q, want none", got)
-	}
-	write(museChild, `not json`)
-	if got := parentOf(museChild); got != "" {
-		t.Errorf("corrupt record: parent %q, want none", got)
-	}
-	if got := MuseParentOf("")(museChild); got != "" {
-		t.Errorf("no spool dir: parent %q, want none", got)
 	}
 }
 

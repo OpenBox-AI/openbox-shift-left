@@ -67,6 +67,25 @@ func (l lifecycle) loadLink(childID string) (subagentLink, bool) {
 	return link, true
 }
 
+// SubagentParentOf answers, for a child session, the parent the hook path
+// recorded for it under spoolDir (the Muse spool), or "" when it recorded none,
+// a negative link, or nothing yet: a child with no link is a session of its
+// own. The telemetry lane folds a child's model calls with this, so both lanes
+// put one child's rows in the same session. It only reads.
+func SubagentParentOf(spoolDir string) func(child string) string {
+	if spoolDir == "" {
+		return func(string) string { return "" }
+	}
+	l := lifecycle{Dir: lifecycleDir(spoolDir)}
+	return func(child string) string {
+		link, ok := l.loadLink(child)
+		if !ok {
+			return ""
+		}
+		return link.ParentSessionID
+	}
+}
+
 func (l lifecycle) saveLink(link subagentLink) {
 	link.UpdatedAt = l.now().UnixNano()
 	data, err := json.Marshal(link)

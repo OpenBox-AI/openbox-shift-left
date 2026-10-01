@@ -252,8 +252,9 @@ its `session_id` attribute (Claude Code's is `session.id`, Codex's
 provider, and input, output and cached token counts, which carry no content.
 There is nothing to outrank, so the election is whether Muse's settings point at
 this receiver on loopback, re-read per record from the path the unit's
-`--muse-settings` carries. A subagent's call folds into the session its
-`session_root_id` names, the way the hook path folds the same child. Its
+`--muse-settings` carries. A subagent's call folds into the parent session
+the hook path recorded for that child, so both lanes put the child in one place;
+a child the hook path never linked stays a session of its own. Its
 pre-send hook is also evaluated as a `model_call_gate` activity: a policy check,
 not a record of the call (see
 [Coverage](coverage.md#1b-model-call-coverage-matrix)). `api.meta.ai` is a

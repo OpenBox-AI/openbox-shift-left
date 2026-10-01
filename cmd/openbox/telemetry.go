@@ -12,6 +12,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	muse "github.com/openbox-ai/openbox-shift-left/internal/adapters/muse"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
@@ -418,7 +419,7 @@ func newMuseTelemetryEmitter(settingsPath, receiverAddr, spoolDir string, record
 	return &telemetryemit.Emitter{
 		Mapper: telemetryemit.New("", telemetryemit.Policy{Elected: electedNow}).
 			WithSessionAttr(sessionkey.OTelAttr(sessionkey.Muse)).WithToolName(string(provider.Muse)).
-			WithFieldMap(telemetryemit.MuseFieldMap).WithParentOf(telemetryemit.MuseParentOf(spoolDir)),
+			WithFieldMap(telemetryemit.MuseFieldMap).WithParentOf(muse.SubagentParentOf(spoolDir)),
 		DID:     did,
 		Warn:    warn,
 		Deliver: deliver,
