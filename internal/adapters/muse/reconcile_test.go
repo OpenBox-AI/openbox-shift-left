@@ -174,6 +174,25 @@ func TestReconcileSurfacesAnOversizeIntentItCannotJoin(t *testing.T) {
 	}
 }
 
+// A log that is replaced and read afresh starts its join over: the old file's
+// intents are not still counted against the gate records.
+func TestReconcileRotatedLogStartsItsJoinOver(t *testing.T) {
+	e := newReconcileEnv(t)
+	writeLog(t, e.logPath(""), intentLine(1, "Bash", "", t0, `{}`)+intentLine(2, "Bash", "", t1, `{}`))
+	e.gate("Bash", "")
+	e.gate("Bash", "")
+	if res := e.run(cutoffAfterAll); res.Intents != 2 || res.Gaps != 0 {
+		t.Fatalf("first pass: %+v", res)
+	}
+
+	// Shorter than the recorded offset: read from the top, one intent, and
+	// its gate record is among those already on the ledger.
+	writeLog(t, e.logPath(""), intentLine(1, "Bash", "", t0, `{}`))
+	if res := e.run(cutoffAfterAll); res.Intents != 1 || res.Gaps != 0 {
+		t.Fatalf("after rotation: %+v", res)
+	}
+}
+
 func TestReconcileRespectsItsDeadline(t *testing.T) {
 	e := newReconcileEnv(t)
 	writeLog(t, e.logPath(""), intentLine(1, "Write", "tu-1", t0, `{}`))

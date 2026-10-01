@@ -105,6 +105,44 @@ type cursorState struct {
 	// Claimed counts, per tool name, the gate records already matched exactly
 	// by an intent's tool_use_id, so the ordinal join does not count them twice.
 	Claimed map[string]int `json:"claimed"`
+	// Joins is, per log, what that log added to Ordinals and Claimed, so a log
+	// that is replaced and read afresh takes its old contribution back out.
+	Joins map[string]fileJoin `json:"joins,omitempty"`
+}
+
+// fileJoin is one log's share of the join counters.
+type fileJoin struct {
+	Ordinals map[string]int `json:"ordinals,omitempty"`
+	Claimed  map[string]int `json:"claimed,omitempty"`
+}
+
+// forgetFile takes a log's contribution out of the join counters: the log was
+// replaced and is read from the top, so its old intents are not counted twice.
+func (st *cursorState) forgetFile(key string) {
+	j := st.Joins[key]
+	for tool, n := range j.Ordinals {
+		st.Ordinals[tool] = max(0, st.Ordinals[tool]-n)
+	}
+	for tool, n := range j.Claimed {
+		st.Claimed[tool] = max(0, st.Claimed[tool]-n)
+	}
+	delete(st.Joins, key)
+}
+
+// join returns the log's share of the counters, ready to be written to.
+func (st *cursorState) join(key string) fileJoin {
+	if st.Joins == nil {
+		st.Joins = map[string]fileJoin{}
+	}
+	j := st.Joins[key]
+	if j.Ordinals == nil {
+		j.Ordinals = map[string]int{}
+	}
+	if j.Claimed == nil {
+		j.Claimed = map[string]int{}
+	}
+	st.Joins[key] = j
+	return j
 }
 
 func loadCursor(path string) (cursorState, error) {
@@ -370,9 +408,13 @@ func (r Reconciler) Run(sessionID, runID string, cutoff, deadline time.Time) (re
 			res.Errors++
 			continue
 		}
+		if out.Rotated {
+			st.forgetFile(l.Key)
+			dirty = true
+		}
 		for _, it := range out.Intents {
 			res.Intents++
-			if gapOf(it, gates, &st) {
+			if gapOf(it, gates, &st, l.Key) {
 				res.Gaps++
 				findings = append(findings, gapRecord(sessionID, runID, it))
 			}
@@ -419,16 +461,19 @@ func (r Reconciler) Run(sessionID, runID string, cutoff, deadline time.Time) (re
 // is the intent's ordinal among this session's id-less intents of the same tool
 // against the gate records of that tool no exact join has claimed, so the pass
 // finds how many calls went ungated and not always which of them.
-func gapOf(it intent, gates gateSet, st *cursorState) bool {
+func gapOf(it intent, gates gateSet, st *cursorState, logKey string) bool {
+	j := st.join(logKey)
 	if it.ToolUseID != "" {
 		if gates.ids[it.ToolUseID] {
 			st.Claimed[it.ToolName]++
+			j.Claimed[it.ToolName]++
 			return false
 		}
 		return true
 	}
 	k := st.Ordinals[it.ToolName]
 	st.Ordinals[it.ToolName] = k + 1
+	j.Ordinals[it.ToolName]++
 	return k >= gates.byTool[it.ToolName]-st.Claimed[it.ToolName]
 }
 
