@@ -3,8 +3,9 @@ package claudecode
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 // HookName is the Claude Code hook event this adapter reacts to.
@@ -101,11 +102,7 @@ var hookNames = map[HookName]bool{
 
 // ParseHookName validates a raw argv value as a known hook name.
 func ParseHookName(s string) (HookName, error) {
-	h := HookName(s)
-	if !hookNames[h] {
-		return "", fmt.Errorf("unknown Claude Code hook %q", s)
-	}
-	return h, nil
+	return hookflow.ParseHookName(s, hookNames, "Claude Code")
 }
 
 // HookEvent is the subset of a Claude Code hook's stdin JSON this adapter
@@ -301,21 +298,11 @@ type HookEvent struct {
 	ElicitationContent json.RawMessage `json:"content"`
 }
 
-const maxHookPayload = 32 << 20 // 32 MiB
+const maxHookPayload = hookflow.MaxHookPayload // 32 MiB
 
 // ParseHookEvent decodes a Claude Code hook payload from r over a bounded
 // reader (maxHookPayload).
-func ParseHookEvent(r io.Reader) (*HookEvent, error) {
-	dec := json.NewDecoder(io.LimitReader(r, maxHookPayload))
-	var ev HookEvent
-	if err := dec.Decode(&ev); err != nil {
-		if err == io.EOF {
-			return nil, fmt.Errorf("empty hook payload")
-		}
-		return nil, fmt.Errorf("parse hook payload: %w", err)
-	}
-	return &ev, nil
-}
+func ParseHookEvent(r io.Reader) (*HookEvent, error) { return hookflow.ParseHookEvent[HookEvent](r) }
 
 func (e *HookEvent) filePath() string {
 	if len(e.ToolInput) == 0 {

@@ -111,7 +111,7 @@ type promptOutputContract struct{}
 func (promptOutputContract) ApprovalDecision() string { return codexPromptDecisionBlock }
 
 // ContentFieldKeys: a prompt has no redactable tool_input field, so the
-// proceed-path rewrite can never engage. Paired with promptTarget.ToolInput()
+// proceed-path rewrite can never engage. Paired with hookflow.PromptTarget.ToolInput()
 // returning nil, this makes updatedInput structurally impossible here.
 func (promptOutputContract) ContentFieldKeys() []string { return nil }
 

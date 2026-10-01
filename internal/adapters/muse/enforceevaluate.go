@@ -1,8 +1,6 @@
 package muse
 
 import (
-	"log"
-
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 )
@@ -11,16 +9,7 @@ import (
 // Its ceiling is the gating ceiling the installer declares for every gated
 // handler, PreLLMCall included, so the whole-hook budget is derived from it
 // (hookflow.EnforceBudget) rather than restated here.
-var evaluator = hookflow.Evaluator{
-	Ceiling: Engine{}.HookCeilings(),
-	NewClient: func(logger *log.Logger) (hookflow.Governor, error) {
-		creds, err := ResolveCredentials()
-		if err != nil {
-			return nil, err
-		}
-		return creds.NewClient(logger)
-	},
-}
+var evaluator = hookflow.NewEvaluator(Engine{}.HookCeilings())
 
 // isHighRiskClass reports whether a tool is shell execution or an MCP call.
 func isHighRiskClass(toolName string) bool {
@@ -29,5 +18,5 @@ func isHighRiskClass(toolName string) bool {
 		return true
 	}
 	c, known := builtinTools[toolName]
-	return known && c.kind == client.ToolShell
+	return known && c.Kind == client.ToolShell
 }

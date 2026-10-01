@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
@@ -255,7 +256,7 @@ func printTraceRecord(w io.Writer, r trace.Record, jsonOut, bodies bool) {
 
 	var line strings.Builder
 	fmt.Fprintf(&line, "%s %-7d %-16s %-20s %-9s",
-		r.TS.Format(time.RFC3339Nano), r.PID, r.Proc, r.Stage, orDashTrace(r.Outcome))
+		r.TS.Format(time.RFC3339Nano), r.PID, r.Proc, r.Stage, hookflow.OrDash(r.Outcome))
 	for _, id := range []struct {
 		label, value string
 	}{
@@ -282,11 +283,4 @@ func printTraceRecord(w io.Writer, r trace.Record, jsonOut, bodies bool) {
 		fmt.Fprintf(&line, " detail=%s", string(b))
 	}
 	fmt.Fprintln(w, line.String())
-}
-
-func orDashTrace(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }

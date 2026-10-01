@@ -25,10 +25,7 @@ const stopContentPoll = 50 * time.Millisecond
 // reaches core on the telemetry lane's model-call row. The pair is built only
 // when the turn has a reply or thinking to report.
 func (m Mapper) MapTurn(e *HookEvent, thinking string, index int) (started, completed client.DevEvent, ok bool) {
-	if e == nil || e.SessionID == "" || (e.LastAssistantMessage == "" && thinking == "") {
-		return client.DevEvent{}, client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || (e.LastAssistantMessage == "" && thinking == "") || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, client.DevEvent{}, false
 	}
 
@@ -73,18 +70,7 @@ func (m Mapper) MapTurn(e *HookEvent, thinking string, index int) (started, comp
 	// The reply and the thinking ride the completed half only, under capture
 	// and redacted: a turn's input is the prompt, which already ships on
 	// PromptSubmitted under the same gate.
-	if m.CaptureContent {
-		var c client.Content
-		if e.LastAssistantMessage != "" {
-			c.Output = m.redact(e.LastAssistantMessage)
-		}
-		if thinking != "" {
-			c.Thinking = m.redact(thinking)
-		}
-		if c.Output != "" || c.Thinking != "" {
-			completed.Content = &c
-		}
-	}
+	completed.Content = hookflow.TurnContent(m.CaptureContent, m.RedactContent, e.LastAssistantMessage, thinking)
 	completed.EventID = m.eventID(completed)
 	return started, completed, true
 }

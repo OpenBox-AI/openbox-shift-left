@@ -237,13 +237,13 @@ func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, erro
 	entry, captured := rec.Keys[TelemetryKey]
 
 	switch {
-	case captured && p.current.Exists() && !canonicalJSONEqual([]byte(p.current.Raw), []byte(entry.Owned)):
+	case captured && p.current.Exists() && !hookflow.CanonicalJSONEqual([]byte(p.current.Raw), []byte(entry.Owned)):
 		return nil, fmt.Errorf("muse: %s holds a %q value that changed after OpenBox set it (%s); leaving it alone. "+
 			"Remove the key, or restore OpenBox's value, and run init again", path, TelemetryKey, p.current.Raw)
 	case captured && p.current.Exists():
 		// Ours. Only the endpoint can differ, and the original prior value stays.
 		entry.Owned = p.desired
-	case p.current.Exists() && canonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)):
+	case p.current.Exists() && hookflow.CanonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)):
 		// No record, yet the key already holds exactly the value this lane
 		// writes: a lost record, or a settings file synced from a machine where
 		// OpenBox had set it. That value is OpenBox's, not the developer's, so it
@@ -264,7 +264,7 @@ func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, erro
 	// The creation note belongs to the file it was made for, and only that one.
 	created := rec.SettingsCreated && (rec.SettingsPath == "" || samePath(rec.SettingsPath, path))
 	p.rec = priorSettings{Schema: priorSettingsSchema, SettingsPath: path, SettingsCreated: created, Keys: keys}
-	if p.current.Exists() && canonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)) {
+	if p.current.Exists() && hookflow.CanonicalJSONEqual([]byte(p.current.Raw), []byte(p.desired)) {
 		p.unchanged = true
 		return p, nil
 	}
@@ -329,7 +329,7 @@ func WriteTelemetry(settingsPath, homeDir, endpoint string) (replaced string, er
 	written, rerr := os.ReadFile(p.path)
 	if rerr == nil {
 		if _, rerr = ValidateSettings(written); rerr == nil {
-			if got := gjson.GetBytes(written, TelemetryKey); !got.Exists() || !canonicalJSONEqual([]byte(got.Raw), []byte(p.desired)) {
+			if got := gjson.GetBytes(written, TelemetryKey); !got.Exists() || !hookflow.CanonicalJSONEqual([]byte(got.Raw), []byte(p.desired)) {
 				rerr = errors.New("the telemetry value did not land as written")
 			}
 		}
@@ -379,7 +379,7 @@ func HasOwnedTelemetry(settingsPath, homeDir string) bool {
 		return false
 	}
 	current := gjson.GetBytes(raw, TelemetryKey)
-	return current.Exists() && canonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned))
+	return current.Exists() && hookflow.CanonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned))
 }
 
 // TelemetryRestored reports what RestoreTelemetry did, so uninstall can say
@@ -434,7 +434,7 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 		return TelemetryRestored{}, err
 	}
 	current := gjson.GetBytes(before, TelemetryKey)
-	if !existed || !current.Exists() || !canonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned)) {
+	if !existed || !current.Exists() || !hookflow.CanonicalJSONEqual([]byte(current.Raw), []byte(entry.Owned)) {
 		out := TelemetryRestored{Recorded: true, Drifted: true, Current: "<absent>"}
 		if current.Exists() {
 			out.Current = current.Raw

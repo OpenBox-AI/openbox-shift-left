@@ -166,8 +166,13 @@ func (f *Server) V3EvaluateAttempts() int {
 func (f *Server) AttemptsByKey() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make(map[string]int, len(f.v3EvaluateKeys))
-	for _, k := range f.v3EvaluateKeys {
+	return countKeys(f.v3EvaluateKeys)
+}
+
+// countKeys tallies how many times each idempotency key appears.
+func countKeys(keys []string) map[string]int {
+	out := make(map[string]int, len(keys))
+	for _, k := range keys {
 		out[k]++
 	}
 	return out
@@ -184,11 +189,7 @@ func (f *Server) AttemptsByKey() map[string]int {
 func (f *Server) HeldByKey() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make(map[string]int, len(f.v3EvaluateHeldKeys))
-	for _, k := range f.v3EvaluateHeldKeys {
-		out[k]++
-	}
-	return out
+	return countKeys(f.v3EvaluateHeldKeys)
 }
 
 // TransientByKey narrows AttemptsByKey to the attempts answered with a 5xx
@@ -200,11 +201,7 @@ func (f *Server) HeldByKey() map[string]int {
 func (f *Server) TransientByKey() map[string]int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	out := make(map[string]int, len(f.v3EvaluateTransientKeys))
-	for _, k := range f.v3EvaluateTransientKeys {
-		out[k]++
-	}
-	return out
+	return countKeys(f.v3EvaluateTransientKeys)
 }
 
 // TokenEndpointDown makes the next bootstrap document's token_endpoint point

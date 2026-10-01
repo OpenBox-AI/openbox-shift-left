@@ -1,11 +1,9 @@
 package muse
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"log"
-	"os"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -13,11 +11,6 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/decision"
 )
-
-// flushBudget bounds the detached `flush` subcommand: the realtime trigger's
-// spawned child and the periodic sweeper both inherit it. 60s so a pass can
-// start attempt-timeout-bounded (30s) deliveries with slack.
-const flushBudget = 60 * time.Second
 
 // inlineWindow bounds SessionStart's and SessionEnd's own inline delivery
 // attempt: both run under the 5s ceiling of a non-gated handler, and this
@@ -53,12 +46,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		}()
 	}
 
-	if sub == "" {
-		logger.Printf("usage: openbox hook muse <HookName|flush>")
-		return
-	}
-	if sub == "flush" {
-		runFlush(logger, os.Getenv(hookflow.EnvFlushSession))
+	if hookflow.RunSubcommand(logger, provider, DefaultSpoolDir(), sub) {
 		return
 	}
 
@@ -84,17 +72,7 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		return
 	}
 
-	// Read the whole payload BEFORE it is parsed, bounded the same way
-	// ParseHookEvent's own decoder is: the trace records raw stdin even when
-	// parsing fails, and a stream decoder consumed on a failed parse cannot be
-	// replayed to build that record afterward.
-	rawStdin, _ := io.ReadAll(io.LimitReader(stdin, maxHookPayload))
-	ev, err := ParseHookEvent(bytes.NewReader(rawStdin))
-	sessionID := ""
-	if ev != nil {
-		sessionID = ev.SessionID
-	}
-	hookflow.TraceHookIn(provider, string(hook), sessionID, rawStdin, err)
+	ev, err := hookflow.ReadHookEvent(provider, string(hook), stdin, func(e *HookEvent) string { return e.SessionID })
 	if err != nil {
 		logger.Printf("dropping %s event: %v", hook, err)
 		if hook.Gated() {
@@ -103,18 +81,12 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		return
 	}
 
-	var hookOut hookflow.HookOutputBuffer
-	stdout = io.MultiWriter(stdout, &hookOut)
-	defer func() {
-		hookflow.TraceHookOut(provider, string(hook), ev.SessionID, hookStart, &hookOut)
-	}()
+	stdout, traceOut := hookflow.TraceHookOutput(provider, string(hook), stdout, hookStart, func() string { return ev.SessionID })
+	defer traceOut()
 
 	ad := New(id, DefaultSpoolDir())
 	ad.Mapper.CaptureContent = devconfig.ResolveContentCapture()
-	if devconfig.ResolveSecretDetection() {
-		redactor := decision.NewRedactor()
-		ad.Mapper.RedactContent = func(s string) string { return hookflow.RedactText(redactor, s) }
-	}
+	ad.Mapper.RedactContent = hookflow.ContentRedactor(devconfig.ResolveSecretDetection())
 	pinnedNow := nowFn()
 	ad.Mapper.Now = func() time.Time { return pinnedNow }
 
@@ -279,16 +251,7 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 	// trip, the latch is the decided state. Used both for the PRE-gate check and
 	// wired onto the gate for a halt this call's OWN drain step discovers: one
 	// implementation of "how a halted run answers", not two.
-	onHalted := func(info hookflow.SessionHaltInfo) hookflow.ApplyResult {
-		if _, err := ad.Observe(hook, ev); err != nil {
-			logger.Printf("spool %s event: %v", hook, err)
-		}
-		nudgeFlush()
-		c, toolName, toolKind := haltReplayTriple(hook, ev)
-		dec, res := hookflow.SessionHaltReplay(logger, stdout, info, false, nil, toolName, c)
-		hookflow.RecordEnforcement(logger, ev.SessionID, toolKind, dec, res)
-		return res
-	}
+	onHalted := ad.HaltReplayer(logger, stdout, hook, ev, ev.SessionID, nudgeFlush, func() (hookflow.OutputContract, string, string) { return haltReplayTriple(hook, ev) })
 
 	if hook == HookPreToolUse {
 		// Before anything can end the call: whatever the verdict, a call whose
@@ -319,18 +282,7 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 		if hook == HookPreLLMCall {
 			traceModelCall(hook, ev, devEv)
 		}
-		spoolObserve = func() {
-			if err := ad.Spool.Append(devEv); err != nil {
-				logger.Printf("spool %s event: %v", hook, err)
-			}
-			nudgeFlush()
-		}
-		spoolObserveHead = func() {
-			if err := ad.Spool.SpoolObserveHead(devEv); err != nil {
-				logger.Printf("spool %s event to the session head: %v", hook, err)
-			}
-			nudgeFlush()
-		}
+		spoolObserve, spoolObserveHead = ad.GateSpoolers(logger, string(hook), devEv, nudgeFlush)
 	}
 
 	var (
@@ -345,7 +297,7 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 	case HookPreLLMCall:
 		target, record = llmTarget{id: id, mapper: ad.Mapper, ev: ev}, recordModelCallEnforcement
 	default:
-		target, record = promptTarget{id: id, mapper: ad.Mapper, ev: ev}, recordPromptEnforcement
+		target, record = newPromptTarget(id, ad.Mapper, ev), recordPromptEnforcement
 	}
 	g := hookflow.EnforceGate{
 		Contract:         contractFor(hook),
@@ -363,75 +315,14 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 	g.Run(context.Background(), logger, stdout, target)
 }
 
-// inlineAttempt drives one single-attempt, own-session drain within the inline
-// window (measured from hookStart, the hook's own process start, so credential
-// resolution and everything RunHook already did count against the SAME budget
-// the hook's own ceiling is), so a SessionStart or SessionEnd hook's newest
-// event does not wait on the detached flusher's debounce window to reach core.
-// It owns the stripe lock for its own session: the append this hook just made is
-// drained under the SAME lock, so nothing can overtake it. An attempt whose own
-// ctx expires before core answers is requeued, never scored as a failure.
-// Whatever the window could not start, or get an answer for, falls back to the
-// detached flusher; a re-send is deduped by core's idempotency key.
+// inlineAttempt drains this session's newest events within the inline window
+// (hookflow.Engine.InlineAttempt), falling back to the detached flusher.
 func inlineAttempt(ad *Adapter, logger *log.Logger, sessionID string, hookStart time.Time) {
-	creds, err := ResolveCredentials()
-	if err != nil {
-		logger.Printf("flush skipped (events remain spooled): %v", err)
-		forceFlusher(logger, sessionID)
-		return
-	}
-	cl, err := creds.NewClient(logger)
-	if err != nil {
-		logger.Printf("flush skipped (client init): %v", err)
-		forceFlusher(logger, sessionID)
-		return
-	}
-
-	ad.Log = logger.Printf
-	ad.Advisory.Log = logger
-
-	ctx, cancel := context.WithDeadline(context.Background(), hookStart.Add(inlineWindow))
-	defer cancel()
-	opts := hookflow.DrainOptions{Mode: hookflow.Block, AttemptTimeout: inlineAttemptTimeout, RequeueUnanswered: true}
-	if _, err := ad.DrainSession(ctx, sessionID, cl, opts); err != nil {
-		logger.Printf("inline delivery ended early: %v", err)
-	}
-	if ad.Spool.PendingCount(sessionID) > 0 {
-		forceFlusher(logger, sessionID)
-	}
+	ad.InlineAttempt(logger, sessionID, hookStart, inlineWindow, inlineAttemptTimeout, func() { forceFlusher(logger, sessionID) })
 }
 
 // forceFlusher spawns the detached flusher regardless of the realtime_flush
-// toggle: once an inline attempt could not finish, waiting out the ordinary
-// debounce is not the fallback's job.
+// toggle (hookflow.ForceFlusher).
 func forceFlusher(logger *log.Logger, sessionID string) {
-	hookflow.RealtimeTrigger{
-		Spool:    hookflow.Spool{Dir: DefaultSpoolDir()},
-		Provider: provider,
-		Enabled:  func() bool { return true },
-	}.Maybe(logger, sessionID)
-}
-
-func runFlush(logger *log.Logger, sessionID string) {
-	creds, err := ResolveCredentials()
-	if err != nil {
-		logger.Printf("flush skipped (events remain spooled): %v", err)
-		return
-	}
-	cl, err := creds.NewClient(logger)
-	if err != nil {
-		logger.Printf("flush skipped (client init): %v", err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), flushBudget)
-	defer cancel()
-
-	ad := New(creds.Identity(), DefaultSpoolDir())
-	ad.Log = logger.Printf
-	ad.Advisory.Log = logger
-	n, err := ad.FlushOrSweep(ctx, sessionID, cl)
-	if err != nil {
-		logger.Printf("flush ended early after %d event(s): %v", n, err)
-	}
+	hookflow.ForceFlusher(logger, DefaultSpoolDir(), provider, sessionID)
 }

@@ -72,7 +72,7 @@ func TestConfigChangeOutputContractRender(t *testing.T) {
 	var _ hookflow.OutputContract = configContract
 }
 
-// ── configSubject: the promptTarget template, not enforceTarget --
+// ── configSubject: the hookflow.PromptTarget template, not enforceTarget --
 // no tool_input, no HighRisk, identity + source/file_path axes only.
 func TestConfigSubject_Fields(t *testing.T) {
 	id := Identity{DeveloperDID: testDID}

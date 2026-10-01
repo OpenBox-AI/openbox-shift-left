@@ -190,12 +190,7 @@ func CapCommand(s string) string {
 // unknown, like the Mapper's compact) and returns nil when nothing is left, so
 // the request carries no empty axes for a policy to spuriously not-match on.
 func CompactAny(m map[string]any) map[string]any {
-	for k, v := range m {
-		if s, ok := v.(string); ok && s == "" {
-			delete(m, k)
-		}
-	}
-	if len(m) == 0 {
+	if len(Compact(m)) == 0 {
 		return nil
 	}
 	return m

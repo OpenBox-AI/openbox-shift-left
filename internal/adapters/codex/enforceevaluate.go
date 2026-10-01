@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"log"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
@@ -20,16 +19,7 @@ func (Engine) HookCeilings() providerspi.HookCeiling {
 	}
 }
 
-var evaluator = hookflow.Evaluator{
-	Ceiling: Engine{}.HookCeilings(),
-	NewClient: func(logger *log.Logger) (hookflow.Governor, error) {
-		creds, err := ResolveCredentials()
-		if err != nil {
-			return nil, err
-		}
-		return creds.NewClient(logger)
-	},
-}
+var evaluator = hookflow.NewEvaluator(Engine{}.HookCeilings())
 
 func isHighRiskClass(toolName string) bool {
 	if toolName == bashToolName {

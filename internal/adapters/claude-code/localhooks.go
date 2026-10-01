@@ -1,7 +1,6 @@
 package claudecode
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -105,7 +104,7 @@ func setLocalHookEntries(raw []byte, event string, entries []any) ([]byte, error
 	if err != nil {
 		return nil, fmt.Errorf("encode hooks.%s: %w", event, err)
 	}
-	if canonicalJSONEqual([]byte(gjson.GetBytes(raw, localHookPath(event)).Raw), encoded) {
+	if hookflow.CanonicalJSONEqual([]byte(gjson.GetBytes(raw, localHookPath(event)).Raw), encoded) {
 		return raw, nil
 	}
 	return sjson.SetRawBytes(raw, localHookPath(event), encoded)
@@ -143,21 +142,6 @@ func deleteLocalHookEvent(raw []byte, event string) ([]byte, error) {
 func localHookEventIsNull(raw []byte, event string) bool {
 	r := gjson.GetBytes(raw, localHookPath(event))
 	return r.Exists() && r.Type == gjson.Null
-}
-
-// canonicalJSONEqual compares two JSON values by content, not bytes: both go
-// through the same key-sorting encoder, so formatting is not a difference.
-func canonicalJSONEqual(a, b []byte) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
-	}
-	var av, bv any
-	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
-		return false
-	}
-	ac, aErr := json.Marshal(av)
-	bc, bErr := json.Marshal(bv)
-	return aErr == nil && bErr == nil && bytes.Equal(ac, bc)
 }
 
 // writeHooks merges OpenBox's hook registrations into one settings file,

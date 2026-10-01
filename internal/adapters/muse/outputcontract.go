@@ -193,7 +193,7 @@ type promptOutputContract struct{}
 func (promptOutputContract) ApprovalDecision() string { return hookflow.DecisionDeny }
 
 // ContentFieldKeys: a prompt has no redactable tool_input, so no rewrite can
-// engage; paired with promptTarget.ToolInput() returning nil.
+// engage; paired with hookflow.PromptTarget.ToolInput() returning nil.
 func (promptOutputContract) ContentFieldKeys() []string { return nil }
 
 func (promptOutputContract) Render(decision, reason string, _ json.RawMessage) ([]byte, string) {

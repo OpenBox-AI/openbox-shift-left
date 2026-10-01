@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -93,21 +93,6 @@ var hookedEvents = []HookName{
 // would ever exercise.
 func hooksEventPath(ev HookName) string { return "hooks." + string(ev) }
 
-// canonicalJSONEqual compares two JSON values by content, not bytes: both go
-// through the same key-sorting encoder, so formatting is not a difference.
-func canonicalJSONEqual(a, b []byte) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
-	}
-	var av, bv any
-	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
-		return false
-	}
-	ac, aErr := json.Marshal(av)
-	bc, bErr := json.Marshal(bv)
-	return aErr == nil && bErr == nil && bytes.Equal(ac, bc)
-}
-
 type matcherGroup struct {
 	Matcher *string           `json:"matcher,omitempty"`
 	Hooks   []json.RawMessage `json:"hooks"`
@@ -159,7 +144,7 @@ func (i Installer) writeHooks() error {
 		// Skip the splice when the event already says what it should. Without
 		// this, a re-run of `openbox init` reformats every event it owns and puts
 		// a diff in Codex's file for no change at all.
-		if canonicalJSONEqual([]byte(existing.Raw), merged) {
+		if hookflow.CanonicalJSONEqual([]byte(existing.Raw), merged) {
 			continue
 		}
 		if out, err = sjson.SetRawBytes(out, hooksEventPath(ev), merged); err != nil {
@@ -309,15 +294,7 @@ func (i Installer) hooksPath() string {
 	return defaultHooksPath()
 }
 
-func (i Installer) configPath() string {
-	if i.ConfigPath != "" {
-		return i.ConfigPath
-	}
-	if p, err := devconfig.DevConfigWritePath(); err == nil {
-		return p
-	}
-	return DefaultConfigPath()
-}
+func (i Installer) configPath() string { return devconfig.InstallConfigPath(i.ConfigPath) }
 
 // (Repo-level .codex/hooks.json and config.toml [hooks] are alternative
 // locations this installer deliberately does not touch.)

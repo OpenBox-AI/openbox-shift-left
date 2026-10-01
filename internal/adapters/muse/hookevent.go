@@ -7,6 +7,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 // HookName is the Muse hook event this adapter reacts to.
@@ -50,11 +52,7 @@ var hookNames = map[HookName]bool{
 
 // ParseHookName validates a raw argv value as a known hook name.
 func ParseHookName(s string) (HookName, error) {
-	h := HookName(s)
-	if !hookNames[h] {
-		return "", fmt.Errorf("unknown Muse hook %q", s)
-	}
-	return h, nil
+	return hookflow.ParseHookName(s, hookNames, "Muse")
 }
 
 // Gated reports whether the hook can deny, so its answer (or the exit code of
@@ -361,17 +359,7 @@ func outputText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-const maxHookPayload = 32 << 20 // 32 MiB; Muse itself never delivers more than 256 KiB
+const maxHookPayload = hookflow.MaxHookPayload // 32 MiB; Muse itself never delivers more than 256 KiB
 
 // ParseHookEvent decodes a Muse hook payload from r over a bounded reader.
-func ParseHookEvent(r io.Reader) (*HookEvent, error) {
-	dec := json.NewDecoder(io.LimitReader(r, maxHookPayload))
-	var ev HookEvent
-	if err := dec.Decode(&ev); err != nil {
-		if err == io.EOF {
-			return nil, fmt.Errorf("empty hook payload")
-		}
-		return nil, fmt.Errorf("parse hook payload: %w", err)
-	}
-	return &ev, nil
-}
+func ParseHookEvent(r io.Reader) (*HookEvent, error) { return hookflow.ParseHookEvent[HookEvent](r) }

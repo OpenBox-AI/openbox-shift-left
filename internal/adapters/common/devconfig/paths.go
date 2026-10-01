@@ -225,6 +225,18 @@ func DevConfigPath() (string, error) {
 	return resolveConfigPath("dev.json")
 }
 
+// InstallConfigPath is the dev config an installer writes: override when an
+// installer was handed one, else DevConfigWritePath, else DefaultConfigPath.
+func InstallConfigPath(override string) string {
+	if override != "" {
+		return override
+	}
+	if p, err := DevConfigWritePath(); err == nil {
+		return p
+	}
+	return DefaultConfigPath()
+}
+
 // DevConfigWritePath is where to write the dev config; always the new
 // location, never the legacy one, so a write can never re-entrench the old
 // path. Callers that write must run MigrateLegacyConfig first.

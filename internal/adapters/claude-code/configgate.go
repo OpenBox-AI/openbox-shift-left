@@ -19,7 +19,7 @@ const configToolKind = "config"
 // unrecognized future source to "" and could accidentally exempt it too.
 const policySettingsSource = "policy_settings"
 
-// configSubject is promptTarget's template, not enforceTarget's: a config
+// configSubject is hookflow.PromptTarget's template, not enforceTarget's: a config
 // change is not a tool call. No tool_input to rewrite, no HighRisk class, no
 // MCP or file semantics.
 type configSubject struct {

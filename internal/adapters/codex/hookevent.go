@@ -3,8 +3,9 @@ package codex
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 )
 
 // HookName is the Codex hook event this adapter reacts to.
@@ -40,11 +41,7 @@ var hookNames = map[HookName]bool{
 
 // ParseHookName validates a raw argv value as a known hook name.
 func ParseHookName(s string) (HookName, error) {
-	h := HookName(s)
-	if !hookNames[h] {
-		return "", fmt.Errorf("unknown Codex hook %q", s)
-	}
-	return h, nil
+	return hookflow.ParseHookName(s, hookNames, "Codex")
 }
 
 // HookEvent is the subset of a Codex hook's stdin JSON this adapter reads.
@@ -137,22 +134,12 @@ func (e *HookEvent) fileText() string {
 	return e.command()
 }
 
-const maxHookPayload = 32 << 20 // 32 MiB
+const maxHookPayload = hookflow.MaxHookPayload // 32 MiB
 
 // ParseHookEvent decodes a Codex hook payload from r over a bounded reader. A
 // malformed or empty body is an error the caller treats fail-open (log to
 // stderr, emit nothing, exit 0); never a block (INV-3).
-func ParseHookEvent(r io.Reader) (*HookEvent, error) {
-	dec := json.NewDecoder(io.LimitReader(r, maxHookPayload))
-	var ev HookEvent
-	if err := dec.Decode(&ev); err != nil {
-		if err == io.EOF {
-			return nil, fmt.Errorf("empty hook payload")
-		}
-		return nil, fmt.Errorf("parse hook payload: %w", err)
-	}
-	return &ev, nil
-}
+func ParseHookEvent(r io.Reader) (*HookEvent, error) { return hookflow.ParseHookEvent[HookEvent](r) }
 
 // outputText is the text of a tool_response: a JSON string as is (Codex's live
 // shape), a top-level object's output/stdout field, else the raw JSON. "" for an absent, null or empty

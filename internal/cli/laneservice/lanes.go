@@ -101,10 +101,7 @@ func (s Spec) WithCodexSettings(configPath string) Spec {
 	if configPath == "" {
 		return s
 	}
-	args := make([]Arg, len(s.Args), len(s.Args)+2)
-	copy(args, s.Args)
-	s.Args = append(args, Literal(CodexSettingsFlag), Value(configPath))
-	return s
+	return s.withFlag(CodexSettingsFlag, configPath)
 }
 
 // MuseSettingsFlag carries Muse's settings.json path into the telemetry unit,
@@ -119,10 +116,7 @@ func (s Spec) WithMuseSettings(settingsPath string) Spec {
 	if settingsPath == "" {
 		return s
 	}
-	args := make([]Arg, len(s.Args), len(s.Args)+2)
-	copy(args, s.Args)
-	s.Args = append(args, Literal(MuseSettingsFlag), Value(settingsPath))
-	return s
+	return s.withFlag(MuseSettingsFlag, settingsPath)
 }
 
 // MuseSessionsFlag carries the absolute path of Muse's sessions directory into
@@ -137,10 +131,7 @@ func (s Spec) WithMuseSessions(sessionsDir string) Spec {
 	if sessionsDir == "" {
 		return s
 	}
-	args := make([]Arg, len(s.Args), len(s.Args)+2)
-	copy(args, s.Args)
-	s.Args = append(args, Literal(MuseSessionsFlag), Value(sessionsDir))
-	return s
+	return s.withFlag(MuseSessionsFlag, sessionsDir)
 }
 
 // CodexSessionsFlag carries the absolute path of Codex's sessions directory
@@ -156,10 +147,7 @@ func (s Spec) WithCodexSessions(sessionsDir string) Spec {
 	if sessionsDir == "" {
 		return s
 	}
-	args := make([]Arg, len(s.Args), len(s.Args)+2)
-	copy(args, s.Args)
-	s.Args = append(args, Literal(CodexSessionsFlag), Value(sessionsDir))
-	return s
+	return s.withFlag(CodexSessionsFlag, sessionsDir)
 }
 
 // PACRecordFlag carries the absolute path of the activation record (which
@@ -174,10 +162,7 @@ func (s Spec) WithPACRecord(recordPath string) Spec {
 	if recordPath == "" {
 		return s
 	}
-	args := make([]Arg, len(s.Args), len(s.Args)+2)
-	copy(args, s.Args)
-	s.Args = append(args, Literal(PACRecordFlag), Value(recordPath))
-	return s
+	return s.withFlag(PACRecordFlag, recordPath)
 }
 
 // ProvidersFlag carries the transport lane's provider union into the unit,
@@ -197,9 +182,15 @@ func (s Spec) WithProviders(providers []string) Spec {
 	if providers == nil {
 		return s
 	}
+	return s.withFlag(ProvidersFlag, strings.Join(providers, ","))
+}
+
+// withFlag returns a copy of s with one trailing `flag value` pair appended
+// after whatever Args already holds, never aliasing s's own backing array.
+func (s Spec) withFlag(flag, value string) Spec {
 	args := make([]Arg, len(s.Args), len(s.Args)+2)
 	copy(args, s.Args)
-	s.Args = append(args, Literal(ProvidersFlag), Value(strings.Join(providers, ",")))
+	s.Args = append(args, Literal(flag), Value(value))
 	return s
 }
 

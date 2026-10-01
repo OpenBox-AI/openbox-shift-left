@@ -200,7 +200,7 @@ budget sat above the real ceiling, so the flush was killed mid-drain every time.
 The budget now sits under it: SessionEnd sends inline, in the hook itself,
 within its own 2 s window (1 s per attempt, `hookrun.go`'s
 `sessionEndInlineWindow`/`sessionEndAttemptTimeout`), not the detached
-`flush` subcommand's own 60 s budget (`flushBudget`), which only bounds the
+`flush` subcommand's own 60 s budget (`hookflow.FlushBudget`), which only bounds the
 spawned fallback flusher SessionEnd starts when its inline window runs out
 before every queued event was attempted. Nothing is lost to the smaller
 window: every hook nudges a realtime flush or, for SessionStart/SessionEnd,

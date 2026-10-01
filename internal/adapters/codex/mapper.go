@@ -1,9 +1,6 @@
 package codex
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
@@ -19,9 +16,7 @@ const agentToolName = provider
 // Identity is the developer-agent identity the adapter emits under. Only the
 // DID is needed to build events; the obx_ key and Ed25519 seed live in the
 // client, never here (INV-1).
-type Identity struct {
-	DeveloperDID string // did:aip:<uuid>
-}
+type Identity = hookflow.Identity
 
 // Mapper translates Codex hook payloads into normalized DevEvents.
 type Mapper struct {
@@ -79,10 +74,7 @@ func NewMapper(id Identity) Mapper {
 // unusable (no session id, or no valid developer DID); the caller drops it
 // fail-open (INV-3), never blocking the tool call.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
-	if e == nil || e.SessionID == "" {
-		return client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, false
 	}
 
@@ -209,10 +201,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 // : the same wire carrier and the same activity_output shape Claude Code's
 // per-turn pairs use, at the granularity Codex's wired hook surface offers.
 func (m Mapper) MapUsageRollup(e *HookEvent) (started, completed client.DevEvent, ok bool) {
-	if e == nil || e.SessionID == "" || m.Finops == nil || m.Finops.Tokens == nil {
-		return client.DevEvent{}, client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || m.Finops == nil || m.Finops.Tokens == nil || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, client.DevEvent{}, false
 	}
 
@@ -278,64 +267,39 @@ func toolMetadata(e *HookEvent) map[string]any {
 	})
 }
 
-//   - Span.InvocationID = tool_use_id.
-//   - Span.OperationID = what is being done, identical across a retry.
-//     Activity_id derives from it, and activity_id is the approval key plus
-//     the scope of both of core's bypass grants.
-func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
+// toolCall is this payload's tool invocation, classified by classifyTool so
+// the observe event and the enforce gate classify a tool identically.
+func toolCall(e *HookEvent) hookflow.ToolCall {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
-
-	tool := client.Tool{Name: capStr(e.ToolName), Kind: kind}
-	if kind == client.ToolMCP {
-		tool.MCPServer = capStr(mcpServer)
+	return hookflow.ToolCall{
+		SessionID:       e.SessionID,
+		ToolName:        e.ToolName,
+		ToolUseID:       e.ToolUseID,
+		ToolInput:       e.ToolInput,
+		PermissionMode:  e.PermissionMode,
+		PermissionModes: permissionModes,
+		Kind:            kind,
+		Sem:             sem,
+		FileOp:          fileOp,
+		MCPServer:       mcpServer,
+		Function:        function,
+		Command:         e.command,
+		FileText:        e.fileText,
 	}
-
-	span := &client.Span{SemanticType: sem, Stage: stage}
-	if kind == client.ToolMCP {
-		span.MCPServer = capStr(mcpServer)
-		span.Function = capStr(function)
-	}
-	span.InvocationID = capStr(e.ToolUseID)
-	span.OperationID = operationID(kind, e)
-	if kind == client.ToolFile {
-		span.FileOp = fileOp
-	}
-	return tool, span
 }
 
-func operationID(kind client.ToolKind, e *HookEvent) string {
-	switch kind {
-	case client.ToolShell:
-		if op := client.OperationForCommand(e.command()); op != "" {
-			return op
-		}
-	case client.ToolMCP:
-		return client.OperationForArgs(e.ToolInput)
-	}
-	// A gated class must never reach here; see
-	// TestHighRiskClassesHaveAStableOperationID.
-	return capStr(e.ToolUseID)
+func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
+	tc := toolCall(e)
+	return tc.Tool(), tc.Span(stage)
 }
 
+// classifyTool classifies a tool by name against this adapter's builtin table
+// (hookflow.ClassifyTool).
 func classifyTool(name string) (kind client.ToolKind, sem, fileOp, mcpServer, function string) {
-	if strings.HasPrefix(name, "mcp__") {
-		server, fn := hookflow.SplitMCPName(name)
-		if server == "" {
-			return client.ToolShell, "internal", "", "", ""
-		}
-		return client.ToolMCP, "mcp_tool_call", "", server, fn
-	}
-	if c, ok := builtinTools[name]; ok {
-		return c.kind, c.sem, c.fileOp, "", ""
-	}
-	return client.ToolShell, "internal", "", "", ""
+	return hookflow.ClassifyTool(name, builtinTools)
 }
 
-type toolClass struct {
-	kind   client.ToolKind
-	sem    string
-	fileOp string
-}
+type toolClass hookflow.ToolClass
 
 var builtinTools = map[string]toolClass{
 	"Bash":        {client.ToolShell, "internal", ""},
@@ -343,13 +307,7 @@ var builtinTools = map[string]toolClass{
 }
 
 func sessionStartMetadata(e *HookEvent) map[string]any {
-	return hookflow.Compact(map[string]any{
-		"provider":        provider,
-		"source":          hookflow.EnumOr(e.Source, sourceValues), // startup|resume|clear|compact
-		"model":           capStr(e.Model),                         // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                           // structural (blessed by conformance testdata); not content
-		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
-	})
+	return hookflow.SessionStartMetadata(provider, e.Source, sourceValues, e.Model, e.Cwd, e.PermissionMode, permissionModes)
 }
 
 const maxIdentLen = 512
@@ -368,55 +326,22 @@ var (
 // way; maxIdentLen stays declared here because tests read it.
 func capStr(s string) string { return hookflow.CapIdent(s) }
 
-func (m Mapper) clock() time.Time {
-	if m.Now != nil {
-		return m.Now()
-	}
-	return time.Now()
-}
+func (m Mapper) clock() time.Time { return hookflow.NowOr(m.Now) }
 
 // redact runs a content body through the secret detector before it is attached.
 // It lives on the Mapper rather than at the call site so every caller of Map
 // inherits it: the enforce gate re-maps the same hook event for its own
 // DecisionRequest copy, and a call-site redactor would leave that copy raw.
-func (m Mapper) redact(s string) string {
-	if m.RedactContent == nil {
-		return s
-	}
-	return m.RedactContent(s)
-}
+func (m Mapper) redact(s string) string { return hookflow.RedactWith(m.RedactContent, s) }
 
-func (m Mapper) eventID(ev client.DevEvent) string {
-	if m.NewID != nil {
-		return m.NewID()
-	}
-	return deriveID(ev)
-}
+func (m Mapper) eventID(ev client.DevEvent) string { return hookflow.EventIDOr(m.NewID, deriveID, ev) }
 
 func deriveID(ev client.DevEvent) string {
-	const sep = 0x1f
-	var b strings.Builder
-	b.WriteString(ev.SessionID)
-	b.WriteByte(sep)
-	b.WriteString(string(ev.EventType))
-	b.WriteByte(sep)
-	b.WriteString(ev.Tool.Name)
-	b.WriteByte(sep)
-	b.WriteString(ev.Timestamp) // RFC3339Nano; the per-event distinguisher
-	if ev.Span != nil {
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.FilePath)
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.Function) // the MCP function name
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.InvocationID)
-	}
+	var after []string
 	if tid, ok := ev.Metadata["thread_id"].(string); ok && tid != "" {
-		b.WriteByte(sep)
-		b.WriteString(tid)
+		after = append(after, tid)
 	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return "cdx-" + hex.EncodeToString(sum[:])
+	return hookflow.DeriveID("cdx-", ev, nil, after)
 }
 
 // MapTurn builds one turn's llm_completion activity pair.
@@ -427,10 +352,7 @@ func deriveID(ev client.DevEvent) string {
 // for a sidechain), which is what keeps per-turn rows from colliding with the
 // SessionEnd rollup.
 func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, completed client.DevEvent, ok bool) {
-	if e == nil || e.SessionID == "" || !w.HasUsage {
-		return client.DevEvent{}, client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || !w.HasUsage || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, client.DevEvent{}, false
 	}
 
@@ -466,18 +388,7 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	// Content rides the COMPLETED half only: a turn's input is the prompt, which
 	// already ships on PromptSubmitted under the same gate. Redaction happens here
 	// rather than at the call site so a second caller of MapTurn inherits it.
-	if m.CaptureContent {
-		var c client.Content
-		if e.LastAssistantMessage != "" {
-			c.Output = m.redact(e.LastAssistantMessage)
-		}
-		if w.Thinking != "" {
-			c.Thinking = m.redact(w.Thinking)
-		}
-		if c.Output != "" || c.Thinking != "" {
-			completed.Content = &c
-		}
-	}
+	completed.Content = hookflow.TurnContent(m.CaptureContent, m.RedactContent, e.LastAssistantMessage, w.Thinking)
 	completed.EventID = m.eventID(completed)
 
 	return started, completed, true

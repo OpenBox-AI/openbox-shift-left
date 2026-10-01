@@ -324,7 +324,7 @@ func mergeEvent(doc []byte, ev HookName, group []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if existing.Exists() && canonicalJSONEqual([]byte(existing.Raw), []byte(gjson.GetBytes(next, path).Raw)) {
+	if existing.Exists() && hookflow.CanonicalJSONEqual([]byte(existing.Raw), []byte(gjson.GetBytes(next, path).Raw)) {
 		return doc, nil
 	}
 	return next, nil
@@ -337,17 +337,6 @@ func keepTrailingSpace(out, before []byte) []byte {
 	const space = " \t\r\n"
 	trailing := before[len(bytes.TrimRight(before, space)):]
 	return append(bytes.TrimRight(out, space), trailing...)
-}
-
-// canonicalJSONEqual compares two JSON values by content, not bytes.
-func canonicalJSONEqual(a, b []byte) bool {
-	var av, bv any
-	if json.Unmarshal(a, &av) != nil || json.Unmarshal(b, &bv) != nil {
-		return false
-	}
-	ac, aErr := json.Marshal(av)
-	bc, bErr := json.Marshal(bv)
-	return aErr == nil && bErr == nil && bytes.Equal(ac, bc)
 }
 
 // escapeKey makes a key safe inside a gjson/sjson path, so an event name read
@@ -370,14 +359,6 @@ func (i Installer) settingsPath() string {
 	return SettingsPath()
 }
 
-func (i Installer) configPath() string {
-	if i.ConfigPath != "" {
-		return i.ConfigPath
-	}
-	if p, err := devconfig.DevConfigWritePath(); err == nil {
-		return p
-	}
-	return devconfig.DefaultConfigPath()
-}
+func (i Installer) configPath() string { return devconfig.InstallConfigPath(i.ConfigPath) }
 
 var _ providerspi.Installer = Installer{}

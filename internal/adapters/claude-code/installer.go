@@ -341,15 +341,7 @@ func (i Installer) pluginDir() string {
 	return userPluginDir()
 }
 
-func (i Installer) configPath() string {
-	if i.ConfigPath != "" {
-		return i.ConfigPath
-	}
-	if p, err := devconfig.DevConfigWritePath(); err == nil {
-		return p
-	}
-	return DefaultConfigPath()
-}
+func (i Installer) configPath() string { return devconfig.InstallConfigPath(i.ConfigPath) }
 
 func userPluginDir() string {
 	return filepath.Join(homeDir(), ".claude", "plugins", "openbox-observe")

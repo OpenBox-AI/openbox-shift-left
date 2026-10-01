@@ -1,9 +1,6 @@
 package muse
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"strings"
 	"time"
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
@@ -18,9 +15,7 @@ const agentToolName = provider
 // Identity is the developer-agent identity the adapter emits under. Only the
 // DID is needed to build events; the key material lives in the client, never
 // here (INV-1).
-type Identity struct {
-	DeveloperDID string // did:aip:<uuid>
-}
+type Identity = hookflow.Identity
 
 // RunIdentity is one hook invocation's resolved continue-as-new identity:
 // generation 0 (the zero value) means no continuation has happened for this
@@ -84,10 +79,7 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 }
 
 func (m Mapper) mapHook(hook HookName, e *HookEvent) (client.DevEvent, bool) {
-	if e == nil || e.SessionID == "" {
-		return client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, false
 	}
 
@@ -274,14 +266,10 @@ func (m Mapper) signalEvent(ev *client.DevEvent, t client.EventType, meta map[st
 }
 
 func (m Mapper) gatedSignalDetail(text string) *client.Content {
-	if !m.CaptureContent || text == "" {
-		return nil
+	if out := hookflow.GatedText(m.CaptureContent, m.RedactContent, text); out != "" {
+		return &client.Content{SignalDetail: out}
 	}
-	out := m.redact(text)
-	if out == "" {
-		return nil
-	}
-	return &client.Content{SignalDetail: out}
+	return nil
 }
 
 // subagentMetadata marks a session as a subagent's own: agent_id is Muse's
@@ -322,66 +310,41 @@ func toolMetadata(e *HookEvent) map[string]any {
 	})
 }
 
-// mapTool builds a tool call's identity, and its two ids kept deliberately
-// separate: InvocationID is Muse's tool_use_id, OperationID is what is being
-// done, identical across a retry.
-func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
+// toolCall is this payload's tool invocation, classified by classifyTool so
+// the observe event and the enforce gate classify a tool identically.
+func toolCall(e *HookEvent) hookflow.ToolCall {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
-
-	tool := client.Tool{Name: capStr(e.ToolName), Kind: kind}
-	if kind == client.ToolMCP {
-		tool.MCPServer = capStr(mcpServer)
+	return hookflow.ToolCall{
+		SessionID:       e.SessionID,
+		ToolName:        e.ToolName,
+		ToolUseID:       e.ToolUseID,
+		ToolInput:       e.ToolInput,
+		PermissionMode:  e.PermissionMode,
+		PermissionModes: permissionModes,
+		Kind:            kind,
+		Sem:             sem,
+		FileOp:          fileOp,
+		MCPServer:       mcpServer,
+		Function:        function,
+		FilePath:        e.filePath,
+		Command:         e.command,
+		DecisionCommand: e.shellText,
+		FileText:        e.fileText,
 	}
-
-	span := &client.Span{SemanticType: sem, Stage: stage}
-	switch {
-	case hookflow.IsFileSemantic(sem):
-		span.FilePath = capStr(e.filePath()) // structural locator only (INV-2)
-		span.FileOp = fileOp
-	case kind == client.ToolMCP:
-		span.MCPServer = capStr(mcpServer)
-		span.Function = capStr(function)
-	}
-	span.InvocationID = capStr(e.ToolUseID)
-	span.OperationID = operationID(kind, e)
-	return tool, span
 }
 
-func operationID(kind client.ToolKind, e *HookEvent) string {
-	switch kind {
-	case client.ToolShell:
-		if op := client.OperationForCommand(e.command()); op != "" {
-			return op
-		}
-	case client.ToolMCP:
-		return client.OperationForArgs(e.ToolInput)
-	}
-	return capStr(e.ToolUseID)
+func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
+	tc := toolCall(e)
+	return tc.Tool(), tc.Span(stage)
 }
 
-// classifyTool sorts a Muse tool name into the contract's tool classes. A name
-// this table does not know is shell-kinded and semantically opaque, which is
-// the case a file write must never fall into: TestFixturesToolsAreClassified
-// fails on any fixture tool that lands here by default.
+// classifyTool classifies a tool by name against this adapter's builtin table
+// (hookflow.ClassifyTool).
 func classifyTool(name string) (kind client.ToolKind, sem, fileOp, mcpServer, function string) {
-	if strings.HasPrefix(name, "mcp__") {
-		server, fn := hookflow.SplitMCPName(name)
-		if server == "" {
-			return client.ToolShell, "internal", "", "", ""
-		}
-		return client.ToolMCP, "mcp_tool_call", "", server, fn
-	}
-	if c, ok := builtinTools[name]; ok {
-		return c.kind, c.sem, c.fileOp, "", ""
-	}
-	return client.ToolShell, "internal", "", "", ""
+	return hookflow.ClassifyTool(name, builtinTools)
 }
 
-type toolClass struct {
-	kind   client.ToolKind
-	sem    string
-	fileOp string
-}
+type toolClass hookflow.ToolClass
 
 // builtinTools maps Muse's tool names. Observed on 1.4.1: bash, bash_input,
 // read_file, write_file, edit_file and search are the native spellings. Muse
@@ -427,13 +390,7 @@ var builtinTools = map[string]toolClass{
 }
 
 func sessionStartMetadata(e *HookEvent) map[string]any {
-	return hookflow.Compact(map[string]any{
-		"provider":        provider,
-		"source":          hookflow.EnumOr(e.Source, sourceValues),
-		"model":           capStr(e.Model),
-		"cwd":             capStr(e.Cwd),
-		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
-	})
+	return hookflow.SessionStartMetadata(provider, e.Source, sourceValues, e.Model, e.Cwd, e.PermissionMode, permissionModes)
 }
 
 const maxIdentLen = 512
@@ -468,62 +425,23 @@ func isBumpSource(source string) bool {
 // way.
 func capStr(s string) string { return hookflow.CapIdent(s) }
 
-func (m Mapper) clock() time.Time {
-	if m.Now != nil {
-		return m.Now()
-	}
-	return time.Now()
-}
+func (m Mapper) clock() time.Time { return hookflow.NowOr(m.Now) }
 
 // redact runs a content body through the secret detector before it is attached.
 // It lives on the Mapper so every caller of Map inherits it: the gate re-maps
 // the same hook event for its own copy, and a call-site redactor would leave
 // that copy raw.
-func (m Mapper) redact(s string) string {
-	if m.RedactContent == nil {
-		return s
-	}
-	return m.RedactContent(s)
-}
+func (m Mapper) redact(s string) string { return hookflow.RedactWith(m.RedactContent, s) }
 
 func (m Mapper) gatedToolOutput(text string) *client.Content {
-	if !m.CaptureContent || text == "" {
-		return nil
+	if out := hookflow.GatedText(m.CaptureContent, m.RedactContent, text); out != "" {
+		return &client.Content{ToolOutput: out}
 	}
-	out := m.redact(text)
-	if out == "" {
-		return nil
-	}
-	return &client.Content{ToolOutput: out}
+	return nil
 }
 
-func (m Mapper) eventID(ev client.DevEvent) string {
-	if m.NewID != nil {
-		return m.NewID()
-	}
-	return deriveID(ev)
-}
+func (m Mapper) eventID(ev client.DevEvent) string { return hookflow.EventIDOr(m.NewID, deriveID, ev) }
 
 func deriveID(ev client.DevEvent) string {
-	const sep = 0x1f
-	var b strings.Builder
-	b.WriteString(ev.SessionID)
-	b.WriteByte(sep)
-	b.WriteString(string(ev.EventType))
-	b.WriteByte(sep)
-	b.WriteString(ev.Tool.Name)
-	b.WriteByte(sep)
-	b.WriteString(ev.Timestamp) // RFC3339Nano; the per-event distinguisher
-	b.WriteByte(sep)
-	b.WriteString(ev.ModelCallRequestID)
-	if ev.Span != nil {
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.FilePath)
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.Function)
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.InvocationID)
-	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return "mus-" + hex.EncodeToString(sum[:])
+	return hookflow.DeriveID("mus-", ev, []string{ev.ModelCallRequestID}, nil)
 }

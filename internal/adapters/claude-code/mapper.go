@@ -1,8 +1,6 @@
 package claudecode
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"strconv"
 	"strings"
 	"time"
@@ -20,9 +18,7 @@ const agentToolName = provider
 // Identity is the developer-agent identity the adapter emits under. Only the
 // DID is needed to build events; the obx_ key and Ed25519 seed live in the
 // client, never here (INV-1).
-type Identity struct {
-	DeveloperDID string // did:aip:<uuid>
-}
+type Identity = hookflow.Identity
 
 // Mapper translates Claude Code hook payloads into normalized DevEvents.
 type Mapper struct {
@@ -91,10 +87,7 @@ func NewMapper(id Identity) Mapper {
 // unusable (no session id, or no valid developer DID); in which case the
 // caller drops it fail-open (INV-3), never blocking the tool call.
 func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
-	if e == nil || e.SessionID == "" {
-		return client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, false
 	}
 
@@ -450,10 +443,7 @@ func commonMetadata(e *HookEvent) map[string]any {
 // MapTurn builds one model turn's ActivityStarted/ActivityCompleted pair from
 // a Stop/SubagentStop firing and the transcript window it delimits.
 func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, completed client.DevEvent, ok bool) {
-	if e == nil || e.SessionID == "" || !w.HasUsage {
-		return client.DevEvent{}, client.DevEvent{}, false
-	}
-	if !strings.HasPrefix(m.Identity.DeveloperDID, "did:aip:") {
+	if e == nil || e.SessionID == "" || !w.HasUsage || !m.Identity.HasDeveloperDID() {
 		return client.DevEvent{}, client.DevEvent{}, false
 	}
 
@@ -499,18 +489,7 @@ func (m Mapper) MapTurn(e *HookEvent, w turnWindow, index int) (started, complet
 	completed.Model = capStr(w.Model)
 	// Deliberately NOT on the started half: a turn's input is the prompt, which
 	// already rides PromptSubmitted under the same gate.
-	if m.CaptureContent {
-		var c client.Content
-		if e.LastAssistantMessage != "" {
-			c.Output = m.redact(e.LastAssistantMessage)
-		}
-		if w.Thinking != "" {
-			c.Thinking = m.redact(w.Thinking)
-		}
-		if c.Output != "" || c.Thinking != "" {
-			completed.Content = &c
-		}
-	}
+	completed.Content = hookflow.TurnContent(m.CaptureContent, m.RedactContent, e.LastAssistantMessage, w.Thinking)
 	completed.Metadata = turnMetadata(e, turnIndex)
 	completed.Metadata = mergeMetadata(completed.Metadata, commonMetadata(e))
 	completed.EventID = m.eventID(completed)
@@ -528,44 +507,31 @@ func turnMetadata(e *HookEvent, index int) map[string]any {
 	return m
 }
 
-// mapTool two identities, deliberately separate (client.Span.InvocationID /
-// OperationID):
-//   - InvocationID = tool_use_id, which Claude Code mints per call.
-//   - Shell → the command, hashed.
-func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
+// toolCall is this payload's tool invocation, classified by classifyTool so
+// the observe event and the enforce gate classify a tool identically.
+func toolCall(e *HookEvent) hookflow.ToolCall {
 	kind, sem, fileOp, mcpServer, function := classifyTool(e.ToolName)
-
-	tool := client.Tool{Name: capStr(e.ToolName), Kind: kind}
-	if kind == client.ToolMCP {
-		tool.MCPServer = capStr(mcpServer)
+	return hookflow.ToolCall{
+		SessionID:       e.SessionID,
+		ToolName:        e.ToolName,
+		ToolUseID:       e.ToolUseID,
+		ToolInput:       e.ToolInput,
+		PermissionMode:  e.PermissionMode,
+		PermissionModes: permissionModes,
+		Kind:            kind,
+		Sem:             sem,
+		FileOp:          fileOp,
+		MCPServer:       mcpServer,
+		Function:        function,
+		FilePath:        e.filePath,
+		Command:         e.command,
+		FileText:        e.fileText,
 	}
-
-	span := &client.Span{SemanticType: sem, Stage: stage}
-	switch {
-	case hookflow.IsFileSemantic(sem):
-		span.FilePath = capStr(e.filePath()) // structural locator only (INV-2)
-		span.FileOp = fileOp
-	case kind == client.ToolMCP:
-		span.MCPServer = capStr(mcpServer)
-		span.Function = capStr(function)
-	}
-	span.InvocationID = capStr(e.ToolUseID)
-	span.OperationID = operationID(kind, e)
-	return tool, span
 }
 
-func operationID(kind client.ToolKind, e *HookEvent) string {
-	switch kind {
-	case client.ToolShell:
-		if op := client.OperationForCommand(e.command()); op != "" {
-			return op
-		}
-	case client.ToolMCP:
-		return client.OperationForArgs(e.ToolInput)
-	}
-	// A gated class must never reach here; see
-	// TestHighRiskClassesHaveAStableOperationID.
-	return capStr(e.ToolUseID)
+func mapTool(e *HookEvent, stage string) (client.Tool, *client.Span) {
+	tc := toolCall(e)
+	return tc.Tool(), tc.Span(stage)
 }
 
 // toolMetadata identifiers only, never content (INV-2); tool_input and
@@ -596,26 +562,13 @@ func mergeMetadata(dst, src map[string]any) map[string]any {
 	return dst
 }
 
+// classifyTool classifies a tool by name against this adapter's builtin table
+// (hookflow.ClassifyTool).
 func classifyTool(name string) (kind client.ToolKind, sem, fileOp, mcpServer, function string) {
-	if strings.HasPrefix(name, "mcp__") {
-		server, fn := hookflow.SplitMCPName(name)
-		if server == "" {
-			// Claude Code never emits this.
-			return client.ToolShell, "internal", "", "", ""
-		}
-		return client.ToolMCP, "mcp_tool_call", "", server, fn
-	}
-	if c, ok := builtinTools[name]; ok {
-		return c.kind, c.sem, c.fileOp, "", ""
-	}
-	return client.ToolShell, "internal", "", "", ""
+	return hookflow.ClassifyTool(name, builtinTools)
 }
 
-type toolClass struct {
-	kind   client.ToolKind
-	sem    string
-	fileOp string
-}
+type toolClass hookflow.ToolClass
 
 var builtinTools = map[string]toolClass{
 	"Write":        {client.ToolFile, "file_write", "write"},
@@ -650,13 +603,7 @@ var builtinTools = map[string]toolClass{
 }
 
 func sessionStartMetadata(e *HookEvent) map[string]any {
-	return hookflow.Compact(map[string]any{
-		"provider":        provider,
-		"source":          hookflow.EnumOr(e.Source, sourceValues), // startup|resume|clear|compact|fork
-		"model":           capStr(e.Model),                         // free-form model id → bounded
-		"cwd":             capStr(e.Cwd),                           // structural (as in the dev-event schema's testdata); not content
-		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),
-	})
+	return hookflow.SessionStartMetadata(provider, e.Source, sourceValues, e.Model, e.Cwd, e.PermissionMode, permissionModes)
 }
 
 // maxIdentLen bounds every externally-influenced identifier/path field before
@@ -790,22 +737,13 @@ func machineInjectedPrompt(source, prompt string) (injected, fromVendor bool) {
 // way; maxIdentLen stays declared here because tests read it.
 func capStr(s string) string { return hookflow.CapIdent(s) }
 
-func (m Mapper) clock() time.Time {
-	if m.Now != nil {
-		return m.Now()
-	}
-	return time.Now()
-}
+func (m Mapper) clock() time.Time { return hookflow.NowOr(m.Now) }
 
 func (m Mapper) gatedToolOutput(text string) *client.Content {
-	if !m.CaptureContent || text == "" {
-		return nil
+	if out := hookflow.GatedText(m.CaptureContent, m.RedactContent, text); out != "" {
+		return &client.Content{ToolOutput: out}
 	}
-	out := m.redact(text)
-	if out == "" {
-		return nil
-	}
-	return &client.Content{ToolOutput: out}
+	return nil
 }
 
 // gatedContentMeta writes free text into a signal's metadata under the same two
@@ -826,38 +764,21 @@ func (m Mapper) gatedToolOutput(text string) *client.Content {
 // Empty text writes no key at all: an empty string in signal_args is a value a
 // policy can match on, and "" is not a fact anyone asserted.
 func (m Mapper) gatedContentMeta(meta map[string]any, key, text string) {
-	if !m.CaptureContent || text == "" {
-		return
-	}
-	if out := m.redact(text); out != "" {
+	if out := hookflow.GatedText(m.CaptureContent, m.RedactContent, text); out != "" {
 		meta[key] = out
 	}
 }
 
 func (m Mapper) gatedSignalDetail(text string) *client.Content {
-	if !m.CaptureContent || text == "" {
-		return nil
+	if out := hookflow.GatedText(m.CaptureContent, m.RedactContent, text); out != "" {
+		return &client.Content{SignalDetail: out}
 	}
-	out := m.redact(text)
-	if out == "" {
-		return nil
-	}
-	return &client.Content{SignalDetail: out}
+	return nil
 }
 
-func (m Mapper) redact(s string) string {
-	if m.RedactContent == nil {
-		return s
-	}
-	return m.RedactContent(s)
-}
+func (m Mapper) redact(s string) string { return hookflow.RedactWith(m.RedactContent, s) }
 
-func (m Mapper) eventID(ev client.DevEvent) string {
-	if m.NewID != nil {
-		return m.NewID()
-	}
-	return deriveID(ev)
-}
+func (m Mapper) eventID(ev client.DevEvent) string { return hookflow.EventIDOr(m.NewID, deriveID, ev) }
 
 //   - The same logical event always yields the same id; robust even if the id
 //     is ever recomputed from the spooled/persisted record (the fields it
@@ -866,33 +787,14 @@ func (m Mapper) eventID(ev client.DevEvent) string {
 //     (RFC3339Nano) is the per-event distinguisher, reinforced by the
 //     structural separators (session, type, tool name, file/function locator).
 func deriveID(ev client.DevEvent) string {
-	const sep = 0x1f
-	var b strings.Builder
-	b.WriteString(ev.SessionID)
-	b.WriteByte(sep)
-	b.WriteString(string(ev.EventType))
-	b.WriteByte(sep)
-	b.WriteString(ev.Tool.Name)
-	b.WriteByte(sep)
-	b.WriteString(ev.Timestamp) // RFC3339Nano; the per-event distinguisher
-	if ev.Span != nil {
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.FilePath)
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.Function)
-		b.WriteByte(sep)
-		b.WriteString(ev.Span.InvocationID)
-	}
+	var after []string
 	if ev.TurnIndex != nil {
-		b.WriteByte(sep)
-		b.WriteString(strconv.Itoa(*ev.TurnIndex))
+		after = append(after, strconv.Itoa(*ev.TurnIndex))
 	}
 	if ev.AgentID != "" {
-		b.WriteByte(sep)
-		b.WriteString(ev.AgentID)
+		after = append(after, ev.AgentID)
 	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return "cc-" + hex.EncodeToString(sum[:])
+	return hookflow.DeriveID("cc-", ev, nil, after)
 }
 
 // modelSwitchMetadata is the shape both model-switch classes carry; only the

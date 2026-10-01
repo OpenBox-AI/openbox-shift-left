@@ -30,11 +30,46 @@ func (a *app) laneSettingsPath(fromUnit string) string {
 // electedFn is the per-record election gate. A function, not a bool: install
 // starts the daemon before writing the env var.
 func electedFn(settingsPath string, lane activation.Lane, override *bool) func() bool {
+	return electedBy(func() activation.Election { return activation.ResolveElection(settingsPath) }, lane, override)
+}
+
+// electedBy is the per-record election gate over one election source: true
+// when the operator forced it (--elected) or resolve names lane. resolve runs
+// per call, never cached.
+func electedBy(resolve func() activation.Election, lane activation.Lane, override *bool) func() bool {
 	return func() bool {
 		if override != nil && *override {
 			return true
 		}
-		return activation.ResolveElection(settingsPath).Elected == lane
+		return resolve().Elected == lane
+	}
+}
+
+// electedNameBy reports which lane resolve names, "" for none -- lane itself
+// when the operator forced it -- and traces each change under traceLane.
+func electedNameBy(resolve func() activation.Election, lane activation.Lane, traceLane string, override *bool) func() string {
+	var mu sync.Mutex
+	last := electionChangeSentinel
+	return func() string {
+		var name string
+		if override != nil && *override {
+			name = string(lane) // forced by the operator; this lane is the producer
+		} else {
+			name = string(resolve().Elected)
+		}
+		traceElectionChange(&mu, &last, traceLane, name)
+		return name
+	}
+}
+
+// electionProblemBy reports why resolve could not decide, "" when the operator
+// decided it and there is nothing to read.
+func electionProblemBy(resolve func() activation.Election, override *bool) func() string {
+	return func() string {
+		if override != nil && *override {
+			return ""
+		}
+		return resolve().SettingsProblem
 	}
 }
 
@@ -44,18 +79,7 @@ func electedFn(settingsPath string, lane activation.Lane, override *bool) func()
 // "the settings route no lane at all", where nothing emits and a relay holding a
 // call is a routing gap worth saying out loud.
 func electedNameFn(settingsPath string, lane activation.Lane, override *bool) func() string {
-	var mu sync.Mutex
-	last := electionChangeSentinel
-	return func() string {
-		var name string
-		if override != nil && *override {
-			name = string(lane) // forced by the operator; this lane is the producer
-		} else {
-			name = string(activation.ResolveElection(settingsPath).Elected)
-		}
-		traceElectionChange(&mu, &last, string(lane), name)
-		return name
-	}
+	return electedNameBy(func() activation.Election { return activation.ResolveElection(settingsPath) }, lane, string(lane), override)
 }
 
 // traceElectionChange emits trace.StageElection the first time it is called
@@ -81,12 +105,7 @@ func traceElectionChange(mu *sync.Mutex, last *string, lane, elected string) {
 
 // electionProblemFn reports why the election could not be decided, or "".
 func electionProblemFn(settingsPath string, override *bool) func() string {
-	return func() string {
-		if override != nil && *override {
-			return "" // decided by the operator; nothing to read
-		}
-		return activation.ResolveElection(settingsPath).SettingsProblem
-	}
+	return electionProblemBy(func() activation.Election { return activation.ResolveElection(settingsPath) }, override)
 }
 
 // museElectedFn is electedFn's Muse counterpart: it reads Muse's settings.json
@@ -95,12 +114,7 @@ func electionProblemFn(settingsPath string, override *bool) func() string {
 // (receiverAddr); the settings path comes from the unit's argv, never from
 // $HOME, which a daemon does not have.
 func museElectedFn(settingsPath, receiverAddr string, override *bool) func() bool {
-	return func() bool {
-		if override != nil && *override {
-			return true
-		}
-		return activation.ResolveMuseElection(settingsPath, receiverAddr).Elected == activation.LaneTelemetry
-	}
+	return electedBy(func() activation.Election { return activation.ResolveMuseElection(settingsPath, receiverAddr) }, activation.LaneTelemetry, override)
 }
 
 // reportMuseElection logs the telemetry daemon's startup view of Muse's
@@ -163,39 +177,18 @@ func (p codexElectionPaths) resolve() activation.Election {
 // for: telemetry asks for LaneTelemetry and the relay for LaneTransport, and
 // because both resolve the same three files exactly one of them is elected.
 func codexElectedFn(paths codexElectionPaths, lane activation.Lane, override *bool) func() bool {
-	return func() bool {
-		if override != nil && *override {
-			return true
-		}
-		return paths.resolve().Elected == lane
-	}
+	return electedBy(paths.resolve, lane, override)
 }
 
 // codexElectedNameFn reports which lane Codex's election named, "" for none,
 // tracing a change the way electedNameFn does.
 func codexElectedNameFn(paths codexElectionPaths, lane activation.Lane, override *bool) func() string {
-	var mu sync.Mutex
-	last := electionChangeSentinel
-	return func() string {
-		var name string
-		if override != nil && *override {
-			name = string(lane)
-		} else {
-			name = string(paths.resolve().Elected)
-		}
-		traceElectionChange(&mu, &last, "codex:"+string(lane), name)
-		return name
-	}
+	return electedNameBy(paths.resolve, lane, "codex:"+string(lane), override)
 }
 
 // codexElectionProblemFn reports why Codex's election could not be decided.
 func codexElectionProblemFn(paths codexElectionPaths, override *bool) func() string {
-	return func() string {
-		if override != nil && *override {
-			return ""
-		}
-		return paths.resolve().SettingsProblem
-	}
+	return electionProblemBy(paths.resolve, override)
 }
 
 // codexObserver is what the relay calls when a model call carrying Codex's
