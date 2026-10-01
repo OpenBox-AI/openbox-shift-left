@@ -204,6 +204,9 @@ type readOutcome struct {
 	Envelopes int
 	// Oversize counts lines over maxLineBytes that were stepped over.
 	Oversize int
+	// Unjoinable counts oversize lines that may be tool intents whose join
+	// fields (payload type, call id, tool name) were not seen before the cap.
+	Unjoinable int
 	// Rotated is set when the file was replaced or shortened and read afresh.
 	Rotated bool
 	// DecodeErr is set when the log does not look like the observed format (see
@@ -252,18 +255,30 @@ func readLog(path string, cur fileCursor, cutoff, deadline time.Time, maxBytes i
 			// Past the line cap: the rest is skipped in bulk. The line is
 			// committed (a pass that refused it would never get past it), and
 			// counted. It still counts as an intent when the fields seen before
-			// the cap were enough to be one.
+			// the cap were enough to be one. A line that may be an intent but
+			// whose join fields lie past the cap is counted as Unjoinable: an
+			// action was journaled that nothing can be joined to, and a payload
+			// that large is exactly the case this reader exists for.
 			complete := sc.skipRest()
 			out.BytesRead += sc.n
 			if !complete {
+				break
+			}
+			it, isIntent, ok := rec.intent()
+			unjoinable := rec.PayloadType == "" || isIntent && !ok
+			if (isIntent && ok || unjoinable) && !rec.recordedAt().IsZero() && !rec.recordedAt().Before(cutoff) {
+				// Not old enough: left, uncommitted, for a later pass.
 				break
 			}
 			out.Oversize++
 			if rec.envelope() {
 				out.Envelopes++
 			}
-			if it, isIntent, ok := rec.intent(); isIntent && ok && it.At.Before(cutoff) {
+			switch {
+			case isIntent && ok:
 				out.Intents = append(out.Intents, it)
+			case unjoinable:
+				out.Unjoinable++
 			}
 			out.Cursor.Offset += sc.n
 			out.Lines++
@@ -331,6 +346,15 @@ type joinRecord struct {
 
 // envelope reports whether the line carried the two envelope type fields.
 func (r joinRecord) envelope() bool { return r.RecordType != "" && r.PayloadType != "" }
+
+// recordedAt is the line's own time, zero when not seen or not usable.
+func (r joinRecord) recordedAt() time.Time {
+	us, err := strconv.ParseInt(r.RecordedAt, 10, 64)
+	if err != nil || us <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMicro(us)
+}
 
 // intent reads the record as a tool-execution intent. isIntent is false for any
 // other line. ok is false when it is an intent the join cannot use, which means

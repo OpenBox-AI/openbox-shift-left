@@ -156,6 +156,24 @@ func TestReconcileLeavesIntentsNewerThanTheTrigger(t *testing.T) {
 	}
 }
 
+// A started record whose call id and tool name lie past the line cap cannot be
+// joined, which is no reason to say nothing: it is surfaced as a finding.
+func TestReconcileSurfacesAnOversizeIntentItCannotJoin(t *testing.T) {
+	e := newReconcileEnv(t)
+	huge := strings.Repeat("x", maxLineBytes+1<<20)
+	line := `{"schema_version":1,"record_type":"event","payload_type":"tool_batch.effect.started","recorded_at":` +
+		fmt.Sprint(mustParse(t0).UnixMicro()) + `,"payload":{"content":"` + huge + `"}}` + "\n"
+	writeLog(t, e.logPath(""), line)
+	res := e.run(cutoffAfterAll)
+	gaps := e.gaps()
+	if res.Gaps != 1 || len(gaps) != 1 || gaps[0].Outcome != reasonUnjoinable {
+		t.Fatalf("res=%+v gaps=%+v", res, gaps)
+	}
+	if res := e.run(cutoffAfterAll); res.Gaps != 0 {
+		t.Fatalf("the line was reported twice: %+v", res)
+	}
+}
+
 func TestReconcileRespectsItsDeadline(t *testing.T) {
 	e := newReconcileEnv(t)
 	writeLog(t, e.logPath(""), intentLine(1, "Write", "tu-1", t0, `{}`))

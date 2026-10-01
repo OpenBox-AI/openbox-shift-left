@@ -389,13 +389,35 @@ func TestReadLogStepsOverALineOverTheCapAndCountsIt(t *testing.T) {
 		}
 	})
 
-	t.Run("fields only after the cap are skipped and the pass moves on", func(t *testing.T) {
+	t.Run("fields only after the cap are counted as unjoinable and the pass moves on", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "session.jsonl")
 		line := `{"schema_version":1,"payload":{"content":"` + huge + `"},"record_type":"event","payload_type":"tool_batch.effect.started","recorded_at":1}` + "\n"
 		writeLog(t, path, line+good)
 		out, err := readLog(path, fileCursor{}, cutoffAfterAll, time.Now().Add(time.Minute), 64<<20)
-		if err != nil || out.DecodeErr != nil || out.Oversize != 1 || len(out.Intents) != 1 || out.Intents[0].ToolUseID != "tu-3" {
-			t.Fatalf("oversize=%d intents=%+v decodeErr=%v err=%v", out.Oversize, out.Intents, out.DecodeErr, err)
+		if err != nil || out.DecodeErr != nil || out.Oversize != 1 || out.Unjoinable != 1 || len(out.Intents) != 1 || out.Intents[0].ToolUseID != "tu-3" {
+			t.Fatalf("oversize=%d unjoinable=%d intents=%+v decodeErr=%v err=%v", out.Oversize, out.Unjoinable, out.Intents, out.DecodeErr, err)
+		}
+	})
+
+	t.Run("a known other payload type over the cap is not an intent", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		line := envelopeLine(1, "model.response", t0, `{"content":"`+huge+`"}`)
+		writeLog(t, path, line+good)
+		out, err := readLog(path, fileCursor{}, cutoffAfterAll, time.Now().Add(time.Minute), 64<<20)
+		if err != nil || out.Oversize != 1 || out.Unjoinable != 0 || len(out.Intents) != 1 {
+			t.Fatalf("oversize=%d unjoinable=%d intents=%+v err=%v", out.Oversize, out.Unjoinable, out.Intents, err)
+		}
+	})
+
+	t.Run("a recent oversize intent is left for a later pass", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "session.jsonl")
+		line := `{"schema_version":1,"record_type":"event","payload_type":"tool_batch.effect.started","recorded_at":` +
+			fmt.Sprint(mustParse(t2).UnixMicro()) + `,"payload":{"content":"` + huge + `"}}` + "\n"
+		writeLog(t, path, line)
+		cutoff := mustParse(t1)
+		out, err := readLog(path, fileCursor{}, cutoff, time.Now().Add(time.Minute), 64<<20)
+		if err != nil || out.Unjoinable != 0 || out.Oversize != 0 || out.Cursor.Offset != 0 {
+			t.Fatalf("a line not old enough was committed: %+v err=%v", out, err)
 		}
 	})
 }

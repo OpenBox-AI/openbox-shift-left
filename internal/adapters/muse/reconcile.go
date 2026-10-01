@@ -51,6 +51,9 @@ const (
 	intentGrace = 2 * time.Second
 
 	reasonNoGateRecord = "no_gate_record"
+	// reasonUnjoinable marks an oversize journal line that may be a tool
+	// action but whose join fields lie past the line cap.
+	reasonUnjoinable = "oversize_unjoinable"
 
 	// evidenceWindow is how far back doctor counts findings.
 	evidenceWindow = 7 * 24 * time.Hour
@@ -351,6 +354,11 @@ func (r Reconciler) Run(sessionID, runID string, cutoff, deadline time.Time) (re
 				findings = append(findings, gapRecord(sessionID, runID, it))
 			}
 		}
+		for i := 0; i < out.Unjoinable; i++ {
+			res.Intents++
+			res.Gaps++
+			findings = append(findings, unjoinableRecord(sessionID, runID))
+		}
 		if out.Cursor != st.Files[l.Key] {
 			st.Files[l.Key] = out.Cursor
 			dirty = true
@@ -419,6 +427,24 @@ func gapRecord(sessionID, runID string, it intent) trace.Record {
 		Stage:     trace.StageEvidenceGap,
 		Outcome:   reasonNoGateRecord,
 		Detail:    detail,
+	}
+}
+
+// unjoinableRecord is the finding for an oversize line that cannot be joined:
+// no tool name or id is known, only that an action may have gone ungated.
+func unjoinableRecord(sessionID, runID string) trace.Record {
+	return trace.Record{
+		Provider:  provider,
+		SessionID: sessionID,
+		RunID:     runID,
+		Stage:     trace.StageEvidenceGap,
+		Outcome:   reasonUnjoinable,
+		Detail: map[string]any{
+			"provider":   provider,
+			"session_id": sessionID,
+			"run_id":     runID,
+			"reason":     reasonUnjoinable,
+		},
 	}
 }
 
