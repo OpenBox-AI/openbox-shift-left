@@ -67,6 +67,20 @@ none of which is an envelope. It stays stopped there until the adapter learns th
 new format. A line that is not JSON at all is a torn write, not a new format:
 that pass is `unverified`, and the next one starts past the line.
 
+A journal line over the 8 MiB line cap is stepped over in constant memory. When
+its join fields lie past the cap it cannot be joined, so it is reported as an
+`evidence.gap` finding with reason `oversize_unjoinable` rather than dropped.
+A pass is bounded by bytes and time: a line that would carry it past its byte
+budget is left for the next pass, which reads it first.
+
+`Stop` leaves intents journaled in the last two seconds for a later pass: Muse
+journals an intent before the `PreToolUse` hook process has started and written
+the gate ledger, so a call journaled an instant ago is in flight, not ungated.
+`SessionEnd`, the last pass, has no such grace, since no tool batch is waiting on
+a hook once the session is over. A journal that is replaced and read from the top
+takes its old intents back out of the id-less join counters, and a gate ledger
+line too long to read is skipped rather than ending the read.
+
 ## Event mapping
 
 | Muse hook | Contract type | Gated | Answer |
