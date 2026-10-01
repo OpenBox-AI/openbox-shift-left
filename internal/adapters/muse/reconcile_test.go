@@ -607,3 +607,76 @@ func TestRecordGateCallConcurrentAppendsAreAllKept(t *testing.T) {
 		t.Fatalf("ledger holds %d entries, %d ids; want %d", g.byTool["Bash"], len(g.ids), n)
 	}
 }
+
+func ageLockFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-2 * stateRetention)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A sweep that lands while a pass is acquiring its session lock must not unlink
+// the file: the pass would lock an inode no later pass can see.
+func TestSweepDuringAcquisitionKeepsTheSessionLockFile(t *testing.T) {
+	e := newReconcileEnv(t)
+	writeLog(t, e.logPath(""), intentLine(1, "Write", "tu-1", t0, `{}`))
+	dir := reconcileDir(e.spool)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, stateStem(e.sid)+".lock")
+	ageLockFile(t, path)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSessionLock = func() { sweepState(e.spool, time.Now()) }
+	t.Cleanup(func() { beforeSessionLock = func() {} })
+
+	res := e.run(cutoffAfterAll)
+	after, err := os.Stat(path)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("session lock file was replaced under an acquiring pass (stat err %v)", err)
+	}
+	if res.Skipped || res.Gaps != 1 {
+		t.Fatalf("pass = %+v", res)
+	}
+}
+
+func TestPassSweepsOldIdleLocksAfterReleasingTheSweepLock(t *testing.T) {
+	e := newReconcileEnv(t)
+	writeLog(t, e.logPath(""), intentLine(1, "Write", "tu-1", t0, `{}`))
+	dir := reconcileDir(e.spool)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	idle := filepath.Join(dir, "idle.lock")
+	ageLockFile(t, idle)
+	e.run(cutoffAfterAll)
+	if _, err := os.Stat(idle); err == nil {
+		t.Error("a pass's own sweep could not remove an idle old lock")
+	}
+}
+
+func TestPassIsSkippedWhileTheSweeperHoldsTheDirectory(t *testing.T) {
+	e := newReconcileEnv(t)
+	writeLog(t, e.logPath(""), intentLine(1, "Write", "tu-1", t0, `{}`))
+	if err := os.MkdirAll(reconcileDir(e.spool), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sw := flock.New(filepath.Join(reconcileDir(e.spool), sweepLockName))
+	if ok, err := sw.TryLock(); !ok || err != nil {
+		t.Fatalf("sweep lock: %v %v", ok, err)
+	}
+	if res := e.run(cutoffAfterAll); !res.Skipped {
+		t.Fatalf("pass ran beside the sweeper: %+v", res)
+	}
+	_ = sw.Unlock()
+	if res := e.run(cutoffAfterAll); res.Skipped || res.Gaps != 1 {
+		t.Fatalf("after release = %+v", res)
+	}
+}

@@ -3,6 +3,7 @@ package muse
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -374,8 +375,8 @@ func (r Reconciler) Run(sessionID, runID string, cutoff, deadline time.Time) (re
 		res.Errors++
 		return res
 	}
-	lock := flock.New(filepath.Join(reconcileDir(r.SpoolDir), stateStem(sessionID)+".lock"))
-	switch held, err := lock.TryLock(); {
+	lock, held, err := acquireSessionLock(r.SpoolDir, sessionID)
+	switch {
 	case err != nil:
 		res.Errors++
 		return res
@@ -539,6 +540,48 @@ func reconcileRecord(sessionID, runID string, res Result) trace.Record {
 	}
 }
 
+// beforeSessionLock runs after a pass has taken the shared sweep lock and built
+// its session lock, before it locks it. Tests use it to run the sweeper inside
+// that window.
+var beforeSessionLock = func() {}
+
+// sweepLockName is the reconcile dir's reader/writer lock between passes
+// acquiring a session lock (shared) and the sweeper removing lock files
+// (exclusive). It is never swept.
+const sweepLockName = "sweep.lock"
+
+// sweepShareBudget bounds how long a pass waits for a sweeper to finish.
+const sweepShareBudget = 200 * time.Millisecond
+
+// acquireSessionLock takes the session's lock file. The shared sweep lock is
+// held only across the acquisition, and released before the pass runs (the pass
+// sweeps at its end and would otherwise refuse itself). Opening a lock file and
+// locking it are not one step: a sweeper unlinking the file between them would
+// leave this pass holding an unlinked inode while a later pass creates and locks
+// a fresh file at the same path. held is false when the session is busy or a
+// sweeper holds the directory.
+func acquireSessionLock(spoolDir, sessionID string) (*flock.Flock, bool, error) {
+	dir := reconcileDir(spoolDir)
+	sweep := flock.New(filepath.Join(dir, sweepLockName))
+	ctx, cancel := context.WithTimeout(context.Background(), sweepShareBudget)
+	defer cancel()
+	switch ok, err := sweep.TryRLockContext(ctx, 10*time.Millisecond); {
+	case err != nil && !errors.Is(err, context.DeadlineExceeded):
+		return nil, false, err
+	case !ok:
+		return nil, false, nil
+	}
+	defer func() { _ = sweep.Unlock() }()
+
+	lock := flock.New(filepath.Join(dir, stateStem(sessionID)+".lock"))
+	beforeSessionLock()
+	held, err := lock.TryLock()
+	if err != nil || !held {
+		return nil, false, err
+	}
+	return lock, true, nil
+}
+
 // sweepState removes cursors and ledgers nothing has written for a while, a
 // bounded number per pass, so state for ended sessions does not pile up.
 func sweepState(spoolDir string, now time.Time) {
@@ -550,6 +593,24 @@ func sweepState(spoolDir string, now time.Time) {
 	// files at the front of the listing cannot keep the old ones behind them
 	// from ever being reached.
 	removed := 0
+	// Lock files go only while no pass is between opening one and locking it
+	// (see acquireSessionLock). If one is, they stay until the next sweep.
+	var sweep *flock.Flock
+	defer func() {
+		if sweep != nil {
+			_ = sweep.Unlock()
+		}
+	}()
+	lockFilesOK := func() bool {
+		if sweep == nil {
+			l := flock.New(filepath.Join(reconcileDir(spoolDir), sweepLockName))
+			if held, err := l.TryLock(); err != nil || !held {
+				return false
+			}
+			sweep = l
+		}
+		return true
+	}
 	for _, e := range entries {
 		if removed >= maxSweep {
 			return
@@ -559,7 +620,13 @@ func sweepState(spoolDir string, now time.Time) {
 			continue
 		}
 		path := filepath.Join(reconcileDir(spoolDir), e.Name())
+		if e.Name() == sweepLockName {
+			continue
+		}
 		if strings.HasSuffix(e.Name(), ".lock") {
+			if !lockFilesOK() {
+				continue
+			}
 			// A lock file's mtime is the day it was created, not the last time
 			// it was held, so a long session's lock looks old while a pass holds
 			// it. Removing a held lock would let a second pass in beside it.
