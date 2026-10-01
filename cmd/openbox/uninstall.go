@@ -716,6 +716,11 @@ func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSur
 		st.keepPriorRecord(s.provider, home, s.path)
 		return
 	}
+	if res.RemovedFile {
+		// Reported whether or not a key was recorded: the file is gone either way.
+		a.row("removed", "%s (a settings file which `init` created and nothing else was in)", s.path)
+		st.deleted++
+	}
 	switch {
 	case !res.Recorded:
 		return // the ordinary case: never installed here, or already uninstalled

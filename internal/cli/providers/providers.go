@@ -130,6 +130,10 @@ type SettingsRestoreResult struct {
 	// deleted.
 	Present bool
 	Value   string
+	// RemovedFile is true when the settings file was one `init` created and
+	// held nothing else, so the restore deleted it. It can be set with
+	// Recorded false.
+	RemovedFile bool
 }
 
 // RestoreProviderSettings puts back whatever a bare settings key held before
@@ -159,6 +163,8 @@ func RestoreProviderSettings(name, settingsPath, homeDir string) (SettingsRestor
 			Current:  r.Current,
 			Present:  r.Present,
 			Value:    r.Value,
+
+			RemovedFile: r.RemovedFile,
 		}, err
 	case provider.Codex:
 		// Codex forces no bare settings key at install time.

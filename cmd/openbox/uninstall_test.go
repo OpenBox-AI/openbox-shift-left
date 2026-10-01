@@ -14,6 +14,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
+	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
 // installedMachine is a fake machine carrying everything `init` writes, so a
@@ -833,5 +834,72 @@ func TestUninstallCleanCheckSeesACacheOnlyMachine(t *testing.T) {
 	}
 	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
 		t.Errorf("the token cache survived (err=%v)", err)
+	}
+}
+
+// museSettingsRow is the uninstall row that says a settings.json `init`
+// created was taken away again.
+const museSettingsRow = "which `init` created and nothing else was in"
+
+func installMuseTelemetry(t *testing.T, m *installedMachine, existing string) string {
+	t.Helper()
+	t.Setenv("HOME", m.home)
+	path := providers.MuseSettingsPath()
+	if existing != "" {
+		writeFile(t, path, existing)
+	}
+	withMuseRunner(t, healthyMuse())
+	inst, err := providers.Lookup(string(provider.Muse))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inst.Install(provider.CredentialRef{AgentID: "3f2504e0-4f89-11d3-9a0c-0305e82c3301"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := providers.WriteMuseTelemetry(path, m.home, "http://127.0.0.1:8789"); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestUninstallSaysItRemovedAMuseSettingsFileInitCreated(t *testing.T) {
+	skipUnlessSupervised(t)
+	m := newInstalledMachine(t)
+	path := installMuseTelemetry(t, m, "")
+
+	a, first := m.app(t)
+	if code := a.runUninstall(nil); code != exitOK {
+		t.Fatalf("first exit = %d:\n%s", code, first.String())
+	}
+	if exists(path) {
+		t.Fatalf("%s survived uninstall:\n%s", path, first.String())
+	}
+	if !strings.Contains(first.String(), museSettingsRow) || !strings.Contains(first.String(), path) {
+		t.Errorf("uninstall removed %s without saying so:\n%s", path, first.String())
+	}
+
+	b, second := m.app(t)
+	if code := b.runUninstall(nil); code != exitOK {
+		t.Fatalf("second exit = %d:\n%s", code, second.String())
+	}
+	if strings.Contains(second.String(), museSettingsRow) {
+		t.Errorf("the second run reported the file again:\n%s", second.String())
+	}
+}
+
+func TestUninstallKeepsAndStaysQuietAboutAMuseSettingsFileWithOtherKeys(t *testing.T) {
+	skipUnlessSupervised(t)
+	m := newInstalledMachine(t)
+	path := installMuseTelemetry(t, m, "{\"schema_version\": 1, \"theme\": \"dark\"}\n")
+
+	a, out := m.app(t)
+	if code := a.runUninstall(nil); code != exitOK {
+		t.Fatalf("exit = %d:\n%s", code, out.String())
+	}
+	if !exists(path) {
+		t.Fatalf("%s holds the developer's keys and was removed", path)
+	}
+	if strings.Contains(out.String(), museSettingsRow) {
+		t.Errorf("a kept file produced a removal row:\n%s", out.String())
 	}
 }

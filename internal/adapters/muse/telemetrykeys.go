@@ -397,6 +397,10 @@ type TelemetryRestored struct {
 	// Value, false means it was absent before init and is now deleted.
 	Present bool
 	Value   string
+	// RemovedFile is true when the settings file was one `init` created and held
+	// nothing but what OpenBox wrote, so uninstall deleted it. It is independent
+	// of Recorded: the telemetry key may have no record while the file does.
+	RemovedFile bool
 }
 
 // RestoreTelemetry puts `telemetry` back to what WriteTelemetry found, or
@@ -412,14 +416,15 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 	entry, ok := rec.Keys[TelemetryKey]
 	if !ok {
 		if rec.SettingsCreated {
-			return TelemetryRestored{}, settleCreatedSettings(homeDir, rec, resolveSettingsPath(settingsPath))
+			removed, err := settleCreatedSettings(homeDir, rec, resolveSettingsPath(settingsPath))
+			return TelemetryRestored{RemovedFile: removed}, err
 		}
 		return TelemetryRestored{}, nil
 	}
 	if rec.isElsewhere(resolveSettingsPath(settingsPath)) {
 		return TelemetryRestored{}, recordElsewhere(rec, resolveSettingsPath(settingsPath))
 	}
-	forget := func() error {
+	forget := func() (bool, error) {
 		delete(rec.Keys, TelemetryKey)
 		return settleCreatedSettings(homeDir, rec, resolveSettingsPath(settingsPath))
 	}
@@ -434,7 +439,8 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 		if current.Exists() {
 			out.Current = current.Raw
 		}
-		return out, forget()
+		out.RemovedFile, err = forget()
+		return out, err
 	}
 
 	var next []byte
@@ -462,10 +468,11 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 	if err := hookflow.AtomicWriteFile(path, next, perm); err != nil {
 		return TelemetryRestored{}, fmt.Errorf("muse: writing %s: %w", path, err)
 	}
-	if err := forget(); err != nil {
+	removed, err := forget()
+	if err != nil {
 		return TelemetryRestored{}, err
 	}
-	return TelemetryRestored{Recorded: true, Present: entry.Present, Value: entry.Raw}, nil
+	return TelemetryRestored{Recorded: true, Present: entry.Present, Value: entry.Raw, RemovedFile: removed}, nil
 }
 
 // noteCreatedSettings records, before the install creates the settings file at
@@ -499,36 +506,42 @@ func noteCreatedSettings(homeDir, path string) (undo func(), err error) {
 // holds nothing but the schema_version OpenBox wrote, the file goes. A file
 // that gained anything since is the developer's now and stays. The note is
 // cleared either way, and the record goes with it once nothing else is in it.
-func settleCreatedSettings(homeDir string, rec priorSettings, path string) error {
+// removed reports that the file was deleted.
+func settleCreatedSettings(homeDir string, rec priorSettings, path string) (removed bool, err error) {
 	if rec.SettingsCreated && rec.SettingsPath != "" && samePath(rec.SettingsPath, path) {
-		if err := removeSettingsIfOnlySchema(path); err != nil {
-			return err
+		removed, err = removeSettingsIfOnlySchema(path)
+		if err != nil {
+			return false, err
 		}
 		rec.SettingsCreated = false
 	}
-	return savePriorSettings(homeDir, rec)
+	return removed, savePriorSettings(homeDir, rec)
 }
 
 // removeSettingsIfOnlySchema deletes a settings file whose whole content is the
-// schema_version key this adapter writes into a file it creates.
-func removeSettingsIfOnlySchema(path string) error {
+// schema_version key this adapter writes into a file it creates. removed is
+// true only when this call deleted the file.
+func removeSettingsIfOnlySchema(path string) (removed bool, err error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("muse: reading %s: %w", path, err)
+		return false, fmt.Errorf("muse: reading %s: %w", path, err)
 	}
 	root := gjson.ParseBytes(raw)
 	if !gjson.ValidBytes(raw) || !root.IsObject() {
-		return nil
+		return false, nil
 	}
 	fields := root.Map()
 	if len(fields) != 1 || !fields["schema_version"].Exists() {
-		return nil
+		return false, nil
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("muse: removing %s: %w", path, err)
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("muse: removing %s: %w", path, err)
 	}
-	return nil
+	return true, nil
 }

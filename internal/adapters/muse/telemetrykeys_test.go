@@ -450,3 +450,47 @@ func TestARecordForAnotherSettingsFileIsNotAppliedHere(t *testing.T) {
 		t.Fatalf("restore of the original file = %+v, %v", r, err)
 	}
 }
+
+func TestRestoreTelemetryReportsTheFileItRemoved(t *testing.T) {
+	i, path := newTestInstaller(t)
+	if err := i.Install(testRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteTelemetry(path, i.HomeDir, testEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveHooks(path); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RestoreTelemetry(path, i.HomeDir)
+	if err != nil || !res.RemovedFile {
+		t.Fatalf("restore = %+v, %v; want the created file reported removed", res, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the created file survived (err=%v)", err)
+	}
+	if again, err := RestoreTelemetry(path, i.HomeDir); err != nil || again.RemovedFile || again.Recorded {
+		t.Errorf("a second restore = %+v, %v; want nothing", again, err)
+	}
+}
+
+func TestRestoreTelemetryKeepsAFileWithOtherKeysAndSaysNothing(t *testing.T) {
+	i, path := newTestInstaller(t)
+	writeFile(t, path, foreignSettings)
+	if err := i.Install(testRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteTelemetry(path, i.HomeDir, testEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RemoveHooks(path); err != nil {
+		t.Fatal(err)
+	}
+	res, err := RestoreTelemetry(path, i.HomeDir)
+	if err != nil || res.RemovedFile {
+		t.Fatalf("restore = %+v, %v; want the developer's file kept", res, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("the developer's file is gone: %v", err)
+	}
+}
