@@ -503,6 +503,37 @@ func TestReconcileSkipsAPassWhileAnotherHoldsTheSession(t *testing.T) {
 	}
 }
 
+func TestSweepStateKeepsAHeldLock(t *testing.T) {
+	spool := t.TempDir()
+	dir := reconcileDir(spool)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	held, idle := filepath.Join(dir, "held.lock"), filepath.Join(dir, "idle.lock")
+	past := time.Now().Add(-2 * stateRetention)
+	for _, p := range []string{held, idle} {
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, past, past); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l := flock.New(held)
+	if ok, err := l.TryLock(); err != nil || !ok {
+		t.Fatalf("lock: %v %v", ok, err)
+	}
+	defer l.Unlock()
+
+	sweepState(spool, time.Now())
+	if _, err := os.Stat(held); err != nil {
+		t.Error("a lock a pass holds was swept")
+	}
+	if _, err := os.Stat(idle); err == nil {
+		t.Error("an idle old lock survived")
+	}
+}
+
 func TestSweepStateReachesOldFilesBehindFreshOnes(t *testing.T) {
 	spool := t.TempDir()
 	dir := reconcileDir(spool)

@@ -513,7 +513,22 @@ func sweepState(spoolDir string, now time.Time) {
 		if err != nil || e.IsDir() || now.Sub(info.ModTime()) < stateRetention {
 			continue
 		}
-		if os.Remove(filepath.Join(reconcileDir(spoolDir), e.Name())) == nil {
+		path := filepath.Join(reconcileDir(spoolDir), e.Name())
+		if strings.HasSuffix(e.Name(), ".lock") {
+			// A lock file's mtime is the day it was created, not the last time
+			// it was held, so a long session's lock looks old while a pass holds
+			// it. Removing a held lock would let a second pass in beside it.
+			l := flock.New(path)
+			if held, err := l.TryLock(); err != nil || !held {
+				continue
+			}
+			if os.Remove(path) == nil {
+				removed++
+			}
+			_ = l.Unlock()
+			continue
+		}
+		if os.Remove(path) == nil {
 			removed++
 		}
 	}
