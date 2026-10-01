@@ -1144,8 +1144,21 @@ func TestCodexHookIsObserveOnlyInProcess(t *testing.T) {
 	if !strings.Contains(string(raw), "ToolCall") {
 		t.Errorf("spooled event should be a ToolCall: %s", raw)
 	}
-	if strings.Contains(string(raw), secret) {
-		t.Fatalf("command content leaked into the spool: %s", raw)
+	if !strings.Contains(string(raw), secret) {
+		t.Fatalf("default content-ON posture must carry the command: %s", raw)
+	}
+
+	// Capture off: the same call spools no command.
+	offSpool := setCodexHookEnv(t)
+	t.Setenv(devconfig.EnvContentCapture, "0")
+	a, _, errb = testApp(nil)
+	a.stdin = strings.NewReader(`{"hook_event_name":"PreToolUse","session_id":"th-2","cwd":"/r","tool_name":"Bash","tool_use_id":"call-2","tool_input":{"command":"` + secret + `"}}`)
+	if code := a.run([]string{"hook", "codex", "PreToolUse"}); code != exitOK {
+		t.Fatalf("capture-off hook exit = %d; stderr=%q", code, errb.String())
+	}
+	rawOff, _ := os.ReadFile(filepath.Join(offSpool, onlySpoolFile(t, offSpool)))
+	if !strings.Contains(string(rawOff), "ToolCall") || strings.Contains(string(rawOff), secret) {
+		t.Fatalf("capture off: want a ToolCall with no command content: %s", rawOff)
 	}
 }
 
@@ -1237,9 +1250,34 @@ func TestCodexUnifiedBinaryObserveE2E(t *testing.T) {
 			t.Errorf("spool missing a %s event:\n%s", wantType, raw)
 		}
 	}
+	for _, want := range []string{"go test ./...", "0.412s"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("default content-ON posture must carry tool content %q: %s", want, raw)
+		}
+	}
+
+	// Capture off: the same tool hooks spool no tool content.
+	offSpool := filepath.Join(dir, "spool-off")
+	offEnv := append(append([]string{}, env...),
+		"OPENBOX_SPOOL_DIR="+offSpool, "OPENBOX_CONTENT_CAPTURE=0")
+	for _, e := range []struct{ hook, fixture string }{
+		{"PreToolUse", "pretooluse.json"}, {"PostToolUse", "posttooluse.json"}} {
+		payload, err := os.ReadFile(filepath.Join(fixtures, e.fixture))
+		if err != nil {
+			t.Fatalf("fixture %s: %v", e.fixture, err)
+		}
+		cmd := exec.Command(bin, "hook", "codex", e.hook)
+		cmd.Stdin = bytes.NewReader(payload)
+		cmd.Env = offEnv
+		_ = cmd.Run() // PreToolUse denies with no control plane; only the spool matters here
+	}
+	rawOff, _ := os.ReadFile(filepath.Join(offSpool, onlySpoolFile(t, offSpool)))
+	if !strings.Contains(string(rawOff), "ToolResult") {
+		t.Errorf("capture-off spool missing the ToolResult event:\n%s", rawOff)
+	}
 	for _, secret := range []string{"go test ./...", "0.412s"} {
-		if strings.Contains(string(raw), secret) {
-			t.Fatalf("tool content leaked into the spool: %s", raw)
+		if strings.Contains(string(rawOff), secret) {
+			t.Fatalf("capture off: tool content leaked into the spool: %s", rawOff)
 		}
 	}
 }

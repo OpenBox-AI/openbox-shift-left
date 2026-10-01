@@ -86,8 +86,16 @@ func TestRunHook_ObserveOnlyContract(t *testing.T) {
 	if !strings.Contains(string(raw), "ToolCall") {
 		t.Errorf("spooled event should be a ToolCall: %s", raw)
 	}
-	if strings.Contains(string(raw), secret) {
-		t.Fatalf("command content leaked into the spool: %s", raw)
+	if !strings.Contains(string(raw), secret) {
+		t.Fatalf("default content-ON posture must carry the command: %s", raw)
+	}
+
+	// Capture off: the same call spools no command.
+	offSpool := setHookEnv(t)
+	t.Setenv(devconfig.EnvContentCapture, "0")
+	runHook(t, "PreToolUse", payload)
+	if strings.Contains(spooledBody(t, offSpool), secret) {
+		t.Fatalf("capture off: command content leaked into the spool")
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 // v0.145.0-shaped payloads a manual validation pipes into the real
 // binary) through the engine and asserts the observe contract for each:
 // SessionStart/PostToolUse/SessionEnd write nothing, and every fixture spools
-// without leaking its payload content. UserPromptSubmit/PreToolUse are gated
+// with tool content under the default content-ON posture. UserPromptSubmit/PreToolUse are gated
 // unconditionally now (ResolveEnforce always reports true); with no reachable
 // control plane they deny (delivery is always fail-closed), but the
 // escalation was never attempted (no client configured), so the gate's own
@@ -24,7 +24,7 @@ func TestFixtures_AllFiveEventsObserveOnly(t *testing.T) {
 		{"SessionStart", "sessionstart.json"},
 		{"UserPromptSubmit", "userpromptsubmit.json"},
 		{"PreToolUse", "pretooluse.json"},
-		{"PostToolUse", "posttooluse.json"},
+		{"PostToolUse", "posttooluse-string.json"},
 		{"SessionEnd", "sessionend.json"},
 	}
 	for _, f := range fixtures {
@@ -56,16 +56,16 @@ func TestFixtures_AllFiveEventsObserveOnly(t *testing.T) {
 		raw, _ := os.ReadFile(filepath.Join(spool, e.Name()))
 		lines += strings.Count(string(raw), "\n")
 		spooled += string(raw)
-		for _, secret := range []string{"go test ./...", "0.412s"} {
-			if strings.Contains(string(raw), secret) {
-				t.Fatalf("tool content leaked into the spool: %s", raw)
-			}
-		}
 	}
 	if lines != 5 {
 		t.Errorf("spooled %d events, want 5 (SessionStarted, PromptSubmitted, ToolCall, ToolResult, SessionEnded)", lines)
 	}
 	if !strings.Contains(spooled, "add a health endpoint") {
 		t.Errorf("default content-ON posture should capture the prompt; spool: %s", spooled)
+	}
+	for _, want := range []string{"go test ./...", "hello-live"} {
+		if !strings.Contains(spooled, want) {
+			t.Errorf("default content-ON posture should capture tool content %q; spool: %s", want, spooled)
+		}
 	}
 }

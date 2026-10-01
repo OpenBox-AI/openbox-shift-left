@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,8 +48,9 @@ func ParseHookName(s string) (HookName, error) {
 }
 
 // HookEvent is the subset of a Codex hook's stdin JSON this adapter reads.
-// Content), and `tool_response` (PostToolUse) has no field here at all, so
-// neither can leak into an emitted event even by accident.
+// Content fields (prompt, tool_input, tool_response, last_assistant_message)
+// are copied onto an emitted event only by the mapper, under the capture gate
+// and after redaction.
 type HookEvent struct {
 	// HookEventName common (present on every hook payload).
 	HookEventName  string `json:"hook_event_name"`
@@ -76,9 +78,13 @@ type HookEvent struct {
 	// payload has tool_name and tool_input but no tool_use_id -- so a
 	// PermissionRequest cannot be paired to the tool call it escalates from.
 	ToolUseID string `json:"tool_use_id"`
-	// ToolInput is retained only as an opaque blob for the enforce leg (local,
-	// never-egressed decision input). The observe path never decodes it.
+	// ToolInput is content (INV-2): the enforce leg reads it for the local
+	// decision, and the mapper copies it onto ToolCall only under
+	// Mapper.CaptureContent, redacted.
 	ToolInput json.RawMessage `json:"tool_input"`
+	// ToolResponse is PostToolUse's tool result: a string or an object such as
+	// {"output": ...}. Content (INV-2), copied only by the mapper under capture.
+	ToolResponse json.RawMessage `json:"tool_response"`
 
 	// Reason sessionEnd. The embedded schema pins reason to the single value
 	// "other" (not load-bearing here).
@@ -113,8 +119,7 @@ type HookEvent struct {
 	Prompt string `json:"prompt"`
 }
 
-// command the observe path never calls it (ToolInput stays an opaque
-// json.RawMessage), so observe egress is unchanged.
+// command is the shell command inside tool_input, or "" when absent.
 func (e *HookEvent) command() string {
 	if len(e.ToolInput) == 0 {
 		return ""
@@ -147,4 +152,32 @@ func ParseHookEvent(r io.Reader) (*HookEvent, error) {
 		return nil, fmt.Errorf("parse hook payload: %w", err)
 	}
 	return &ev, nil
+}
+
+// outputText is the text of a tool_response: a JSON string as is (Codex's live
+// shape), a top-level object's output/stdout field, else the raw JSON. "" for an absent, null or empty
+// response.
+func outputText(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	if raw[0] == '"' {
+		// A JSON string is the tool's output verbatim, even if it parses as an object.
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return ""
+		}
+		return s
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		for _, k := range []string{"output", "stdout"} {
+			var s string
+			if json.Unmarshal(obj[k], &s) == nil && s != "" {
+				return s
+			}
+		}
+	}
+	return string(raw)
 }

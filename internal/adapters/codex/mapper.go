@@ -30,10 +30,9 @@ type Mapper struct {
 	// NewID, when non-nil, overrides the idempotency-id source; used by
 	// tests to pin ids.
 	NewID func() string
-	// CaptureContent authorizes copying the (content) prompt text onto the
-	// emitted PromptSubmitted event (on by default, opt-out honored). Only the
-	// prompt is gated here; command strings, patch bodies, and tool output are
-	// never decoded at all.
+	// CaptureContent authorizes copying content onto emitted events (on by
+	// default, opt-out honored): the prompt, a tool call's input and a tool
+	// result's output here, and the turn's assistant text and thinking in MapTurn.
 	CaptureContent bool
 	// RedactContent redacts a content body for secrets before it is attached to
 	// an event. Nil ⇒ identity, which is the honest `secret_detection:false`
@@ -123,6 +122,11 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.StartedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "started")
 		ev.Metadata = toolMetadata(e)
+		if m.CaptureContent {
+			if in := m.redact(toolInputExtract(e)); in != "" {
+				ev.Content = &client.Content{ToolInput: in}
+			}
+		}
 
 	case HookPermissionRequest:
 		// A signal, not an activity: the escalation is not a second execution of
@@ -168,6 +172,13 @@ func (m Mapper) Map(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 		ev.EndedAt = ts
 		ev.Tool, ev.Span = mapTool(e, "completed")
 		ev.Metadata = toolMetadata(e)
+		// Status stays unreported: tool_response does not say whether the call
+		// succeeded (see capabilities.go).
+		if m.CaptureContent {
+			if out := m.redact(outputText(e.ToolResponse)); out != "" {
+				ev.Content = &client.Content{ToolOutput: out}
+			}
+		}
 
 	case HookSessionEnd:
 		ev.EventType = client.EventSessionEnded
@@ -257,8 +268,8 @@ func mergeMetadata(dst, src map[string]any) map[string]any {
 	return dst
 }
 
-// toolMetadata identifiers only, never content (INV-2);
-// tool_input/tool_response are not represented.
+// toolMetadata identifiers only, never content (INV-2); tool_input and
+// tool_response ride Content under the capture gate instead.
 func toolMetadata(e *HookEvent) map[string]any {
 	return hookflow.Compact(map[string]any{
 		"permission_mode": hookflow.EnumOr(e.PermissionMode, permissionModes),

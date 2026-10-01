@@ -75,7 +75,7 @@ type codexProducers struct {
 
 // feedCodexCallToBothDaemons sends the same Codex model call down each lane:
 // the relay sees the wire request (carrier header = thread id), telemetry
-// receives Codex's own api_request export for the same thread. Both emitters
+// receives Codex's own codex.sse_event export for the same thread. Both emitters
 // are built by the daemons' own constructors over the same election paths.
 func feedCodexCallToBothDaemons(t *testing.T, paths codexElectionPaths) codexProducers {
 	t.Helper()
@@ -116,20 +116,19 @@ func feedCodexCallToBothDaemons(t *testing.T, paths codexElectionPaths) codexPro
 	})
 
 	tel := newCodexTelemetryEmitter(paths, func() bool { return true }, nil,
-		func() string { return onceOnlyDID }, counter(&telemetryN), func(string, ...any) {})
+		func() string { return onceOnlyDID }, counter(&telemetryN), func(string, ...any) {}, nil)
 	if err := tel.Emit(context.Background(), telemetry.Record{
 		Signal:    telemetry.SignalLogs,
-		EventName: "api_request",
+		EventName: "codex.sse_event",
 		Timestamp: time.Date(2026, 9, 30, 12, 0, 1, 0, time.UTC),
 		Attrs: map[string]string{
-			"event.name":        "api_request",
-			"conversation.id":   "thread-once",
-			"model":             "gpt-5",
-			"input_tokens":      "10",
-			"output_tokens":     "5",
-			"duration_ms":       "2000",
-			"request_id":        "req_once",
-			"client_request_id": "thread-once",
+			"event.name":         "codex.sse_event",
+			"event.kind":         "response.completed",
+			"conversation.id":    "thread-once",
+			"model":              "gpt-5",
+			"input_token_count":  "10",
+			"output_token_count": "5",
+			"cached_token_count": "0",
 		},
 	}); err != nil {
 		t.Fatalf("telemetry Emit: %v", err)
