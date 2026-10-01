@@ -581,8 +581,16 @@ func (a *app) reportLanes() {
 	election := activation.ResolveElection(settingsPath)
 
 	fmt.Fprintf(a.stdout, "\nLanes (which one emits model-call turns, and are they up)\n")
-	undecidable := election.SettingsProblem != ""
+	claude := a.claudeCodePresent(settingsPath)
+	undecidable := claude && election.SettingsProblem != ""
 	switch {
+	case !claude:
+		// settings.json is Claude Code's election alone. Without Claude Code its
+		// verdict says nothing about this machine: Codex and Muse record model
+		// calls through lanes they report in their own sections.
+		a.row("elected", "Claude Code is not installed, so its lane election does not apply here")
+		a.row("", "Codex's lanes are reported in the Codex section below; Muse's in the")
+		a.row("", "Muse section's `model calls` row.")
 	case undecidable:
 		a.row("elected", "CANNOT BE DECIDED; %s", election.SettingsProblem)
 		a.row("", "This is NOT the same as no lane being routed. Nothing here knows")
@@ -591,10 +599,12 @@ func (a *app) reportLanes() {
 		a.row("", "installed and whether anything is listening do not come from the")
 		a.row("", "settings file, and they are what recovery starts from.")
 	case election.Elected == "":
+		a.row("", "The lines below are Claude Code's election, read from its settings.json.")
 		a.row("elected", "(none); %s", election.Reason)
-		a.row("", "No lane emits model-call turns, so token counts and costs for this")
-		a.row("", "machine are ABSENT rather than merely incomplete.")
+		a.row("", "No lane emits Claude Code's model-call turns, so its token counts and")
+		a.row("", "costs on this machine are ABSENT rather than merely incomplete.")
 	default:
+		a.row("", "The lines below are Claude Code's election, read from its settings.json.")
 		a.row("elected", "%s", election.Elected)
 		a.wrapRow("because", "%s", election.Reason)
 	}
@@ -758,6 +768,16 @@ func readDeliveryStatus(openboxHome, lane string) (hookflow.DeliverStatus, bool)
 		return hookflow.DeliverStatus{}, false
 	}
 	return status, true
+}
+
+// claudeCodePresent reports whether Claude Code is installed as far as doctor can
+// tell: its settings file exists, or the system-PAC record lists it.
+func (a *app) claudeCodePresent(settingsPath string) bool {
+	if fileExists(settingsPath) {
+		return true
+	}
+	entry, err := activation.LoadSystemEntry(a.homeDir())
+	return err == nil && entry != nil && slices.Contains(entry.Providers, string(provider.ClaudeCode))
 }
 
 // codexPresent reports whether OpenBox has anything installed for Codex that
