@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.10",
+  "schema_version": "1.11",
   "event_id": "evt-content-40",
   "event_type": "ModelCallRequested",
   "openbox_session_id": "sess-abc123",

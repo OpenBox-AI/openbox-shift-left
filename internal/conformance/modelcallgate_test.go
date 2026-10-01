@@ -11,7 +11,7 @@ import (
 // must not import internal/client (its dependency closure is pinned by the
 // depguard allowlist), so the pairwise check against client.SchemaVersion lives
 // in internal/client/acceptancetest.
-const currentVersion = "1.10"
+const currentVersion = "1.11"
 
 func gateBase(eventType string) map[string]any {
 	m := turnBase(eventType)
@@ -50,7 +50,6 @@ func TestModelCallGateRejectsWhatItMayNotCarry(t *testing.T) {
 		"gateway_request_id": "gw-1",
 		"otel_request_id":    "ot-1",
 		"proxy_request_id":   "px-1",
-		"span":               map[string]any{"semantic_type": "internal", "stage": "started"},
 		"activity_type":      "llm_completion",
 	}
 	for _, et := range []string{"ModelCallRequested", "ModelCallFinished"} {
@@ -61,6 +60,37 @@ func TestModelCallGateRejectsWhatItMayNotCarry(t *testing.T) {
 				t.Errorf("%s carrying %s: want rejection, got nil", et, field)
 			}
 		}
+	}
+}
+
+// TestModelCallSpanIsOnlyForTheStartedHalf: the started half carries the pending
+// request as span.request_body (gated content); the finished half has no span.
+func TestModelCallSpanIsOnlyForTheStartedHalf(t *testing.T) {
+	span := map[string]any{"semantic_type": "internal", "stage": "started", "request_body": "{\"messages\":[]}"}
+
+	ev := gateBase("ModelCallRequested")
+	ev["span"] = span
+	raw := marshalEvent(t, ev)
+	if err := ValidateDevEvent(raw, false); err != ErrContentDisabled {
+		t.Errorf("started with a request body, capture off: want ErrContentDisabled, got %v", err)
+	}
+	if err := ValidateDevEvent(raw, true); err != nil {
+		t.Errorf("started with a request body, capture on: %v", err)
+	}
+
+	ev = gateBase("ModelCallFinished")
+	ev["span"] = span
+	if err := ValidateDevEvent(marshalEvent(t, ev), true); err == nil {
+		t.Error("finished half carrying a span: want rejection")
+	}
+}
+
+// TestPreviousStampIsRefused: a 1.10 stamp is not the current contract.
+func TestPreviousStampIsRefused(t *testing.T) {
+	ev := gateBase("ModelCallRequested")
+	ev["schema_version"] = "1.10"
+	if err := ValidateDevEvent(marshalEvent(t, ev), false); err == nil {
+		t.Error("a 1.10 stamp validated against 1.11")
 	}
 }
 
@@ -114,8 +144,8 @@ func TestMessagePreviewsAreGatedContent(t *testing.T) {
 	}
 }
 
-// TestPreviousVersionPayloadsValidateOnceRestamped: 1.10 adds to the contract
-// and removes nothing, so a 1.9 event differs from a valid 1.10 one only in its
+// TestPreviousVersionPayloadsValidateOnceRestamped: 1.10 and 1.11 add to the
+// contract and remove nothing, so a 1.9 event differs from a valid current one only in its
 // stamp. Unrestamped, the const rejects it, which is what a stale producer
 // should see.
 func TestPreviousVersionPayloadsValidateOnceRestamped(t *testing.T) {
@@ -127,7 +157,7 @@ func TestPreviousVersionPayloadsValidateOnceRestamped(t *testing.T) {
 		raw := read(t, f)
 		content := strings.Contains(f, "with_")
 		if err := ValidateDevEvent(raw, content); err == nil {
-			t.Errorf("%s: a 1.9 stamp validated against 1.10", f)
+			t.Errorf("%s: a 1.9 stamp validated against 1.11", f)
 		}
 		var m map[string]any
 		if err := json.Unmarshal(raw, &m); err != nil {

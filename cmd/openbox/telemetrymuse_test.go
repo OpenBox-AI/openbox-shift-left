@@ -257,7 +257,7 @@ func TestMuseEmitterStaysIdleUntilSettingsPointAtIt(t *testing.T) {
 	delivered := &deliveredEvents{}
 	settings := filepath.Join(t.TempDir(), "settings.json")
 	em := newMuseTelemetryEmitter(settings, "127.0.0.1:8789", t.TempDir(), func() bool { return true }, nil,
-		func() string { return routeDID }, delivered.Deliver, func(string, ...any) {})
+		func() string { return routeDID }, delivered.Deliver, func(string, ...any) {}, nil)
 	rec := museRecord
 
 	_ = em.Emit(context.Background(), rec)
@@ -273,7 +273,7 @@ func TestMuseEmitterStaysIdleUntilSettingsPointAtIt(t *testing.T) {
 	}
 	// And the posture gate: recording=false suppresses even an elected lane.
 	quiet := newMuseTelemetryEmitter(settings, "127.0.0.1:8789", t.TempDir(), func() bool { return false }, nil,
-		func() string { return routeDID }, delivered.Deliver, func(string, ...any) {})
+		func() string { return routeDID }, delivered.Deliver, func(string, ...any) {}, nil)
 	_ = quiet.Emit(context.Background(), rec)
 	if n := len(delivered.asMaps(t)); n != 2 {
 		t.Errorf("a telemetry=false posture still emitted (%d events total)", n)
