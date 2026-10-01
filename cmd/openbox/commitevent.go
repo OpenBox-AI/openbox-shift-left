@@ -11,6 +11,7 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/muse"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/providers"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
@@ -30,6 +31,13 @@ import (
 // branch below is a log line and a return, the same fail-open shape the
 // git-hook engine uses everywhere else.
 func newCommitSink(getenv func(string) string, logger *log.Logger) obgit.CommitSink {
+	// The sink and the resolver that feeds it are wired together: a Muse tool
+	// shell names its call, not its session, and only the Muse adapter's index
+	// can map one to the other. Installed here, at the one place the git hook
+	// engine is armed, so the trailer and the event agree on the session.
+	obgit.SetToolUseLookup(func(id string) (string, bool) {
+		return muse.LookupToolUse(muse.DefaultSpoolDir(), id)
+	})
 	return func(facts obgit.CommitFacts, sessions []obgit.ResolvedSession) {
 		marker := attestProvider(getenv)
 		for _, rs := range sessions {

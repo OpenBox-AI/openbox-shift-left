@@ -24,8 +24,8 @@ func RunHook(args []string, installArgs []string, logf func(string, ...any)) {
 	}
 	sub, rest := args[0], args[1:]
 
-	g := Git{}                    // ambient git, current repo
-	resolver := SessionResolver{} // env override + worktree-scoped registry
+	g := Git{}                                                // ambient git, current repo
+	resolver := SessionResolver{ToolUseLookup: toolUseLookup} // env tiers + worktree-scoped registry
 
 	switch sub {
 	case "prepare-commit-msg":

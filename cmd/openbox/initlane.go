@@ -8,6 +8,7 @@ import (
 
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/muse"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/activation"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/gatewayservice"
 	"github.com/openbox-ai/openbox-shift-left/internal/cli/laneservice"
@@ -242,10 +243,13 @@ func (a *app) telemetrySpec(homeDir, addr string, verbose bool, installing provi
 		WithEnv(a.laneUnitEnv())
 	if codexConfigPath := providers.CodexConfigTOMLPath(); installing == provider.Codex || providers.HasOwnedCodexOtel(codexConfigPath) {
 		// The record path rides with the config path: Codex's election reads both.
-		spec = spec.WithCodexSettings(codexConfigPath).WithPACRecord(activation.RecordPath(homeDir))
+		spec = spec.WithCodexSettings(codexConfigPath).WithPACRecord(activation.RecordPath(homeDir)).
+			WithCodexSessions(providers.CodexSessionsRoot())
 	}
 	if musePath := providers.MuseSettingsPath(); installing == provider.Muse || providers.HasOwnedMuseTelemetry(musePath, homeDir) {
-		spec = spec.WithMuseSettings(musePath)
+		// The sessions directory rides with the settings path: both are resolved
+		// here because the daemon has no $HOME.
+		spec = spec.WithMuseSettings(musePath).WithMuseSessions(muse.SessionLogRoot())
 	}
 	return spec
 }

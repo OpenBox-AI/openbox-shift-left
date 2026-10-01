@@ -21,15 +21,29 @@ const (
 	// rust-v0.145.0); so a Codex-run `git commit` sees it in the git-hook env
 	// with no liveness registry at all.
 	EnvCodexThreadID = "CODEX_THREAD_ID"
+
+	// EnvMuseToolUseID is the id of the tool call a Muse tool shell runs in. It
+	// names no session; ToolUseLookup maps it to one.
+	EnvMuseToolUseID = "MUSE_TOOL_USE_ID"
 )
 
-// Tier names identify which of SessionResolver's three lookup tiers produced
+// Tier names identify which of SessionResolver's lookup tiers produced
 // a ResolvedSession.
 const (
-	TierCodexEnv   = "codex-env"   // CODEX_THREAD_ID
-	TierSessionEnv = "session-env" // OPENBOX_SESSION / OPENBOX_SESSION_FILE
-	TierRegistry   = "registry"    // the worktree-scoped liveness registry
+	TierCodexEnv    = "codex-env"     // CODEX_THREAD_ID
+	TierMuseToolUse = "muse-tool-use" // MUSE_TOOL_USE_ID, via ToolUseLookup
+	TierSessionEnv  = "session-env"   // OPENBOX_SESSION / OPENBOX_SESSION_FILE
+	TierRegistry    = "registry"      // the worktree-scoped liveness registry
 )
+
+// toolUseLookup is the lookup RunHook hands its resolver, wired by cmd/openbox
+// (SetToolUseLookup) for the same reason the commit sink is: this package
+// cannot import the adapter that owns the index.
+var toolUseLookup func(string) (string, bool)
+
+// SetToolUseLookup installs the Muse tool-use index lookup. nil (the zero
+// value) leaves MUSE_TOOL_USE_ID unread.
+func SetToolUseLookup(fn func(toolUseID string) (sessionID string, ok bool)) { toolUseLookup = fn }
 
 // ResolvedSession is one session id in scope for a commit, with enough about
 // where it came from for a commit event's routing to decide whether an
@@ -52,6 +66,11 @@ type SessionResolver struct {
 	Now        func() time.Time
 	SessionDir string        // "" => DefaultSessionDir()
 	TTL        time.Duration // 0 => env OPENBOX_SESSION_TTL or defaultSessionTTL
+
+	// ToolUseLookup maps a Muse tool-use id to the session it was recorded
+	// under. It is a seam because this package must not import the Muse adapter;
+	// nil leaves MUSE_TOOL_USE_ID unread.
+	ToolUseLookup func(toolUseID string) (sessionID string, ok bool)
 }
 
 func (r SessionResolver) getenv(k string) string {
@@ -132,6 +151,14 @@ func (r SessionResolver) ResolveDetailed(worktree string) []ResolvedSession {
 	//     it to suppress attribution).
 	if id := strings.TrimSpace(r.getenv(EnvCodexThreadID)); id != "" {
 		return []ResolvedSession{{ID: id, Tier: TierCodexEnv, Tool: "codex"}}
+	}
+	// A Muse tool shell: the id resolves through the adapter's index. A miss (the
+	// index was never written, or expired) is a missing record, not garbage, so
+	// it falls through to the remaining tiers instead of suppressing them.
+	if id := strings.TrimSpace(r.getenv(EnvMuseToolUseID)); id != "" && r.ToolUseLookup != nil {
+		if sid, ok := r.ToolUseLookup(id); ok && sid != "" {
+			return []ResolvedSession{{ID: sid, Tier: TierMuseToolUse, Tool: "muse"}}
+		}
 	}
 	if env := r.envSessions(); len(env) > 0 {
 		out := make([]ResolvedSession, len(env))
