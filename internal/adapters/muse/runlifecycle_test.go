@@ -1,8 +1,11 @@
 package muse
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
@@ -253,5 +256,59 @@ func TestFoldedEventNeverReopensASealedParent(t *testing.T) {
 	ev = &HookEvent{SessionID: "sess-p"}
 	if _, tr := l.advance(HookUserPromptSubmit, ev); !tr.Open || !tr.Resumed {
 		t.Errorf("the session's own prompt did not resume it: %+v", tr)
+	}
+}
+
+// Records nothing has written for the retention are swept when a run seals,
+// the subagent links with them; a fresh sealed record (what a resume reads) and
+// a recent link stay.
+func TestSealingSweepsStaleRecordsAndKeepsFreshOnes(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	l := lifecycle{Dir: dir, Now: func() time.Time { return now }}
+	l.save("s-old", RunIdentity{}, true)
+	l.saveLink(subagentLink{ChildSessionID: "c-old", ParentSessionID: "s-old"})
+	l.save("s-recent", RunIdentity{}, true)
+	l.saveLink(subagentLink{ChildSessionID: "c-recent", ParentSessionID: "s-recent"})
+	stale := now.Add(-lifecycleRetention - time.Hour)
+	for _, p := range []string{l.statePath("s-old"), l.linkPath("c-old")} {
+		if err := os.Chtimes(p, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now = now.Add(2 * lifecycleSweepEvery)
+	l.save("s-new", RunIdentity{}, true)
+
+	for _, p := range []string{l.statePath("s-old"), l.linkPath("c-old")} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("stale record %s survived the sweep (%v)", filepath.Base(p), err)
+		}
+	}
+	for _, p := range []string{l.statePath("s-recent"), l.linkPath("c-recent"), l.statePath("s-new")} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("fresh record %s was removed: %v", filepath.Base(p), err)
+		}
+	}
+	if st, ok := l.load("s-recent"); !ok || !st.Sealed {
+		t.Errorf("a recently sealed session lost its sealed state: %+v", st)
+	}
+}
+
+// The walk is rate-limited: a second sealing inside the interval leaves a
+// stale file alone.
+func TestSweepIsRateLimited(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	l := lifecycle{Dir: dir, Now: func() time.Time { return now }}
+	l.save("s-a", RunIdentity{}, true)
+	l.save("s-old", RunIdentity{}, false)
+	stale := now.Add(-lifecycleRetention - time.Hour)
+	if err := os.Chtimes(l.statePath("s-old"), stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	l.save("s-b", RunIdentity{}, true)
+	if _, err := os.Stat(l.statePath("s-old")); err != nil {
+		t.Errorf("a sweep ran again inside the interval: %v", err)
 	}
 }

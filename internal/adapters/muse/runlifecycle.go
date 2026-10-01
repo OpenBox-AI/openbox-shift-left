@@ -80,6 +80,23 @@ type lifecycle struct {
 	Log  *log.Logger
 }
 
+const (
+	// lifecycleRetention is how long a record outlives its last write before a
+	// sweep removes it. A sealed record is what tells a resumed session from a
+	// new one, so it must outlast any plausible gap between `muse` sessions;
+	// past it the session is treated as unseen. 30 days is twice the
+	// reconciler's state retention, and the cost of an over-long keep is one
+	// small file per session or subagent.
+	lifecycleRetention = 30 * 24 * time.Hour
+	// lifecycleSweepEvery rate-limits the directory walk: a skill-reminder
+	// subagent per turn would otherwise pay for it on every one.
+	lifecycleSweepEvery = time.Hour
+	// maxLifecycleSweep bounds the removals of one pass.
+	maxLifecycleSweep = 200
+
+	lifecycleSweepMarker = ".swept"
+)
+
 func lifecycleDir(spoolDir string) string { return filepath.Join(spoolDir, "lifecycle") }
 
 func (l lifecycle) logf(format string, args ...any) {
@@ -169,6 +186,53 @@ func (l lifecycle) save(sessionID string, run RunIdentity, sealed bool) {
 	if err != nil {
 		l.logf("run lifecycle: state not recorded: %v", err)
 	}
+	if sealed {
+		l.sweep()
+	}
+}
+
+// sweep removes records (the sessions' and the subagent links') nothing has
+// written for lifecycleRetention, at most once per lifecycleSweepEvery and a
+// bounded number per pass, so state for ended sessions does not pile up.
+// Callers hold lock; a removal races only with a record 30 days stale.
+func (l lifecycle) sweep() {
+	now := l.now()
+	marker := filepath.Join(l.Dir, lifecycleSweepMarker)
+	if info, err := os.Stat(marker); err == nil && now.Sub(info.ModTime()) < lifecycleSweepEvery {
+		return
+	}
+	if err := os.MkdirAll(l.Dir, 0o700); err != nil {
+		return
+	}
+	if err := hookflow.AtomicWriteFile(marker, nil, 0o600); err != nil {
+		l.logf("run lifecycle: sweep marker not written, skipping: %v", err)
+		return
+	}
+	_ = os.Chtimes(marker, now, now)
+	removed := 0
+	for _, dir := range []string{l.Dir, filepath.Join(l.Dir, subagentLinkDir)} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		// The bound is on removals, not entries looked at, so fresh files at the
+		// front of the listing cannot keep the old ones behind them from going.
+		for _, e := range entries {
+			if removed >= maxLifecycleSweep {
+				return
+			}
+			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil || now.Sub(info.ModTime()) < lifecycleRetention {
+				continue
+			}
+			if os.Remove(filepath.Join(dir, e.Name())) == nil {
+				removed++
+			}
+		}
+	}
 }
 
 // current is the run a session is on according to the run store: generation 0
@@ -207,7 +271,9 @@ func (l lifecycle) advance(hook HookName, ev *HookEvent) (RunIdentity, transitio
 	switch {
 	case folded && hook == HookSubagentStop:
 		// A subagent ending reports nothing inside its parent's session, and
-		// must never reopen a parent run that has already ended.
+		// must never reopen a parent run that has already ended. It is the one
+		// per-child hook that always runs, so it also trims stale records.
+		l.sweep()
 		return l.current(sid), transition{Drop: true}
 
 	case hook == HookSessionStart:
