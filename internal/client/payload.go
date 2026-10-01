@@ -125,7 +125,7 @@ func buildPayload(ev DevEvent) ([]byte, error) {
 		// core's approval-bypass path.
 	case EventModelCallRequested:
 		p.ActivityID = modelCallGateActivityID(ev)
-		p.ActivityInput = modelCallGateInput(ev)
+		p.ActivityInput = modelCallGateInput(ev, cut)
 	case EventModelCallFinished:
 		p.ActivityID = modelCallGateActivityID(ev)
 		p.ActivityOutput = modelCallGateOutput(ev)

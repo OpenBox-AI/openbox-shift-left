@@ -12,7 +12,7 @@
 package client
 
 // SchemaVersion is the dev-event contract version this client speaks.
-const SchemaVersion = "1.10"
+const SchemaVersion = "1.11"
 
 // EventType is a developer-runtime lifecycle event type.
 type EventType string

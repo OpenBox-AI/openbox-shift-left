@@ -13,10 +13,9 @@ import (
 // one another by core's usage extraction, dedupe and goal alignment.
 
 const (
-	// maxModelCallPreviewRunes bounds one message preview.
+	// maxModelCallPreviewRunes bounds one short metadata string (a tool name or
+	// a provider token).
 	maxModelCallPreviewRunes = 256
-	// maxModelCallPreviews bounds how many previews one gate carries.
-	maxModelCallPreviews = 16
 	// maxModelCallToolNames bounds the tool-name summary.
 	maxModelCallToolNames = 64
 	// maxModelCallRequestIDLen is the producer request-id bound, declared in the
@@ -55,13 +54,19 @@ func modelCallGateActivityID(ev DevEvent) string {
 // normalizeModelCallGate returns ev reduced to what a gate may carry. Dropped
 // unconditionally, whatever the adapter set: usage and cost (a gate is not a
 // completion), the turn index and every producer request id (a gate is not a
-// turn and must not collide with one), and the span and content (the gate's
-// evidence is metadata only). Metadata is copied, never mutated in place, and
-// its previews are bounded here so the activity_input and metadata copies
-// cannot disagree.
+// turn and must not collide with one), and the content. Of the span only the
+// started half's RequestBody survives: it is the pending request, carried to
+// activity_input.content, and every other span field is dropped. Metadata is
+// copied, never mutated in place; the retired message_previews key is removed
+// so no producer can put a second, shorter copy of the request on the wire.
 func normalizeModelCallGate(ev DevEvent) DevEvent {
 	ev.Tokens, ev.Cost, ev.TurnIndex = nil, nil, nil
-	ev.Span, ev.Content = nil, nil
+	ev.Content = nil
+	if ev.EventType == EventModelCallRequested && ev.Span != nil && ev.Span.RequestBody != "" {
+		ev.Span = &Span{RequestBody: ev.Span.RequestBody}
+	} else {
+		ev.Span = nil
+	}
 	ev.ProxyRequestID, ev.GatewayRequestID, ev.OtelRequestID = "", "", ""
 	ev.SessionRollup = false
 	ev.ActivityType = ActivityTypeModelCallGate
@@ -70,13 +75,7 @@ func normalizeModelCallGate(ev DevEvent) DevEvent {
 	for k, v := range ev.Metadata {
 		m[k] = v
 	}
-	if v, ok := m[modelCallPreviewsKey]; ok {
-		if prev := boundedStrings(v, maxModelCallPreviews, maxModelCallPreviewRunes); len(prev) > 0 {
-			m[modelCallPreviewsKey] = prev
-		} else {
-			delete(m, modelCallPreviewsKey)
-		}
-	}
+	delete(m, modelCallPreviewsKey)
 	if v, ok := m["tool_names"]; ok {
 		if names := boundedStrings(v, maxModelCallToolNames, maxModelCallPreviewRunes); len(names) > 0 {
 			m["tool_names"] = names
@@ -133,9 +132,10 @@ func truncateRunes(s string, n int) string {
 }
 
 // modelCallGateInput is the ActivityStarted input: what a policy matches a
-// pre-send decision on. The previews are gated content and are absent when
-// content capture is off; every other key is structural.
-func modelCallGateInput(ev DevEvent) json.RawMessage {
+// pre-send decision on. content is the pending request, gated and tail-kept in
+// bytes (the newest turn is at the end); it is absent when content capture is
+// off or the producer set none, and every other key is structural.
+func modelCallGateInput(ev DevEvent, cut *cutLog) json.RawMessage {
 	m := map[string]any{}
 	if ev.Model != "" {
 		m["model"] = ev.Model
@@ -145,8 +145,11 @@ func modelCallGateInput(ev DevEvent) json.RawMessage {
 			m[k] = v
 		}
 	}
-	if v, ok := ev.Metadata[modelCallPreviewsKey]; ok && !ev.contentStripped {
-		m[modelCallPreviewsKey] = v
+	if ev.Span != nil && ev.Span.RequestBody != "" && !ev.contentStripped {
+		if len(ev.Span.RequestBody) > maxModelCallBodyBytes {
+			cut.note("activity_input", modelCallContentKey)
+		}
+		m[modelCallContentKey] = capModelCallRequest(ev.Span.RequestBody)
 	}
 	return marshalOrNil(m)
 }

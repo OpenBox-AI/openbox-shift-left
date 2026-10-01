@@ -14,9 +14,9 @@ import (
 // (signalvocabulary_test.go, schema_guard_test.go, acceptancetest) lives
 // elsewhere; this file does not duplicate it.
 
-func TestSchemaVersionIsV110(t *testing.T) {
-	if SchemaVersion != "1.10" {
-		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.10")
+func TestSchemaVersionIsV111(t *testing.T) {
+	if SchemaVersion != "1.11" {
+		t.Errorf("SchemaVersion = %q, want %q", SchemaVersion, "1.11")
 	}
 }
 
@@ -338,13 +338,13 @@ func TestSchemaEnumAndOneOfHave33Entries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load schema: %v", err)
 	}
-	if v := schema["x-schema-version"]; v != "1.10" {
-		t.Errorf("x-schema-version = %v, want 1.10", v)
+	if v := schema["x-schema-version"]; v != "1.11" {
+		t.Errorf("x-schema-version = %v, want 1.11", v)
 	}
 	props, _ := schema["properties"].(map[string]any)
 	sv, _ := props["schema_version"].(map[string]any)
-	if sv["const"] != "1.10" {
-		t.Errorf("properties.schema_version.const = %v, want 1.10", sv["const"])
+	if sv["const"] != "1.11" {
+		t.Errorf("properties.schema_version.const = %v, want 1.11", sv["const"])
 	}
 	et, _ := props["event_type"].(map[string]any)
 	enum, _ := et["enum"].([]any)

@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func gateEvent(et EventType) DevEvent {
 		ProxyRequestID:     "px-1",
 		GatewayRequestID:   "gw-1",
 		OtelRequestID:      "ot-1",
-		Span:               &Span{SemanticType: "llm", Stage: "started", RequestBody: "body"},
+		Span:               &Span{SemanticType: "llm", Stage: "started", RequestBody: gateRequestBody, HTTPMethod: "POST", HTTPURL: "http://x/y", ResponseBody: "resp"},
 		Metadata: map[string]any{
 			"provider":         "meta",
 			"message_count":    4,
@@ -46,6 +47,8 @@ func gateEvent(et EventType) DevEvent {
 		},
 	}
 }
+
+const gateRequestBody = `{"messages":[{"role":"user","content":[{"type":"text","text":"hello there"}]}],"tools":[]}`
 
 func gateWire(t *testing.T, ev DevEvent) map[string]any {
 	t.Helper()
@@ -62,8 +65,8 @@ func objectField(t *testing.T, m map[string]any, key string) map[string]any {
 }
 
 func TestModelCallGateVocabulary(t *testing.T) {
-	if SchemaVersion != "1.10" {
-		t.Errorf("SchemaVersion = %q, want 1.10", SchemaVersion)
+	if SchemaVersion != "1.11" {
+		t.Errorf("SchemaVersion = %q, want 1.11", SchemaVersion)
 	}
 	if EventModelCallRequested != "ModelCallRequested" || EventModelCallFinished != "ModelCallFinished" {
 		t.Errorf("event names drifted: %q %q", EventModelCallRequested, EventModelCallFinished)
@@ -143,9 +146,16 @@ func TestModelCallGateStartedInput(t *testing.T) {
 	if len(names) != 2 || names[0] != "Bash" {
 		t.Errorf("tool_names = %v", in["tool_names"])
 	}
-	prev, _ := in["message_previews"].([]any)
-	if len(prev) != 2 || prev[0] != "hello there" {
-		t.Errorf("message_previews = %v", in["message_previews"])
+	if in["content"] != gateRequestBody {
+		t.Errorf("content = %v, want the request body", in["content"])
+	}
+	if _, present := in["message_previews"]; present {
+		t.Error("message_previews is retired and must not reach activity_input")
+	}
+	for _, k := range []string{"http_method", "http_url", "request_body", "response_body"} {
+		if _, present := in[k]; present {
+			t.Errorf("activity_input carries span field %s", k)
+		}
 	}
 	if _, present := m["activity_output"]; present {
 		t.Error("the started half carries activity_output")
@@ -160,49 +170,6 @@ func TestModelCallGateStartedInput(t *testing.T) {
 	}
 }
 
-func TestModelCallGatePreviewsAreBounded(t *testing.T) {
-	ev := gateEvent(EventModelCallRequested)
-	long := strings.Repeat("ü", 1000)
-	ev.Metadata["message_previews"] = []string{long, "ok"}
-	for _, raw := range []json.RawMessage{
-		objectRaw(t, gateWire(t, ev), "activity_input"),
-		objectRaw(t, gateWire(t, ev), "metadata"),
-	} {
-		var o struct {
-			Previews []string `json:"message_previews"`
-		}
-		if err := json.Unmarshal(raw, &o); err != nil {
-			t.Fatal(err)
-		}
-		if len(o.Previews) != 2 {
-			t.Fatalf("previews = %v", o.Previews)
-		}
-		if n := len([]rune(o.Previews[0])); n != maxModelCallPreviewRunes {
-			t.Errorf("preview kept %d runes, want %d", n, maxModelCallPreviewRunes)
-		}
-	}
-	if maxModelCallPreviewRunes != 256 {
-		t.Errorf("preview bound = %d, want 256", maxModelCallPreviewRunes)
-	}
-
-	// A spooled event comes back as []any, not []string.
-	ev.Metadata["message_previews"] = []any{long, 7, "ok"}
-	in := objectField(t, gateWire(t, ev), "activity_input")
-	prev, _ := in["message_previews"].([]any)
-	if len(prev) != 2 || prev[1] != "ok" {
-		t.Errorf("non-string preview survived a spool round trip: %v", prev)
-	}
-
-	ev.Metadata["message_previews"] = make([]string, 500)
-	for i := range ev.Metadata["message_previews"].([]string) {
-		ev.Metadata["message_previews"].([]string)[i] = "x"
-	}
-	in = objectField(t, gateWire(t, ev), "activity_input")
-	if prev, _ := in["message_previews"].([]any); len(prev) != maxModelCallPreviews {
-		t.Errorf("preview count = %d, want cap %d", len(prev), maxModelCallPreviews)
-	}
-}
-
 func objectRaw(t *testing.T, m map[string]any, key string) json.RawMessage {
 	t.Helper()
 	b, err := json.Marshal(objectField(t, m, key))
@@ -212,29 +179,76 @@ func objectRaw(t *testing.T, m map[string]any, key string) json.RawMessage {
 	return b
 }
 
-// TestModelCallGatePreviewsFollowContentCapture is the gate proper: with
-// capture off the previews reach neither activity_input nor metadata, while the
+// TestModelCallGateContentFollowsCapture is the gate proper: with capture off
+// the request reaches neither activity_input, metadata nor spans, while the
 // structural keys still ship.
-func TestModelCallGatePreviewsFollowContentCapture(t *testing.T) {
-	const canary = "PREVIEW-CANARY"
+func TestModelCallGateContentFollowsCapture(t *testing.T) {
+	const canary = "REQUEST-CANARY"
 	ev := gateEvent(EventModelCallRequested)
-	ev.Metadata["message_previews"] = []string{canary}
+	ev.Span.RequestBody = canary
 
 	on, _ := buildPayload(ev)
 	if !strings.Contains(string(on), canary) {
-		t.Fatal("capture on: preview missing from the wire")
+		t.Fatal("capture on: request body missing from the wire")
 	}
 
 	off, err := buildPayload(stripContent(ev))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(off), canary) || strings.Contains(string(off), "message_previews") {
-		t.Errorf("capture off: preview reached the wire: %s", off)
+	if strings.Contains(string(off), canary) {
+		t.Errorf("capture off: request body reached the wire: %s", off)
 	}
 	in := objectField(t, decodeRawBytes(t, off), "activity_input")
+	if _, present := in["content"]; present {
+		t.Errorf("capture off: content key present: %v", in)
+	}
 	if in["message_count"] != float64(4) || in["provider"] != "meta" || in["model"] != "muse-spark" {
 		t.Errorf("capture off: structural keys lost: %v", in)
+	}
+}
+
+// TestModelCallGateContentIsTailCapped: an over-cap request keeps its newest
+// end, in bytes, and the cut is indexed in truncated_paths.
+func TestModelCallGateContentIsTailCapped(t *testing.T) {
+	ev := gateEvent(EventModelCallRequested)
+	body := strings.Repeat("A", maxModelCallBodyBytes) + "NEWEST-TURN"
+	ev.Span.RequestBody = body
+	m := gateWire(t, ev)
+	in := objectField(t, m, "activity_input")
+	got, _ := in["content"].(string)
+	if want := capModelCallRequest(body); got != want || len(got) != maxModelCallBodyBytes {
+		t.Fatalf("content len %d, want %d (the tail cap)", len(got), len(capModelCallRequest(body)))
+	}
+	if !strings.HasSuffix(got, "NEWEST-TURN") || !strings.HasPrefix(got, truncationMark) {
+		t.Error("tail cap did not keep the newest end")
+	}
+	if !strings.Contains(string(objectRaw(t, m, "metadata")), "activity_input.content") {
+		t.Errorf("cut not indexed in truncated_paths: %v", m["metadata"])
+	}
+
+	ev.Span.RequestBody = "short"
+	if md := string(objectRaw(t, gateWire(t, ev), "metadata")); strings.Contains(md, "activity_input.content") {
+		t.Errorf("an uncut body was indexed as cut: %s", md)
+	}
+}
+
+// TestModelCallGateFinishedCarriesNoContent: only the started half keeps the
+// request; a finished half drops every span field.
+func TestModelCallGateFinishedCarriesNoContent(t *testing.T) {
+	ev := gateEvent(EventModelCallFinished)
+	b, err := buildPayload(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "hello there") || strings.Contains(string(b), `"content"`) {
+		t.Errorf("finished half carries request content: %s", b)
+	}
+	if got := normalizeModelCallGate(ev); got.Span != nil {
+		t.Errorf("finished half kept a span: %+v", got.Span)
+	}
+	if got := normalizeModelCallGate(gateEvent(EventModelCallRequested)); got.Span == nil || !reflect.DeepEqual(*got.Span, Span{RequestBody: gateRequestBody}) {
+		t.Errorf("started half span = %+v, want only RequestBody", got.Span)
 	}
 }
 
