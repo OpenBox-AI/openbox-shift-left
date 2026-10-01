@@ -403,3 +403,50 @@ func TestWriteTelemetryWithNoRecordDoesNotAdoptItsOwnValueAsPrior(t *testing.T) 
 		t.Errorf("uninstall left the lane's pointer behind: %s", readFile(t, path))
 	}
 }
+
+// TestARecordForAnotherSettingsFileIsNotAppliedHere: the record names the file
+// it was made for. Applied to a different one (HOME or the user changed), its
+// owned value would be compared with a file OpenBox never wrote and the run
+// would blame the developer for a change nobody made. Write, check and restore
+// all stop, name both files, and leave the record and both files alone.
+func TestARecordForAnotherSettingsFileIsNotAppliedHere(t *testing.T) {
+	first, home := telemetrySandbox(t, foreignSettings)
+	if _, err := WriteTelemetry(first, home, testEndpoint); err != nil {
+		t.Fatal(err)
+	}
+	recBefore := readFile(t, PriorSettingsPath(home))
+	other := filepath.Join(t.TempDir(), "other", "settings.json")
+	writeFile(t, other, foreignSettings)
+
+	for name, call := range map[string]func() error{
+		"write":   func() error { _, err := WriteTelemetry(other, home, testEndpoint); return err },
+		"check":   func() error { return CheckTelemetry(other, home, testEndpoint) },
+		"restore": func() error { _, err := RestoreTelemetry(other, home); return err },
+	} {
+		err := call()
+		if err == nil {
+			t.Fatalf("%s: a record for another settings file was applied", name)
+		}
+		if strings.Contains(err.Error(), "changed after OpenBox set it") {
+			t.Errorf("%s: blamed the developer for a change nobody made: %v", name, err)
+		}
+		firstResolved, _ := filepath.EvalSymlinks(first)
+		otherResolved, _ := filepath.EvalSymlinks(other)
+		if !strings.Contains(err.Error(), firstResolved) || !strings.Contains(err.Error(), otherResolved) {
+			t.Errorf("%s: the error does not name both files: %v", name, err)
+		}
+	}
+	if got := readFile(t, other); got != foreignSettings {
+		t.Errorf("the other file was touched:\n%s", got)
+	}
+	if got := readFile(t, PriorSettingsPath(home)); got != recBefore {
+		t.Errorf("the record was changed:\n%s", got)
+	}
+	if HasOwnedTelemetry(other, home) {
+		t.Error("HasOwnedTelemetry claimed a file the record is not for")
+	}
+	// The file it was made for still restores.
+	if r, err := RestoreTelemetry(first, home); err != nil || !r.Recorded {
+		t.Fatalf("restore of the original file = %+v, %v", r, err)
+	}
+}

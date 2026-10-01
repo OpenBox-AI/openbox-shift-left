@@ -114,15 +114,52 @@ func telemetryObject(endpoint string) string {
 	return string(raw)
 }
 
+// resolveSettingsPath is the real path behind a settings file, or the path as
+// given when it does not resolve (the file may not exist yet).
+func resolveSettingsPath(path string) string {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		return r
+	}
+	return path
+}
+
+// samePath reports whether two settings paths name one file: the same cleaned
+// string, or two paths that stat to the same file.
+func samePath(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ai, aerr := os.Stat(a)
+	bi, berr := os.Stat(b)
+	return aerr == nil && berr == nil && os.SameFile(ai, bi)
+}
+
+// recordElsewhere is the refusal for a restore record written for another
+// settings file (HOME or the user changed, a sudo run). Applying its entry here
+// would compare this file's value with one OpenBox set in a different file and
+// report a change nobody made; discarding it would strand a restore that may
+// still be owed there. So the run stops and names both files.
+func recordElsewhere(rec priorSettings, current string) error {
+	return fmt.Errorf("muse: the OpenBox restore record is for %s, but this run is working on %s; "+
+		"leaving both alone. Run again as the user (and HOME) that ran `openbox init` for %s, "+
+		"or delete the record if that file no longer exists", rec.SettingsPath, current, rec.SettingsPath)
+}
+
+// isElsewhere reports whether the record holds the telemetry entry for a
+// settings file other than current.
+func (rec priorSettings) isElsewhere(current string) bool {
+	if _, ok := rec.Keys[TelemetryKey]; !ok || rec.SettingsPath == "" {
+		return false
+	}
+	return !samePath(rec.SettingsPath, current)
+}
+
 // resolvedSettings returns the real path behind a settings file (a dotfiles
 // manager often makes it a symlink, and renaming over the link would replace
 // it with a regular file), its bytes, whether it exists, and its permissions.
 // A file Muse could not read is refused, because Muse drops every hook in it.
 func resolvedSettings(path string) (resolved string, before []byte, existed bool, perm os.FileMode, err error) {
-	resolved, perm = path, 0o600
-	if r, evalErr := filepath.EvalSymlinks(path); evalErr == nil {
-		resolved = r
-	}
+	resolved, perm = resolveSettingsPath(path), 0o600
 	before, err = os.ReadFile(resolved)
 	switch {
 	case err == nil:
@@ -175,6 +212,9 @@ func planTelemetry(settingsPath, homeDir, endpoint string) (*telemetryPlan, erro
 	rec, err := loadPriorSettings(homeDir)
 	if err != nil {
 		return nil, err
+	}
+	if rec.isElsewhere(path) {
+		return nil, recordElsewhere(rec, path)
 	}
 	p := &telemetryPlan{path: path, before: before, existed: existed, perm: perm, prevKeys: map[string]priorValue{}, prevPath: rec.SettingsPath}
 	for k, v := range rec.Keys {
@@ -324,7 +364,7 @@ func HasOwnedTelemetry(settingsPath, homeDir string) bool {
 		return false
 	}
 	entry, ok := rec.Keys[TelemetryKey]
-	if !ok {
+	if !ok || rec.isElsewhere(resolveSettingsPath(settingsPath)) {
 		return false
 	}
 	raw, err := os.ReadFile(settingsPath)
@@ -365,6 +405,9 @@ func RestoreTelemetry(settingsPath, homeDir string) (TelemetryRestored, error) {
 	entry, ok := rec.Keys[TelemetryKey]
 	if !ok {
 		return TelemetryRestored{}, nil
+	}
+	if rec.isElsewhere(resolveSettingsPath(settingsPath)) {
+		return TelemetryRestored{}, recordElsewhere(rec, resolveSettingsPath(settingsPath))
 	}
 	forget := func() error {
 		delete(rec.Keys, TelemetryKey)
