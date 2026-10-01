@@ -250,6 +250,13 @@ func readLog(path string, cur fileCursor, cutoff, deadline time.Time, maxBytes i
 	br := bufio.NewReaderSize(f, 64<<10)
 	for out.BytesRead < maxBytes && time.Now().Before(deadline) {
 		sc := &lineScanner{r: br, deadline: deadline}
+		if out.BytesRead > 0 {
+			// A line must not carry the pass past its byte budget: it is left
+			// for the next pass, which starts on it. The first line of a pass
+			// has no such limit, so a line longer than the budget still gets
+			// read once (within the deadline) rather than never.
+			sc.budget = maxBytes - out.BytesRead
+		}
 		rec, st := sc.scan()
 		if st == lineTooLong {
 			// Past the line cap: the rest is skipped in bulk. The line is
@@ -401,6 +408,17 @@ type lineScanner struct {
 	n int64
 	// deadline, when set, is checked every deadlineStride bytes.
 	deadline time.Time
+	// budget, when positive, is how many bytes this line may consume before it
+	// is left uncommitted; checked with the deadline.
+	budget int64
+}
+
+// expired reports whether the deadline or the line's byte budget is spent.
+func (s *lineScanner) expired() bool {
+	if s.budget > 0 && s.n >= s.budget {
+		return true
+	}
+	return !s.deadline.IsZero() && time.Now().After(s.deadline)
 }
 
 func (s *lineScanner) next() (byte, error) {
@@ -412,7 +430,7 @@ func (s *lineScanner) next() (byte, error) {
 	if s.n > maxLineBytes {
 		return 0, errTooLong
 	}
-	if s.n%deadlineStride == 0 && !s.deadline.IsZero() && time.Now().After(s.deadline) {
+	if s.n%deadlineStride == 0 && s.expired() {
 		return 0, errTime
 	}
 	if b == '\n' {
@@ -471,8 +489,8 @@ func (s *lineScanner) scan() (joinRecord, lineStatus) {
 }
 
 // skipRest steps over the rest of an over-long line in bulk and reports
-// whether it ended in a newline; a deadline or the end of the file leaves it
-// uncommitted.
+// whether it ended in a newline; a deadline, the line's byte budget or the end
+// of the file leaves it uncommitted.
 func (s *lineScanner) skipRest() bool {
 	for {
 		chunk, err := s.r.ReadSlice('\n')
@@ -481,7 +499,7 @@ func (s *lineScanner) skipRest() bool {
 		case err == nil:
 			return true
 		case errors.Is(err, bufio.ErrBufferFull):
-			if !s.deadline.IsZero() && time.Now().After(s.deadline) {
+			if s.expired() {
 				return false
 			}
 		default:

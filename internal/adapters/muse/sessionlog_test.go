@@ -422,6 +422,31 @@ func TestReadLogStepsOverALineOverTheCapAndCountsIt(t *testing.T) {
 	})
 }
 
+// A line past the pass's byte budget is left for the next pass, which starts on
+// it and, being first, reads it through: the budget is neither overrun by the
+// line nor a reason it can never be read.
+func TestReadLogStopsAnOversizeLineAtTheByteBudget(t *testing.T) {
+	small := intentLine(1, "bash", "tu-1", t0, `{}`)
+	huge := envelopeLine(2, "tool_batch.effect.started", t1,
+		`{"kind":"tool_batch_effect","record":{"kind":"started","call_id":"tu-2","tool_name":"bash","arguments":{"c":"`+strings.Repeat("x", maxLineBytes+1<<20)+`"}}}`)
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	writeLog(t, path, small+huge)
+
+	const budget = 1 << 20
+	deadline := time.Now().Add(time.Minute)
+	out, err := readLog(path, fileCursor{}, cutoffAfterAll, deadline, budget)
+	if err != nil || len(out.Intents) != 1 || out.Cursor.Offset != int64(len(small)) {
+		t.Fatalf("first pass: intents=%d cursor=%d err=%v", len(out.Intents), out.Cursor.Offset, err)
+	}
+	if out.BytesRead > budget+2*deadlineStride {
+		t.Errorf("read %d bytes against a budget of %d", out.BytesRead, budget)
+	}
+	next, err := readLog(path, out.Cursor, cutoffAfterAll, deadline, budget)
+	if err != nil || next.Oversize != 1 || len(next.Intents) != 1 || next.Intents[0].ToolUseID != "tu-2" || next.Cursor.Offset != int64(len(small)+len(huge)) {
+		t.Fatalf("second pass: %+v err=%v", next, err)
+	}
+}
+
 func TestLineScannerChecksTheDeadlineInsideALine(t *testing.T) {
 	line := `{"record_type":"event","body":"` + strings.Repeat("y", 1<<20) + `"}` + "\n"
 	sc := &lineScanner{r: bufioReader(line), deadline: time.Now().Add(-time.Second)}
