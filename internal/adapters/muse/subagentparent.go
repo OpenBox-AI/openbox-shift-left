@@ -113,7 +113,13 @@ func (l lifecycle) foldSubagent(hook HookName, ev *HookEvent, logRoot string) {
 	child := ev.SessionID
 	link, have := l.loadLink(child)
 	if !have {
-		if _, known := l.load(child); known && hook != HookSubagentStart {
+		_, known := l.load(child)
+		if known && hook != HookSubagentStart {
+			return
+		}
+		if !known && hook.signal() {
+			// A signal never opens a run, so it has nothing to be folded into
+			// and is not worth the poll for a link.
 			return
 		}
 		unlock := l.lock(child)

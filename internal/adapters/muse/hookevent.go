@@ -27,8 +27,11 @@ const (
 	HookPreLLMCall         HookName = "PreLLMCall"
 	HookPostLLMCall        HookName = "PostLLMCall"
 
-	// The five Muse events with no contract type. A handler for one of these is
-	// never installed; one that runs anyway is a no-op.
+	// PreCompact, PostCompact and Notification are lifecycle signals.
+	// PostToolBatch and Interrupt have no contract type: a handler for one is
+	// never installed, and one that runs anyway is a no-op. PostToolBatch is
+	// registered by Muse but never fires on 1.4.2 (production-dark, see
+	// testdata/README.md), and Interrupt is refused unless async.
 	HookPreCompact    HookName = "PreCompact"
 	HookPostCompact   HookName = "PostCompact"
 	HookNotification  HookName = "Notification"
@@ -67,17 +70,26 @@ func (h HookName) Gated() bool {
 }
 
 // Observed reports whether the hook produces anything at all. The rest have no
-// contract type: a turn's usage is never taken from a hook payload, and a
-// completion is never fabricated. Stop reports nothing either, but it is where
-// the session-log reconciler runs, so it is installed. SubagentStop is
-// observed: a subagent is a session of its own, and this is its SessionEnded.
+// contract type: a completion is never fabricated. Stop produces the turn's
+// llm_completion pair and is where the session-log reconciler runs.
+// SubagentStop is observed: a subagent is a session of its own, and this is its
+// SessionEnded.
 func (h HookName) Observed() bool {
 	switch h {
-	case HookPreCompact, HookPostCompact,
-		HookNotification, HookPostToolBatch, HookInterrupt:
+	case HookPostToolBatch, HookInterrupt:
 		return false
 	}
 	return hookNames[h]
+}
+
+// signal reports whether the hook is a lifecycle signal: a row about a session
+// that is already running, never the start of one.
+func (h HookName) signal() bool {
+	switch h {
+	case HookPreCompact, HookPostCompact, HookNotification:
+		return true
+	}
+	return false
 }
 
 // HookEvent is the subset of a Muse hook's stdin JSON this adapter reads.
@@ -107,6 +119,19 @@ type HookEvent struct {
 	Reason string
 	// Prompt is UserPromptSubmit's text; content, never copied without capture.
 	Prompt string
+
+	// LastAssistantMessage is Stop's (and SubagentStop's) reply text: content,
+	// never copied without capture. StopHookActive is read for the trace only.
+	LastAssistantMessage string
+	StopHookActive       bool
+
+	// Trigger is PreCompact's and PostCompact's cause: soft or hard.
+	Trigger string
+	// NotificationType is structural; Title and Message are content (the
+	// message carries the project directory name).
+	NotificationType string
+	Title            string
+	Message          string
 
 	ToolName string
 	// ToolUseID pairs a PreToolUse with its PostToolUse. PermissionRequest
@@ -175,27 +200,34 @@ func (e *HookEvent) UnmarshalJSON(b []byte) error {
 		Source:         str(m["source"]),
 		Reason:         str(m["reason"]),
 		Prompt:         str(m["prompt"]),
-		ToolName:       str(m["tool_name"]),
-		ToolUseID:      str(m["tool_use_id"]),
-		ToolInput:      m["tool_input"],
-		ToolResponse:   m["tool_response"],
-		SubagentID:     str(m["subagent_id"]),
-		ChildSessionID: str(m["child_session_id"]),
-		Provider:       str(m["provider"]),
-		RequestID:      str(m["request_id"]),
-		Attempt:        m["attempt"],
-		Step:           m["step"],
-		Messages:       list("messages"),
-		Tools:          list("tools"),
-		MessageCount:   m["message_count"],
-		ToolCount:      m["tool_count"],
-		Options:        m["options"],
-		Status:         str(m["status"]),
-		ResponseID:     str(m["response_id"]),
-		FinishReason:   str(m["finish_reason"]),
-		ToolCallCount:  m["tool_call_count"],
-		Usage:          m["usage"],
-		Error:          m["error"],
+
+		LastAssistantMessage: str(m["last_assistant_message"]),
+		StopHookActive:       str(m["stop_hook_active"]) == "true",
+		Trigger:              str(m["trigger"]),
+		NotificationType:     str(m["notification_type"]),
+		Title:                str(m["title"]),
+		Message:              str(m["message"]),
+		ToolName:             str(m["tool_name"]),
+		ToolUseID:            str(m["tool_use_id"]),
+		ToolInput:            m["tool_input"],
+		ToolResponse:         m["tool_response"],
+		SubagentID:           str(m["subagent_id"]),
+		ChildSessionID:       str(m["child_session_id"]),
+		Provider:             str(m["provider"]),
+		RequestID:            str(m["request_id"]),
+		Attempt:              m["attempt"],
+		Step:                 m["step"],
+		Messages:             list("messages"),
+		Tools:                list("tools"),
+		MessageCount:         m["message_count"],
+		ToolCount:            m["tool_count"],
+		Options:              m["options"],
+		Status:               str(m["status"]),
+		ResponseID:           str(m["response_id"]),
+		FinishReason:         str(m["finish_reason"]),
+		ToolCallCount:        m["tool_call_count"],
+		Usage:                m["usage"],
+		Error:                m["error"],
 	}
 	return nil
 }

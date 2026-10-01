@@ -190,3 +190,41 @@ func TestHookInvocationMarkersMatchWhatInstallWrites(t *testing.T) {
 		t.Error("no markers")
 	}
 }
+
+// The lifecycle hooks are ours to register and ours to remove; Interrupt and
+// PostToolBatch are neither.
+func TestUninstallRemovesTheLifecycleHandlersInstallWrote(t *testing.T) {
+	i, path := newTestInstaller(t)
+	if err := i.Install(testRef); err != nil {
+		t.Fatal(err)
+	}
+	hooks := decodeHooks(t, readFile(t, path))
+	for _, h := range []HookName{HookPreCompact, HookPostCompact, HookNotification} {
+		if len(hooks[string(h)]) != 1 {
+			t.Errorf("%s is not registered", h)
+		}
+	}
+	for _, h := range []HookName{HookPostToolBatch, HookInterrupt} {
+		if _, ok := hooks[string(h)]; ok {
+			t.Errorf("%s is registered", h)
+		}
+	}
+	removed, err := RemoveHooks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"PreCompact", "PostCompact", "Notification"} {
+		var gone bool
+		for _, r := range removed {
+			gone = gone || strings.HasPrefix(r, h+" ")
+		}
+		if !gone {
+			t.Errorf("uninstall did not report removing %s: %v", h, removed)
+		}
+	}
+	if _, err := os.Stat(path); err == nil {
+		if h := decodeHooks(t, readFile(t, path)); len(h) != 0 {
+			t.Errorf("hooks left behind: %v", h)
+		}
+	}
+}

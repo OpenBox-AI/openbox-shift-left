@@ -79,3 +79,54 @@ record (`call_0003` read_file) that no gate record matches. `call_0001` and
 No secret-shaped values: no API keys, bearer tokens, Meta `LLM|...` keys, or
 long high-entropy strings. Any secret-shaped fixture must be built in code
 (CLAUDE.md, privacy posture).
+
+## Content-reader fixtures
+
+`session-jsonl-content.jsonl` and `session-jsonl-content-drift.jsonl` are
+synthetic: the keys and kinds (`model_response_created`,
+`assistant_message_committed`, `reasoning_summary_committed`,
+`assistant_tool_calls_committed`, `model_completed`, plus the decoys `output`,
+`reasoning_committed` and a `model_input_trace_recorded` carrying a nested
+`schema_version:2`) follow the shape of a Muse 1.4.1 log observed 2026-10-01; all
+text is neutral. The drift file is the same log with envelope `schema_version:2`.
+Regenerate by editing both together; the reader tests pin their ids and text.
+
+## Lifecycle hooks, live capture (muse 1.4.2-R4684.1, 2026-10-01)
+
+Captured on **Muse Code 1.4.2** (installed; the plan said 1.4.1) with a logging
+handler (stdin to a file, exit 0) registered for the lifecycle events in a
+sandbox `XDG_CONFIG_HOME` settings file (Muse honours `XDG_CONFIG_HOME`; the
+developer's own settings and OpenBox hooks were not touched), against a
+throwaway git workspace, driven headless via `muse exec --json` and through the
+TUI on a pty. Scrubbed the same way as the files above (`sess-0001`,
+`turn-0001`, `/tmp/proj`); keys, order and value types are the captured ones.
+
+| File | Hook | Observed |
+|---|---|---|
+| `pre-compact.json` | PreCompact | `trigger` = `soft` (automatic compaction at the soft threshold). Common keys only: no summary, token count or message fields |
+| `post-compact.json` | PostCompact | same shape, `trigger` = `soft`; fired once after a compaction that succeeded |
+| `notification.json` | Notification | adds `notification_type` (`permission_prompt`), `title`, `message` to the common keys; fired a few seconds after a `PermissionRequest` while the TUI sat waiting for approval |
+
+Behaviours that matter to a mapper:
+- PreCompact fired several times in one run and PostCompact once: a compaction
+  attempt that fails (`context compaction replacement still exceeds the hard
+  threshold`) fires PreCompact with no PostCompact, and internal sessions
+  (compaction/observer children, with `session_id == turn_id`) fire PreCompact
+  under their own ids that have no session directory. Do not pair them.
+- The TUI `/compact` command compacted the context ("Context compacted") but
+  fired **neither** PreCompact nor PostCompact. Only automatic compaction
+  (forced with `--context-compaction-soft-threshold 0.043 --context-compaction-hard-threshold 0.08`)
+  fires them. `trigger` = `hard` was not observed.
+- Notification did not fire when the TUI blocked on a user-question tool for
+  90 s, nor for `PermissionRequest` alone; only the approval wait produced it.
+  Only `permission_prompt` was observed.
+- `Interrupt` is rejected by the settings loader unless the handler declares
+  `async: true` (`UnsupportedHandler`); it stays uninstalled.
+
+### PostToolBatch: N/A, never fired
+
+No `PostToolBatch` payload on 1.4.2 across a parallel `read_file` pair (two
+PreToolUse a few ms apart) in `exec` and in the TUI, three multi-tool runs in
+all, with PostToolBatch registered and accepted by the loader (11 of 12 hooks
+runnable). The binary's own telemetry docs say `StopFailure` and `PostToolBatch`
+"are staged schema values and remain production-dark". No fixture.

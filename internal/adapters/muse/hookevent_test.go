@@ -66,7 +66,7 @@ func TestParseRefusesWhatIsNotAnObject(t *testing.T) {
 
 func TestHookClasses(t *testing.T) {
 	gated := map[HookName]bool{HookUserPromptSubmit: true, HookPreToolUse: true, HookPermissionRequest: true, HookPreLLMCall: true}
-	silent := map[HookName]bool{HookPreCompact: true, HookPostCompact: true, HookNotification: true, HookPostToolBatch: true, HookInterrupt: true}
+	silent := map[HookName]bool{HookPostToolBatch: true, HookInterrupt: true}
 	for h := range hookNames {
 		if h.Gated() != gated[h] {
 			t.Errorf("%s: Gated() = %v", h, h.Gated())
@@ -77,5 +77,30 @@ func TestHookClasses(t *testing.T) {
 	}
 	if len(hookNames) != 18 {
 		t.Errorf("Muse documents 18 hook events, the adapter knows %d", len(hookNames))
+	}
+}
+
+func TestStopAndLifecyclePayloadsDecode(t *testing.T) {
+	stop := parseFixture(t, "stop")
+	if stop.LastAssistantMessage != "The workspace is empty." || stop.StopHookActive {
+		t.Errorf("stop = %q active=%v", stop.LastAssistantMessage, stop.StopHookActive)
+	}
+	if sub := parseFixture(t, "subagent-stop"); sub.LastAssistantMessage != "" {
+		t.Errorf("a null reply read as %q", sub.LastAssistantMessage)
+	}
+	if pre := parseFixture(t, "pre-compact"); pre.Trigger != "soft" {
+		t.Errorf("trigger = %q", pre.Trigger)
+	}
+	n := parseFixture(t, "notification")
+	if n.NotificationType != "permission_prompt" || n.Title == "" || n.Message == "" {
+		t.Errorf("notification = %+v", n)
+	}
+	// A type surprise reads as empty rather than failing the payload.
+	ev, err := ParseHookEvent(strings.NewReader(`{"hook_event_name":"Stop","session_id":"s","last_assistant_message":{"a":1},"stop_hook_active":"yes","trigger":[1]}`))
+	if err != nil || ev.LastAssistantMessage != "" || ev.StopHookActive || ev.Trigger != "" {
+		t.Errorf("tolerance: %+v %v", ev, err)
+	}
+	if ev, _ := ParseHookEvent(strings.NewReader(`{"hook_event_name":"Stop","session_id":"s","stop_hook_active":true}`)); !ev.StopHookActive {
+		t.Error("stop_hook_active true not read")
 	}
 }

@@ -57,10 +57,18 @@ func TestModelCallGateEventsValidateAndPair(t *testing.T) {
 		}
 		var generic map[string]any
 		_ = json.Unmarshal(raw, &generic)
-		for _, forbidden := range []string{"tokens", "cost", "turn_index", "span", "gateway_request_id", "otel_request_id", "proxy_request_id"} {
+		for _, forbidden := range []string{"tokens", "cost", "turn_index", "gateway_request_id", "otel_request_id", "proxy_request_id"} {
 			if _, present := generic[forbidden]; present {
 				t.Errorf("%s carries %s", ev.EventType, forbidden)
 			}
+		}
+		// Only the started half carries a span, and in it only the request.
+		span, hasSpan := generic["span"].(map[string]any)
+		if wantSpan := ev.EventType == client.EventModelCallRequested; hasSpan != wantSpan {
+			t.Errorf("%s: span present = %v, want %v", ev.EventType, hasSpan, wantSpan)
+		}
+		if hasSpan && (span["request_body"] == nil || span["response_body"] != nil || span["http_url"] != nil) {
+			t.Errorf("%s: span = %v, want request_body only", ev.EventType, span)
 		}
 		if generic["model_call_request_id"] != "turn-0001:0:1.1" {
 			t.Errorf("%s: model_call_request_id = %v", ev.EventType, generic["model_call_request_id"])

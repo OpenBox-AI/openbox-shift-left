@@ -155,7 +155,8 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		lock func()
 	)
 	if hook == HookStop {
-		// Stop reports nothing, so it neither opens nor closes a run.
+		// Stop reports a turn, never a run boundary: it neither opens nor
+		// closes a run.
 		run = lc.current(ev.SessionID)
 	} else {
 		lock = lc.lock(ev.SessionID)
@@ -202,13 +203,22 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 			logger.Printf("spool %s event: %v", hook, err)
 		}
 	}
-	if hook == HookPostLLMCall && mapped {
-		traceModelCall(hook, ev, devEv)
+	if hook == HookPostLLMCall {
+		if mapped {
+			traceModelCall(hook, ev, devEv)
+		}
+		if !tr.Drop {
+			stashModelCall(ad, logger, ev)
+		}
 	}
 	switch hook {
 	case HookStop:
-		// Nothing to report; the pass over the session's own journal is the
-		// whole of this handler.
+		// The turn's pair, then the pass over the session's own journal. A turn
+		// is reported only into a run that is open: Stop never opens one.
+		if st, have := lc.load(ev.SessionID); have && !st.Sealed {
+			emitTurn(ad, logger, ev)
+			nudgeFlush()
+		}
 		reconcileOnHook(hook, ev.SessionID, runID, hookStart, pinnedNow, logger)
 	case HookSessionStart:
 		// The session's own WorkflowStarted event is drained inline, under this
@@ -216,6 +226,9 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// flusher's debounce window can let anything else of this run overtake it.
 		inlineAttempt(ad, logger, ev.SessionID, hookStart)
 	case HookSessionEnd:
+		if !ev.folded() {
+			clearTurnIndex(ad.Spool.Dir, ev.SessionID)
+		}
 		// Muse kills a SessionEnd hook as the session exits, whatever its
 		// timeout, so an inline attempt here dies mid-delivery and leaves a
 		// half-sent file the next drain can only discard. Delivery goes to the
@@ -231,6 +244,11 @@ func RunHook(sub string, stdin io.Reader, stdout io.Writer, logger *log.Logger) 
 		// call drains its session's backlog first, so a run's WorkflowStarted
 		// still reaches core ahead of anything else of it. A subagent's own
 		// journal is not reconciled: the join looks for the parent's actions.
+		if hook == HookSubagentStop && ev.folded() {
+			if st, have := lc.load(ev.SessionID); have && !st.Sealed {
+				emitTurn(ad, logger, ev)
+			}
+		}
 		forceFlusher(logger, ev.SessionID)
 	default:
 		nudgeFlush()
@@ -277,6 +295,12 @@ func runGated(ad *Adapter, id Identity, hook HookName, ev *HookEvent, runID stri
 		// hook started is one the journal join must find.
 		if err := RecordGateCall(DefaultSpoolDir(), ev.SessionID, ev.ToolName, ev.ToolUseID); err != nil {
 			logger.Printf("gate ledger: %v", err)
+		}
+		// The shell this call runs carries the tool-use id and no session id, so
+		// the commit hook finds the (parent) session through this entry. It is
+		// written before the verdict, so a slow gate cannot reorder it.
+		if err := PutToolUse(DefaultSpoolDir(), ev.ToolUseID, ev.SessionID); err != nil {
+			logger.Printf("tool-use index: %v", err)
 		}
 	}
 

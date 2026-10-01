@@ -16,6 +16,7 @@ import (
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // Muse gives this adapter no reliable lifecycle to hang a run on:
@@ -275,6 +276,21 @@ func (l lifecycle) advance(hook HookName, ev *HookEvent) (RunIdentity, transitio
 		// per-child hook that always runs, so it also trims stale records.
 		l.sweep()
 		return l.current(sid), transition{Drop: true}
+
+	case !have && hook.signal():
+		// A signal never opens a run: it reports on a session that is already
+		// running. With no record the session is not one this adapter has seen
+		// (Muse fires PreCompact for its internal compaction sessions), and a
+		// run opened for it would never be ended.
+		trace.Emit(trace.Record{
+			Provider:  provider,
+			SessionID: sid,
+			EventType: string(hook),
+			Stage:     trace.StageCapture,
+			Outcome:   "muse.signal",
+			Detail:    map[string]any{"reason": "unknown_session"},
+		})
+		return RunIdentity{}, transition{Drop: true}
 
 	case hook == HookSessionStart:
 		// An explicit start: a resume source continues the session as a new run.

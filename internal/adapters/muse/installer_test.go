@@ -89,12 +89,12 @@ func TestInstalledEventsComeFromTheAdaptersOwnTable(t *testing.T) {
 	for _, ev := range installedEvents() {
 		got = append(got, string(ev))
 	}
-	want := []string{"PermissionRequest", "PostLLMCall", "PostToolUse", "PostToolUseFailure", "PreLLMCall",
+	want := []string{"Notification", "PermissionRequest", "PostCompact", "PostLLMCall", "PostToolUse", "PostToolUseFailure", "PreCompact", "PreLLMCall",
 		"PreToolUse", "SessionEnd", "SessionStart", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "UserPromptSubmit"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("installed events = %v, want %v", got, want)
 	}
-	for _, never := range []HookName{HookPreCompact, HookPostCompact, HookNotification, HookPostToolBatch, HookInterrupt} {
+	for _, never := range []HookName{HookPostToolBatch, HookInterrupt} {
 		for _, ev := range installedEvents() {
 			if ev == never {
 				t.Errorf("%s has no contract type and must never be registered", never)

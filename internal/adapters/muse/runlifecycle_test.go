@@ -1,15 +1,18 @@
 package muse
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
 	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
 )
 
 // startedFirst fails for any run whose rows reach core before that run's own
@@ -310,5 +313,78 @@ func TestSweepIsRateLimited(t *testing.T) {
 	l.save("s-b", RunIdentity{}, true)
 	if _, err := os.Stat(l.statePath("s-old")); err != nil {
 		t.Errorf("a sweep ran again inside the interval: %v", err)
+	}
+}
+
+// A signal rides the run it reports on and is never the start of one.
+func TestLifecycleSignalsRideAnOpenRunAndNeverOpenOne(t *testing.T) {
+	setHookEnv(t)
+	t.Setenv(devconfig.EnvContentCapture, "1")
+	f := serveCore(t, fakecore.Script{Default: allowJSON})
+
+	// A session nothing has opened: dropped, with a content-free finding, and
+	// no WorkflowStarted for a run nothing would ever end.
+	runHook(t, "PreCompact", fixture(t, "pre-compact", "s-internal"))
+	runHook(t, "Notification", fixture(t, "notification", "s-internal"))
+	flushSession(t, "s-internal")
+	if len(f.Inbox()) != 0 {
+		t.Fatalf("a signal opened a run: %d rows", len(f.Inbox()))
+	}
+	var findings int
+	for _, r := range traceRecords(t, trace.StageCapture) {
+		if r.Outcome == "muse.signal" && r.Detail["reason"] == "unknown_session" {
+			findings++
+			raw, _ := json.Marshal(r)
+			if strings.Contains(string(raw), "waiting for approval") {
+				t.Errorf("the finding carries content: %s", raw)
+			}
+		}
+	}
+	if findings != 2 {
+		t.Errorf("findings = %d, want 2", findings)
+	}
+
+	// An open run: four PreCompact to one PostCompact is five rows, unpaired.
+	runHook(t, "UserPromptSubmit", fixture(t, "user-prompt-submit", "s-live"))
+	for i := 0; i < 4; i++ {
+		runHook(t, "PreCompact", fixture(t, "pre-compact", "s-live"))
+	}
+	runHook(t, "PostCompact", fixture(t, "post-compact", "s-live"))
+	runHook(t, "Notification", fixture(t, "notification", "s-live"))
+	flushSession(t, "s-live")
+
+	names := map[string]int{}
+	for _, r := range f.Inbox() {
+		if n, _ := r.Body["signal_name"].(string); n != "" {
+			names[n]++
+		}
+		if r.Body["signal_name"] == "pre_compact" {
+			if m := rowMeta(r); m["trigger"] != "soft" {
+				t.Errorf("pre_compact metadata = %v", m)
+			}
+		}
+		if r.Body["signal_name"] == "notification" {
+			if m := rowMeta(r); m["notification_type"] != "permission_prompt" || m["notification_title"] == nil {
+				t.Errorf("notification metadata = %v", m)
+			}
+		}
+	}
+	if names["pre_compact"] != 4 || names["post_compact"] != 1 || names["notification"] != 1 {
+		t.Errorf("signals = %v", names)
+	}
+	if n := rowCount(f, fakecore.WireWorkflowStarted); n != 1 {
+		t.Errorf("WorkflowStarted rows = %d, want the one run", n)
+	}
+}
+
+// A signal from a session the lifecycle has never seen does not poll the
+// journals for a parent link.
+func TestUnknownSessionSignalSkipsTheSubagentLinkPoll(t *testing.T) {
+	setHookEnv(t)
+	pointSessionLogs(t)
+	start := time.Now()
+	runHook(t, "PreCompact", fixture(t, "pre-compact", "s-internal"))
+	if d := time.Since(start); d >= subagentLinkWait {
+		t.Errorf("took %v: the link poll ran", d)
 	}
 }
