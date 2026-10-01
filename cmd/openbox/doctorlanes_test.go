@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestDoctorLaneBlockDoesNotDenyModelCallsWhenClaudeCodeIsAbsent(t *testing.T
 	if strings.Contains(got, "ABSENT rather than merely incomplete") || strings.Contains(got, "elected (none)") {
 		t.Errorf("a Muse-only machine is told no lane emits model-call turns:\n%s", out.String())
 	}
-	if !strings.Contains(got, "Claude Code is not installed, so its lane election does not apply") ||
+	if !strings.Contains(got, "no Claude Code settings or system-PAC entry found, so its lane election does not apply") ||
 		!strings.Contains(got, "`model calls` row") {
 		t.Errorf("the pointer to the Codex and Muse sections is missing:\n%s", out.String())
 	}
@@ -52,7 +53,7 @@ func TestDoctorLaneBlockKeepsClaudeCodeElectionWhenPresent(t *testing.T) {
 	if !strings.Contains(got, "Claude Code's election") {
 		t.Errorf("the election lines do not say they are Claude Code's:\n%s", out.String())
 	}
-	if strings.Contains(got, "Claude Code is not installed") {
+	if strings.Contains(got, "no Claude Code settings or system-PAC entry found") {
 		t.Errorf("the absent row printed with Claude Code present:\n%s", out.String())
 	}
 }
@@ -89,5 +90,39 @@ func TestDoctorTelemetryLaneBlockNamesMuseWhenTheReceiverIsDown(t *testing.T) {
 	got := flat(out.String())
 	if !strings.Contains(got, "configured yes; muse from their own config") || !strings.Contains(got, "reachable NO; nothing is listening") {
 		t.Errorf("the down lane Muse uses is not reported as configured and unreachable:\n%s", out.String())
+	}
+}
+
+// A Claude Code settings file doctor cannot even stat is not an absent one: the
+// election says it cannot be decided, rather than doctor deciding there is no
+// Claude Code here.
+func TestDoctorLaneBlockReportsAnUnreadableClaudeSettingsAsUndecided(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("directory permissions do not block a stat here")
+	}
+	installedMuse(t)
+	withProbedMuse(t, healthyMuse())
+	a, out, _ := testApp(nil)
+	settings := gatewayservice.SettingsPath(a.homeDir())
+	dir := filepath.Dir(settings)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settings, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if code := a.runDoctor(nil); code != exitOK && code != exitError {
+		t.Fatalf("doctor exit = %d", code)
+	}
+	got := flat(out.String())
+	if strings.Contains(got, "no Claude Code settings or system-PAC entry found") {
+		t.Errorf("an unreadable Claude Code settings file read as no Claude Code:\n%s", out.String())
+	}
+	if !strings.Contains(got, "CANNOT BE DECIDED") {
+		t.Errorf("the election does not say it cannot be decided:\n%s", out.String())
 	}
 }

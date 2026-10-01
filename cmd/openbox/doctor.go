@@ -588,7 +588,7 @@ func (a *app) reportLanes() {
 		// settings.json is Claude Code's election alone. Without Claude Code its
 		// verdict says nothing about this machine: Codex and Muse record model
 		// calls through lanes they report in their own sections.
-		a.row("elected", "Claude Code is not installed, so its lane election does not apply here")
+		a.row("elected", "no Claude Code settings or system-PAC entry found, so its lane election does not apply here")
 		a.row("", "Codex's lanes are reported in the Codex section below; Muse's in the")
 		a.row("", "Muse section's `model calls` row.")
 	case undecidable:
@@ -770,10 +770,13 @@ func readDeliveryStatus(openboxHome, lane string) (hookflow.DeliverStatus, bool)
 	return status, true
 }
 
-// claudeCodePresent reports whether Claude Code is installed as far as doctor can
-// tell: its settings file exists, or the system-PAC record lists it.
+// claudeCodePresent reports whether Claude Code's election is worth printing:
+// its settings file exists, or the system-PAC record lists it. A settings path
+// that cannot be stat'ed for any reason but absence counts as present, so an
+// unreadable file still reaches the election's "cannot be decided" row instead
+// of reading as no Claude Code at all.
 func (a *app) claudeCodePresent(settingsPath string) bool {
-	if fileExists(settingsPath) {
+	if _, err := os.Stat(settingsPath); err == nil || !os.IsNotExist(err) {
 		return true
 	}
 	entry, err := activation.LoadSystemEntry(a.homeDir())
