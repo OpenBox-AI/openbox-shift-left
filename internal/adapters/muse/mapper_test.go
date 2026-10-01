@@ -46,6 +46,9 @@ var fixtureEvents = map[string]client.EventType{
 	"post-llm-call-tool-calls":    client.EventModelCallFinished,
 	"subagent-stop":               client.EventSessionEnded,
 	"stop":                        "",
+	"pre-compact":                 client.EventPreCompact,
+	"post-compact":                client.EventPostCompact,
+	"notification":                client.EventNotification,
 }
 
 func TestMapEveryFixture(t *testing.T) {
@@ -277,7 +280,7 @@ func TestMapDropsWhatItCannotPlace(t *testing.T) {
 	if _, ok := bad.Map(HookPreToolUse, &HookEvent{SessionID: "s"}); ok {
 		t.Error("an event under a bad DID mapped")
 	}
-	for _, h := range []HookName{HookStop, HookPreCompact, HookNotification, HookInterrupt, HookPostToolBatch} {
+	for _, h := range []HookName{HookStop, HookInterrupt, HookPostToolBatch} {
 		if _, ok := m.Map(h, &HookEvent{SessionID: "s"}); ok {
 			t.Errorf("%s mapped; it has no contract type", h)
 		}
@@ -318,5 +321,42 @@ func TestStopFailureMapping(t *testing.T) {
 	sf, _ := testMapper().Map(HookStopFailure, parseFixture(t, "stop-failure"))
 	if sf.EventType != client.EventAPIError || sf.Content != nil {
 		t.Errorf("StopFailure = %+v", sf)
+	}
+}
+
+// The live-captured shapes: trigger is Muse's own soft|hard, passed through as
+// said; the notification message carries the project name, so title and message
+// are gated content.
+func TestLifecycleSignalsMapAsCapturedAndGateContent(t *testing.T) {
+	for _, tc := range []struct {
+		fixture string
+		want    client.EventType
+	}{{"pre-compact", client.EventPreCompact}, {"post-compact", client.EventPostCompact}} {
+		got, ok := testMapper().Map(hookOf(parseFixture(t, tc.fixture)), parseFixture(t, tc.fixture))
+		if !ok || got.EventType != tc.want || got.Metadata["trigger"] != "soft" || got.Content != nil {
+			t.Errorf("%s = %+v %v", tc.fixture, got, ok)
+		}
+	}
+	ev := parseFixture(t, "pre-compact")
+	ev.Trigger = "hard"
+	if got, _ := testMapper().Map(HookPreCompact, ev); got.Metadata["trigger"] != "hard" {
+		t.Errorf("hard trigger = %v", got.Metadata["trigger"])
+	}
+	ev.Trigger = "something else"
+	if got, _ := testMapper().Map(HookPreCompact, ev); got.Metadata["trigger"] != nil {
+		t.Errorf("an unknown trigger egressed: %v", got.Metadata["trigger"])
+	}
+
+	n := parseFixture(t, "notification")
+	off, _ := testMapper().Map(HookNotification, n)
+	if off.Metadata["notification_type"] != "permission_prompt" || off.Content != nil || off.Metadata["notification_title"] != nil {
+		t.Errorf("capture off: %+v", off)
+	}
+	on := testMapper()
+	on.CaptureContent = true
+	on.RedactContent = strings.ToUpper
+	got, _ := on.Map(HookNotification, n)
+	if got.Metadata["notification_title"] != strings.ToUpper(n.Title) || got.Content == nil || got.Content.SignalDetail != strings.ToUpper(n.Message) {
+		t.Errorf("capture on: %+v %+v", got.Metadata, got.Content)
 	}
 }

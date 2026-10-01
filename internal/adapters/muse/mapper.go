@@ -207,6 +207,30 @@ func (m Mapper) mapHook(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 			ev.Metadata = mergeMetadata(ev.Metadata, m.Evidence.Metadata())
 		}
 
+	case HookPreCompact, HookPostCompact:
+		// Signals, unpaired: Muse fires PreCompact for a compaction that then
+		// fails, and for internal sessions, so there is no PostCompact to wait
+		// for and none is synthesized. trigger is Muse's own word (soft|hard).
+		et := client.EventPreCompact
+		if hook == HookPostCompact {
+			et = client.EventPostCompact
+		}
+		m.signalEvent(&ev, et, hookflow.Compact(map[string]any{
+			"trigger": hookflow.EnumOr(e.Trigger, compactTriggers),
+		}))
+
+	case HookNotification:
+		notif := hookflow.Compact(map[string]any{
+			"notification_type": hookflow.EnumOr(e.NotificationType, notificationTypes),
+		})
+		if m.CaptureContent && e.Title != "" {
+			if t := m.redact(e.Title); t != "" {
+				notif["notification_title"] = t
+			}
+		}
+		m.signalEvent(&ev, client.EventNotification, notif)
+		ev.Content = m.gatedSignalDetail(e.Message)
+
 	case HookStopFailure:
 		// The provider's error text is undocumented and never bound, so the row
 		// says only that a turn ended in a provider-side error.
@@ -241,6 +265,23 @@ func (m Mapper) mapHook(hook HookName, e *HookEvent) (client.DevEvent, bool) {
 
 	ev.EventID = m.eventID(ev)
 	return ev, true
+}
+
+func (m Mapper) signalEvent(ev *client.DevEvent, t client.EventType, meta map[string]any) {
+	ev.EventType = t
+	ev.Tool = client.Tool{Name: agentToolName, Kind: client.ToolShell}
+	ev.Metadata = meta
+}
+
+func (m Mapper) gatedSignalDetail(text string) *client.Content {
+	if !m.CaptureContent || text == "" {
+		return nil
+	}
+	out := m.redact(text)
+	if out == "" {
+		return nil
+	}
+	return &client.Content{SignalDetail: out}
 }
 
 // subagentMetadata marks a session as a subagent's own: agent_id is Muse's
@@ -402,6 +443,15 @@ var (
 	sourceValues = map[string]bool{"startup": true, "resume": true, "clear": true, "compact": true}
 	// reasonValues is SessionEnd's cause; Muse's own values are undocumented.
 	reasonValues = map[string]bool{"clear": true, "resume": true, "logout": true, "prompt_input_exit": true, "other": true}
+	// compactTriggers is Muse's own vocabulary (soft|hard), passed through as
+	// said rather than renamed to Claude Code's manual|auto.
+	compactTriggers   = map[string]bool{"soft": true, "hard": true}
+	notificationTypes = map[string]bool{
+		"permission_prompt": true, "idle_prompt": true, "auth_success": true, "elicitation_dialog": true,
+		"elicitation_url_dialog": true, "elicitation_complete": true, "elicitation_response": true,
+		"agent_needs_input": true, "agent_completed": true, "quota_auto_resume_fired": true,
+		"quota_auto_resume_stale": true, "quota_auto_resume_disabled": true,
+	}
 	// permissionModes is the closed enum the contract declares for
 	// metadata.permission_mode; a Muse mode outside it is dropped.
 	permissionModes = map[string]bool{"default": true, "plan": true, "acceptEdits": true, "auto": true, "dontAsk": true, "bypassPermissions": true}

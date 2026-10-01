@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"log"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -18,8 +17,10 @@ import (
 // A Muse model call is a gate, not a model-call record. PreLLMCall opens a
 // model-call gate activity that is evaluated like a tool call, before the
 // request is sent and on the same gating ceiling; PostLLMCall closes it with
-// metadata only. Neither half carries usage, a turn index or a lane producer
-// id (the client drops them whatever is set here), so the row can never be read
+// metadata only. The started half also carries the pending request itself
+// under content capture (RequestBody, redacted, as activity_input.content);
+// the finished half never carries content. Neither half carries usage, a turn
+// index or a lane producer id (the client drops them whatever is set here), so the row can never be read
 // as an llm_completion and core's usage extraction and turn counts cannot pick
 // it up. Usage stays in the local trace (usage.go), and a call that never
 // reports finished (a crash, a cancel, an interrupt) leaves the started row
@@ -27,10 +28,7 @@ import (
 
 const modelCallToolKind = "model_call"
 
-const (
-	maxPreviews  = 16
-	maxToolNames = 64
-)
+const maxToolNames = 64
 
 // modelCallRequestID names one gate: Muse's request id, a ".", and the attempt,
 // so a retry of one request is a new gate. It is what pairs PostLLMCall to its
@@ -89,54 +87,6 @@ func nameOf(raw json.RawMessage) string {
 	return str(m["name"])
 }
 
-// previewSourceBytes bounds the text one message contributes before redaction.
-// The client cuts a preview to 256 runes, so nothing past this reaches the
-// wire, and a secret straddling the bound is never part of what is sent.
-const previewSourceBytes = 8 << 10
-
-// previewOf reads one element of messages[]: the text of its content blocks
-// ({"type":"text","text":...}), joined, or a bare string content or a
-// text_preview. Blocks of any other type (images, tool calls) contribute
-// nothing.
-func previewOf(raw json.RawMessage) string {
-	if s := str(raw); s != "" {
-		return hookflow.TruncateBytes(s, previewSourceBytes)
-	}
-	var m map[string]json.RawMessage
-	if json.Unmarshal(raw, &m) != nil {
-		return ""
-	}
-	if s := str(m["text_preview"]); s != "" {
-		return hookflow.TruncateBytes(s, previewSourceBytes)
-	}
-	if s := str(m["content"]); s != "" && strings.TrimSpace(string(m["content"]))[0] == '"' {
-		return hookflow.TruncateBytes(s, previewSourceBytes)
-	}
-	var blocks []struct {
-		Type string          `json:"type"`
-		Text json.RawMessage `json:"text"`
-	}
-	if json.Unmarshal(m["content"], &blocks) != nil {
-		return ""
-	}
-	var parts []string
-	size := 0
-	for _, b := range blocks {
-		if b.Type != "text" {
-			continue
-		}
-		t := str(b.Text)
-		if t == "" {
-			continue
-		}
-		parts = append(parts, t)
-		if size += len(t); size >= previewSourceBytes {
-			break
-		}
-	}
-	return hookflow.TruncateBytes(strings.Join(parts, "\n"), previewSourceBytes)
-}
-
 func (m Mapper) mapModelCallRequested(ev client.DevEvent, agent client.Tool, e *HookEvent) (client.DevEvent, bool) {
 	ev.EventType = client.EventModelCallRequested
 	ev.Tool = agent
@@ -163,21 +113,14 @@ func (m Mapper) mapModelCallRequested(ev client.DevEvent, agent client.Tool, e *
 	if len(names) > 0 {
 		meta["tool_names"] = names
 	}
-	// The previews are content: behind the capture gate, redacted before they
-	// are attached. The client cuts each to 256 runes and strips them when
-	// capture is off. They are the NEWEST messages, in conversation order: the
-	// tail is what is about to be sent, and the head (the system prompt, the
-	// first turns) would fill the quota with the same text on every call.
+	// The request is content: behind the capture gate, redacted before it is
+	// attached. It rides Span.RequestBody, the one span field the client keeps
+	// on a gate (every other is dropped), and the client strips it when capture
+	// is off. The span's semantic type and stage are the contract's required
+	// fields, not a claim about the call.
 	if m.CaptureContent {
-		var previews []string
-		for i := len(e.Messages) - 1; i >= 0 && len(previews) < maxPreviews; i-- {
-			if p := m.redact(previewOf(e.Messages[i])); p != "" {
-				previews = append(previews, p)
-			}
-		}
-		slices.Reverse(previews)
-		if len(previews) > 0 {
-			meta["message_previews"] = previews
+		if body := RequestBody(e, m.redact); body != "" {
+			ev.Span = &client.Span{SemanticType: "internal", Stage: "started", RequestBody: body}
 		}
 	}
 	ev.Metadata = meta

@@ -2,11 +2,12 @@ package muse
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
 )
 
 func TestModelCallRequestedMapping(t *testing.T) {
@@ -29,7 +30,7 @@ func TestModelCallRequestedMapping(t *testing.T) {
 		t.Errorf("tool_names = %v", ev.Metadata["tool_names"])
 	}
 	if _, present := ev.Metadata["message_previews"]; present {
-		t.Error("previews carried with capture off")
+		t.Error("retired previews key carried")
 	}
 	if ev.Span != nil || ev.Content != nil || ev.Tokens != nil || ev.TurnIndex != nil {
 		t.Errorf("a gate carries no span, content, usage or turn: %+v", ev)
@@ -39,39 +40,94 @@ func TestModelCallRequestedMapping(t *testing.T) {
 	}
 }
 
-func TestModelCallPreviewsAreGatedAndRedacted(t *testing.T) {
+// The request body is gated content: redacted before it is attached, whole
+// rather than cut to a preview.
+func TestModelCallRequestBodyIsGatedAndRedacted(t *testing.T) {
 	secret := "LLM|" + strings.Repeat("7", 12) + "|" + strings.Repeat("a", 24)
 	e := parseFixture(t, "pre-llm-call")
 	e.Messages = []json.RawMessage{
-		json.RawMessage(`{"role":"user","text_preview":"use key ` + secret + ` please"}`),
-		json.RawMessage(`{"role":"system","text_preview":""}`),
-		json.RawMessage(`"bare string preview"`),
+		json.RawMessage(`{"role":"user","content":"use key ` + secret + ` please"}`),
+		json.RawMessage(`{"role":"system","content":"` + strings.Repeat("long ", 200) + `"}`),
 	}
 	e.MessageCount = nil
 	m := testMapper()
 	m.CaptureContent = true
 	m.RedactContent = func(s string) string { return strings.ReplaceAll(s, secret, "[scrubbed]") }
 	ev, _ := m.Map(HookPreLLMCall, e)
-	previews, _ := ev.Metadata["message_previews"].([]string)
-	if len(previews) != 2 {
-		t.Fatalf("previews = %v", previews)
+	if ev.Span == nil || ev.Span.RequestBody == "" {
+		t.Fatalf("no request body: %+v", ev.Span)
 	}
-	for _, p := range previews {
-		if strings.Contains(p, secret) {
-			t.Errorf("a preview carried the secret: %q", p)
-		}
+	body := ev.Span.RequestBody
+	if strings.Contains(body, secret) || !strings.Contains(body, "use key [scrubbed] please") {
+		t.Errorf("body not redacted: %q", body)
 	}
-	if previews[0] != "use key [scrubbed] please" {
-		t.Errorf("preview 0 = %q", previews[0])
+	if want := RequestBody(e, m.redact); body != want {
+		t.Errorf("body differs from RequestBody")
 	}
-	if ev.Metadata["message_count"] != 3 {
-		t.Errorf("message_count falls back to the list length, got %v", ev.Metadata["message_count"])
+	// Whole messages, not a 256-rune preview.
+	if !strings.Contains(body, strings.Repeat("long ", 200)) {
+		t.Error("a long message was truncated")
+	}
+	var parsed struct {
+		Messages []json.RawMessage `json:"messages"`
+		Tools    []json.RawMessage `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(body), &parsed); err != nil || len(parsed.Messages) != 2 || len(parsed.Tools) != 5 {
+		t.Errorf("body shape: %v messages=%d tools=%d", err, len(parsed.Messages), len(parsed.Tools))
+	}
+	if ev.Metadata["message_count"] != 2 {
+		t.Errorf("message_count = %v", ev.Metadata["message_count"])
+	}
+	if _, present := ev.Metadata["message_previews"]; present {
+		t.Error("retired previews key carried")
 	}
 
 	m.CaptureContent = false
 	ev, _ = m.Map(HookPreLLMCall, e)
-	if _, present := ev.Metadata["message_previews"]; present {
-		t.Error("capture off carried previews")
+	if ev.Span != nil {
+		t.Errorf("capture off carried a span: %+v", ev.Span)
+	}
+}
+
+// The wire, not the struct: through the real hook, the gate's
+// activity_input.content is the request body byte for byte (under the cap), and
+// is absent with capture off. The fake core refuses a malformed row.
+func TestModelCallRequestReachesTheWireAsContent(t *testing.T) {
+	setHookEnv(t)
+	f := serveCore(t, fakecore.Script{Default: allowJSON})
+	t.Setenv(devconfig.EnvContentCapture, "1")
+	runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", "s-wire"))
+	t.Setenv(devconfig.EnvContentCapture, "0")
+	runHook(t, "PreLLMCall", fixture(t, "pre-llm-call", "s-wire-off"))
+
+	want := RequestBody(parseFixture(t, "pre-llm-call"), nil)
+	if want == "" {
+		t.Fatal("fixture yields no request body")
+	}
+	var on, off int
+	for _, r := range gateRows(f) {
+		in, _ := r.Body["activity_input"].(map[string]any)
+		content, has := in["content"].(string)
+		if strings.Contains(string(r.Raw), "s-wire-off") {
+			off++
+			if has {
+				t.Errorf("capture off: content on the wire: %q", content)
+			}
+			continue
+		}
+		on++
+		if !has || content != want {
+			t.Errorf("wire content = %q, want %q", content, want)
+		}
+		if _, present := in["message_previews"]; present {
+			t.Error("retired previews on the wire")
+		}
+		if _, present := r.Body["spans"]; present {
+			t.Error("spans[] on the wire")
+		}
+	}
+	if on != 1 || off != 1 {
+		t.Fatalf("gate rows on=%d off=%d, want 1 each", on, off)
 	}
 }
 
@@ -182,27 +238,6 @@ func TestLLMTargetMapsThroughTheObserveMapper(t *testing.T) {
 	}
 	if req := tg.DecisionRequest(true); req.EventType != client.EventModelCallRequested || req.Content != nil {
 		t.Errorf("decision request = %+v", req)
-	}
-}
-
-// A long conversation's previews are its newest messages, oldest first: the
-// tail is what the model call is about to send, so a content policy has to see
-// it, not the system prompt and first turns every time.
-func TestModelCallPreviewsAreTheNewestMessages(t *testing.T) {
-	e := parseFixture(t, "pre-llm-call")
-	e.Messages = nil
-	for i := 1; i <= maxPreviews+4; i++ {
-		e.Messages = append(e.Messages, json.RawMessage(`{"role":"user","text_preview":"msg `+strconv.Itoa(i)+`"}`))
-	}
-	m := testMapper()
-	m.CaptureContent = true
-	ev, _ := m.Map(HookPreLLMCall, e)
-	previews, _ := ev.Metadata["message_previews"].([]string)
-	if len(previews) != maxPreviews {
-		t.Fatalf("previews = %d, want %d", len(previews), maxPreviews)
-	}
-	if previews[0] != "msg 5" || previews[maxPreviews-1] != "msg 20" {
-		t.Errorf("previews run %q..%q, want msg 5..msg 20", previews[0], previews[maxPreviews-1])
 	}
 }
 

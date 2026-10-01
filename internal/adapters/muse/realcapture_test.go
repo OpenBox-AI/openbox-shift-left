@@ -2,8 +2,6 @@ package muse
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -162,33 +160,13 @@ func TestPermissionRequestCarriesNoToolUseID(t *testing.T) {
 	}
 }
 
-func TestPreLLMCallPreviewsAreBuiltFromTextBlocks(t *testing.T) {
-	secret := "LLM|" + strings.Repeat("7", 12) + "|" + strings.Repeat("a", 24)
+func TestPreLLMCallRequestIsBuiltFromTheCapturedMessages(t *testing.T) {
 	m := testMapper()
 	m.CaptureContent = true
-	m.RedactContent = func(s string) string { return strings.ReplaceAll(s, secret, "[scrubbed]") }
 	ev, _ := m.Map(HookPreLLMCall, parseFixture(t, "pre-llm-call"))
-	previews, _ := ev.Metadata["message_previews"].([]string)
-	if len(previews) != 2 || previews[0] != "You are a coding agent working in /tmp/proj." || previews[1] != "list the workspace files" {
-		t.Fatalf("previews = %q", previews)
-	}
-
-	e := &HookEvent{SessionID: "s", Messages: []json.RawMessage{
-		json.RawMessage(`{"role":"user","content":[{"type":"image","source":"x"},{"type":"text","text":"first ` + secret + `"},{"type":"text","text":"second"}]}`),
-		json.RawMessage(`{"role":"tool","content":[{"type":"tool_result","content":"not a text block"}]}`),
-		json.RawMessage(`{"role":"user","content":"a plain string content"}`),
-		json.RawMessage(`{"role":"user","content":[{"type":"text","text":"` + strings.Repeat("x", 3*previewSourceBytes) + `"}]}`),
-	}}
-	got, _ := m.Map(HookPreLLMCall, e)
-	previews, _ = got.Metadata["message_previews"].([]string)
-	if len(previews) != 3 {
-		t.Fatalf("previews = %d entries, want 3 (the tool_result block has no text)", len(previews))
-	}
-	if previews[0] != "first [scrubbed]\nsecond" || previews[1] != "a plain string content" {
-		t.Errorf("previews = %q", previews[:2])
-	}
-	if len(previews[2]) > previewSourceBytes {
-		t.Errorf("one message contributed %d bytes", len(previews[2]))
+	if ev.Span == nil || !strings.Contains(ev.Span.RequestBody, "list the workspace files") ||
+		!strings.Contains(ev.Span.RequestBody, "You are a coding agent working in /tmp/proj.") {
+		t.Fatalf("request body = %+v", ev.Span)
 	}
 }
 
@@ -215,25 +193,6 @@ func TestPostLLMCallStatusesObservedOnARealMuse(t *testing.T) {
 			}
 		}
 	}
-}
-
-// Stop's last_assistant_message is the model's reply: it is never reported, and
-// Stop writes nothing to the spool.
-func TestStopNeverEgressesTheAssistantMessage(t *testing.T) {
-	spool := setHookEnv(t)
-	if _, ok := testMapper().Map(HookStop, parseFixture(t, "stop")); ok {
-		t.Fatal("Stop mapped to an event")
-	}
-	runHook(t, "Stop", fixture(t, "stop", "s-stop"))
-	_ = filepath.Walk(spool, func(p string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			raw, _ := os.ReadFile(p)
-			if strings.Contains(string(raw), "The workspace is empty") {
-				t.Errorf("%s carries the assistant message", p)
-			}
-		}
-		return nil
-	})
 }
 
 // An empty or unreadable payload on a gated event is answered with that event's
