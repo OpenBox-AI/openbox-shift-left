@@ -330,6 +330,45 @@ func TestGateLedgerRoundTrip(t *testing.T) {
 	}
 }
 
+// One over-long ledger line must not end the read: every call after it would
+// look ungated.
+func TestGateLedgerStepsOverAnOverlongLine(t *testing.T) {
+	spool := t.TempDir()
+	if err := RecordGateCall(spool, "s", "Bash", "before"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(reconcileDir(spool), stateStem("s")+".gates")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"tool_name":"` + strings.Repeat("x", 200<<10) + `"}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := RecordGateCall(spool, "s", "Bash", "after"); err != nil {
+		t.Fatal(err)
+	}
+	got := loadGates(spool, "s")
+	if !got.ids["before"] || !got.ids["after"] || got.byTool["Bash"] != 2 {
+		t.Errorf("gates = %+v", got)
+	}
+}
+
+func TestRecordGateCallBoundsWhatItWrites(t *testing.T) {
+	spool := t.TempDir()
+	if err := RecordGateCall(spool, "s", strings.Repeat("n", 1<<20), strings.Repeat("i", 1<<20)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(reconcileDir(spool), stateStem("s")+".gates"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > 4*maxFieldLen {
+		t.Errorf("one ledger line is %d bytes", len(raw))
+	}
+}
+
 func TestSweepStateRemovesOnlyOldFiles(t *testing.T) {
 	spool := t.TempDir()
 	dir := reconcileDir(spool)

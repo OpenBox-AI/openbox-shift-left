@@ -174,7 +174,7 @@ func RecordGateCall(spoolDir, sessionID, toolName, toolUseID string) (err error)
 	if spoolDir == "" || !safeSessionID(sessionID) {
 		return nil
 	}
-	line, err := json.Marshal(gateEntry{ToolName: toolName, ToolUseID: toolUseID})
+	line, err := json.Marshal(gateEntry{ToolName: capLedgerField(toolName), ToolUseID: capLedgerField(toolUseID)})
 	if err != nil {
 		return err
 	}
@@ -199,6 +199,16 @@ func RecordGateCall(spoolDir, sessionID, toolName, toolUseID string) (err error)
 	return werr
 }
 
+// capLedgerField bounds a ledger field to what the journal reader keeps of the
+// same field (maxFieldLen): a longer value could never match one, and an
+// unbounded name must not grow a ledger line past what the reader will take.
+func capLedgerField(s string) string {
+	if len(s) <= maxFieldLen {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxFieldLen], "")
+}
+
 // gateSet is what the ledgers of a session (and its subagents) hold.
 type gateSet struct {
 	ids    map[string]bool
@@ -215,16 +225,29 @@ func loadGates(spoolDir string, sessionIDs ...string) gateSet {
 		if err != nil {
 			continue
 		}
-		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 0, 4<<10), 64<<10)
-		for sc.Scan() {
-			var e gateEntry
-			if json.Unmarshal(sc.Bytes(), &e) != nil {
+		// A line longer than the reader's buffer is stepped over, never allowed
+		// to end the read: every later call would look ungated.
+		br := bufio.NewReaderSize(f, 64<<10)
+		overlong := false
+		for {
+			line, err := br.ReadSlice('\n')
+			if errors.Is(err, bufio.ErrBufferFull) {
+				overlong = true
 				continue
 			}
-			g.byTool[e.ToolName]++
-			if e.ToolUseID != "" {
-				g.ids[e.ToolUseID] = true
+			if overlong {
+				overlong = false // the tail of an over-long line
+			} else if len(line) > 0 {
+				var e gateEntry
+				if json.Unmarshal(line, &e) == nil {
+					g.byTool[e.ToolName]++
+					if e.ToolUseID != "" {
+						g.ids[e.ToolUseID] = true
+					}
+				}
+			}
+			if err != nil {
+				break
 			}
 		}
 		f.Close()
