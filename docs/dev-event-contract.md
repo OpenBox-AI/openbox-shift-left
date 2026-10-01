@@ -39,7 +39,7 @@ needed to add a lifecycle type.
 | `SessionStarted` / `SessionEnded` | a session opens / closes | one `WorkflowStarted` and one `WorkflowCompleted`, paired |
 | `ToolCall` / `ToolResult` | before / after a tool runs | one `ActivityStarted` and one `ActivityCompleted`, paired by `activity_id` |
 | `TurnStarted` / `TurnCompleted` | before / after a model turn | same pairing, with `activity_type: llm_completion` |
-| `ModelCallRequested` / `ModelCallFinished` | before a model call is sent / after it finishes (1.10) | same pairing, with `activity_type: model_call_gate` — see [Model-call gate](#model-call-gate-110) |
+| `ModelCallRequested` / `ModelCallFinished` | before a model call is sent / after it finishes (1.10) | same pairing, with `activity_type: model_call_gate` — see [Model-call gate](#model-call-gate-110-request-body-added-in-111) |
 | `PromptSubmitted`, `CommitCreated`, `Deploy`, `SubagentStarted`, `PermissionDenied`, `APIError`, and every other lifecycle signal (config changes, notifications, compaction, model switches, elicitations, …) | a one-off lifecycle moment | a single `SignalReceived` row — unpaired |
 
 Every activity that ran gets exactly its two rows; a `SignalReceived` never
@@ -58,7 +58,7 @@ counts, and (for a model call) bodies — the client reads it into
 An adapter author populates `span`; nothing downstream expects a literal span
 on the wire.
 
-## Model-call gate (1.10)
+## Model-call gate (1.10; request body added in 1.11)
 
 Contract 1.10 adds a pre-send gate on a model call: a provider hook that fires
 before the call leaves, is evaluated through policy like a tool call, and is
@@ -77,12 +77,17 @@ A gate is not a model-call record, and the contract keeps the two apart:
   `:usage:rollup` shapes.
 - `activity_type` is `model_call_gate` on both halves, never `llm_completion`.
 - Neither half carries usage (`tokens`, `cost`), a `turn_index`, a producer
-  request id, `session_rollup` or a `span`. The schema rejects them on these
-  types and the client drops them before egress whatever an adapter sets.
+  request id or `session_rollup`. `ModelCallFinished` carries no `span`;
+  `ModelCallRequested` may carry one only to hand the client the pending
+  request (`span.request_body`, below). The client reads that one field and
+  drops every other span field, so no `spans[]` reaches the wire.
 - `ModelCallRequested`'s `activity_input` carries `model`, `provider`,
   `message_count`, `tool_count`, `tool_names` and, under content capture only,
-  `message_previews` (gated content: at most 16 previews of at most 256
-  characters each, after local redaction).
+  `content`: the redacted request, `{"messages":[...],"tools":[...]}`, cut from
+  the head to at most 65536 bytes (the newest turn is at the end), with the
+  cut named in `truncated_paths`. Capture off, the key is absent.
+  `message_previews` (1.10) is retired: no producer sets it and the client
+  drops it.
 - `ModelCallFinished`'s `activity_output` is metadata only: `status`,
   `finish_reason`, `response_id`, `error_class`, `tool_call_count`, `model`,
   `provider`. Never the reply, thinking or a body.
@@ -103,6 +108,12 @@ every event regardless of `activity_type`, which core passes through
 unvalidated. That core has to be deployed before a client speaking 1.10
 reaches a developer. Restamped, a 1.9 event still validates: 1.10 adds and
 removes nothing.
+
+Version history entry, 1.11. `activity_input.content` on the started half is
+what lets policy, Guardrails and the judge see the request being sent; core
+must pass it through unchanged and accept `schema_version` `1.11`, which the
+client stamps on every event. A 1.10 event restamped 1.11 still validates:
+1.11 adds `content` and retires `message_previews`, nothing else.
 
 ## Invariants
 

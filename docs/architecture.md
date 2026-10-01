@@ -210,7 +210,7 @@ denied, the run is not halted.
 | Lane | What it is | Sees | Installed for |
 |---|---|---|---|
 | `transport` | local HTTPS proxy with a machine-generated CA | real request and response bytes | Claude Code; Codex on macOS (through the system PAC) |
-| `telemetry` | local OTLP receiver | the tool's own usage report, no content | Claude Code, Codex, Muse Code |
+| `telemetry` | local OTLP receiver | the tool's own usage report; no content in the export itself (the daemon joins bodies on locally where a tool keeps them, see Coverage) | Claude Code, Codex, Muse Code |
 
 Rules that keep this correct:
 
@@ -237,7 +237,7 @@ The code also contains a third, older lane, `gateway` (a base-URL relay),
 which `init` no longer installs.
 
 **Muse Code has the telemetry lane only.** It ignores the system PAC and
-rejects the relay's CA (measured on 1.4.1), so there is no transport arm. Its
+rejects the relay's CA (measured on 1.4.1, not seen to change on 1.4.2), so there is no transport arm. Its
 own `settings.json` can redirect its export: `telemetry` set to
 `{enabled: true, destination: "external", endpoint: "http://127.0.0.1:8789"}`
 makes Muse post OTLP to `<endpoint>/muse-code/telemetry/{logs,traces}` instead
@@ -250,6 +250,9 @@ its `session_id` attribute (Claude Code's is `session.id`, Codex's
 `conversation.id`; a record carrying more than one is refused), and maps only the
 `model_call` log to a model-call pair: the response id as the request id, model,
 provider, and input, output and cached token counts, which carry no content.
+Under `content_capture` the daemon then joins the call's request (a redacted
+copy the `PostLLMCall` hook stashed) and response (read from Muse's session
+journal) onto that pair, which is why the unit carries `--muse-sessions`.
 There is nothing to outrank, so the election is whether Muse's settings point at
 this receiver on loopback, re-read per record from the path the unit's
 `--muse-settings` carries. A subagent's call folds into the parent session
@@ -327,7 +330,7 @@ provider credential. Do not widen an allowlist just to make an import pass.
   hooks cannot be mandated at all; the shipped managed config pins approval
   and sandbox modes instead ([`deployments/managed/`](../deployments/managed/)).
 - **Muse Code's runtime fails open.** Its payload shapes were read off Muse
-  1.4.1 captures, and its refusal shapes were checked by hand on 1.4.1. A hook
+  1.4.1 and 1.4.2 captures, and its refusal shapes were checked by hand on 1.4.1. A hook
   that crashes, times out or answers invalidly lets the action proceed; a
   deny-only `onFailure` successor and a non-zero exit on a gated crash backstop
   that (observed on 1.4.1), except plain non-JSON output, which Muse allows and

@@ -159,10 +159,10 @@ The full walkthrough, with CI setup, approvals and troubleshooting, is in
 |---|---|---|---|
 | Session, prompt and tool events | yes | yes | yes |
 | Enforcement | block, approval, redact, halt | block, redact, halt (approval becomes block) | block, redact, halt (approval and halt render as a plain refusal) |
-| Model calls recorded | yes (transport lane) | token usage; on macOS the request and reply too, once the relay has seen Codex | model, tokens and response id only (telemetry lane); each call is also checked before it is sent |
+| Model calls recorded | yes (transport lane) | token usage, plus the request and reply read from the local rollout (telemetry lane); on macOS also through the relay, once it has seen Codex | model, tokens, request and reply read from the session journal (telemetry lane); each call is also checked, with its request, before it is sent |
 | Org mandate file | managed settings | `requirements.toml` | hooks file and policy (unverified keys) |
 
-Muse Code's hook payloads and refusal answers were observed on Muse 1.4.1;
+Muse Code's hook payloads and refusal answers were observed on Muse 1.4.1, and its compaction and notification hooks on 1.4.2;
 what is still unverified is listed in the
 [adapter README](internal/adapters/muse/README.md#unverified-and-what-would-settle-it).
 Details: [Provider coverage](docs/coverage.md).

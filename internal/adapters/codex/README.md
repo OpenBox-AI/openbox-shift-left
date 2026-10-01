@@ -32,7 +32,7 @@ behaviour.
 ```
 Codex hook (stdin JSON)
    └─ openbox hook codex <event>          # hooks.json wires each event here
-        ├─ map → normalized the event contract DevEvent # mapper.go (no tool content)
+        ├─ map → normalized the event contract DevEvent # mapper.go (tool content under capture)
         ├─ append → local spool           # spool.go (hot path: local I/O only)
         └─ exit 0, empty stdout           # Codex parses hook stdout as output JSON; we emit none
    SessionEnd / `openbox hook codex flush`
@@ -84,7 +84,7 @@ Tool classification (`classifyTool`), grounded in `codex-rs`
   shell/unified-exec paths) → `shell`/`internal`
 - `"apply_patch"` → `file`/`file_write` (its `Write`/`Edit` matcher aliases are
   never serialized as `tool_name`); no `file_path`; Codex's tool_input is the
-  patch body (content), which we never decode
+  patch body (content), carried whole as `tool_input` under capture
 - `mcp__<server>__<tool>` → `mcp`/`mcp_tool_call`
 - Everything else (`web_search`, `update_plan`, `view_image`, `spawn_agent`, …)
   → the coarse `shell`/`internal` catch-all; the real name rides `tool.name` +
@@ -110,28 +110,53 @@ fall back to the CC-parity derivation; `tool_use_id`/`turn_id` ride tool-event
 
 ## Privacy
 
-**Content capture is ON by default**, and three fields ride that one
-gate: the developer's **prompt** on `PromptSubmitted`, and the turn's
+**Content capture is ON by default**, and five fields ride that one
+gate: the developer's **prompt** on `PromptSubmitted`, a tool call's **input**
+(`tool_input`: the shell command, else the whole input) on `ToolCall`, a tool
+result's **output** (`tool_response`: its `output`/`stdout`, else the raw JSON)
+on `ToolResult`, and the turn's
 **assistant text** (`last_assistant_message`) plus its **reasoning summary** on
-the completed half of each turn pair. All three are opted out together with
+the completed half of each turn pair. All five are opted out together with
 `content_capture:false` / `OPENBOX_CONTENT_CAPTURE=0`.
 
-All three are **redacted before attachment**, through the mapper's
+All five are **redacted before attachment**, through the mapper's
 `RedactContent` collaborator rather than at any call site, so a second caller of
 `Map`/`MapTurn` inherits the scan instead of having to remember it. That
 ordering is the only in-transit control there is. Redaction is keyword-driven,
 so an unlabelled high-entropy value below the detector's floor stays invisible to
 it: scanned is not the same as safe.
 
-Unconditionally NOT captured: shell command strings, `apply_patch` bodies, and
-tool output **never** ride an observe event; `tool_input` is kept as an opaque
-blob the observe path never decodes, and `tool_response` is not even bound to a
-field. The rollout reader binds an explicit **allowlist** of payload fields
+Tool content is bounded only by the egress cap, not `MaxCommandLen` (which
+bounds the local decision request). `status` stays unreported: `tool_response`
+carries no outcome. The rollout reader binds an explicit **allowlist** of payload fields
 (`rolloutAllowedPayloadFields`) and a test asserts that allowlist is exhaustive,
 so a new vendor field cannot ride along unclassified — `encrypted_content` in
 particular has no Go field at all. Asserted by
 `TestMap_NoContentLeak`, `TestWire_NoContentLeakEndToEnd`, and the cli
 real-binary E2E (`TestCodexUnifiedBinaryObserveE2E`).
+
+## Model-call bodies come from the rollout
+
+The telemetry lane's model-call row (`codex.sse_event`, `event.kind`
+`response.completed`) carries counts and no bodies, so under `content_capture`
+the telemetry daemon joins them on from the thread's rollout
+(`rolloutcontent.go`, `ReadCallContent`; wired in
+`cmd/openbox/telemetrycodexcontent.go`; the unit carries `--codex-sessions`). A
+call is found by its `token_usage_record` line: equal input, output and cached
+counts, nearest in time within 30 s, and two equally near candidates or none is
+`no_join`, never a guess. The request is the items before that line, newest
+first under 64 KiB (`RequestBodyJSON`); the response is the call's assistant
+message, reasoning summaries and tool calls plus `response_id`
+(`ResponseBodyJSON`). Both are redacted before attachment, and the reader decodes
+its own allowlist (`rolloutContentAllowedFields`, pinned exhaustive by
+`TestRolloutContentAllowlistIsExhaustive`), so `encrypted_content` and the base
+instructions have no field to land in. A rollout whose first record is not this
+thread's `session_meta`, or whose `token_usage_record` lacks numeric usage, is
+`unverified`: no content, and a content-free `codex.content` finding in the local
+trace that `openbox doctor` reports. This is separate from the finops usage
+reader below, which still decodes numeric fields only. Test-proven against
+fixtures shaped like a Codex 0.156.1 rollout; the join rate on real traffic has
+not been measured live.
 
 ## Commit attribution
 
@@ -253,7 +278,8 @@ Two **deliberate divergences from the CC reader**, both source-verified:
 carries **no cost field** (`TokenCountEvent = {info, rate_limits}`); cost is
 never derived from a pricing table (that would be a fabricated number).
 
-**Invariants.** INV-2 is structural: the rollout is decoded into projection
+**Invariants.** INV-2 is structural for this usage reader (the model-call
+bodies above are a separate reader, with its own allowlist): the rollout is decoded into projection
 structs with **only numeric fields** (nested), so every content-bearing key
 (prompt, agent message, shell command, apply_patch body, tool output, cwd, …)
 has nowhere to land; proven by `TestFinops_NoContentOnWire` (sentinel content in

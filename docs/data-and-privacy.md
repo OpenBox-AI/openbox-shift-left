@@ -20,7 +20,7 @@ through managed config.
 | The prompt you give a subagent (the whole `Agent` tool input) | by default | `content_capture` |
 | Notification text, task titles and descriptions, `/compact` instructions and summary, MCP elicitation prompts and your answers | by default | `content_capture` |
 | Why a tool was refused; a failed turn's error detail | by default | `content_capture` |
-| Model-call request and response bodies (transport lane only; see [below](#model-calls)) | by default | `content_capture` |
+| Model-call request and response bodies (the transport lane; Muse's telemetry lane joins them in too; see [below](#model-calls)) | by default | `content_capture` |
 | Your Claude account email and organization UUID, once per session | if signed in | none (see [Account attribution](#account-attribution)) |
 | A one-way fingerprint of the provider credential used for a model call | transport lane only | none |
 | Git commit trailer: commit sha, tree sha, session id | always | `OPENBOX_INSTALL_GIT_HOOK=false` |
@@ -34,15 +34,24 @@ Bodies are content, and all of them answer to the one `content_capture` key.
 believe it had turned content off while one type kept flowing. The cost is
 that you cannot, for example, keep prompts and drop tool output.
 
-**Muse Code sends its own set.** Muse hooks carry the prompt, tool input and
-tool output (with error text on a failure), and each model call's request
-summary (see [Muse Code](#muse-code)); they carry no assistant reply or
-thinking, and no hook carries token counts, so none of those leave through a hook.
-Token counts come from Muse's separate telemetry export, which is metadata only.
+**Muse Code sends the same classes, by a different route.** Its hooks carry
+the prompt, tool input and tool output (with error text on a failure), the
+assistant reply (the `Stop` payload), each model call's whole request, and
+notification and compaction text. Thinking summaries and each call's response
+are read from Muse's own session journal on this machine (see
+[Muse Code](#muse-code)). No hook carries token counts: those come from Muse's
+separate telemetry export. All of it answers to `content_capture`.
 
-**Codex sends less.** Codex hooks carry the prompt, the assistant reply and
-thinking, but not tool input or output. A gated Codex call sends its tool
-input (see [below](#what-an-enforced-call-sends)).
+**Codex sends tool content too.** Codex hooks carry the prompt, the assistant
+reply and thinking, and, since this release, **tool input and tool output**:
+`tool_input` on the call and `tool_response` on the result, redacted before
+they are attached and gated on `content_capture`. That is new egress for
+Codex: earlier releases sent a Codex tool's input only to a gated call's
+decision, never as the call's own record, and never its output. A gated Codex
+call still sends its tool input for the decision (see
+[below](#what-an-enforced-call-sends)). The telemetry lane also sends each
+model call's request and response bodies, read from Codex's rollout (see
+[Model calls](#model-calls)).
 
 ## How content is protected
 
@@ -107,7 +116,7 @@ other field with markers and checks none of them reach the wire.
 is never opened. Because reply text and thinking ride the turn event, turning
 `finops` off removes them too.
 
-Claude Code and Codex report usage per turn; Muse reports it only through its telemetry export, never a hook. Codex derives each turn's counts from its
+Claude Code and Codex report usage per turn; Muse reports it only through its telemetry export, never a hook (its turn event carries the reply and thinking, no counts). Codex derives each turn's counts from its
 own rollout file; a Codex session that ends with no completed turn sends one
 per-session total instead.
 
@@ -186,8 +195,28 @@ no response is still recorded, with no status. A call with no session header
 is recorded nowhere. Token-count probes (`/v1/messages/count_tokens`) send
 nothing.
 
-The **telemetry** lane sends no content at all: model id, four token counts,
-duration and a request id.
+The **telemetry** lane sends model id, four token counts, duration and a
+request id. For Muse (see [Muse Code](#muse-code)) and Codex it also joins the
+call's request and response bodies onto the row; for Claude Code it sends no
+content.
+
+**Codex's bodies come from its rollout.** With `content_capture` on, the
+telemetry daemon reads Codex's own rollout file for the thread
+(`<CODEX_HOME>/sessions/…/rollout-….jsonl`, the directory the telemetry unit
+carries as `--codex-sessions`) and attaches to each `llm_completion` pair the
+call's **request**, the conversation items sent (your prompts, the developer
+and system messages, earlier tool calls and their outputs), newest first up to
+64KB, and its **response** (the assistant's message, reasoning summaries and
+tool calls). This is new egress for Codex. Both are redacted on this machine
+before they are attached, and the reader decodes only an allowlist of fields,
+so Codex's opaque encrypted reasoning blobs and its own instructions are never
+sent. The daemon waits up to two seconds for the rollout and ships a call
+without a half it could not match (a call is matched to its rollout record by
+token counts and time, and never guessed); the reason goes to the local trace
+without any content. An install from before this release has no
+`--codex-sessions` in its unit, so it sends no bodies until
+`openbox init --provider codex` is run again; `openbox doctor` says so. Nothing
+is copied from the rollout when `content_capture` is off.
 
 **claude.ai chats (macOS).** With the system proxy active, each claude.ai chat
 in a browser or the desktop app becomes its own session, keyed on the
@@ -232,11 +261,23 @@ export sends.
   body or reply. OpenBox reads one event, `model_call`, and sends the model, the
   provider, the response id (its activity id), the duration and the input,
   output and cached token counts, for a session's subagents in that session.
-  Nothing in it is covered by `content_capture`, because nothing in it is
-  content; the session, turn and other events Muse exports are received and
-  skipped. The receiver also writes each record's attributes (ids and numbers)
-  to the local trace ([The local trace](#the-local-trace)), which never leaves
-  the machine. `telemetry: false` in Muse's dev config records nothing.
+  None of that is content, and the export itself carries none; the session, turn and other events Muse exports are
+  received and skipped. The receiver also writes each record's attributes (ids
+  and numbers) to the local trace ([The local trace](#the-local-trace)), which
+  never leaves the machine. `telemetry: false` in Muse's dev config records
+  nothing. The export is metadata only; the call's bodies are not in it but
+  are joined in locally under `content_capture`, as the next item says.
+- **Bodies are joined onto that row, under `content_capture`.** The telemetry
+  daemon attaches the call's **request** (from the copy the `PostLLMCall` hook
+  stashed, below) and its **response**: the reply text, reasoning summaries
+  and tool calls, read from Muse's session journal under the `--muse-sessions`
+  directory the telemetry unit carries. Both are redacted before they are
+  attached and capped at 64KB. The daemon waits up to two seconds for them, so
+  the row can arrive that much late, and a half it could not find ships
+  without it; a content-free note of why goes to the local trace. A unit
+  installed before this release has no `--muse-sessions`, so it sends no
+  bodies until `openbox init --provider muse` is run again; `openbox doctor`
+  says so.
 
 What the hooks send leaves the machine like this; each body is redacted before
 attachment and capped like any other:
@@ -245,18 +286,42 @@ attachment and capped like any other:
   shell command and MCP arguments go to the platform verbatim so a policy can
   judge what will run; a file write goes redacted. The same carve-outs as
   Claude Code (see [What an enforced call sends](#what-an-enforced-call-sends)).
+- **The reply and thinking.** At `Stop` (and a subagent's `SubagentStop`) the
+  assistant's reply from the hook payload, and the reasoning summaries read
+  from the session journal, ride the turn event under `content_capture`,
+  redacted. The same reply also rides the telemetry lane's model-call row
+  above, so a consumer sees it twice, as it does on Claude Code.
+- **Notifications and compaction.** A `Notification` hook sends its type, its
+  title and its message; `PreCompact` and `PostCompact` send the trigger
+  (`soft` or `hard`). The title and message are content, gated the same way.
 - **Model-call gate.** Every `PreLLMCall` is evaluated before the request is
   sent. Metadata always goes: provider, model, message and tool counts and tool
-  names. Under `content_capture` it also sends **message previews**: at most
-  16, each cut to 256 characters, after redaction. The closing `PostLLMCall`
-  is metadata only (status, finish reason, response id, an error class).
+  names. Under `content_capture` it also sends **the request itself**: the
+  messages and tool definitions, redacted, cut from the head to the last 64KB
+  so the newest turn survives. That includes the system prompt and tool
+  descriptions Muse puts in the request. The closing `PostLLMCall` is metadata
+  only (status, finish reason, response id, an error class).
+- **The request is kept on disk for a few minutes.** So the telemetry row can
+  carry it, the `PostLLMCall` hook writes the already-redacted request body to
+  `.openbox/requests/` under the Muse spool directory (`0600`, readable by
+  anything running as you), and the daemon takes and deletes it when the
+  matching export arrives. An entry nothing took is removed after ten minutes,
+  when the next hook writes one, so a stopped daemon leaves bodies there until
+  then. With `content_capture` off nothing is written. Alongside it, two
+  indexes of ids only (tool-use id to session, response id to turn) live for
+  24 hours.
 - **Stays local.** `PostLLMCall`'s usage numbers and the request's trace
   context go to the local trace only, never to the platform. Usage reaches the
   platform only through the telemetry lane above.
 - **Muse's session log is read locally.** At `Stop` and `SessionEnd`, OpenBox
   reads `~/.local/share/muse/sessions/…/session.jsonl` for the join fields of
   each recorded tool action (its type, name, time, and id where present) to
-  spot an action whose hook never ran. Nothing in it is copied, logged or sent.
+  spot an action whose hook never ran. That pass copies, logs and sends
+  nothing from it. A separate reader takes the reasoning summaries (at `Stop`)
+  and each call's reply and tool calls (in the telemetry daemon) from the same
+  file, under `content_capture` only; those, and only those, leave the
+  machine, redacted, as described above. If the file's format stops matching
+  what the reader was built on, it reads nothing and `doctor` reports it.
 - **The gate ledger is content-free.** It lists tool names and ids the gate
   was asked about, under the Muse spool directory's `reconcile/` folder, and
   is swept after 14 days.
@@ -293,7 +358,7 @@ Linux, `%AppData%\openbox\` on Windows (move the queue with
 | `claude-code-prior-settings.json` | `~/.openbox/` | the previous `showThinkingSummaries` value |
 | `telemetry.log`, `transport.log` | `~/.openbox/` | lane diagnostics; no traffic |
 | `*-delivery-status.json` | `~/.openbox/` | how many lane records the platform did not accept; no content |
-| `cc-spool/`, `codex-spool/`, `muse-spool/` | runtime dir | the per-session event queue, already redacted, in plaintext. Normally empty: each event is attempted once and then removed |
+| `cc-spool/`, `codex-spool/`, `muse-spool/` | runtime dir | the per-session event queue, already redacted, in plaintext. Normally empty: each event is attempted once and then removed. `muse-spool/.openbox/` also holds Muse request bodies (redacted, ten minutes) and id-only indexes (24 hours), described under [Muse Code](#muse-code) |
 | `enforcements.jsonl` | runtime dir | what enforcement did: verdict, source, redaction categories. Never the secret or the body |
 | `advisories.jsonl` | runtime dir | guardrail findings |
 | `halted-sessions/` | runtime dir | one small file per halted run: the reason and a timestamp. It keeps that run refused |

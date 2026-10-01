@@ -16,7 +16,7 @@ decisions and then discards it (persistence needs a `hook_trigger` this client
 never sets), so nothing sent there was ever stored, and this client stopped
 sending it.
 
-**Contract versions:** `schema_version` (currently `"1.10"`) is a `const` in
+**Contract versions:** `schema_version` (currently `"1.11"`) is a `const` in
 the schema and is the authority on the adapter-facing shape; see the schema's
 own `x-changelog` for what each version added. This document describes the
 current wire shape only.
@@ -98,7 +98,7 @@ Built by `wireTypeFor` in `internal/client/payload.go`.
 ### Muse Code hooks
 
 Muse's hook stdin is Claude Code-shaped; `internal/adapters/muse/mapper.go`
-maps it onto the same contract. The shapes were read off Muse 1.4.1 captures
+maps it onto the same contract. The shapes were read off Muse 1.4.1 captures and re-checked on 1.4.2
 (see [coverage.md](coverage.md)); a subagent's events are folded into the session
 that spawned it (the parent's journal names the child), and Muse fires no
 `SessionStart` on resume.
@@ -115,12 +115,17 @@ that spawned it (the parent's journal names the child), and Muse fires no
 | `StopFailure` | `APIError` | no | no error text bound |
 | `SessionEnd` | `SessionEnded` | no | |
 | `PreLLMCall` | `ModelCallRequested` | yes | a model-call gate, see below |
-| `PostLLMCall` | `ModelCallFinished` | no | metadata only |
-| `Stop` | none | no | runs the session-log reconciler; no turn, no usage |
-| `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | none | no | not installed |
+| `PostLLMCall` | `ModelCallFinished` | no | metadata only; also stashes the redacted request body (under capture) for the telemetry lane's model-call row |
+| `Stop` | `TurnStarted` + `TurnCompleted` | no | the reply (`last_assistant_message`) and the reasoning summaries read from the session journal, under `content_capture`; no tokens. Also runs the session-log reconciler. Only into an open run: Stop never opens one |
+| `PreCompact`, `PostCompact` | `SignalReceived` | no | unpaired; `trigger` is Muse's `soft` or `hard`, passed through |
+| `Notification` | `SignalReceived` | no | unpaired; `notification_type`, the title as metadata and the message as gated content |
+| `PostToolBatch` | none | no | not installed: Muse never fires it (`production-dark` in its own docs) |
+| `Interrupt` | none | no | not installed |
 
-Muse sends no `TurnStarted`/`TurnCompleted`: no hook payload's usage reaches
-the wire, so a Muse session has no `llm_completion` rows.
+The turn pair carries no usage: tokens reach core on the telemetry lane's
+model-call row, which is the one that joins the request and response bodies
+(see [coverage.md](coverage.md) §1b). A signal from a session with no open
+run is dropped and traced, never given a run of its own.
 
 ### Correlation metadata keys
 
@@ -184,7 +189,16 @@ duplicate of another's: the hook lane (Claude Code/Codex's own `Stop`), and eith
 telemetry receiver (`otel_request_id`, `:otel:`) or the transport relay
 (`proxy_request_id`, `:proxy:`). The older gateway relay
 (`gateway_request_id`, `:gateway:`) keeps its own namespace but is no longer
-installed. An in-path lane classifies the call by its
+installed. The telemetry lane's id is the tool's own where its export carries
+one: Muse's response id. Codex's export carries none, so the daemon mints
+`call-` plus the first 12 hex characters of a SHA-256 over the thread id, the
+record's time, its `event.timestamp` and its input, output and cached token
+counts: stateless, so it is the same after a daemon restart, and distinct per
+call. Codex's lane record is `codex.sse_event` with `event.kind`
+`response.completed`, not the `codex.api_request` the first version of this
+lane read. Under `content_capture` the daemon joins request and response
+bodies onto a Muse or Codex telemetry pair from local files (see
+[coverage.md](coverage.md#1b-model-call-coverage-matrix)). An in-path lane classifies the call by its
 captured path, not its HTTP method — method alone would file a token-count
 probe as a real completion:
 
@@ -196,7 +210,7 @@ probe as a real completion:
 | `POST /v1/messages/count_tokens` | `token_count` | no, and not emitted at all |
 | the tool's own telemetry call to its vendor | `tool_telemetry` | no |
 | anything else on the intercepted host | `provider_request` | yes |
-| a provider's pre-send hook, evaluated through policy (no path: not a relayed call) | `model_call_gate` | no, metadata only |
+| a provider's pre-send hook, evaluated through policy (no path: not a relayed call) | `model_call_gate` | no; the started half carries the request under `content_capture` |
 
 A relayed call is attributed to a provider by its host and then its carrier
 header (`internal/cli/sessionkey/proxy.go`, `AttributeProxy`). A host one
@@ -227,11 +241,12 @@ disjoint from every producer above. It is never `llm_completion`: neither half
 carries usage, a turn index or a producer request id, and no `hook_trigger` or
 `spans[]` is sent. `ModelCallRequested`'s `activity_input` holds `model`,
 `provider`, `message_count`, `tool_count`, `tool_names` and, under content
-capture, `message_previews`; `ModelCallFinished`'s `activity_output` holds
+capture, `content` (v1.11: the redacted request, tail-kept at 65536 bytes;
+`message_previews` is retired); `ModelCallFinished`'s `activity_output` holds
 `status`, `finish_reason`, `response_id`, `error_class`, `tool_call_count`,
 `model` and `provider`. A denied gate leaves the started row only. Core must
 evaluate the started half through policy and count it as neither a completion
-nor a turn; see the 1.10 entry in [dev-event-contract.md](dev-event-contract.md).
+nor a turn; see the 1.10 and 1.11 entries in [dev-event-contract.md](dev-event-contract.md).
 
 ### Signal payload: `signal_args`
 

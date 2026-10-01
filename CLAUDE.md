@@ -28,8 +28,9 @@ providers, deliberately, and a fourth tool needs each of them read. Three
 tools exist (Claude Code, Codex, Muse Code) and they differ on purpose: Muse has
 the telemetry arm only (its own settings.json redirects its export to the
 receiver; it ignores the system PAC and rejects the relay's CA, so there is no
-transport arm) plus an evaluated model-call gate, and no commit-marker arm, and
-`doctor` reports it in its own `reportMuse` rather than the managed-config loop.
+transport arm) plus an evaluated model-call gate; its commit-marker arm is
+`MUSE_TOOL_USE_ID`, resolved to a session through the tool-use index PreToolUse
+writes (`adapters/muse/tooluseindex.go`), and `doctor` reports it in its own `reportMuse` rather than the managed-config loop.
 Muse's telemetry pointer is a key in a file the developer owns, so it is
 recorded before it is written and restored by the recorded value
 (`adapters/muse/telemetrykeys.go`), never inferred. An adapter is four things: its native hook shape, its

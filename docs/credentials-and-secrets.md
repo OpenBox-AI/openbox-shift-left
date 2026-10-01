@@ -34,7 +34,7 @@ For Muse Code the tool is `muse`: `~/.openbox/muse/` holds the same three
 files under the same plaintext boundary, so a signed Muse event proves origin
 of config, not tamper resistance. **Muse's own Meta Model API key is Muse's to
 store.** OpenBox never reads, copies or writes it, and puts nothing of it in
-`~/.openbox/`. A copy that reaches a prompt, a command or a model-call preview
+`~/.openbox/`. A copy that reaches a prompt, a command or a model-call request
 is redacted by shape before it leaves the machine (see the scanner table
 below), but the [local trace](data-and-privacy.md#the-local-trace) keeps bodies
 as they were before redaction, so a key pasted into one can sit there in
@@ -132,6 +132,17 @@ match is replaced with a placeholder, and only the category (`aws_key`,
 
 On a gated `Write` or `Edit`, the redaction is applied to the **file itself**:
 the file is written with the placeholder in place of the secret.
+
+The same order covers every body added for Muse and Codex: Muse's reply,
+thinking summaries, model-call request and response bodies, notification text,
+Codex's tool input and tool output, and the request and response bodies read
+from Codex's rollout. Each is redacted, then gated on
+`content_capture`, then capped, before it is attached. The Muse request body is
+redacted when the `PostLLMCall` hook stashes it, so the copy that waits on disk
+for up to ten minutes (`0600`, under the Muse spool directory) is already the
+redacted form; Muse's own session journal, which the reply is read from, is
+Muse's file and holds what Muse wrote. A secret the scanner does not recognise
+is in these bodies as ordinary text, the same limit as every other body below.
 
 Redaction protects what egresses, not what stays on disk: the
 [local trace](data-and-privacy.md#the-local-trace) keeps every body before and

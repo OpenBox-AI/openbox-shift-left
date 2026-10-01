@@ -158,7 +158,10 @@ A Muse that is not on your `PATH` installs with a warning.
   `~/.config/muse/settings.json` to `destination: "external"` with the
   receiver as its endpoint. Muse then sends its own telemetry (model, token
   counts and response ids; no prompts, tool content or replies) to OpenBox's
-  loopback receiver **instead of Meta's destinations**. The value that was there
+  loopback receiver **instead of Meta's destinations**. The telemetry daemon
+  also reads Muse's session journal (`--muse-sessions` in its unit), and under
+  `content_capture` joins each call's request and response onto the row; see
+  [Data and privacy](data-and-privacy.md#muse-code). The value that was there
   is recorded first, and `openbox uninstall` puts it back exactly, or removes the
   key if there was none; a value you changed after `init` is left alone. If
   `init` created `~/.config/muse/settings.json`, uninstall removes it again once
@@ -172,9 +175,14 @@ A Muse that is not on your `PATH` installs with a warning.
   it when Muse's status shows it. No proxy lane exists for Muse: it ignores the
   system proxy and rejects the relay's certificate. Prompts, tool calls and
   model calls are still gated: every model call is checked before it is sent.
+- **Upgrading an existing Muse install needs `openbox init --provider muse`
+  again.** Without it the settings file keeps its earlier hook set (no
+  `PreCompact`, `PostCompact` or `Notification`) and the telemetry unit has no
+  `--muse-sessions`, so model-call bodies are not recorded. `openbox doctor`
+  reports the missing flag.
 - A HALT verdict, a block and an unanswered approval all come back to Muse as
   a plain refusal.
-- Muse's hook payloads and refusal answers were observed on Muse 1.4.1; what
+- Muse's hook payloads and refusal answers were observed on Muse 1.4.1 (payloads re-checked on 1.4.2); what
   is still unverified is listed in `internal/adapters/muse/README.md`. A hook payload over 256 KiB is never delivered to any hook,
   so that action is not gated; `doctor` counts such actions from Muse's own
   session log, it cannot stop them.

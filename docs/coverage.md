@@ -18,10 +18,14 @@ provider is implemented.
 
 **Muse Code is partly observed.** Its adapter was built from Meta's published
 hook documentation (the hook-events reference and the 1.4.0 changelog), and its
-payload shapes were then corrected against scrubbed real captures of a Muse
-1.4.1 session, which the fixtures now are. The four refusal shapes and the
-`onFailure` successor were then exercised by hand against Muse 1.4.1 (below),
-but no automated test runs Muse, so every Muse row in §5 is at most E1 or E2.
+payload shapes were then corrected against scrubbed real captures of Muse
+1.4.1 and 1.4.2 sessions, which the fixtures now are. The four refusal shapes
+and the `onFailure` successor were exercised by hand against Muse 1.4.1
+(below), but no automated test runs Muse, so every Muse row in §5 is at most
+E1 or E2. Content parity with Claude Code is the bar for Muse and Codex; the
+content paths (reply, thinking, request and response bodies) are implemented
+and test-proven against fixtures, and measuring them against a live Muse or
+Codex is still pending.
 `internal/adapters/muse/README.md` lists what is still guessed.
 
 ## 1. Lifecycle coverage matrix
@@ -37,9 +41,10 @@ but no automated test runs Muse, so every Muse row in §5 is at most E1 or E2.
 | `PermissionRequest` | `PermissionRequest` hook; content-gated; no `tool_use_id`, so it never correlates to the tool call it is about | `PermissionRequest` hook; content-gated | `PermissionRequest` hook; evaluated only so it can refuse, never to grant; no `tool_use_id` |
 | `PermissionDenied` | `PermissionDenied` hook; only auto-mode classifier denials — a static deny rule or a manual denial never fires it | none | none |
 | `APIError` | `StopFailure` hook | none | `StopFailure` hook; no error text is bound |
-| `PreCompact` / `PostCompact` | wired; content-gated (the `/compact` instructions and the summary) | wired; content-gated | none: not installed |
-| `ModelCallRequested` / `ModelCallFinished` | none | none | `PreLLMCall` / `PostLLMCall` hooks: a model-call **gate** activity (`model_call_gate`), evaluated before the request is sent. Not a record of the call — see §1b |
-| `CommitCreated` | `git post-commit` hook, only where the hook is installed, agent commits only — see [mapping.md](mapping.md) | same | none: a Muse commit keeps its trailer but no marker tells the post-commit hook it was Muse's |
+| `TurnStarted` / `TurnCompleted` (the reply and thinking) | `Stop` / `SubagentStop` hook, with tokens | same | `Stop` (and a folded child's `SubagentStop`) hook: the reply from the payload, thinking from the session journal, under `content_capture`; no tokens (they ride the telemetry lane's row) |
+| `PreCompact` / `PostCompact` | wired; content-gated (the `/compact` instructions and the summary) | wired; content-gated | wired as unpaired signals; `trigger` is Muse's `soft` or `hard`, passed through; never opens a run |
+| `ModelCallRequested` / `ModelCallFinished` | none | none | `PreLLMCall` / `PostLLMCall` hooks: a model-call **gate** activity (`model_call_gate`), evaluated before the request is sent, carrying the request as `activity_input.content` under `content_capture`. Not a record of the call — see §1b |
+| `CommitCreated` | `git post-commit` hook, only where the hook is installed, agent commits only — see [mapping.md](mapping.md) | same | same: `MUSE_TOOL_USE_ID` in the tool's shell (confirmed on Muse 1.4.2) names the tool call, and an index written at `PreToolUse` maps it to the session |
 | `Deploy` | git-action level, not a hook | same | same |
 
 Claude Code also wires about twenty more hooks with no Codex counterpart
@@ -64,17 +69,21 @@ A few of those hooks buy less than they look like:
   observer there would break `claude --worktree`. This is a deliberate choice,
   not a gap.
 
-Muse Code documents eighteen hook events; the adapter installs a handler for
-the twelve that map to a contract type (`SessionStart`, `UserPromptSubmit`,
-`PreToolUse`, `PermissionRequest`, `PostToolUse`, `PostToolUseFailure`,
-`SubagentStart`, `SubagentStop`, `StopFailure`, `SessionEnd`, `PreLLMCall`,
-`PostLLMCall`).
-`Stop` runs only the session-log reconciler (§3) and reports nothing. `Stop`'s
-turn boundary carries no usage, so Muse sends no per-turn token counts or
-reply text. `PreCompact`, `PostCompact`, `Notification`,
-`PostToolBatch` and `Interrupt` have no contract type and are not installed;
-`Interrupt` in particular never fabricates a completion (and Muse refuses a
-synchronous `Interrupt` handler, which would have to be `async: true`).
+Muse Code documents eighteen hook events; the adapter installs sixteen
+handlers (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`,
+`PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `Stop`,
+`StopFailure`, `SessionEnd`, `PreLLMCall`, `PostLLMCall`, `PreCompact`,
+`PostCompact`, `Notification`).
+`Stop` reports the turn's reply and thinking (a `TurnStarted`/`TurnCompleted`
+pair with no tokens: usage rides the telemetry lane's row) into an open run
+only, and also runs the session-log reconciler (§3). `PreCompact`,
+`PostCompact` and `Notification` are signals with no pairing state; a signal
+from a session with no open run is dropped and traced, never given a run of its
+own. `PostToolBatch` is not installed because Muse never fires it (its own
+documentation calls it production-dark; a parallel tool pair on 1.4.2 produced
+no fire), and `Interrupt` is not installed: it never fabricates a completion
+(and Muse refuses a synchronous `Interrupt` handler, which would have to be
+`async: true`).
 
 Codex documents about a dozen hook events in total; the ones not listed above
 are not wired. Its own `tool.status` is not reported at all: one `PostToolUse`
@@ -125,10 +134,10 @@ coverage.
 | Claude Code | `transport` and `telemetry`; one of them emits (below) | none |
 | Codex, macOS | `telemetry` until the relay is elected, then `transport` | election needs evidence (below) |
 | Codex, Linux and Windows | `telemetry` | no system proxy there |
-| Muse Code | `telemetry`: metadata only (model, tokens, ids) | no proxy lane is possible (below) |
+| Muse Code | `telemetry`: model, tokens, ids, plus request and response bodies joined in under `content_capture` | no proxy lane is possible (below) |
 
-**Muse Code's model calls are recorded by `telemetry` alone, and only as
-metadata.** Measured on Muse 1.4.1, not assumed:
+**Muse Code's model calls are recorded by `telemetry` alone.** Measured on
+Muse 1.4.1 and re-checked on 1.4.2, not assumed:
 
 - *The telemetry lane is Muse's own export.* With `telemetry` set to
   `{enabled: true, destination: "external", endpoint: <loopback receiver>}` in
@@ -144,7 +153,25 @@ metadata.** Measured on Muse 1.4.1, not assumed:
   id it is skipped and counted apart from lost records. Every other
   event is skipped. A subagent's call is recorded in the parent session
   the hook path recorded for that child (a child nothing links stays a session of
-  its own, as its hook rows do). Muse exports no body, so there is none to capture.
+  its own, as its hook rows do). Muse's export carries no body, so the bodies
+  are joined onto the pair from two local sources, only under `content_capture`
+  and only when the telemetry unit carries `--muse-sessions` (an install from
+  before this existed has no such flag, and `openbox doctor` says so):
+  the **request** from a redacted copy the `PostLLMCall` hook stashed under the
+  spool keyed on Muse's response id, and the **response** (reply text,
+  reasoning summaries, tool calls) from Muse's session journal. The two halves
+  are independent: one missing does not drop the other. The daemon waits up to
+  two seconds for them after it receives the export, so a Muse model-call row
+  can land that much late. The last model-call pair of a session can therefore
+  land after `WorkflowCompleted`; that is within the best-effort ordering rule
+  (only `WorkflowStarted` first is guaranteed). A half that could not be joined ships without it
+  and files a content-free `muse.content` finding in the local trace with the
+  reason (`stash_absent`, `log_absent`, `timeout`, `unverified`, `shutdown`),
+  which `openbox doctor` counts. `unverified` means the journal no longer
+  looks like the format the reader was built on, and the reader stops rather
+  than guess. These paths are implemented and covered by tests against
+  recorded fixtures; their rates against a live Muse have not yet been
+  measured.
   Routing is by the `session_id` attribute; the election is whether the
   settings point at this receiver on loopback, so a settings file that does not
   (key absent or changed, destination not `external`, telemetry disabled, another
@@ -156,10 +183,17 @@ metadata.** Measured on Muse 1.4.1, not assumed:
   proxy in this project at all.
 - *The gate is not a record.* `PreLLMCall` and `PostLLMCall` produce the
   `model_call_gate` activity: the model, provider, message and tool counts,
-  tool names and, under `content_capture` and after redaction, message
-  previews, then a metadata-only close. It carries no usage, no turn, no
-  request or response body, and is never `llm_completion`. `PostLLMCall`'s
-  usage and trace context stay in the local trace.
+  tool names and, under `content_capture` and after redaction, the request
+  itself as `activity_input.content` (at most 64 KiB, newest turn kept), then
+  a metadata-only close. It carries no usage, no turn and no response, and is
+  never `llm_completion`. `PostLLMCall`'s usage and trace context stay in the
+  local trace.
+- *The reply is reported twice, on purpose.* The `Stop` hook's turn carries
+  the reply and thinking (`:turn:`), and the telemetry lane's `llm_completion`
+  carries the same reply as its response body (`:otel:`). Claude Code reports
+  the reply the same two ways (its `Stop` turn and the relay's response body),
+  and Muse follows that rather than choosing one. A consumer that scores reply
+  text sees both rows.
 
 `openbox doctor` says so for Muse on each of those points. `api.meta.ai` is in
 the host rows of all three tools: a call there is attributed by its carrier
@@ -169,7 +203,7 @@ known, so a Muse call through the relay is skipped.
 
 | | `transport` (Claude Code; Codex on macOS) | `telemetry` (Claude Code, Codex, Muse) |
 |---|---|---|
-| Model request/response body | captured | never — this lane binds no content at all |
+| Model request/response body | captured | Muse and Codex: joined in locally under `content_capture` (Muse from the hook stash and the session journal, Codex from its rollout); Claude Code: never |
 | Token counts + model id | yes | yes (its whole payload) |
 | Refuses a call on a local HALT latch | yes, latch-only, no `/evaluate` round trip | no — receive-only, out of path |
 | Suppressible by the governed tool | no — it observes bytes in path | yes — the tool reports its own calls, so it can under-report |
@@ -198,10 +232,39 @@ nothing for Codex, so a Codex-host call the relay cannot record (an unrecognised
 path, no session carrier) is recorded by nobody. `openbox doctor` counts those
 from the local trace ("Codex-host calls skipped while the relay is elected"). `openbox doctor` names the elected lane and warns when nothing is
 listening behind it — the check to run before trusting a data gap as
-"nothing happened" rather than "nothing was recorded". `telemetry` ships only
-the model id, four token counts, a duration and a request id — never a
-prompt, a completion, or a cost (the server derives cost from a model-keyed
-pricing table).
+"nothing happened" rather than "nothing was recorded". `telemetry` ships the
+model id, four token counts, a duration and a request id, never a cost (the
+server derives cost from a model-keyed pricing table), and for Claude Code
+never a prompt or a completion. For Muse and Codex the daemon joins the
+bodies on from local files, as below.
+
+**Codex's telemetry lane reads `codex.sse_event`, and joins bodies from the
+rollout.** The lane's record is the `response.completed` kind of
+`codex.sse_event` (model and input, output and cached token counts; the
+`codex.api_request` event an earlier version read carries none of them).
+Codex's export carries no request id, so the daemon mints one from the thread,
+the record's time and the counts (see [mapping.md](mapping.md#model-turns)).
+Under `content_capture` the daemon then reads the thread's rollout
+(`<CODEX_HOME>/sessions/…/rollout-….jsonl`, which the unit's `--codex-sessions`
+names) and finds the call by its `token_usage_record` line: the line whose
+input, output and cached counts equal the export's and which is nearest in
+time within 30 seconds. Two equally near lines, or none, is `no_join`, never a
+guess. The **request** is the conversation items before that line (user and
+developer messages, prior tool calls and outputs), newest first under 64 KiB;
+the **response** is the call's assistant message, reasoning summaries and tool
+calls, with Codex's `response_id` from the rollout. Opaque blobs
+(`encrypted_content`, base instructions) and metadata are never bound: the
+reader decodes an allowlist of fields. Both halves are redacted before they
+are attached. As with Muse the daemon waits up to two seconds, a half it could
+not join ships without it, and a content-free `codex.content` finding in the
+local trace says why (`log_absent`, `no_join`, `unverified`, `timeout`,
+`shutdown`, `empty`); `unverified` means the rollout no longer looks like the
+format the reader was built on, and the reader stops. `openbox doctor` warns
+when the unit lacks `--codex-sessions` and counts the findings. This is
+implemented and covered by tests against fixtures shaped like a live Codex
+0.156.1 rollout; whether a real Codex's export reaches the daemon with these
+keys, the join rate on real traffic and the clock skew between the export and
+the rollout have not been measured live.
 
 ## 2. Field-derivation rules
 
@@ -210,8 +273,8 @@ pricing table).
 - **`tool.mcp_server`**: parsed from the tool name pattern `^mcp__([^_]+)__`.
 - **`tokens` / `model`**: gated by the `finops` posture key (on by default,
   `OPENBOX_FINOPS=0` to opt out). Claude Code and Codex report **per turn**
-  (Muse reports none: no hook payload's usage reaches the wire): a
-  `Stop`/`SubagentStop` pair becomes a `TurnStarted`/`TurnCompleted` pair
+  (Muse reports none on its turn pair: usage rides the telemetry lane's
+  `llm_completion` row): a `Stop`/`SubagentStop` pair becomes a `TurnStarted`/`TurnCompleted` pair
   carrying all four token counts and the model id, read from a local
   transcript/rollout file, never the provider's own usage API. Codex derives
   its counts as the delta between cumulative usage snapshots so the same
@@ -224,7 +287,9 @@ pricing table).
   the `Stop`/`SubagentStop` payload's `last_assistant_message`, gated on
   `content_capture` (on by default) and `finops`, redacted for secrets before
   attachment, then capped at 64KB. Thinking rides the same turn under
-  `activity_output.thinking`.
+  `activity_output.thinking`. Muse the same way, minus `finops` (its pair
+  carries no tokens): the reply from `Stop`'s `last_assistant_message`, the
+  thinking from the reasoning summaries in Muse's session journal.
 - **`error_type`**: passed through an allowlist of the provider's own error
   values — never free text, since the underlying JSON key also carries a
   tool's own error string on a different hook.
@@ -250,11 +315,18 @@ These are documented gaps, not missing work:
    because it already has a job: closing a turn.
 3. **Compaction internals stay out of scope.** `PreCompact`/`PostCompact` are
    wired as boundary signals; what compaction actually drops is not modeled.
-4. **Content parity between providers is not a goal.** Both egress the
-   prompt, the turn's reply text and thinking under `content_capture`. Only
-   Claude Code also egresses tool input/output and failure detail: Codex hooks
-   do not carry them (a gated Codex call still sends its tool input for the
-   decision). State the asymmetry rather than average across it.
+4. **Content parity with Claude Code is the goal for Muse and Codex.** All
+   three egress the prompt, the turn's reply text and thinking, tool input and
+   output, and model-call request and response bodies under the one
+   `content_capture` key. The asymmetries that remain are where the tool
+   does not send the data, and each is stated rather than averaged:
+   - Muse `PostToolBatch` never fires (production-dark), and `Interrupt` is
+     not installed.
+   - Muse has no transport lane, so its model-call bodies come from its
+     session journal and the hook stash, not from bytes in path; if the
+     journal's format drifts they are skipped and `doctor` says so.
+   - Muse's turn pair carries no tokens (they ride the model-call row), and
+     Codex's `tool.status` is not reported.
 5. **Non-session telemetry is dropped, not synthesized.** Every event needs a
    resolvable `openbox_session_id`; a signal that has none is not emitted.
 6. **One `ToolCall` per invocation**, even where a hook surface offers both a
@@ -274,8 +346,9 @@ These are documented gaps, not missing work:
 11. **Muse Code: `muse serve` and the Muse Server Protocol are not governed.**
     Only hooks in a CLI session are.
 12. **Muse Code: the hooks lane does not record model calls.** The gate in §1b
-    is an evaluation, not a record; no usage or body is taken from a hook
-    payload.
+    is an evaluation, not a record; no usage is taken from a hook payload.
+    The model-call record is the telemetry lane's row, which the bodies are
+    joined onto.
 13. **Muse Code: no shell-profile proxying.** OpenBox never edits a shell
     profile to point Muse at a proxy.
 14. **No system proxy on Linux or Windows.** The PAC and CA trust exist on
@@ -290,11 +363,17 @@ These are documented gaps, not missing work:
     join fields only and records a local `evidence.gap` finding for each
     action with no gate record. Nothing is blocked or sent to the platform;
     `openbox doctor` shows the count.
-17. **Muse Code: commits carry the trailer but no `CommitCreated`.** The
+17. **Muse Code: a commit is attributed through the tool-use index.** The
     attestation reads an environment marker per tool. A Muse tool call's shell
-    carries `MUSE_TOOL_USE_ID` and `MUSE_RELEASE_INFO` but no session id, so no
-    commit is attributed to a Muse session (and it never attests as Claude Code,
-    whose markers it lacks).
+    carries `MUSE_TOOL_USE_ID` (confirmed on Muse 1.4.2) but no session id, so
+    the `PreToolUse` hook writes an index from the tool-use id to the session
+    (ids only, 0600, 24 hours) and the post-commit hook looks the id up. A
+    commit made by hand, or one whose id was never indexed (a payload over the
+    hook limit skips the hook), emits no `CommitCreated`. A shell that outlives
+    its tool call and commits later is attributed to the session that started
+    it for up to 24 hours, the same class as Codex's `CODEX_THREAD_ID`. It never
+    attests as Claude Code, whose markers it lacks. Verified in tests with a
+    real `git post-commit`; a live commit on Muse has not been measured.
 
 ## 4. Enforcement posture
 
@@ -409,9 +488,10 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | A denied Muse model call leaves the gate's started row only | E2 | `internal/adapters/muse/hookrun_test.go` · `TestModelCallDenyBlocksAndLeavesTheStartedRowOnly` |
 | An allowed Muse model call is one `:llmgate:` pair carrying no usage or turn | E2 | `internal/adapters/muse/hookrun_test.go` · `TestModelCallAllowThenFinishedIsOnePair` |
 | A real HALT latches the Muse run, and later gated calls of it, model calls included, deny with no round trip | E2 | `internal/adapters/muse/hookrun_test.go` · `TestHaltLatchesTheRunAndDeniesLaterCallsWithoutTheNetwork` |
-| A Muse gate event validates against the 1.10 contract and pairs | E1 | `internal/adapters/muse/conformance_test.go` · `TestModelCallGateEventsValidateAndPair` |
+| A Muse gate event validates against the current (1.11) contract and pairs | E1 | `internal/adapters/muse/conformance_test.go` · `TestModelCallGateEventsValidateAndPair` |
 | The contract rejects usage, a turn or a producer id on a gate | E1 | `internal/conformance/modelcallgate_test.go` · `TestModelCallGateRejectsWhatItMayNotCarry` |
-| A gate's message previews are gated content, redacted first | E1 | `internal/adapters/muse/llmgate_test.go` · `TestModelCallPreviewsAreGatedAndRedacted` |
+| A gate's request body is gated content, redacted before it is attached | E1 | `internal/adapters/muse/llmgate_test.go` · `TestModelCallRequestBodyIsGatedAndRedacted` |
+| The request body reaches the wire as `activity_input.content` under capture and is absent with capture off, with no `spans[]` | E2 | `internal/adapters/muse/llmgate_test.go` · `TestModelCallRequestReachesTheWireAsContent` |
 | A Muse hook that crashes exits non-zero, so the `onFailure` successor runs | E2 | `cmd/openbox/musefault_test.go` · `TestMuseGatedCrashExitsNonZero` |
 | The Muse fail-closed successor denies every gated event and writes nothing | E2 | `cmd/openbox/failclosed_test.go` · `TestMuseFailClosedDeniesGatedEventsAndTouchesNothing` |
 | `init --provider muse` refuses a Muse older than 1.4.0 and writes nothing | E1 | `cmd/openbox/initmuse_test.go` · `TestInitMuseRefusesAnOldMuseAndWritesNothing` |
@@ -425,7 +505,39 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | A Muse `model_call` becomes one `llm_completion` pair in the `:otel:` namespace with response id, model, provider and usage | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseModelCallBecomesOneLLMCompletionPair` |
 | Every other Muse event is skipped | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseEveryOtherEventIsSkipped` |
 | A Muse subagent's call is recorded in the session that spawned it | E1 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseSubagentCallFollowsTheRecordedFold` |
-| No Muse content-shaped attribute reaches the wire, at either capture posture | E2 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseContentNeverReachesTheWire` |
+| The Muse mapper itself binds no content attribute, at either capture posture | E2 | `internal/cli/telemetryemit/musemapper_test.go` · `TestMuseContentNeverReachesTheWire` |
+| Enriched bodies reach the wire only through the enrichment seam, and follow the capture gate | E2 | `internal/cli/telemetryemit/sentinel_test.go` · `TestEnrichedBodiesReachTheWireOnlyThroughTheSeam` |
+| An enriched pair carries its bodies on the right halves and never blocks the receiver | E1 | `internal/cli/telemetryemit/enrich_test.go` · `TestEnrichedPairCarriesBodiesAndNeverBlocksEmit` |
+| A content miss ships the row without it and files a content-free finding | E1 | `internal/cli/telemetryemit/enrich_test.go` · `TestMissesAreTracedWithoutContentAndTheRowStillShips` |
+| Codex's lane record is `codex.sse_event` `response.completed`, read from the live-shaped export | E1 | `internal/cli/telemetryemit/codexmapper_test.go` · `TestCodexSSECompletedBecomesOnePairWithTokens` |
+| A Codex model call's request id is minted: stable across a restart, distinct per call | E1 | `internal/cli/telemetryemit/codexmapper_test.go` · `TestCodexMintedRequestIDIsStableAndDistinctPerCall` |
+| A Muse model-call row joins the stashed request and the journal's reply | E1 | `cmd/openbox/telemetrymusecontent_test.go` · `TestMuseEnricherJoinsTheStashedRequestAndTheJournalReply` |
+| A response that never reaches the journal is `log_absent` at the deadline, not a hang | E1 | `cmd/openbox/telemetrymusecontent_test.go` · `TestMuseEnricherNeverFoundIsLogAbsentAtTheDeadline` |
+| A journal that no longer looks like the observed format yields no content and stops early | E1 | `cmd/openbox/telemetrymusecontent_test.go` · `TestMuseEnricherDriftIsUnverifiedAndStopsEarly` |
+| The enriched Muse pair ships through the real mapper with its bodies | E2 | `cmd/openbox/telemetrymusecontent_test.go` · `TestMuseEmitterWithContentShipsBodiesThroughTheRealMapper` |
+| Muse's `Stop` reports the reply and thinking under capture | E2 | `internal/adapters/muse/turn_test.go` · `TestStopEgressesTheReplyAndThinkingUnderCapture` |
+| With capture off Muse's `Stop` reports the pair with no text | E2 | `internal/adapters/muse/turn_test.go` · `TestStopWithCaptureOffEmitsThePairWithoutAnyText` |
+| An unreadable journal leaves the reply and a content-free `muse.content` finding, never a guess | E1 | `internal/adapters/muse/turn_test.go` · `TestStopOverAnUnverifiedJournalEmitsOutputOnlyAndTraces` |
+| The stashed request body is `0600` and survives `SessionEnd` until its TTL | E1 | `internal/adapters/muse/requeststash_test.go` · `TestRequestStashFileIs0600`; `internal/adapters/muse/turn_test.go` · `TestRequestStashSurvivesSessionEndAndExpiresByTTL` |
+| Muse's compaction and notification hooks are signals that ride an open run and never open one | E2 | `internal/adapters/muse/runlifecycle_test.go` · `TestLifecycleSignalsRideAnOpenRunAndNeverOpenOne` |
+| Every activity class Claude Code produces is produced for Muse and Codex or is a named N/A, graded on fakecore wire bytes | E2 | `cmd/openbox/activitymatrix_test.go` · `TestActivityMatrix` |
+| With capture off no fixture string and no content key reaches any provider's wire | E2 | `cmd/openbox/activitymatrix_test.go` · `TestActivityMatrixCaptureOffSentinel` |
+| Codex tool input and output are attached only under capture, and redacted first | E1 | `internal/adapters/codex/toolcontent_test.go` · `TestToolContent_CaptureOnToolOutput`; `internal/adapters/codex/toolcontent_test.go` · `TestToolContent_RedactedBeforeAttach` |
+| With capture off Codex attaches no tool content | E1 | `internal/adapters/codex/toolcontent_test.go` · `TestToolContent_CaptureOffAttachesNothing` |
+| A Muse commit in a tool shell emits one `CommitCreated` in the session its tool-use id was indexed under; a hand commit and an unindexed id emit none | E2 | `cmd/openbox/commitmuse_test.go` · `TestMuseCommitInAToolShellEmitsOneCommitCreatedInTheIndexedSession`; `cmd/openbox/commitmuse_test.go` · `TestMuseHandCommitEmitsNoCommitCreated` |
+| `doctor` warns when the Muse telemetry unit lacks `--muse-sessions`, with the plist shape an older install left | E1 | `cmd/openbox/doctormuse_content_test.go` · `TestDoctorMuseContentSourceWarnsWhenTheUnitLacksTheSessionsFlag` |
+| `doctor` reports Muse's journal format as unverified after a drift finding or on an untested Muse | E1 | `cmd/openbox/doctormuse_content_test.go` · `TestDoctorMuseContentFormatIsUnverifiedAfterADriftFinding`; `cmd/openbox/doctormuse_content_test.go` · `TestDoctorMuseContentFormatIsUnverifiedOnAnUntestedMuse` |
+| `doctor` counts content misses by reason over the last week and ignores older ones | E1 | `cmd/openbox/doctormuse_content_test.go` · `TestDoctorMuseContentRateCountsMissesByReason`; `cmd/openbox/doctormuse_content_test.go` · `TestDoctorMuseContentRateIgnoresRecordsOlderThanTheWindow` |
+| `doctor` reports Codex's rollout format as unverified after a drift finding | E1 | `cmd/openbox/doctormuse_content_test.go` · `TestDoctorCodexContentUnverifiedAfterADriftFinding` |
+| `doctor` warns when the Codex telemetry unit lacks `--codex-sessions` | E1 | `cmd/openbox/doctormuse_content_test.go` · `TestDoctorCodexContentSourceWarnsWhenTheUnitLacksTheSessionsFlag` |
+| A Codex call is joined to its rollout by token counts and time, and the request is split from the response | E1 | `internal/adapters/codex/rolloutcontent_test.go` · `TestReadCallContent_JoinsByUsageAndSplitsInputFromOutput` |
+| A call whose counts match no rollout record is `no_join`, never a guess | E1 | `internal/adapters/codex/rolloutcontent_test.go` · `TestReadCallContent_TokenMismatchIsNoJoinNeverAGuess` |
+| A rollout that no longer looks like the observed format yields no content | E1 | `internal/adapters/codex/rolloutcontent_test.go` · `TestReadCallContent_DriftIsUnverifiedWithNoContent` |
+| The rollout reader binds only an allowlist of fields, never opaque blobs or metadata | E1 | `internal/adapters/codex/rolloutcontent_test.go` · `TestRolloutContentAllowlistIsExhaustive` |
+| Codex bodies are redacted before they are attached and stay valid JSON | E1 | `internal/adapters/codex/rolloutcontent_test.go` · `TestBodiesRedactBeforeAttachAndStayValidJSON` |
+| The Codex telemetry emitter ships the rollout's bodies on the pair, and metadata only with capture off | E2 | `cmd/openbox/telemetrycodexcontent_test.go` · `TestCodexTelemetryEmitterEnrichesFromTheRollout`; `cmd/openbox/telemetrycodexcontent_test.go` · `TestCodexTelemetryEmitterWithCaptureOffShipsMetadataOnly` |
+| The telemetry unit carries `--codex-sessions` only for a Codex install, and a later install keeps it | E1 | `cmd/openbox/telemetrycodexcontent_test.go` · `TestTheTelemetryUnitCarriesCodexSessionsOnlyForACodexInstall` |
+| A model call still enriching when the daemon stops is delivered, not dropped | E2 | `cmd/openbox/telemetrycodexcontent_test.go` · `TestTelemetryCommandDeliversInFlightEnrichmentOnShutdown` |
 | A scrubbed Muse 1.4.1 export yields one pair per model call through decode, routing and mapping | E1 | `cmd/openbox/telemetrymuse_test.go` · `TestMuseFixtureThroughTheChainYieldsOnePairPerModelCall` |
 | The real telemetry command records a Muse export at core under Muse's own identity, with the election derived from `--muse-settings` | E2 | `cmd/openbox/telemetrymuse_test.go` · `TestTelemetryCommandRecordsMuseModelCalls` |
 | Muse's telemetry election is routed only when its settings export to this receiver on loopback | E1 | `internal/cli/activation/museelection_test.go` · `TestResolveMuseElection` |
@@ -446,6 +558,8 @@ fails if a citation stops resolving or a registered grader goes unnamed.
 | Windows behaves at runtime as it does on macOS and Linux | **E0** | Cross-compiled in CI only; not run. |
 | Muse's payload, answer and `onFailure` shapes match a real Muse | **E3** | Checked by hand on Muse 1.4.1: payloads captured (the fixtures are scrubbed copies), the four refusal shapes block, and a crash, unknown JSON shape or timeout runs the deny-only successor. CI cannot install Muse, so no automated test runs a real one; CI holds the recorded goldens (E1). |
 | Muse's export, its paths and the `telemetry` key behave as recorded | **E3** | Measured by hand on Muse 1.4.1 with real Meta calls (the fixture is a scrubbed copy of that export). CI cannot install Muse; the recorded fixture is E1. |
+| Codex's export reaches the daemon as `codex.sse_event` `response.completed`, and its bodies join from the rollout | **E3** | Not yet measured live. The record's keys were captured from Codex 0.156.1 and the rollout shape from two small live rollouts (the fixtures are shaped like them); the `response.completed` value, the join rate on real traffic and the export-to-rollout clock skew are pending. |
+| Muse's reply, thinking and model-call bodies join as the tests assume; how often a half misses | **E3** | Not yet measured live. The journal's shape was read off real 1.4.2 captures (the fixtures), and `MUSE_TOOL_USE_ID` reaching a tool's shell was confirmed by hand on 1.4.2; join rates and a live commit are pending. |
 | The control plane accepts, stores and keeps apart what the client sends | **E3** | Needs a live platform. |
 
 What nothing here proves: that the control plane accepts the wire, stores a

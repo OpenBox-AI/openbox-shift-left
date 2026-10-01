@@ -8,9 +8,10 @@ follows the Claude Code and Codex adapters by pattern. Nothing is imported from
 either: `internal/depguard` forbids adapter-to-adapter imports, and shared code
 lives in `adapters/common/hookflow`.
 
-**Status: read off Muse 1.4.1 captures, partly unverified.** The payload shapes
-and the fixtures in `testdata/` come from scrubbed real payloads of a Muse 1.4.1
-session (`testdata/README.md` says which keys were observed). What is still
+**Status: read off Muse 1.4.1 and 1.4.2 captures, partly unverified.** The
+payload shapes and the fixtures in `testdata/` come from scrubbed real payloads
+of Muse 1.4.1 and 1.4.2 sessions (`testdata/README.md` says which keys were
+observed). What is still
 guessed is listed under [Unverified](#unverified-and-what-would-settle-it). The
 four refusal shapes and the `onFailure` successor were observed on 1.4.1 too
 (see the fail-open table below).
@@ -47,7 +48,7 @@ calls the gate was asked about (`reconcile.go`, `sessionlog.go`). Each intent
 with no gate record becomes a local `evidence.gap` trace finding, and `openbox
 doctor` shows the count. Nothing is blocked, latched or sent to core.
 
-The format is observed on Muse 1.4.1. A line is a frame header or retained
+The format is observed on Muse 1.4.1 and 1.4.2. A line is a frame header or retained
 marker with no `record_type` (skipped), or an envelope
 (`schema_version`, `recorded_at` in unix microseconds, `record_type`,
 `payload_type`, `payload`). Envelopes of every other `payload_type` and
@@ -57,8 +58,10 @@ only when a started record carries no `call_id` does the join fall back to (tool
 name, ordinal), which finds how many calls went ungated but not always which.
 The matching `tool_batch.effect.terminal` is not read. Only the join fields
 (`schema_version`, `record_type`, `payload_type`, `recorded_at`, `payload.kind`,
-`payload.record.{kind,call_id,tool_name}`) are decoded; a line's content is never
-copied or logged.
+`payload.record.{kind,call_id,tool_name}`) are decoded; the reconciler never
+copies or logs a line's content. (A separate reader, `sessioncontent.go`, takes
+the reply text, reasoning summaries and tool calls under `content_capture`; see
+[The telemetry lane](#the-telemetry-lane).)
 
 The reader stops and doctor says `unverified` only when the format looks
 changed: an envelope with no `payload_type`, a `schema_version` other than 1, a
@@ -95,9 +98,11 @@ line too long to read is skipped rather than ending the read.
 | `SessionEnd` | `SessionEnded`, delivered by the detached flusher (Muse kills this hook as the session exits) | no | none |
 | `PreLLMCall` | `ModelCallRequested` (started, evaluated) | yes | `{"decision":"block","reason":...}` |
 | `PostLLMCall` | `ModelCallFinished` (completed, metadata only) | no | none |
-| `Stop` | nothing reported: no usage is taken from a hook payload, and no completion is fabricated. Runs the session-log reconciler (see below) | no | none |
+| `Stop` | `TurnStarted` + `TurnCompleted` (an `llm_completion` pair under `<session>:turn:<n>`): the reply is the payload's `last_assistant_message`, the thinking is the turn's reasoning summaries read from `session.jsonl`; both under `content_capture`, redacted; no tokens (they ride the telemetry lane). Emitted only into an open run and only when there is a reply or thinking. Also runs the session-log reconciler (see below) | no | none |
 | `SubagentStop` | nothing in the parent's session (a subagent ending ends no run); `SessionEnded` of the child's own session only when unlinked. Delivered by the detached flusher | no | none |
-| `PreCompact`, `PostCompact`, `Notification`, `PostToolBatch`, `Interrupt` | nothing: no contract type. Never installed; one that runs anyway is a no-op | - | - |
+| `PreCompact`, `PostCompact` | `SignalReceived` (`pre_compact` / `post_compact`), `trigger` as Muse says it (`soft` or `hard`). Unpaired: automatic compaction only (a manual `/compact` fires neither), a failed compaction leaves a lone PreCompact, and Muse also fires PreCompact for internal sessions. A signal never opens a run: one for a session with no run is dropped and traced as `muse.signal` / `unknown_session` | no | none |
+| `Notification` | `SignalReceived` (`notification`), `notification_type`; the title and message are content-gated | no | none |
+| `PostToolBatch`, `Interrupt` | nothing: no contract type. `PostToolBatch` is registered by Muse 1.4.2 but never fires; `Interrupt` is refused unless async. Never installed; one that runs anyway is a no-op | - | - |
 
 ## The model-call gate
 
@@ -113,7 +118,10 @@ record:
 - it carries no usage, no turn index and no lane request id, so core cannot read
   it as an `llm_completion`;
 - the started row carries `provider`, `message_count`, `tool_count`, `tool_names`
-  and, under `content_capture` and after redaction, `message_previews`;
+  and, under `content_capture` and after redaction, the whole request as
+  `activity_input.content` (`{"messages":[...],"tools":[...]}`, schema 1.11,
+  tail-kept at 64 KiB; `requestbody.go`). The producer hands it to the client as
+  `span.request_body`, and `message_previews` is retired;
 - `PostLLMCall` closes it with `status`, `finish_reason`, `response_id`,
   `error_class` (a class token, never error text), `tool_call_count`, `model`;
 - a denied call, or one that never reports finished, leaves the **started row
@@ -145,8 +153,26 @@ sent):
   `gen_ai_response_id`, `gen_ai_provider_name`, `gen_ai_usage_input_tokens`,
   `gen_ai_usage_output_tokens`, `tokens_cached`, `duration_ms` and
   `message_id`. The input count **includes** the cached tokens. No prompt, tool
-  input, file body or reply is exported; `session_start`, `turn_*`, `tool_call`,
+  input, file body or reply is exported by Muse (the bodies are joined on
+  locally, below); `session_start`, `turn_*`, `tool_call`,
   `hook_run`, `subagent_*` and the spans are received and skipped.
+- **Bodies** (`cmd/openbox/telemetrymusecontent.go`, under `content_capture`
+  and only when the unit carries `--muse-sessions <sessions root>`): the
+  emitter holds a record's pair for up to two seconds while an enricher joins
+  the **request**, which the `PostLLMCall` hook stashed (redacted, keyed on the
+  response id; `requeststash.go`, `0600`, ten-minute TTL swept on write, and
+  deliberately not cleared at `SessionEnd`, since the last call's export
+  arrives after it), and the **response** (reply text, reasoning summaries,
+  tool calls) read from the session journal by `sessioncontent.go`, whose
+  reader resumes rather than rescans and stops, `unverified`, if the format
+  drifts. Each half is independent; a missing one ships without it and files a
+  content-free `muse.content` finding in the local trace with the reason
+  (`stash_absent`, `log_absent`, `timeout`, `unverified`, `shutdown`, plus
+  `enrich_saturated` and `enrich_panic` from the emitter). A call with an echo
+  or empty response id is never joined. The `Stop` hook reports the same reply
+  as its own turn, so the reply is on two rows by design (parity with Claude
+  Code). Implemented and test-proven against fixtures; join rates against a
+  live Muse are not yet measured.
 - **Mapping** (`internal/cli/telemetryemit`, `MuseFieldMap`): one
   `llm_completion` Started/Completed pair per `model_call`, `:otel:` activity id
   from the response id, usage on the close. There is no fallback id: Muse's
@@ -195,7 +221,13 @@ sent):
   address the election and the port probe use, and a unit without
   `--muse-settings` (or reading another settings file) is reported as recording
   nothing, because the daemon builds a Muse emitter only when that flag is
-  present. Muse's own posture `telemetry=false` is reported too.
+  present. Muse's own posture `telemetry=false` is reported too. Three
+  content rows follow it: `content source` (warns when the unit carries no
+  `--muse-sessions`, so the daemon cannot read the journal; the remedy is
+  `openbox init --provider muse`), `content format` (unverified after a
+  `muse.content` `unverified` finding in the last 7 days, or on an untested
+  Muse) and `content rate` (the count of misses by reason; a clean join leaves
+  no record, so it is a count of misses, not a rate).
 
 ## Output contract
 
@@ -264,9 +296,9 @@ govern nothing.
 
 - **Which events.** One catch-all handler (no matcher, so MCP tools are covered)
   per event the adapter produces something for, derived from the adapter's own
-  table (`HookName.Observed`): thirteen today (`Stop` triggers the session-log
-  reconciliation and `SubagentStop` hands a subagent's backlog to the flusher); the five events
-  with no contract type never get one. `ExpectedHandlers()` is what doctor counts
+  table (`HookName.Observed`): sixteen today (`Stop` reports the turn and triggers the session-log
+  reconciliation, and `SubagentStop` hands a subagent's backlog to the flusher); `PostToolBatch`
+  (never fires) and `Interrupt` (refused unless async) never get one. `ExpectedHandlers()` is what doctor counts
   against.
 - **Shape.** `{"type":"command","command":"\"<engine>\" hook muse [--home \"<dir>\"] <Event>","timeout":N}`,
   with `N` 30 on a gated event and 5 elsewhere (`SessionEnd` included), and on a gated
@@ -370,8 +402,12 @@ local trace after the probe began; `muse config status` printing
 needing `--plane <defaults|policy> --file <path>`, so doctor does not call it);
 a Muse tool call's shell carrying `MUSE_TOOL_USE_ID`, `MUSE_RELEASE_INFO` and
 `CLAUDE_CODE_TOOL_USE_ID` but not `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT` or any
-session id, so a Muse commit keeps its trailer and emits no CommitCreated
-(`cmd/openbox/attest.go`); Muse refusing a synchronous `Interrupt` handler (it
+session id. A Muse commit keeps its trailer and emits CommitCreated through the
+tool-use index: `PreToolUse` writes `MUSE_TOOL_USE_ID` -> session
+(`tooluseindex.go`, ids only, 24 hours), and the git hook resolves a commit's
+session by looking the marker up (`cmd/openbox/attest.go`,
+`internal/adapters/common/git/session.go`); the marker reaching the tool's
+shell is confirmed on 1.4.2; Muse refusing a synchronous `Interrupt` handler (it
 must be `async: true`, which is one more reason the installer registers none); an
 empty stdin on a gated event (seen on `PreLLMCall` during `muse exec` teardown)
 being refused, never latched. Also observed: the four refusal shapes (the
