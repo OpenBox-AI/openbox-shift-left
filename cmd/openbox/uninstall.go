@@ -44,7 +44,10 @@ type uninstallState struct {
 	failed     bool
 	hookFailed []hookFailure // surfaces this run could not clean
 	laneFailed bool          // a lane whose deactivate conflicted: still routed, still running
-	kept       []string      // org-owned files, reported and left
+	// telemetryKept: the telemetry daemon was left running on purpose because
+	// Muse's pointer at it could not be restored.
+	telemetryKept bool
+	kept          []string // org-owned files, reported and left
 	// Paths this run tried to delete and could not, for a reason other than
 	// their already being gone. Without it the identity-directory sweep finds
 	// them still sitting there and reports them as files OpenBox never wrote,
@@ -735,9 +738,30 @@ func (a *app) restoreProviderSettings(st *uninstallState, home string, s hookSur
 // whoever changed it, and a conflicted lane is reported rather than overwritten
 // — it is also still routed and still running, which the report has to say.
 func (a *app) removeLanes(st *uninstallState, home string) {
+	// The telemetry unit is one daemon shared by Claude Code (an activation
+	// lane), Codex ([otel] block) and Muse (a settings.json pointer). Muse's
+	// pointer is reversed before the unit goes, as install wrote it after the
+	// unit; while that restore is owed, Muse still exports to the unit's port
+	// and removing the unit would leave it pointed at nothing. Claude Code's
+	// lane is deactivated either way, since its keys are not what is owed.
+	keepTelemetry := st.museTelemetryOwed(home)
+	purge := true
+	if keepTelemetry {
+		fmt.Fprintf(a.stdout, "\nKeeping the telemetry daemon\n")
+		if err := a.reportDeactivation("telemetry", home, claudeSettingsPath(home), activation.LaneTelemetry, false); err != nil {
+			fmt.Fprintf(a.stderr, "warning: telemetry removal did not complete: %v\n", err)
+			st.failed = true
+			if isActivationConflict(err) {
+				st.laneFailed = true
+			}
+			// The activation record is what a retry restores that lane from.
+			purge = false
+		}
+		st.telemetryKept = true
+	}
 	res := a.runRemovals(home, removalRequest{
-		gateway: true, telemetry: true, transport: true,
-		purge: true, force: false, uninstall: true,
+		gateway: true, telemetry: !keepTelemetry, transport: true,
+		purge: purge, force: false, uninstall: true,
 	})
 	if !res.ok() {
 		st.failed = true
@@ -746,7 +770,15 @@ func (a *app) removeLanes(st *uninstallState, home string) {
 	// could not be deleted is residue, not an interception, and saying "still
 	// routed" about it would send an operator hunting for traffic that is not
 	// flowing.
-	st.laneFailed = res.stillRouted
+	st.laneFailed = st.laneFailed || res.stillRouted
+}
+
+// museTelemetryOwed reports whether Muse's telemetry pointer is still in place
+// because its removal or restore did not complete this run. A drifted value is
+// not owed: it was changed by its owner and no longer points at the lane.
+func (st *uninstallState) museTelemetryOwed(home string) bool {
+	_, ok := st.keepPriorRecords[providers.MusePriorSettingsPath(home)]
+	return ok
 }
 
 func (a *app) removeArtifacts(st *uninstallState, inv uninstallInventory) {
@@ -959,7 +991,7 @@ func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 	a.row("", "engine is not reachable and exits 0, so commits keep working. Removing")
 	a.row("", "it is optional hygiene.")
 
-	if len(st.hookFailed) == 0 && !st.laneFailed {
+	if len(st.hookFailed) == 0 && !st.laneFailed && !st.telemetryKept {
 		return
 	}
 	fmt.Fprintf(a.stdout, "\nCONSEQUENCES; this machine is NOT clean\n")
@@ -991,6 +1023,12 @@ func (a *app) printUninstallReport(st *uninstallState, inv uninstallInventory) {
 		fmt.Fprintf(a.stdout, "    settings edits are picked up by the tool's own file watcher, so there is no\n")
 		fmt.Fprintf(a.stdout, "    restart to wait for. With the credentials now gone it fails open on every tool\n")
 		fmt.Fprintf(a.stdout, "    call, logging that it has no identity. Remove the entry by hand.\n")
+	}
+	if st.telemetryKept {
+		fmt.Fprintf(a.stdout, "  the telemetry daemon was kept running: Muse's telemetry pointer could not be\n")
+		fmt.Fprintf(a.stdout, "    restored, so it still exports to that daemon and removing it would leave Muse\n")
+		fmt.Fprintf(a.stdout, "    pointed at a dead port. Fix what the warning above names, then run\n")
+		fmt.Fprintf(a.stdout, "    `openbox uninstall` again to restore Muse and remove the daemon.\n")
 	}
 	if st.laneFailed {
 		fmt.Fprintf(a.stdout, "  a lane did not come down: its env key changed after OpenBox set it, so the value\n")

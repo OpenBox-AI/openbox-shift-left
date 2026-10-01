@@ -473,3 +473,54 @@ func TestALaterFailureNeverRemovesAUnitThatWasAlreadyInstalled(t *testing.T) {
 		t.Error("the unit is gone from the supervisor")
 	}
 }
+
+// TestMuseUninstallKeepsTheTelemetryUnitWhileMusePointsAtIt: uninstall reverses
+// install ordering, so the pointer comes out before the unit. When Muse's
+// settings cannot be edited the pointer is still there, and taking the daemon
+// down would leave Muse exporting to a dead port.
+func TestMuseUninstallKeepsTheTelemetryUnitWhileMusePointsAtIt(t *testing.T) {
+	skipUnlessSupervised(t)
+	isolateHome(t)
+	seedCredentials(t, "muse")
+	withMuseRunner(t, museVersion("1.4.0"))
+	path := providers.MuseSettingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(museOwnSettings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, _, errb := testApp(nil)
+	if code := a.run([]string{"init", "--provider", "muse"}); code != exitOK {
+		t.Fatalf("init exit = %d; stderr=%q", code, errb.String())
+	}
+	home := os.Getenv("HOME")
+	unit := laneservice.Telemetry("", "", false).UnitPath(runtime.GOOS, home)
+	if !fileExists(unit) {
+		t.Fatalf("init left no telemetry unit at %s", unit)
+	}
+	installed, _ := os.ReadFile(path)
+	future := strings.Replace(string(installed), `"schema_version": 1`, `"schema_version": 2`, 1)
+	if future == string(installed) {
+		t.Fatalf("schema_version was not where the test expected:\n%s", installed)
+	}
+	if err := os.WriteFile(path, []byte(future), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	u, _, _ := testApp(nil)
+	var combined strings.Builder
+	u.stdout, u.stderr = &combined, &combined
+	if code := u.runUninstall(nil); code == exitOK {
+		t.Fatalf("uninstall reported success with Muse still pointed at the lane:\n%s", combined.String())
+	}
+	if !fileExists(unit) {
+		t.Errorf("the telemetry unit was removed while Muse still points at it:\n%s", combined.String())
+	}
+	if !strings.Contains(combined.String(), "telemetry daemon was kept") {
+		t.Errorf("the report does not say the daemon was kept:\n%s", combined.String())
+	}
+	if got, _ := os.ReadFile(path); string(got) != future {
+		t.Errorf("settings.json was edited despite the refusal:\n%s", got)
+	}
+}
