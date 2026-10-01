@@ -158,3 +158,23 @@ func TestPreToolUseAnswerIsUnchangedWhenTheLedgerCannotBeWritten(t *testing.T) {
 		t.Errorf("the ledger failure was not logged: %q", stderr)
 	}
 }
+
+// An intent journaled an instant before Stop has no gate record only because
+// its hook process is still starting: Stop leaves it, SessionEnd (the last
+// pass) counts it.
+func TestStopLeavesAnIntentJournaledJustBeforeIt(t *testing.T) {
+	setHookEnv(t)
+	root := pointSessionLogs(t)
+	const sid = "s-grace"
+	at := time.Now().Add(-200 * time.Millisecond).UTC().Format(time.RFC3339Nano)
+	writeLog(t, todaysLog(root, sid), intentLine(1, "Write", "toolu-fresh", at, `{}`))
+
+	runHook(t, "Stop", fixture(t, "stop", sid))
+	if n := len(traceRecords(t, trace.StageEvidenceGap)); n != 0 {
+		t.Fatalf("Stop reported %d gaps for an intent the hook may still be answering", n)
+	}
+	runHook(t, "SessionEnd", fixture(t, "session-end", sid))
+	if n := len(traceRecords(t, trace.StageEvidenceGap)); n != 1 {
+		t.Fatalf("SessionEnd reported %d gaps, want the one still ungated", n)
+	}
+}

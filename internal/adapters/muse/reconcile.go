@@ -40,6 +40,16 @@ const (
 	stopReconcileBudget       = 1500 * time.Millisecond
 	sessionEndReconcileBudget = 500 * time.Millisecond
 
+	// intentGrace is how long an intent is left alone after it was journaled
+	// before a Stop counts it as ungated: Muse journals the intent, then starts
+	// the PreToolUse hook as a process, and only that hook writes the gate
+	// ledger, so a call journaled an instant ago (a parallel or background
+	// subagent call above all) has no record yet and is not a gap. SessionEnd
+	// gets no grace: no tool batch is still waiting on a hook once the session
+	// is over, and it is the last pass, so an intent it left would never be
+	// looked at again.
+	intentGrace = 2 * time.Second
+
 	reasonNoGateRecord = "no_gate_record"
 
 	// evidenceWindow is how far back doctor counts findings.
@@ -506,14 +516,24 @@ func SummarizeEvidence(traceDir string, now time.Time) (EvidenceSummary, error) 
 	return sum, nil
 }
 
+// reconcileCutoff is the instant before which a pass reconciles intents: the
+// hook's own instant less the grace, except on the session's last pass.
+func reconcileCutoff(hook HookName, now time.Time) time.Time {
+	if hook == HookSessionEnd {
+		return now
+	}
+	return now.Add(-intentGrace)
+}
+
 // reconcileOnHook runs one pass for a Stop or SessionEnd hook: the cutoff is
-// the hook's own instant, the deadline the hook's start plus its budget.
+// the hook's own instant (see reconcileCutoff), the deadline the hook's start
+// plus its budget.
 func reconcileOnHook(hook HookName, sessionID, runID string, hookStart, now time.Time, logger *log.Logger) {
 	budget := stopReconcileBudget
 	if hook == HookSessionEnd {
 		budget = sessionEndReconcileBudget
 	}
-	res := Reconciler{LogRoot: sessionLogRoot(), SpoolDir: DefaultSpoolDir()}.Run(sessionID, runID, now, hookStart.Add(budget))
+	res := Reconciler{LogRoot: sessionLogRoot(), SpoolDir: DefaultSpoolDir()}.Run(sessionID, runID, reconcileCutoff(hook, now), hookStart.Add(budget))
 	if res.Errors > 0 || res.Disabled || res.Gaps > 0 {
 		// Counts only: a line of the journal is never logged.
 		logger.Printf("session log reconcile for %s: %d intent(s), %d ungated, %d error(s), disabled=%v",
