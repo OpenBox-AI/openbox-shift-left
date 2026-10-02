@@ -608,8 +608,7 @@ Each governed tool carries its OWN agent identity, in its own
 ~/.openbox/<tool>/ store, so run 'init' once for each tool you use. A tool that
 already has an agent is reused offline, with no control-plane call at all.
 
-Two postures stay per-machine, as environment variables rather than flags:
-  OPENBOX_ENFORCE=false            observe only, for this run; nothing persists
+The one posture that remains per-machine is an environment variable, not a flag:
   OPENBOX_INSTALL_GIT_HOOK=false   do not touch any repo's .git/hooks
 
 Environment (needed at 'init' time, to register a tool's agent; 'auth' can

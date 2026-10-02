@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
 	"github.com/openbox-ai/openbox-shift-left/internal/provider"
 )
 
@@ -16,6 +17,11 @@ func TestUsageNamesEverySupportedProvider(t *testing.T) {
 	want := "openbox init --provider <" + strings.Join(provider.Supported(), "|") + ">"
 	if n := strings.Count(got, want); n != 2 {
 		t.Fatalf("usage names %q %d times, want 2 (setup and usage blocks):\n%s", want, n, got)
+	}
+	// Enforcement is always on (devconfig.ResolveEnforce), so offering
+	// OPENBOX_ENFORCE=false as an "observe only" switch would advertise a no-op.
+	if strings.Contains(got, devconfig.EnvEnforce+"=") {
+		t.Fatalf("usage still offers %s, which is no longer honoured:\n%s", devconfig.EnvEnforce, got)
 	}
 	for _, line := range strings.Split(got, "\n") {
 		if strings.Contains(line, "%!") {
