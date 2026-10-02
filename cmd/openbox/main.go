@@ -576,19 +576,24 @@ func discardLegacySpool(tool string) (int, error) {
 	return hookflow.Spool{Dir: dir}.DiscardAll("queued under the previous identity")
 }
 
+// usage derives the provider list from provider.Supported(), as auth's "Next:"
+// hint does, so a new tool cannot be left out of the help text.
 func (a *app) usage() {
-	fmt.Fprint(a.stderr, `openbox; OpenBox developer-runtime governance CLI
+	initCmd := "openbox init --provider <" + strings.Join(provider.Supported(), "|") + ">"
+	w := len(initCmd)
+	fmt.Fprintf(a.stderr, `openbox; OpenBox developer-runtime governance CLI
 
 Setup is two commands, in this order:
-  openbox auth                                 connect your organization
-  openbox init --provider <claude-code|codex>  register that tool's agent and
-                                               install hooks, lanes and posture
-                                               (run it once per tool)
+  %-*s  connect your organization
+  %-*s  register that tool's agent and
+  %-*s  install hooks, lanes and posture
+  %-*s  (run it once per tool)
 
 Usage:
   openbox auth
-  openbox init --provider <claude-code|codex>
-  openbox doctor
+  %s
+`, w, "openbox auth", w, initCmd, w, "", w, "", initCmd)
+	fmt.Fprint(a.stderr, `  openbox doctor
   openbox uninstall
   openbox trace <session-id|run-id> | --list | --against-core --agent <id>
   openbox version
