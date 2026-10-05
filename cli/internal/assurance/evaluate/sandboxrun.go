@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -24,18 +23,13 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	if dependencies.Sandbox == nil {
 		return fail("not_runnable", "project evaluate: no sandbox service is configured")
 	}
-	document := buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, state.relay.Port(), state.effectPort(), state.modelPort())
+	document := buildSandboxPolicy(state.prepared.argv[0], state.prepared.connector.openBoxProvider, state.relay.Port())
 	digest := sha256.Sum256(document)
 	identity := sandboxclient.PolicyIdentity{
 		ID:      sandboxPolicyIdentity,
 		Version: 1,
 		SHA256:  hex.EncodeToString(digest[:]),
 	}
-	state.policy = document
-	if err := state.workspace.WritePrivateFile("policy.yaml", document); err != nil {
-		return &classifiedError{class: "output_failure", err: err}
-	}
-	state.policyWritten = true
 
 	runID, err := sandboxclient.NewRunID()
 	if err != nil {
@@ -45,7 +39,7 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 
 	// OPENBOX_API_KEY is held out because the policy binds it: the proxy
 	// resolves it, so the evaluator sends it in no request. Everything else is
-	// ordinary guest environment, disclosed as ungoverned in the pack.
+	// ordinary guest environment, warned about by name before the run starts.
 	environment := map[string]string{}
 	for name, value := range state.prepared.environment {
 		if name == "OPENBOX_API_KEY" {
@@ -54,7 +48,6 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 		environment[name] = value
 	}
 
-	state.phase(dependencies, "sandbox_creating")
 	state.sandboxMayExist = true
 	begunID, token, err := dependencies.Sandbox.Begin(sandboxclient.ProjectRunSpec{
 		RunID:    runID,
@@ -80,16 +73,12 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	if err != nil {
 		return &classifiedError{class: "readiness_failure", err: err}
 	}
-	state.phase(dependencies, "ready")
 
 	// Begin already started it; this waits rather than launching.
 	result, err := dependencies.Sandbox.WaitCompleted(begunID, readyToken, sandboxExecDeadline)
 	if err != nil {
 		return &classifiedError{class: "command_failure", err: err}
 	}
-	state.sandboxResult = result
-	state.record.CommandExitCode = intPointer(result.ExitCode)
-	state.phase(dependencies, "command_exited")
 	if ctx.Err() != nil {
 		return &classifiedError{class: contextClassification(ctx.Err()), err: errors.New("project evaluate: interrupted while the image command was running")}
 	}
@@ -99,48 +88,18 @@ func (state *runState) runThroughSandbox(ctx context.Context, dependencies Depen
 	return nil
 }
 
-func (state *runState) effectPort() int {
-	if state.effectRelay == nil {
-		return 0
-	}
-	return state.effectRelay.Port()
-}
-
-func (state *runState) modelPort() int {
-	if state.modelRelay == nil {
-		return 0
-	}
-	return state.modelRelay.Port()
-}
-
 // deleteSandbox asks for deletion and then requires terminal absence: an
-// accepted delete is not proof, and the cleanup record claims absence.
+// accepted delete is not proof, and a leaked sandbox must fail the run.
 func (state *runState) deleteSandbox(dependencies Dependencies) error {
 	if dependencies.Sandbox == nil || state.sandboxRunID == "" {
 		return nil
 	}
-	state.record.Cleanup.SandboxDeleteAttempted = true
 	deleteErr := dependencies.Sandbox.Delete(state.sandboxRunID, sandboxDeleteTimeout)
-	absent := dependencies.Sandbox.WaitDeleted(state.sandboxRunID, sandboxDeleteTimeout) == nil
-	state.record.Cleanup.SandboxAbsent = absent
-	if absent {
+	if dependencies.Sandbox.WaitDeleted(state.sandboxRunID, sandboxDeleteTimeout) == nil {
 		return nil
 	}
 	if deleteErr != nil {
 		return fmt.Errorf("sandbox delete failed and absence was not proven: %w", deleteErr)
 	}
 	return errors.New("sandbox remains after cleanup")
-}
-
-// sandboxLogs renders the supervisor's records. Kept as records rather than
-// flattened into a stdout stream, which would claim a fidelity it lacks.
-func (state *runState) sandboxLogs() []byte {
-	if state.sandboxResult == nil || len(state.sandboxResult.Logs) == 0 {
-		return nil
-	}
-	encoded, err := json.Marshal(state.sandboxResult.Logs)
-	if err != nil {
-		return nil
-	}
-	return encoded
 }

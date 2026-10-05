@@ -230,10 +230,10 @@ func TestConfigManualOnlyExitsTwo(t *testing.T) {
 	if !strings.Contains(errb.String(), "note:") {
 		t.Errorf("expected a note on partial success, got %q", errb.String())
 	}
-	for _, want := range []string{"manual_required", "cli/internal/securityskill/bundles/openbox-security-evaluation/1.0.3", filepath.Join(".agents", "skills", "openbox-security-evaluation")} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("Cursor manual skill output missing %q: %q", want, out.String())
-		}
+	// Evaluation moved to the backend (ADR-0023): init no longer places an
+	// analyst skill, not even by manual instruction.
+	if strings.Contains(strings.ToLower(out.String()), "security skill") {
+		t.Errorf("init mentions a security skill: %q", out.String())
 	}
 	// The credentials seeded above are untouched: `init` reads them to verify the
 	// precondition and never rewrites them.
@@ -280,12 +280,11 @@ func TestClaudeCodeInstallsForRealExitsZero(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".claude", "plugins", "openbox-observe", ".claude-plugin", "plugin.json")); err != nil {
 		t.Errorf("plugin bundle not materialized: %v", err)
 	}
-	skillRoot := filepath.Join(home, ".claude", "skills", "openbox-security-evaluation")
-	if _, err := os.Stat(filepath.Join(skillRoot, "SKILL.md")); err != nil {
-		t.Errorf("security skill not installed: %v", err)
+	if _, err := os.Lstat(filepath.Join(home, ".claude", "skills", "openbox-security-evaluation")); !os.IsNotExist(err) {
+		t.Errorf("init installed an analyst skill (err=%v); evaluation is backend-owned", err)
 	}
-	if !strings.Contains(out.String(), "action=installed version=1.0.3 digest=sha256:") {
-		t.Errorf("security skill result missing from output: %q", out.String())
+	if strings.Contains(strings.ToLower(out.String()), "security skill") {
+		t.Errorf("init mentions a security skill: %q", out.String())
 	}
 	// STORY-SL4-WIRE-2 AC3, proven through the real `init` front door: the
 	// running engine is placed at bin/openbox (providers.Lookup → os.Executable()
@@ -1274,11 +1273,11 @@ func TestCodexInstallsForRealExitsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hooks.json not written under CODEX_HOME: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(codexHome, "skills", "openbox-security-evaluation", "bundle.json")); err != nil {
-		t.Errorf("Codex security skill not installed under CODEX_HOME: %v", err)
+	if _, err := os.Lstat(filepath.Join(codexHome, "skills", "openbox-security-evaluation")); !os.IsNotExist(err) {
+		t.Errorf("init installed an analyst skill under CODEX_HOME (err=%v); evaluation is backend-owned", err)
 	}
-	if !strings.Contains(out.String(), "action=installed version=1.0.3 digest=sha256:") {
-		t.Errorf("security skill result missing from output: %q", out.String())
+	if strings.Contains(strings.ToLower(out.String()), "security skill") {
+		t.Errorf("init mentions a security skill: %q", out.String())
 	}
 	// The five wired events, invoking THIS engine (os.Executable() → the test
 	// binary path) as `hook codex <event>`.
@@ -1321,7 +1320,7 @@ func TestCodexDryRunWritesNothing(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("dry-run exit = %d", code)
 	}
-	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex", "Security skill DRY RUN", "action=installed", "version=1.0.3", "digest=sha256:"} {
+	for _, want := range []string{"OpenBox Codex hooks", "/hooks", "hook codex"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("dry-run plan missing %q:\n%s", want, out.String())
 		}

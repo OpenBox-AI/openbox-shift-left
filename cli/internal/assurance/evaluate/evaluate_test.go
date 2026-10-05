@@ -5,28 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/runfs"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/sandboxclient"
-)
-
-// The demo project's model, as a TEST fixture. It is not a lane constant any
-// more: which model serves the gateway's inference.local route is declared per
-// project in `.env.sandbox`, so pinning one here would re-create the coupling
-// that made every evaluable project the same project.
-const (
-	testModel       = "granite4.1:3b"
-	testModelDigest = "sha256:6fd349357287c7ffc9e38189a93b48ea175d24fc566b38f09cfc564fb7f303eb"
 )
 
 func TestParseEnvironment(t *testing.T) {
@@ -91,7 +84,7 @@ func TestEnvironmentFileRejectsSymlink(t *testing.T) {
 	}
 }
 
-func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
+func TestEffectiveEnvironmentPrecedence(t *testing.T) {
 	declared, err := parseEnvironment([]byte(
 		"A=file\nB=file\n" +
 			"OPENAI_MODEL=granite4.1:3b\n" +
@@ -112,10 +105,6 @@ func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
 	if values["OPENAI_API_KEY"] != "sk-live" {
 		t.Fatalf("declared secret did not reach the guest environment: %v", values["OPENAI_API_KEY"])
 	}
-	wantNames := []string{"A", "B", "OPENAI_API_KEY", "OPENAI_MODEL", "OPENBOX_AGENT_ID", "OPENBOX_API_KEY", "OPENBOX_EVALUATION_ID", "PATH"}
-	if got := environmentInventory(values); !reflect.DeepEqual(got, wantNames) {
-		t.Fatalf("names=%v want=%v", got, wantNames)
-	}
 
 	// A credential baked into the IMAGE is still refused. The run cannot
 	// disclose what it never saw declared, and a layer outlives the run.
@@ -132,9 +121,9 @@ func TestEffectiveEnvironmentPrecedenceAndInventory(t *testing.T) {
 	}
 }
 
-// Every credential the workload gets in plaintext is named in the pack. The
+// Every credential the workload gets in plaintext is named in a warning. The
 // bound one is not, because it is not in plaintext.
-func TestUngovernedCredentialsAreDisclosedByName(t *testing.T) {
+func TestPlaintextCredentialsAreWarnedAboutByName(t *testing.T) {
 	declared, err := parseEnvironment([]byte(
 		"OPENAI_MODEL=granite4.1:3b\n" +
 			"PAYMENTS_API_KEY=sk-live-do-not-log\n" +
@@ -142,36 +131,34 @@ func TestUngovernedCredentialsAreDisclosedByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	limitations := ungovernedCredentialLimitations(declared)
-	if len(limitations) != 2 {
-		t.Fatalf("limitations=%v", limitations)
+	warnings := plaintextCredentialWarnings(declared)
+	if len(warnings) != 2 {
+		t.Fatalf("warnings=%v", warnings)
 	}
-	joined := strings.Join(limitations, "\n")
-	// Declared, and undeclared-but-credential-shaped, are both disclosed.
+	joined := strings.Join(warnings, "\n")
 	for _, name := range []string{"PAYMENTS_API_KEY", "SERVICE_TOKEN"} {
 		if !strings.Contains(joined, name) {
-			t.Fatalf("%s was not disclosed: %v", name, limitations)
+			t.Fatalf("%s was not named: %v", name, warnings)
 		}
 	}
 	// A setting is not a credential, and values never appear.
 	if strings.Contains(joined, "OPENAI_MODEL") || strings.Contains(joined, "sk-live") || strings.Contains(joined, "also-a-secret") {
-		t.Fatalf("disclosure is wrong: %v", limitations)
+		t.Fatalf("warning is wrong: %v", warnings)
 	}
-	if got := ungovernedCredentialLimitations(newProjectEnvironment()); len(got) != 0 {
-		t.Fatalf("a project with no credentials disclosed %v", got)
+	if got := plaintextCredentialWarnings(newProjectEnvironment()); len(got) != 0 {
+		t.Fatalf("a project with no credentials warned %v", got)
 	}
 }
 
 func TestProjectEnvironmentIsAnOrdinaryDotenvFile(t *testing.T) {
 	// No prefixes, no declaration syntax. This is what a developer gets by
-	// copying their own .env and adding the two runner directives.
+	// copying their own .env.
 	declared, err := parseEnvironment([]byte(
 		"NODE_ENV=production\n" +
 			"OPENAI_BASE_URL=https://inference.local/v1\n" +
 			"OPENAI_MODEL=granite4.1:3b\n" +
 			"OPENAI_API_KEY=unused\n" +
-			"PAYMENTS_API_KEY=sk-live-do-not-log\n" +
-			modelRouteSetting + "=" + ModelRouteGateway + "\n"))
+			"PAYMENTS_API_KEY=sk-live-do-not-log\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,14 +178,6 @@ func TestProjectEnvironmentIsAnOrdinaryDotenvFile(t *testing.T) {
 	if got := declared.secretNames(); !reflect.DeepEqual(got, []string{"OPENAI_API_KEY", "PAYMENTS_API_KEY"}) {
 		t.Fatalf("secret names=%v", got)
 	}
-	// A runner directive is consumed, not passed to the guest.
-	if declared.modelRoute != ModelRouteGateway {
-		t.Fatalf("model route=%q", declared.modelRoute)
-	}
-	if declared.public[modelRouteSetting] != "" || declared.secret[modelRouteSetting] != "" {
-		t.Fatal("a runner directive leaked into the guest environment")
-	}
-
 	// Nothing is refused for its name, whatever its shape.
 	for _, line := range []string{"SERVICE_TOKEN=value\n", "AWS_SECRET_ACCESS_KEY=abc\n", "DB_PASSWORD=hunter2\n"} {
 		if _, err := parseEnvironment([]byte(line)); err != nil {
@@ -208,14 +187,6 @@ func TestProjectEnvironmentIsAnOrdinaryDotenvFile(t *testing.T) {
 	// One name twice is still a contradiction rather than a precedence.
 	if _, err := parseEnvironment([]byte("TOKEN=a\nTOKEN=b\n")); err == nil {
 		t.Fatal("accepted a name declared twice")
-	}
-	for name, input := range map[string]string{
-		"unknown route": modelRouteSetting + "=somewhere\n",
-		"bad digest":    modelDigestSetting + "=not-a-digest\n",
-	} {
-		if _, err := parseEnvironment([]byte(input)); err == nil {
-			t.Fatalf("%s was accepted", name)
-		}
 	}
 }
 
@@ -252,8 +223,8 @@ func TestValidateImageUsesStandardOCICommand(t *testing.T) {
 // The policy the sandbox service validates is YAML meeting its floor, not the
 // CLI path's JSON. These are the properties that decide what the image may do.
 func TestSandboxPolicyMeetsTheFloorAndBindsCredentialsByProvider(t *testing.T) {
-	first := buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153, 0)
-	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152, 49153, 0)) {
+	first := buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152)
+	if !bytes.Equal(first, buildSandboxPolicy("/usr/local/bin/node", DefaultOpenBoxProvider, 49152)) {
 		t.Fatal("policy bytes changed between identical renders")
 	}
 	text := string(first)
@@ -272,7 +243,11 @@ func TestSandboxPolicyMeetsTheFloorAndBindsCredentialsByProvider(t *testing.T) {
 		}
 	}
 	// A credential must never be renderable into the document.
-	for _, forbidden := range []string{"obx_", "OPENBOX_API_KEY", "access: full", "**"} {
+	// The Core relay is the only endpoint the guest may reach.
+	if strings.Count(text, "host: host.openshell.internal") != 1 || !strings.Contains(text, "openbox_core_relay") {
+		t.Fatalf("policy must carry exactly the Core relay endpoint:\n%s", text)
+	}
+	for _, forbidden := range []string{"obx_", "OPENBOX_API_KEY", "access: full", "**", "/effects/", "/v1/chat/completions"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("policy contains %q:\n%s", forbidden, text)
 		}
@@ -292,17 +267,13 @@ func TestRunIdentityFitsTheGatewayNameLimit(t *testing.T) {
 }
 
 func TestUnsupportedPlatformHasNoEffects(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "must-not-exist")
 	runner := &countingRunner{}
-	_, err := Run(context.Background(), Input{Image: "x", EnvFile: "missing", OpenBoxAgent: "x", Output: root}, Dependencies{
+	_, err := Run(context.Background(), Input{Image: "x", EnvFile: "missing", OpenBoxAgent: "x", ControlToken: "tok"}, Dependencies{
 		Commands: runner, Clock: realClock{}, Random: bytes.NewReader(make([]byte, 12)),
 		Listen: net.Listen, HTTP: http.DefaultClient, GOOS: "linux", GOARCH: "arm64",
 	})
 	if err == nil || runner.calls != 0 {
 		t.Fatalf("err=%v calls=%d", err, runner.calls)
-	}
-	if _, statErr := os.Lstat(root); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("output exists: %v", statErr)
 	}
 }
 
@@ -314,109 +285,222 @@ func TestPreparedSandboxNameFitsOpenShellLimit(t *testing.T) {
 	}
 }
 
-func TestExistingOutputFailsBeforeReadsOrCommands(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "existing")
-	if err := os.Mkdir(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	runner := &countingRunner{}
-	_, err := Run(context.Background(), Input{Image: "example:local", EnvFile: "missing", OpenBoxAgent: "c59e95b6-2a4e-44a7-8c43-b69bfa77667e", Output: root}, Dependencies{
-		Commands: runner, Clock: realClock{}, Random: bytes.NewReader(make([]byte, 12)),
-		Listen: net.Listen, HTTP: http.DefaultClient, GOOS: "darwin", GOARCH: "arm64",
-	})
-	if err == nil || !strings.Contains(err.Error(), "already exists") || runner.calls != 0 {
-		t.Fatalf("err=%v calls=%d", err, runner.calls)
-	}
+// runBackend is the HTTP boundary of the backend, and nothing else: it records
+// what the CLI asked and answers the two evaluation routes.
+type runBackend struct {
+	server  *httptest.Server
+	mu      sync.Mutex
+	posts   []string
+	keys    []string
+	gets    int
+	final   string
+	reason  string
+	report  string
+	postErr int
 }
 
-func TestRunSuccessRetainsIncompleteExecutionRecord(t *testing.T) {
-	parent := t.TempDir()
-	envFile := filepath.Join(parent, "evaluation.env")
-	if err := os.WriteFile(envFile, []byte("APP_ENV=security-test\n"+"OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+testModelDigest+"\n"), 0o600); err != nil {
+func newRunBackend(t *testing.T, final, reason string) *runBackend {
+	t.Helper()
+	backend := &runBackend{final: final, reason: reason, report: `null`}
+	backend.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backend.mu.Lock()
+		defer backend.mu.Unlock()
+		backend.keys = append(backend.keys, r.Header.Get("x-api-key"))
+		base := "/agent/" + testAgent + "/security-evaluations"
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == base:
+			raw, _ := io.ReadAll(r.Body)
+			backend.posts = append(backend.posts, string(raw))
+			if backend.postErr != 0 {
+				w.WriteHeader(backend.postErr)
+				fmt.Fprint(w, `{"code":"connector_required"}`)
+				return
+			}
+			fmt.Fprint(w, `{"status":200,"data":{"id":"se-1","status":"queued"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == base+"/se-1":
+			backend.gets++
+			if backend.gets < 2 {
+				fmt.Fprint(w, `{"status":200,"data":{"id":"se-1","status":"analyzing"}}`)
+				return
+			}
+			reason := "null"
+			if backend.reason != "" {
+				reason = fmt.Sprintf("%q", backend.reason)
+			}
+			fmt.Fprintf(w, `{"status":200,"data":{"id":"se-1","status":%q,"failure_reason":%s,"report":%s}}`, backend.final, reason, backend.report)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(backend.server.Close)
+	return backend
+}
+
+func (backend *runBackend) postCount() int {
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	return len(backend.posts)
+}
+
+type runFixture struct {
+	input   Input
+	deps    Dependencies
+	runner  *lifecycleRunner
+	sandbox *fakeSandbox
+	client  *lifecycleHTTP
+	stdout  *bytes.Buffer
+	stderr  *bytes.Buffer
+	dir     string
+}
+
+func newRunFixture(t *testing.T, backend *runBackend, envContent string) *runFixture {
+	t.Helper()
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "evaluation.env")
+	if err := os.WriteFile(envFile, []byte(envContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	output := filepath.Join(parent, "record")
-	runner := newLifecycleRunner()
-	client := &lifecycleHTTP{agentID: "c59e95b6-2a4e-44a7-8c43-b69bfa77667e"}
-	result, err := Run(context.Background(), Input{
-		Image: "example:local", EnvFile: envFile,
-		OpenBoxAgent: client.agentID, Output: output,
-	}, Dependencies{
-		Commands: runner, Clock: realClock{}, Random: bytes.NewReader(bytes.Repeat([]byte{0x2a}, 12)),
-		Listen: net.Listen, HTTP: client, GOOS: "darwin", GOARCH: "arm64",
-		Sandbox: newFakeSandbox(), SandboxTemplateFromConfig: "example.invalid/base@sha256:" + strings.Repeat("a", 64),
-	})
+	fixture := &runFixture{
+		runner: newLifecycleRunner(), sandbox: newFakeSandbox(), dir: dir,
+		client: &lifecycleHTTP{agentID: testAgent},
+		stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{},
+	}
+	fixture.input = Input{
+		Image: "example:local", EnvFile: envFile, OpenBoxAgent: testAgent,
+		BackendURL: backend.server.URL, ControlToken: testToken,
+		Stdout: fixture.stdout, Stderr: fixture.stderr,
+	}
+	fixture.deps = Dependencies{
+		Commands: fixture.runner, Clock: newFakeClock(), Random: bytes.NewReader(bytes.Repeat([]byte{0x2a}, 12)),
+		Listen: net.Listen, HTTP: fixture.client, BackendHTTP: backend.server.Client(),
+		GOOS: "darwin", GOARCH: "arm64",
+		Sandbox: fixture.sandbox, SandboxTemplateFromConfig: "example.invalid/base@sha256:" + strings.Repeat("a", 64),
+	}
+	return fixture
+}
+
+func (fixture *runFixture) run() (Result, error) {
+	return Run(context.Background(), fixture.input, fixture.deps)
+}
+
+func TestRunRequestsTheEvaluationAfterASuccessfulRun(t *testing.T) {
+	backend := newRunBackend(t, StatusComplete, "")
+	fixture := newRunFixture(t, backend, "APP_ENV=security-test\nPAYMENTS_API_KEY=sk-live-do-not-log\n")
+	result, err := fixture.run()
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	resolvedParent, _ := filepath.EvalSymlinks(filepath.Dir(output))
-	wantOutput := filepath.Join(resolvedParent, filepath.Base(output))
-	if !result.Succeeded || result.Output != wantOutput {
+	if !result.Succeeded || result.Evaluation == nil || result.Evaluation.ID != "se-1" {
 		t.Fatalf("result=%+v", result)
 	}
-	entries, err := os.ReadDir(output)
-	if err != nil {
-		t.Fatal(err)
+	// One POST, authenticated, naming the run the SDK tagged its events with.
+	runID := fixture.sandbox.environment["OPENBOX_EVALUATION_ID"]
+	if backend.postCount() != 1 || backend.posts[0] != `{"run_id":"`+runID+`"}` || runID == "" || runID != result.EvaluationID {
+		t.Fatalf("posts=%v run id=%q result=%q", backend.posts, runID, result.EvaluationID)
 	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		names = append(names, entry.Name())
-		info, _ := entry.Info()
-		if info.Mode().Perm() != 0o600 {
-			t.Fatalf("%s mode=%o", entry.Name(), info.Mode().Perm())
+	for _, key := range backend.keys {
+		if key != testToken {
+			t.Fatalf("key=%q", key)
 		}
 	}
-	// No process.stdout/stderr: the workload is the sandbox's main process, and
-	// a main process has no exec stream. Its output is the supervisor's records.
-	want := []string{".incomplete", "execution.json", "policy.yaml", "workload-records.json"}
-	if !reflect.DeepEqual(names, want) {
-		t.Fatalf("entries=%v want=%v", names, want)
+	// Without --wait the run ends at the request: one line, no polling.
+	if fixture.stdout.String() != "security evaluation requested: se-1 (agent "+testAgent+")\n" || backend.gets != 0 {
+		t.Fatalf("stdout=%q gets=%d", fixture.stdout.String(), backend.gets)
 	}
-	content, err := os.ReadFile(filepath.Join(output, "execution.json"))
-	if err != nil {
-		t.Fatal(err)
+	// The credential-shaped variable is a warning on stderr, by name only.
+	if !strings.Contains(fixture.stderr.String(), "warning: credential-shaped variable PAYMENTS_API_KEY") || strings.Contains(fixture.stderr.String(), "sk-live") {
+		t.Fatalf("stderr=%q", fixture.stderr.String())
 	}
-	if bytes.Contains(content, []byte("provider-real-secret")) {
-		t.Fatal("record leaked secret")
+	// Nothing is written beside the inputs: no record, no pack, no staging.
+	entries, err := os.ReadDir(fixture.dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "evaluation.env" {
+		t.Fatalf("entries=%v err=%v", entries, err)
 	}
-	var record executionRecord
-	if err := json.Unmarshal(content, &record); err != nil {
-		t.Fatal(err)
+	// Cleanup ran: the sandbox is gone and the registry objects were removed.
+	joined := fixture.runner.JoinedCommands()
+	for _, want := range []string{"container rm --force", "volume rm ", "image rm "} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("cleanup command %q missing:\n%s", want, joined)
+		}
 	}
-	if record.ExitClassification != "success" || record.Core.MatchingValidations != 1 || record.Core.GovernanceEvents != 1 || !record.Cleanup.SandboxAbsent {
-		t.Fatalf("record=%+v", record)
+	if !fixture.sandbox.deleted {
+		t.Fatal("sandbox was not deleted")
 	}
-	// Both references carry the same digest, and neither is the bare image ID
-	// the CLI path ran. They differ only in host: the reference handed to the
-	// sandbox uses the push address, because that is the name the local
-	// container engine can resolve, while the published one names the reader.
-	digest := record.Image.ManifestDigest
-	if record.Image.ImmutableReference != pushRegistryHost+"/ai.openbox/evaluation@"+digest ||
-		!strings.HasPrefix(record.Image.PublishedReference, "127.0.0.1:") ||
-		!strings.HasSuffix(record.Image.PublishedReference, "@"+digest) ||
-		record.Image.ImmutableReference == record.Image.LocalID {
-		t.Fatalf("image identity=%+v", record.Image)
-	}
-	if state, err := runfs.Inspect(output); err != nil || state != runfs.StateIncomplete {
-		t.Fatalf("state=%s err=%v", state, err)
-	}
-	if _, err := runfs.VerifyPack(output); err == nil {
-		t.Fatal("execution staging directory verified as an audit pack")
-	}
-	joined := runner.JoinedCommands()
 	for _, forbidden := range []string{"--forward", "--upload", "sandbox exec", "provider create", "inference set"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("commands contain %q:\n%s", forbidden, joined)
 		}
 	}
-	for _, line := range strings.Split(joined, "\n") {
-		if strings.HasPrefix(line, "openshell sandbox create ") && strings.Contains(line, "--detach") {
-			t.Fatalf("sandbox create detached:\n%s", line)
-		}
+	// The guest gets the image's own environment, the project's declarations and
+	// the connector values, and nothing else: no receipt endpoints, no model route.
+	names := make([]string, 0, len(fixture.sandbox.environment))
+	for name := range fixture.sandbox.environment {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	wantNames := []string{"APP_ENV", "NODE_ENV", "OPENBOX_AGENT_ID", "OPENBOX_EVALUATION_ID", "OPENBOX_URL", "PATH", "PAYMENTS_API_KEY"}
+	if !reflect.DeepEqual(names, wantNames) {
+		t.Fatalf("guest environment names=%v want=%v", names, wantNames)
 	}
 }
 
-func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
+func TestRunWaitPrintsTheSummaryOnComplete(t *testing.T) {
+	backend := newRunBackend(t, StatusComplete, "")
+	backend.report = `{"result":"fail","security_pass":false,"issues":[{"title":"Send without approval"}],` +
+		`"recommendations":[{"catalog_entry_id":"human-authorization","target":{"action_name":"send_email"},"rule":{"body":{}}}],` +
+		`"rejected_candidates":[{}]}`
+	fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
+	fixture.input.Wait = true
+	result, err := fixture.run()
+	if err != nil || !result.Succeeded || result.Evaluation.Status != StatusComplete {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	out := fixture.stdout.String()
+	for _, want := range []string{
+		"security evaluation requested: se-1", "result: fail", "issues: 1", "  - Send without approval",
+		"suggested rule: human-authorization on send_email", "rejected candidates: 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, out)
+		}
+	}
+	if backend.gets != 2 {
+		t.Fatalf("polled %d times", backend.gets)
+	}
+}
+
+func TestRunWaitFailedEvaluationIsAnErrorWithItsReason(t *testing.T) {
+	backend := newRunBackend(t, StatusFailed, "model connector returned 401")
+	fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
+	fixture.input.Wait = true
+	result, err := fixture.run()
+	if err == nil || result.Succeeded {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	class, message := Describe(err)
+	if class != "evaluation_failed" || !strings.Contains(message, "model connector returned 401") || !strings.Contains(message, "se-1") {
+		t.Fatalf("class=%s message=%s", class, message)
+	}
+	if strings.Contains(message, testToken) || strings.Contains(fixture.stdout.String()+fixture.stderr.String(), testToken) {
+		t.Fatal("token leaked")
+	}
+}
+
+func TestRunReportsABackendRefusalWithoutLeakingTheToken(t *testing.T) {
+	backend := newRunBackend(t, StatusComplete, "")
+	backend.postErr = http.StatusUnprocessableEntity
+	fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
+	_, err := fixture.run()
+	class, message := Describe(err)
+	if err == nil || class != "evaluation_request_failure" || !strings.Contains(message, "model connector") || strings.Contains(message, testToken) {
+		t.Fatalf("class=%s message=%s", class, message)
+	}
+	if fixture.stdout.Len() != 0 {
+		t.Fatalf("a refused request printed %q", fixture.stdout.String())
+	}
+}
+
+func TestRunFailuresReportTheirClassAndNeverRequestAnEvaluation(t *testing.T) {
 	tests := []struct {
 		name           string
 		configure      func(*lifecycleRunner, *lifecycleHTTP, *fakeSandbox)
@@ -429,40 +513,55 @@ func TestLifecycleFailuresRetainTruthfulRecordAndCleanup(t *testing.T) {
 			sandbox.readyErr = errors.New("policy mismatch")
 		}, classification: "readiness_failure"},
 		{name: "command nonzero", configure: func(_ *lifecycleRunner, _ *lifecycleHTTP, sandbox *fakeSandbox) { sandbox.exitCode = 7 }, classification: "command_nonzero"},
+		{name: "no SDK traffic reached Core", configure: func(_ *lifecycleRunner, _ *lifecycleHTTP, sandbox *fakeSandbox) { sandbox.skipRelay = true }, classification: "observation_failure"},
 		{name: "cleanup overrides success", configure: func(runner *lifecycleRunner, _ *lifecycleHTTP, _ *fakeSandbox) { runner.cleanupTagStays = true }, classification: "cleanup_failure"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			parent := t.TempDir()
-			envFile := filepath.Join(parent, "evaluation.env")
-			if err := os.WriteFile(envFile, []byte("OPENAI_MODEL=granite4.1:3b\n"+modelDigestSetting+"="+testModelDigest+"\n"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			output := filepath.Join(parent, "record")
-			runner := newLifecycleRunner()
-			client := &lifecycleHTTP{agentID: "c59e95b6-2a4e-44a7-8c43-b69bfa77667e"}
-			sandbox := newFakeSandbox()
-			test.configure(runner, client, sandbox)
-			result, err := Run(context.Background(), Input{Image: "example:local", EnvFile: envFile, OpenBoxAgent: client.agentID, Output: output}, Dependencies{
-				Commands: runner, Clock: realClock{}, Random: bytes.NewReader(bytes.Repeat([]byte{0x31}, 12)),
-				Listen: net.Listen, HTTP: client, GOOS: "darwin", GOARCH: "arm64",
-				Sandbox: sandbox, SandboxTemplateFromConfig: "example.invalid/base@sha256:" + strings.Repeat("a", 64),
-			})
+			backend := newRunBackend(t, StatusComplete, "")
+			fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
+			test.configure(fixture.runner, fixture.client, fixture.sandbox)
+			result, err := fixture.run()
 			if err == nil || result.Succeeded {
 				t.Fatalf("result=%+v err=%v", result, err)
 			}
-			content, readErr := os.ReadFile(filepath.Join(output, "execution.json"))
-			if readErr != nil {
-				t.Fatal(readErr)
+			if class, message := Describe(err); class != test.classification || message == "" || strings.Contains(message, "\n") {
+				t.Fatalf("class=%q message=%q want %q", class, message, test.classification)
 			}
-			var record executionRecord
-			if json.Unmarshal(content, &record) != nil || record.ExitClassification != test.classification {
-				t.Fatalf("classification=%q record=%s", record.ExitClassification, content)
+			if backend.postCount() != 0 || fixture.stdout.Len() != 0 {
+				t.Fatalf("a failed run requested an evaluation: posts=%v stdout=%q", backend.posts, fixture.stdout.String())
 			}
-			if test.classification != "cleanup_failure" && (!record.Cleanup.RegistryContainerAbsent || !record.Cleanup.RegistryVolumeAbsent || !record.Cleanup.SandboxAbsent) {
-				t.Fatalf("cleanup=%+v", record.Cleanup)
+			if test.classification != "cleanup_failure" && test.name != "registry refusal" && !fixture.sandbox.deleted {
+				t.Fatal("sandbox was not deleted after a failed run")
+			}
+			if test.classification != "cleanup_failure" && !strings.Contains(fixture.runner.JoinedCommands(), "volume rm ") {
+				t.Fatal("registry volume was not removed after a failed run")
 			}
 		})
+	}
+}
+
+// A run whose evaluation cannot be requested wastes the developer's time, so
+// the missing token is found before any command runs.
+func TestMissingControlTokenFailsBeforeAnyEffect(t *testing.T) {
+	backend := newRunBackend(t, StatusComplete, "")
+	fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
+	fixture.input.ControlToken = " "
+	_, err := fixture.run()
+	if err == nil || !strings.Contains(err.Error(), "OPENBOX_CONTROL_TOKEN") || !strings.Contains(err.Error(), "evaluate:agent_security") {
+		t.Fatalf("err=%v", err)
+	}
+	if got := fixture.runner.JoinedCommands(); got != "" || fixture.sandbox.environment != nil || backend.postCount() != 0 {
+		t.Fatalf("effects before the token check: commands=%q", got)
+	}
+}
+
+func TestRunRefusesAnUnsafeBackendURLBeforeAnyEffect(t *testing.T) {
+	backend := newRunBackend(t, StatusComplete, "")
+	fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
+	fixture.input.BackendURL = "https://user:pass@backend.example.com"
+	if _, err := fixture.run(); err == nil || fixture.runner.JoinedCommands() != "" {
+		t.Fatalf("err=%v commands=%q", err, fixture.runner.JoinedCommands())
 	}
 }
 
@@ -503,12 +602,7 @@ func (runner *countingRunner) Start(context.Context, Command) (Process, error) {
 type lifecycleRunner struct {
 	mu              sync.Mutex
 	commands        []Command
-	getCount        int
-	deleted         bool
 	trigger         chan struct{}
-	triggerOnce     sync.Once
-	phaseError      bool
-	commandExit     int
 	cleanupTagStays bool
 }
 
@@ -527,8 +621,6 @@ func (runner *lifecycleRunner) Run(_ context.Context, command Command) (CommandR
 		image := validTestImage()
 		image.ID = "sha256:" + strings.Repeat("c", 64)
 		return jsonResult([]dockerImage{image}), nil
-	case command.Name == "ollama" && args == "ps":
-		return CommandResult{Stdout: []byte("NAME ID SIZE PROCESSOR UNTIL\n")}, nil
 	case command.Name == "docker" && strings.HasPrefix(args, "run --detach --pull=never"):
 		return CommandResult{Stdout: []byte("registry-container-id\n")}, nil
 	case command.Name == "docker" && strings.HasPrefix(args, "volume create "):
@@ -599,12 +691,8 @@ func (client *lifecycleHTTP) Do(request *http.Request) (*http.Response, error) {
 	switch {
 	case request.URL.String() == localCoreURL+"/":
 		body = "hello world"
-	case request.URL.String() == localBackendURL+"/health":
+	case request.URL.Path == "/health":
 		body = `{"status":200}`
-	case request.URL.String() == ollamaTagsURL:
-		body = `{"models":[{"name":"granite4.1:3b","digest":"` + strings.TrimPrefix(testModelDigest, "sha256:") + `"}]}`
-	case request.URL.String() == ollamaGenerateURL && request.Method == http.MethodPost:
-		body = `{"model":"granite4.1:3b","done":true,"done_reason":"load"}`
 	case request.URL.Host == "127.0.0.1:49153" && request.URL.Path == "/v2/":
 		body = `{}`
 	case request.URL.Host == "127.0.0.1:49153" && strings.Contains(request.URL.Path, "/manifests/"):
@@ -636,9 +724,11 @@ type fakeSandbox struct {
 	execErr      error
 	exitCode     int
 	evidence     []byte
-	deleted      bool
-	absent       bool
-	environment  map[string]string
+	// skipRelay makes the fake guest silent: no SDK traffic reaches Core.
+	skipRelay   bool
+	deleted     bool
+	absent      bool
+	environment map[string]string
 }
 
 func newFakeSandbox() *fakeSandbox {
@@ -686,7 +776,9 @@ func (fake *fakeSandbox) WaitCompleted(_, _ string, _ time.Duration) (*sandboxcl
 	// Stand in for the guest's SDK traffic. The lane's success predicate is
 	// that the relay observed a matching validation and a governance event, so
 	// a fake that never calls it would only ever prove the failure path.
-	fake.callCoreRelay()
+	if !fake.skipRelay {
+		fake.callCoreRelay()
+	}
 	return &sandboxclient.ProjectRunCompleted{
 		ExitCode: fake.exitCode,
 		Logs: []sandboxclient.ProjectRunLogRecord{
@@ -767,41 +859,5 @@ func TestConnectorResolvesPerEnvironmentAndDefaultsToLocalStack(t *testing.T) {
 		if _, err := resolveConnector(input); err == nil {
 			t.Fatalf("%s was accepted", name)
 		}
-	}
-}
-
-// A hosted model route has no content address, and the pack must be able to say
-// so. This used to be impossible: model_digest was required, so a project on
-// OpenAI or Anthropic could only run by inventing a sha256 — a fabricated
-// content address in sealed evidence.
-func TestModelDigestIsOmittedWhenTheRoutePublishesNone(t *testing.T) {
-	hosted, err := parseEnvironment([]byte(
-		"OPENAI_MODEL=gpt-4o\n" + modelRouteSetting + "=" + ModelRouteGateway + "\n"))
-	if err != nil {
-		t.Fatalf("a hosted route without a digest was refused: %v", err)
-	}
-	effect := modelRouteEffect(&prepared{
-		declared:    hosted,
-		environment: map[string]string{"OPENAI_MODEL": "gpt-4o"},
-	}, nil)
-	if _, present := effect["model_digest"]; present {
-		t.Fatalf("emitted a digest for a route that publishes none: %v", effect)
-	}
-	// Absent, not empty: an empty string would still assert a digest exists.
-	if effect["provider"] != ModelRouteGateway || effect["model"] != "gpt-4o" || effect["status"] != "missing" {
-		t.Fatalf("effect=%v", effect)
-	}
-
-	local, err := parseEnvironment([]byte(
-		"OPENAI_MODEL=" + testModel + "\n" + modelDigestSetting + "=" + testModelDigest + "\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	effect = modelRouteEffect(&prepared{
-		declared:    local,
-		environment: map[string]string{"OPENAI_MODEL": testModel},
-	}, nil)
-	if effect["model_digest"] != testModelDigest {
-		t.Fatalf("a declared digest was dropped: %v", effect)
 	}
 }

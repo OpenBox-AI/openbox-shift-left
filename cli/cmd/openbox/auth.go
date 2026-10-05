@@ -61,19 +61,16 @@ type authFields struct {
 var didPattern = regexp.MustCompile(`^did:aip:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // sharedControlPermissionSet is the exact organization-key authority accepted
-// by the shared `openbox auth` stage. The same key may register or rotate the
-// project agent and later perform the GET-only backend collection used by
-// `openbox project evaluate`. No policy/control write or API-key-management
-// permission belongs here.
+// by the shared `openbox auth` stage: register or rotate the project agent, and
+// request a security evaluation (ADR-0023). The evaluation permission reads
+// nothing but its own result, so this key cannot read sessions, logs or
+// controls, and no policy/control write or API-key-management permission
+// belongs here.
 var sharedControlPermissionSet = []string{
 	"create:agent",
 	"read:agent",
 	"update:agent",
-	"read:agent_session",
-	"read:agent_log",
-	"read:agent_guardrail",
-	"read:agent_policy",
-	"read:agent_behavior_rule",
+	"evaluate:agent_security",
 }
 
 func sharedControlPermissions() []string {
@@ -85,7 +82,7 @@ func sharedControlProfileProblem(profile *backend.AuthProfile) string {
 		return "the backend returned no authentication profile"
 	}
 	if !profile.IsAPIKeyAuth {
-		return fmt.Sprintf("%s must be an obx_key_ organization API key so the same credential can be reused by project evaluation; bearer/JWT authentication is not reusable by the GET-only evaluator", devconfig.EnvControlToken)
+		return fmt.Sprintf("%s must be an obx_key_ organization API key so the same credential can be reused by project evaluation; bearer/JWT authentication is not reusable there", devconfig.EnvControlToken)
 	}
 	want := make(map[string]struct{}, len(sharedControlPermissionSet))
 	for _, permission := range sharedControlPermissionSet {
@@ -110,7 +107,7 @@ func sharedControlProfileProblem(profile *backend.AuthProfile) string {
 	if len(missing) == 0 && len(extra) == 0 && len(got) == len(profile.Permissions) {
 		return ""
 	}
-	parts := []string{fmt.Sprintf("%s must have exactly the shared shift-left + security-evaluation permission set", devconfig.EnvControlToken)}
+	parts := []string{fmt.Sprintf("%s must have exactly the shared agent-lifecycle + evaluate:agent_security permission set", devconfig.EnvControlToken)}
 	if len(missing) > 0 {
 		parts = append(parts, "missing: "+strings.Join(missing, ", "))
 	}

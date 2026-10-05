@@ -13,8 +13,9 @@ import (
 //
 // Credentials are never written here. credential_binding names a provider and
 // the gateway resolves it, so the key appears in neither policy nor request.
-// A zero port omits that endpoint.
-func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort, effectPort, modelPort int) []byte {
+// The Core relay is the only endpoint: the guest can reach only the host
+// gateway, so a Core on the host's loopback is unreachable without it.
+func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort int) []byte {
 	var policy strings.Builder
 	policy.WriteString("version: 1\n")
 	policy.WriteString("filesystem_policy:\n")
@@ -25,7 +26,7 @@ func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort
 	// absent from the guest, which the service cannot see to predict.
 	//
 	// /tmp is declared read-only for the floor, though upstream appends it to
-	// read-write anyway; the run records that as a coverage limitation.
+	// read-write anyway.
 	for _, path := range []string{"/app", "/dev/urandom", "/etc", "/lib", "/proc", "/tmp", "/usr", "/var/log"} {
 		fmt.Fprintf(&policy, "    - %s\n", path)
 	}
@@ -43,18 +44,6 @@ func buildSandboxPolicy(applicationExecutable, openBoxProvider string, relayPort
 				{method: "POST", path: "/api/v1/governance/approval"},
 			},
 		}},
-	}
-	if effectPort > 0 {
-		endpoints["safe_effect_sink"] = []sandboxEndpoint{{
-			port:  effectPort,
-			rules: []sandboxRule{{method: "POST", path: "/effects/safe"}},
-		}}
-	}
-	if modelPort > 0 {
-		endpoints["model_route"] = []sandboxEndpoint{{
-			port:  modelPort,
-			rules: []sandboxRule{{method: "POST", path: "/v1/chat/completions"}},
-		}}
 	}
 	policy.WriteString("network_policies:\n")
 	for _, name := range sortedKeys(endpoints) {

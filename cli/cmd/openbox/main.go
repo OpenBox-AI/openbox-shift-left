@@ -31,11 +31,9 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/adapters/common/devconfig"
 	obgit "github.com/openbox-ai/openbox-shift-left/adapters/common/git"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/evaluate"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/securityreport"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/backend"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/devinit"
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/providers"
-	"github.com/openbox-ai/openbox-shift-left/cli/internal/securityskill"
 	"github.com/openbox-ai/openbox-shift-left/client"
 	"github.com/openbox-ai/openbox-shift-left/provider"
 	"io"
@@ -62,12 +60,11 @@ const (
 // (ADR-0015), so a test points OPENBOX_HOME at a temp dir and exercises the same
 // code production runs.
 type app struct {
-	stdout, stderr         io.Writer
-	stdin                  io.Reader
-	getenv                 func(string) string
-	newRegistrar           func(baseURL, credential, clientID string) authRegistrar
-	runProjectEvaluation   func(context.Context, evaluate.Input) (evaluate.Result, error)
-	runProjectFinalization func(context.Context, *securityreport.Prepared, securityreport.RuntimeInput) (securityreport.Result, error)
+	stdout, stderr       io.Writer
+	stdin                io.Reader
+	getenv               func(string) string
+	newRegistrar         func(baseURL, credential, clientID string) authRegistrar
+	runProjectEvaluation func(context.Context, evaluate.Input) (evaluate.Result, error)
 }
 
 // authRegistrar is the shared authentication-stage control-plane surface. The
@@ -98,9 +95,6 @@ func defaultApp() *app {
 					"project evaluate: no sandbox service is reachable; run `obs provision` with OPENBOX_PROJECT_RUN_V2=1: %w", err)
 			}
 			return evaluate.Run(ctx, input, dependencies)
-		},
-		runProjectFinalization: func(ctx context.Context, prepared *securityreport.Prepared, input securityreport.RuntimeInput) (securityreport.Result, error) {
-			return securityreport.Finalize(ctx, prepared, input, securityreport.Dependencies{})
 		},
 	}
 }
@@ -506,11 +500,6 @@ func (a *app) runDevInit(args []string) int {
 		if _, err := devinit.Run(context.Background(), o, d); err != nil {
 			return a.errorf("%v", err)
 		}
-		skillResult, err := securityskill.Install(o.Provider, true)
-		if err != nil {
-			return a.errorf("%v", err)
-		}
-		a.printSecuritySkill(skillResult, true)
 		// Whether the plan governs anything is part of the plan, and dry-run is
 		// where a careful operator looks before committing to it.
 		a.printGovernedScope(o, resolvedScope)
@@ -532,11 +521,6 @@ func (a *app) runDevInit(args []string) int {
 	manualOnly := runErr != nil && res != nil && res.ConfigManualOnly
 	if runErr != nil && !manualOnly {
 		return a.errorf("%v", runErr)
-	}
-	skillResult, skillErr := securityskill.Install(o.Provider, false)
-	a.printSecuritySkill(skillResult, false)
-	if skillErr != nil {
-		return a.errorf("%v", skillErr)
 	}
 	// A registered-but-config-manual result is a real partial success worth a
 	// distinct exit code so scripts can tell it apart from a hard failure.
@@ -579,21 +563,6 @@ func (a *app) runDevInit(args []string) int {
 	return exitOK
 }
 
-func (a *app) printSecuritySkill(result securityskill.InstallResult, dryRun bool) {
-	prefix := "Security skill"
-	if dryRun {
-		prefix = "Security skill DRY RUN"
-	}
-	fmt.Fprintf(a.stdout, "%s: target=%s action=%s version=%s digest=%s\n", prefix, result.Target, result.Action, result.Version, result.Digest)
-	if result.Action == securityskill.ActionManualRequired {
-		fmt.Fprintf(a.stdout, "  repository source: %s\n", result.RepositoryPath)
-		fmt.Fprintf(a.stdout, "  Cursor destination: %s\n", result.Target)
-	}
-	if result.ConflictReason != "" {
-		fmt.Fprintf(a.stdout, "  conflict: %s\n", result.ConflictReason)
-	}
-}
-
 func (a *app) env(key, def string) string {
 	if v := a.getenv(key); v != "" {
 		return v
@@ -618,22 +587,16 @@ Usage:
   openbox approve <allow|deny> <event-id> [--org <id>]
   openbox approve --watch --auto [--host claude-code] [--decide]   (ADR-0012)
   openbox doctor
-  openbox project inspect [path] [--output DIR]
-  openbox project evaluate --image IMAGE --env-file FILE --openbox-agent AGENT_ID --output DIR
-	openbox project finalize --evaluation OBSERVATION_PACK --analysis CANDIDATE_JSON --output REPORT_PACK
-  openbox project verify PACK
-  openbox project report --pack DIR [--format markdown|json|sarif]
-  openbox project propose --pack DIR [--format json|markdown]
+  openbox project evaluate --image IMAGE --env-file FILE --openbox-agent AGENT_ID [--wait]
   openbox version
 
-Project assurance provides passive inspection, one-shot local OpenShell image
-evaluation, native-host issue analysis, and sealed advisory security reports.
-An evaluation record is staging evidence, not an audit pack. See
+Project evaluation runs one local image in the OpenBox Sandbox and asks the
+backend to evaluate the run; the report appears in the dashboard. See
 docs/project-assurance.md.
 
 Environment (used by the shared authentication stage and host-side project evaluation):
   OPENBOX_CONTROL_TOKEN   exact-scope obx_key_ organization key. auth validates the
-                          combined agent-lifecycle + evaluation-read permission set.
+                          agent-lifecycle + evaluate:agent_security permission set.
                           Never a flag, so it cannot leak via argv or shell history.
   OPENBOX_BACKEND_URL     openbox-backend CONTROL-PLANE base URL (or --backend-url)
   OPENBOX_BASE_URL        openbox-core DATA-PLANE base URL (or --base-url). Self-hosted?

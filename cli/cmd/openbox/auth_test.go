@@ -219,8 +219,8 @@ func TestSharedControlProfileRequiresExactCombinedPermissions(t *testing.T) {
 		t.Fatalf("exact shared profile rejected: %s", problem)
 	}
 
-	missing := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: sharedControlPermissions()[:7]}
-	if problem := sharedControlProfileProblem(missing); !strings.Contains(problem, "read:agent_behavior_rule") {
+	missing := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: sharedControlPermissions()[:3]}
+	if problem := sharedControlProfileProblem(missing); !strings.Contains(problem, "evaluate:agent_security") {
 		t.Errorf("missing permission not named: %q", problem)
 	}
 
@@ -228,6 +228,18 @@ func TestSharedControlProfileRequiresExactCombinedPermissions(t *testing.T) {
 	extra := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: extraPermissions}
 	if problem := sharedControlProfileProblem(extra); !strings.Contains(problem, "not allowed: delete:agent") {
 		t.Errorf("extra permission not rejected: %q", problem)
+	}
+
+	// The key shift-left used to need for crawling sessions and controls is now
+	// refused: the backend reads its own tables, so that authority is unused.
+	for _, old := range []string{"read:agent_session", "read:agent_log", "read:agent_guardrail", "read:agent_policy", "read:agent_behavior_rule"} {
+		broad := &backend.AuthProfile{IsAPIKeyAuth: true, Permissions: append(sharedControlPermissions(), old)}
+		if problem := sharedControlProfileProblem(broad); !strings.Contains(problem, "not allowed: "+old) {
+			t.Errorf("%s accepted on the shared key: %q", old, problem)
+		}
+	}
+	if want := []string{"create:agent", "read:agent", "update:agent", "evaluate:agent_security"}; strings.Join(sharedControlPermissions(), ",") != strings.Join(want, ",") {
+		t.Errorf("shared permission set = %v, want %v", sharedControlPermissions(), want)
 	}
 
 	jwt := &backend.AuthProfile{IsAPIKeyAuth: false, Permissions: sharedControlPermissions()}
@@ -739,7 +751,7 @@ func TestRegisterRejectsMissingEvaluationPermissionBeforeAgentCreation(t *testin
 	if len(fake.signingCalls) != 0 {
 		t.Fatalf("signing posture changed before permission failure: %v", fake.signingCalls)
 	}
-	if !strings.Contains(errb.String(), "read:agent_behavior_rule") {
+	if !strings.Contains(errb.String(), "evaluate:agent_security") {
 		t.Errorf("error does not name missing evaluation permission:\n%s", errb.String())
 	}
 }

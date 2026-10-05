@@ -10,13 +10,13 @@ import (
 	"github.com/openbox-ai/openbox-shift-left/cli/internal/assurance/evaluate"
 )
 
-const projectEvaluateUsage = "Usage: openbox project evaluate --image IMAGE --env-file FILE --openbox-agent AGENT_ID --output DIR\n"
+const projectEvaluateUsage = "Usage: openbox project evaluate --image IMAGE --env-file FILE --openbox-agent AGENT_ID [--wait]\n"
 
 type projectEvaluateOptions struct {
 	image        string
 	envFile      string
 	openboxAgent string
-	output       string
+	wait         bool
 }
 
 type onceStringFlag struct {
@@ -48,11 +48,11 @@ func (a *app) parseProjectEvaluateArgs(args []string) (projectEvaluateOptions, i
 		{name: "image", value: &options.image},
 		{name: "env-file", value: &options.envFile},
 		{name: "openbox-agent", value: &options.openboxAgent},
-		{name: "output", value: &options.output},
 	}
 	for _, value := range flags {
 		fs.Var(value, value.name, projectEvaluateFlagHelp(value.name))
 	}
+	fs.BoolVar(&options.wait, "wait", false, "wait for the security evaluation and print a summary (exit non-zero if it fails)")
 	fs.Usage = func() {
 		fmt.Fprint(a.stderr, projectEvaluateUsage)
 		fs.PrintDefaults()
@@ -78,11 +78,9 @@ func projectEvaluateFlagHelp(name string) string {
 	case "image":
 		return "local OCI image reference"
 	case "env-file":
-		return "strict non-secret evaluation environment file"
+		return "sandbox environment file (.env.sandbox); credential-shaped names reach the workload in plaintext and are warned about"
 	case "openbox-agent":
 		return "pre-existing dedicated evaluation agent UUID"
-	case "output":
-		return "new diagnostic or sealed-observation output directory"
 	default:
 		return ""
 	}
@@ -101,27 +99,26 @@ func (a *app) runProjectEvaluate(args []string) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	result, err := runner(ctx, evaluate.Input{
+	_, err := runner(ctx, evaluate.Input{
 		Image: options.image, EnvFile: options.envFile,
-		OpenBoxAgent: options.openboxAgent, Output: options.output,
+		OpenBoxAgent: options.openboxAgent, Wait: options.wait,
 		// The connector. Env wins, then dev.json, then the local-stack default
 		// inside evaluate — the same precedence auth and init already use, so a
 		// developer pointed at UAT by `openbox auth` stays pointed at UAT here
 		// without passing a flag.
-		CoreURL:             inputEnvironment(a.getenv, devconfig.EnvBaseURL),
-		BackendURL:          inputEnvironment(a.getenv, devconfig.EnvBackendURL),
-		OpenBoxProvider:     inputEnvironment(a.getenv, "OPENBOX_SANDBOX_PROVIDER"),
-		ControlToken:        inputEnvironment(a.getenv, devconfig.EnvControlToken),
-		ObservationRequired: true,
-		ProxyConfigured:     proxyEnvironmentConfigured(a.getenv),
+		CoreURL:         inputEnvironment(a.getenv, devconfig.EnvBaseURL),
+		BackendURL:      inputEnvironment(a.getenv, devconfig.EnvBackendURL),
+		OpenBoxProvider: inputEnvironment(a.getenv, "OPENBOX_SANDBOX_PROVIDER"),
+		ControlToken:    inputEnvironment(a.getenv, devconfig.EnvControlToken),
+		// The request line, the --wait summary and the credential warnings are
+		// printed by the evaluation as it goes, so a long --wait shows progress.
+		Stdout: a.stdout,
+		Stderr: a.stderr,
 	})
 	if err != nil {
-		if result.Output != "" {
-			fmt.Fprintf(a.stderr, "project evaluation output retained: %s\n", result.Output)
-		}
-		return a.errorf("%v", err)
+		class, message := evaluate.Describe(err)
+		return a.errorf("project evaluate failed (%s): %s", class, message)
 	}
-	fmt.Fprintf(a.stdout, "project observation sealed: %s\n", result.Output)
 	return exitOK
 }
 
@@ -130,16 +127,4 @@ func inputEnvironment(getenv func(string) string, name string) string {
 		return ""
 	}
 	return getenv(name)
-}
-
-func proxyEnvironmentConfigured(getenv func(string) string) bool {
-	if getenv == nil {
-		return false
-	}
-	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"} {
-		if getenv(name) != "" {
-			return true
-		}
-	}
-	return false
 }

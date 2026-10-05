@@ -9,9 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -23,8 +21,6 @@ var (
 	environmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	agentIDPattern         = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
 	credentialNamePattern  = regexp.MustCompile(`(?i)(^|_)(api_?key|access_?key|token|secret|password|passwd|credential|private_?key|signing_?key|bearer|auth)($|_)`)
-	ansiPattern            = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-	digestPattern          = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 type dockerImage struct {
@@ -47,18 +43,15 @@ type prepared struct {
 	evaluationID      string
 	sandboxName       string
 	registryName      string
-	output            string
 	image             dockerImage
 	argv              []string
 	environment       map[string]string
-	environmentNames  []string
 	applicationRoot   string
 	sandboxService    string
 	sandboxCapability string
 	connector         connector
 	// declared is the project's own `.env.sandbox`, kept for the secret NAMES
-	// the run must disclose and the model-route setting. Values are never
-	// recorded.
+	// the run must warn about. Values are never printed.
 	declared *projectEnvironment
 }
 
@@ -73,27 +66,6 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if err := validateInputStrings(input); err != nil {
 		return nil, err
 	}
-	output, err := filepath.Abs(input.Output)
-	if err != nil {
-		return nil, fmt.Errorf("project evaluate: resolve output: %w", err)
-	}
-	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(output))
-	if err != nil {
-		return nil, fmt.Errorf("project evaluate: resolve output parent: %w", err)
-	}
-	output = filepath.Join(resolvedParent, filepath.Base(output))
-	if _, err := os.Lstat(output); err == nil {
-		return nil, errors.New("project evaluate: output already exists")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("project evaluate: inspect output: %w", err)
-	}
-	if info, err := os.Lstat(filepath.Dir(output)); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		if err != nil {
-			return nil, fmt.Errorf("project evaluate: inspect output parent: %w", err)
-		}
-		return nil, errors.New("project evaluate: output parent must be a real directory")
-	}
-
 	fileEnvironment, err := parseEnvironmentFile(input.EnvFile)
 	if err != nil {
 		return nil, err
@@ -111,7 +83,6 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 		input: input, evaluationID: evaluationID,
 		sandboxName:  "obx-eval-" + identifier[:10],
 		registryName: "obx-eval-registry-" + identifier,
-		output:       output,
 		connector:    resolved,
 	}
 
@@ -129,7 +100,6 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if err != nil {
 		return nil, err
 	}
-	result.environmentNames = environmentInventory(result.environment)
 
 	if _, err := inspectImage(ctx, dependencies.Commands, RegistryImage); err != nil {
 		return nil, fmt.Errorf("project evaluate: required registry image is not preloaded: %w", err)
@@ -140,16 +110,13 @@ func prepare(ctx context.Context, input Input, dependencies Dependencies) (*prep
 	if err := preflightLocalServices(ctx, dependencies, resolved); err != nil {
 		return nil, err
 	}
-	if err := preflightModelRoute(ctx, dependencies, result); err != nil {
-		return nil, err
-	}
 	return result, nil
 }
 
 func validateInputStrings(input Input) error {
 	for name, value := range map[string]string{
 		"--image": input.Image, "--env-file": input.EnvFile,
-		"--openbox-agent": input.OpenBoxAgent, "--output": input.Output,
+		"--openbox-agent": input.OpenBoxAgent,
 	} {
 		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("project evaluate: %s must not be empty or contain control characters", name)
@@ -164,6 +131,14 @@ func validateInputStrings(input Input) error {
 	}
 	if !agentIDPattern.MatchString(input.OpenBoxAgent) {
 		return errors.New("project evaluate: --openbox-agent must be a UUID")
+	}
+	// Required before anything is mutated: a run whose evaluation cannot be
+	// requested wastes the developer's time.
+	if strings.TrimSpace(input.ControlToken) == "" {
+		return errors.New("project evaluate: OPENBOX_CONTROL_TOKEN is required to request the security evaluation (the key needs permission evaluate:agent_security)")
+	}
+	if strings.ContainsAny(input.ControlToken, "\x00\r\n") {
+		return errors.New("project evaluate: OPENBOX_CONTROL_TOKEN must not contain control characters")
 	}
 	return nil
 }
@@ -284,13 +259,6 @@ func parseEnvironment(content []byte) (*projectEnvironment, error) {
 		if len(value) > 4<<10 || strings.ContainsAny(value, "\x00\r\n") {
 			return nil, fmt.Errorf("project evaluate: invalid value for environment key %s", name)
 		}
-		consumed, err := environment.setting(name, value, index+1)
-		if err != nil {
-			return nil, err
-		}
-		if consumed {
-			continue
-		}
 		if _, reserved := reservedEnvironment[name]; reserved {
 			return nil, fmt.Errorf("project evaluate: environment line %d sets connector-reserved key %s", index+1, name)
 		}
@@ -315,15 +283,12 @@ func parseEnvironment(content []byte) (*projectEnvironment, error) {
 // effectiveEnvironment merges the image's own Config.Env with the project's
 // declarations into the one map the guest receives.
 //
-// The evaluator no longer injects model routing. `OPENAI_BASE_URL`,
-// `OPENAI_API_KEY` and `OPENAI_MODEL` used to be forced here to a local Ollama
-// serving one pinned model, which made every project this lane could evaluate
-// the same project. They are the project's to declare now; only the five
-// connector values are still the evaluator's.
+// The evaluator does not inject model routing: `OPENAI_*` and friends are the
+// project's to declare. Only the connector values are the evaluator's.
 //
 // Public and secret declarations land in the same map, because they travel the
-// same way. What differs is what the run DISCLOSES about them, which
-// `ungovernedCredentialLimitations` handles from the names.
+// same way. What differs is what the run WARNS about, which
+// `plaintextCredentialWarnings` handles from the names.
 func effectiveEnvironment(imageEntries []string, declared *projectEnvironment, evaluationID, agentID string) (map[string]string, error) {
 	values := make(map[string]string)
 	for _, entry := range imageEntries {
@@ -416,16 +381,6 @@ func preflightSandbox(dependencies Dependencies, result *prepared) error {
 		sandboxclient.ProjectRunCapability, capabilities)
 }
 
-func outputField(content, name string) string {
-	for _, line := range strings.Split(content, "\n") {
-		field, value, found := strings.Cut(strings.TrimSpace(line), ":")
-		if found && field == name {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
 func preflightLocalServices(ctx context.Context, dependencies Dependencies, resolved connector) error {
 	for name, endpoint := range map[string]string{
 		"Core":    resolved.coreURL + "/",
@@ -444,65 +399,6 @@ func preflightLocalServices(ctx context.Context, dependencies Dependencies, reso
 	return nil
 }
 
-// preflightModelRoute proves the local Ollama serving inference.local has the
-// declared model, and has it cold.
-//
-// It runs only for OPENBOX_SANDBOX_MODEL_ROUTE=local-ollama. A project pointed
-// at OpenAI, Gemini, OpenRouter or a remote Ollama is served by something this
-// host cannot see: there is no tag list to read and no process to prove cold,
-// and running these checks anyway would assert a local fact about a remote
-// service. That route is recorded as unproven instead, which is the honest
-// answer and not a weaker one.
-//
-// The digest pin is likewise optional. It used to be a compile-time constant
-// for one model, then a required declaration; it now holds only when the
-// project states one, because a hosted route has no content address to state.
-func preflightModelRoute(ctx context.Context, dependencies Dependencies, result *prepared) error {
-	model := result.environment["OPENAI_MODEL"]
-	if model == "" {
-		return errors.New("project evaluate: .env.sandbox must set OPENAI_MODEL")
-	}
-	if result.declared.modelRoute != ModelRouteLocalOllama {
-		return nil
-	}
-	response, err := get(ctx, dependencies.HTTP, ollamaTagsURL)
-	if err != nil || response == nil || response.StatusCode != http.StatusOK {
-		if response != nil {
-			response.Body.Close()
-		}
-		return errors.New("project evaluate: local Ollama tags endpoint is unavailable")
-	}
-	var tags struct {
-		Models []struct {
-			Name   string `json:"name"`
-			Digest string `json:"digest"`
-		} `json:"models"`
-	}
-	err = json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&tags)
-	response.Body.Close()
-	if err != nil {
-		return errors.New("project evaluate: local Ollama tag list is unreadable")
-	}
-	found := false
-	for _, candidate := range tags.Models {
-		if candidate.Name != model {
-			continue
-		}
-		if result.declared.modelDigest != "" && "sha256:"+candidate.Digest != result.declared.modelDigest {
-			return fmt.Errorf("project evaluate: local Ollama %s does not match the declared %s", model, modelDigestSetting)
-		}
-		found = true
-	}
-	if !found {
-		return fmt.Errorf("project evaluate: local Ollama does not serve %s", model)
-	}
-	loaded, err := dependencies.Commands.Run(ctx, Command{Name: "ollama", Args: []string{"ps"}})
-	if err != nil || strings.Contains(string(loaded.Stdout), model) {
-		return fmt.Errorf("project evaluate: %s must not already be loaded", model)
-	}
-	return nil
-}
-
 func get(ctx context.Context, client HTTPDoer, endpoint string) (*http.Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -510,11 +406,6 @@ func get(ctx context.Context, client HTTPDoer, endpoint string) (*http.Response,
 	}
 	request.Header.Set("accept", "application/json")
 	return client.Do(request)
-}
-
-func jsonArrayEmpty(content []byte) bool {
-	var values []json.RawMessage
-	return json.Unmarshal(content, &values) == nil && len(values) == 0
 }
 
 func randomIdentifier(reader io.Reader) (string, error) {

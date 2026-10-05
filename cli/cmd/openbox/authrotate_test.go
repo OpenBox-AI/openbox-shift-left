@@ -143,7 +143,7 @@ func TestRotateRejectsMissingEvaluationPermissionBeforeMutation(t *testing.T) {
 	if mutationCalls != 0 {
 		t.Fatalf("rotation endpoint called before permission failure: %d", mutationCalls)
 	}
-	if !strings.Contains(errb.String(), "read:agent_behavior_rule") {
+	if !strings.Contains(errb.String(), "evaluate:agent_security") {
 		t.Errorf("error does not name missing evaluation permission:\n%s", errb.String())
 	}
 }
