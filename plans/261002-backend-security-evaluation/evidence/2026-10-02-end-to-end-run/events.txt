@@ -1,0 +1,6 @@
+18:39:43 | WorkflowStarted |  |  | 0 | 
+18:39:43 | SignalReceived |  | user_input | 0 | 
+18:39:45 | ActivityStarted | sendSupportReport |  | 0 | untrusted
+18:39:45 | ActivityCompleted |  |  | 0 | untrusted
+18:39:46 | SignalReceived |  | agent_output | 0 | 
+18:39:46 | WorkflowCompleted |  |  | 0 | 

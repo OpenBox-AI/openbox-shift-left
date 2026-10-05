@@ -76,23 +76,14 @@ Two paths, deliberately separate:
 
 ## Project assurance lane
 
-Project assurance is separate from the developer hook engine. The CLI provides
-passive inspection, a narrow one-shot local OpenShell image runner, and
-schema-dispatched verification and reporting for historical audit packs,
-sealed observation packs, and advisory security-report packs. No native-host
-project runner, governed rerun, fake SDK receiver, or control Apply path is
-reachable.
-
-The local lane resolves and publishes the exact OCI image, runs its standard
-command in OpenShell, observes matching SDK traffic through local Core, reads
-the terminal backend session, and seals an immutable observation pack. An
-explicit installed native-host skill may create an untrusted issue-only
-candidate. The finalizer independently validates both inputs, captures the
-target's safe GET-only current posture, maps supported issues through a frozen
-inert catalog, and seals matching JSON, Markdown, and SARIF projections.
-OpenShell observations are coverage evidence, not production-enforcement proof,
-and finalization never writes a control. See
-[Project assurance](project-assurance.md).
+Project assurance is separate from the developer hook engine. The CLI runs one
+local image in the OpenBox Sandbox and then asks the backend to evaluate the run;
+the backend reads the session Core already stored, runs the analyst on the
+organization's own model, validates the result and stores a report with suggested
+OpenBox rules ([ADR-0023](adr/ADR-0023-backend-owned-security-evaluation.md)).
+Evaluation starts only on an explicit request, never automatically. OpenShell
+observations are coverage, not production-enforcement proof, and the evaluator
+never writes a control. See [Project assurance](project-assurance.md).
 
 ## Governance levels
 

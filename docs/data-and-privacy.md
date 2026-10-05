@@ -47,33 +47,19 @@ what *could* egress; the second is a widening of what does.
 
 ## Project assurance data
 
-Passive inspection, native-host issue analysis, sealed-pack verification, and
-report rendering read caller-selected local data and make no OpenBox or model
-request. Evaluation is development-only and may transiently process project,
-prompt, tool, model, MCP, network, and effect observations. Its owner-only
-observation pack deliberately retains bounded evidence needed for later
-analysis and can therefore contain sensitive prompts, outputs, paths, and logs.
-The pack retains no credential field.
+`project evaluate` runs a development image in the sandbox and sends its events to
+Core like any session. The evaluation itself runs in the backend, on an explicit
+request: it reads the stored session and sends a bounded, credential-redacted copy
+of it (prompts, tool inputs and outputs, signals) to the **organization's own model
+endpoint**, the one an admin configured. OpenBox supplies no model and holds no
+model credential; the org's key is stored sealed and no API returns it.
 
-Finalization verifies its observation and candidate completely before reading a
-credential or making a request. It then uses the existing organization token for
-one bounded local GET-only posture capture. The token, request headers, raw Rego,
-free-form control bodies, write routes, and arbitrary backend responses are not
-retained. The sealed owner-only report remains sensitive because it embeds the
-observation and analyzer assertions. Verification and rendering of that report
-are offline, and the report never applies or approves a recommendation.
-
-Production workloads, identities, credentials, endpoints, and data are not
-accepted. OpenShell isolation gaps and missing authority remain coverage
-limitations rather than production security claims. Full current boundaries
-are in [Project assurance](project-assurance.md).
-
-*When* it leaves: events are delivered in near-real-time by default — a detached
-flusher drains the local spool within ~2 seconds of each tool call
-(`hookflow.RealtimeTrigger`), with a final drain at session end.
-`realtime_flush: false` (or `OPENBOX_REALTIME=0`) delays delivery to session end
-instead. Either way this changes only *timing*: what egresses is governed solely
-by the table above and the content-capture posture below.
+That is new egress, and two limits stay true: Core-side redaction is not wired, so a
+secret that reached an event is only caught by the backend's credential-shape
+redaction before the analyst sees it, and the report itself can quote session
+content, so it is as sensitive as the session. Nothing leaves the developer's machine
+for evaluation except the run's normal events and one request naming the run. Full
+boundaries are in [Project assurance](project-assurance.md).
 
 ## Usage capture
 
@@ -323,7 +309,7 @@ The shared authentication stage prepares the development project agent with
 `signing_required=false`. That permits the provider-held runtime bearer key to
 emit observable behavior from OpenShell without placing the Ed25519 seed in the
 image. It also means those evaluation requests do not carry cryptographic agent
-attribution; observation packs must disclose that gap and must not promote the
+attribution; reports must disclose that gap and must not promote the
 traffic into signed-identity evidence.
 
 A real environment variable always beats the file, so CI can supply credentials

@@ -12,14 +12,10 @@ openbox init     set up — install the hooks, in one project or fleet-wide
 order wrong.
 
 Project security evaluation is separate from the developer-runtime setup below.
-The CLI supports passive `project inspect`, one-shot local-image
-`project evaluate`, installed-host `openbox-security-evaluation`, offline-first
-`project finalize`, and schema-dispatched `verify` and `report`.
-Evaluation requires the pinned local OpenShell/OpenBox/Ollama tuple and seals a
-verified observation pack on complete success. The host skill creates an
-untrusted issue-only candidate; finalization then performs a bounded local
-GET-only posture read and seals an advisory report. Historical `propose` remains
-available only for historical audit packs. See
+`openbox project evaluate` runs one local image in the OpenBox Sandbox and asks the
+backend to evaluate the run; the report and any suggested rule appear in the
+dashboard. It needs the sandbox, an organization model connector (set once in the
+dashboard) and an explicit request, and it never evaluates on its own. See
 [Project assurance](project-assurance.md).
 
 Examples use `--provider claude-code`; substitute `--provider codex` and most steps
@@ -76,7 +72,7 @@ Permissions to grant the key, by what you intend to run:
 
 | Command | Needs |
 |---|---|
-| Shared `openbox auth` + `openbox project evaluate` + `openbox project finalize` key | `create:agent`, `read:agent`, `update:agent`, `read:agent_session`, `read:agent_log`, `read:agent_guardrail`, `read:agent_policy`, `read:agent_behavior_rule` — exactly these permissions |
+| Shared `openbox auth` + `openbox project evaluate` key | `create:agent`, `read:agent`, `update:agent`, `evaluate:agent_security` — exactly these permissions |
 | `openbox approve …` (human or autonomous) | `read:agent_session`, `manage:agent_session` |
 
 ```bash
@@ -84,8 +80,7 @@ export OPENBOX_CONTROL_TOKEN=obx_key_…
 ```
 
 It is read from the environment and never accepted as a flag, so it cannot leak
-through `ps`. Keep it available to `openbox project evaluate` and the later
-`openbox project finalize` posture read; ordinary developer hooks use the
+through `ps`. Keep it available to `openbox project evaluate`; ordinary developer hooks use the
 separately minted `OPENBOX_API_KEY` and never receive this org key.
 
 The shift-left client may still attach Ed25519 headers, but Core ignores them for

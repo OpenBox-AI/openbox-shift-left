@@ -1,6 +1,9 @@
 # Shift Left project security evaluation
 
-Status: **superseded for execution; retained as design input.**
+Status: **superseded; retained as design history only.** Superseded again on
+2026-10-02 by [ADR-0023](../docs/adr/ADR-0023-backend-owned-security-evaluation.md):
+evaluation, the report and rule suggestions now run in the backend, and the
+local skill, `finalize`, packs and the commands below are deleted.
 Created: 2026-08-17. Updated: 2026-09-02.
 
 > **Read this first.** The delivered lane is

@@ -37,4 +37,5 @@ Every ADR not marked "reconstructed" in the table below is an original.
 | [0019](ADR-0019-full-content-capture.md) | Full content capture, under one org gate | **Proposed** — authorizes nothing until accepted |
 | [0020](ADR-0020-project-assurance-native-sandbox.md) | Project assurance lane with native-sandbox execution | Historical; native execution retired |
 | [0021](ADR-0021-openbox-sandbox-projectrun-v2.md) | Versioned OpenBox Sandbox ProjectRun v2 | Historical direction; deferred and superseded for Shift Left execution |
-| [0022](ADR-0022-agent-evaluation-and-published-reports.md) | Agent evaluation and published security reports | Accepted for local-stack |
+| [0022](ADR-0022-agent-evaluation-and-published-reports.md) | Agent evaluation and published security reports | Accepted for local-stack (§4 superseded by 0023) |
+| [0023](ADR-0023-backend-owned-security-evaluation.md) | Backend-owned security evaluation | Accepted |

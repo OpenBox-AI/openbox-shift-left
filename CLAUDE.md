@@ -386,148 +386,44 @@ double-count disappears end to end, and that `decision_authority` lands in
 and failed before this change. `testbed/10-onboard.sh` gained the dormant
 stale-path replacement assertions.
 
-**Project assurance runs end to end now** (`plans/260825-1623-lean-openshell-project-assurance/`).
-The public surface is `project inspect`, `evaluate`, `finalize`, `verify`,
-`report`, `propose` — six subcommands, `docs/project-assurance.md` for the user
-view. Codex, Claude/SRT, Seatbelt and governed-rerun execution paths stay
-retired with no CLI fallback or hidden probe entrypoint; their audit-pack v1
-objects survive only as historical READ contracts. **ProjectRun v2 is no longer
-retired** — it is the execution path, see the section below. Phases 1–3 are
-verified and Phase 4 is implemented. **OS-04-04 closed 2026-09-22**: a live
-GET-only finalization ran against local-stack and sealed a verifiable report,
-and the zero-control-mutation proof holds (`policies=0`, `guardrails=0` for the
-evaluation agent afterwards). Human report review remains, which is a person's
-job rather than an open engineering task.
-Production data, control publication and automatic fixes stay out of scope;
-project credentials do NOT — see the sandbox section below. Four things about
-this lane are worth not re-litigating:
+**Project assurance is backend-owned** (ADR-0023, 2026-10-02, replacing the local
+analysis lane). The public surface is one command, `openbox project evaluate`
+(`docs/project-assurance.md`): it runs a local image as the main process of an
+OpenBox Sandbox project run, then asks the backend to evaluate the run. The
+backend reads the session Core already stored, runs the analyst — a Mastra agent
+on the **organization's own model** (BYOK connector) — validates it, and stores
+a report with suggested rules; the dashboard's Accept applies one (ADR-0022).
+The local skill, `finalize`, `inspect`, `verify`, `report`, `propose`, the pack
+packages and the effect/model relays are deleted with no fallback and no
+migration code. Five things are worth not re-litigating:
 
-- **The analyzer is a model, and that is not a contradiction of "no LLM
-  verdicts."** The native-host skill may emit only an *issue candidate*;
-  `securityreport.Prepare` then re-resolves every evidence citation against the
-  sealed pack offline, relabels candidate prose as `*_assertion`, and keeps
-  `observed_facts` limited to cited retained records. `severity` is pinned to
-  the single literal `unavailable` at three independent layers (skill
-  instruction, candidate schema `const`, report schema `const` plus the
-  renderer) and `security_pass` is a hard `false`. Loosening any one of those
-  turns an assertion into a finding.
-- **The offline gate must stay ahead of credentials, network and output.**
-  `Prepare` calls `resolveAbsentOutput` before it reads the pack, and
-  `project_finalize.go` reads `OPENBOX_CONTROL_TOKEN` only after `Prepare`
-  returns. Reordering it means an integrity failure that has already touched a
-  credential.
-- **The control token needs EXACT permissions.** Finalization rejects missing
-  reads and unrelated write/approval authority equally, so
-  `local-stack/scripts/bootstrap.sh` reconciles a retained key rather than only
-  minting a new one. A key minted before that reconcile passes every earlier
-  step and fails at finalize.
-- **The model load has its own 30s budget** (`Dependencies.InferenceHTTP`),
-  deliberately not the shared 10s `HTTP` client — that one is also the Core
-  relay, where a longer per-request budget changes how long a stalled Core holds
-  a relayed SDK call. The preflight requires the model UNLOADED, so every load
-  is cold; a 2GB cold read took 14s against the old shared budget and made the
-  lane an availability coin flip.
+- **Evaluation is explicit.** Only a request starts one; nothing evaluates
+  automatically or by sampling, because the model spend is the org's.
+- **The deterministic half is the safety.** The model finds and cites; the
+  backend resolves every citation against the session's own events, fills what
+  the model may not claim (severity is always `unavailable`, `security_pass` is
+  always `false`, standard versions, the action target) and builds rule bodies
+  from a catalog. A finding that fails validation is reported under
+  `rejected_candidates`, never hidden. `inconclusive` needs a limiting gap.
+- **Only suggest what OpenBox can enforce.** An approval-gate policy rule on the
+  cited action is enforceable; prompt injection and cross-event sequences are not
+  (no semantic injection guardrail; behavior rules see only prior steps within
+  one event) and the report says so. Delivery is a new policy version, never PUT.
+- **The key is the minimum.** `openbox auth` accepts exactly `create:agent`,
+  `read:agent`, `update:agent` and `evaluate:agent_security`; the last grants no
+  read of sessions, logs or controls. The local-stack bootstrap key is a broader
+  development key shared with the testbed and is deliberately not this one.
+- **The workload is the sandbox's MAIN process**, not an exec — only the main
+  process receives the environment OpenShell builds from attached providers.
+  Three regressions follow and are disclosed: no workload stdout/stderr, no
+  per-process egress decisions, no independent model-route receipt. Project
+  credentials in `.env.sandbox` reach the workload in plaintext and are named in
+  warnings (binding stays the governed path); the connector key is bound to the
+  entrypoint's Core endpoint and never enters the VM. Runs are bearer-observed
+  (`signing_required=false`) and reports say signed attribution is absent.
 
-**There is deliberately no `assurance/fixture` or `assurance/securityanalysis`
-package**, and git history will not show one — both were dropped before the
-lane's first commit, so do not go looking for the deletion. Phase 0's ledger
-(OS-00-03) retained a poison fixture, a safe sink, an in-process Ollama relay
-and a standalone candidate oracle; Phases 1–4 then reimplemented every one of
-them somewhere else and left the originals orphaned at 3,626 lines with zero
-importers. The live owners are `evaluate/effect_relay.go` for the safe sink,
-OpenShell's own provider route for inference (the CLI only *preflights* that
-route), and `securityreport.Prepare` for candidate validation. Do not restore
-the old packages to "reuse the fixtures" — the poison fixture in particular
-belongs to the retired scenario machinery, and the current lane reports
-`retrieval_poison` as a `missing` coverage channel on purpose.
-
-**The evaluation lane goes through openbox-sandbox, not OpenShell** (2026-09-16).
-`project evaluate` used to shell out to the `openshell` CLI 13 times and parse
-stdout — including scraping human-readable fields after stripping ANSI escapes —
-which made this repo a second owner of the OpenShell contract, pinned to a
-different version than the sandbox service, with no test holding the two
-together. `kb/sandbox.md` already forbade exactly that. The lane now speaks the
-sandbox service protocol over mutual TLS (`cli/internal/assurance/sandboxclient`,
-stdlib only) and `git grep '"openshell"' cli/internal/assurance` returns nothing.
-Six things are worth not re-litigating:
-
-- **The workload is the sandbox's MAIN process, not an exec.** Only the main
-  process receives the environment OpenShell builds from attached provider
-  profiles (`openshell-sandbox/src/lib.rs`, `main_env = provider_env.clone()`),
-  so a workload run through exec silently loses every provider credential. Three
-  regressions follow and are recorded in every pack rather than left as silent
-  gaps: no workload stdout/stderr (the gRPC API carries `SandboxLogLine`,
-  supervisor events only — the old path got output from CLI *attachment*) and
-  no per-process egress decisions. The model route is receipted only on
-  `local-ollama`, by `evaluate/model_relay.go`.
-- **Attach only providers the policy binds.** OpenShell classifies every key an
-  attached provider contributes: bound to an endpoint by `credential_binding`,
-  or declared non-secret. A key that is neither makes the guest supervisor fail
-  closed and revoke the WHOLE set — so attaching the inference provider once
-  revoked the correctly-bound `OPENBOX_API_KEY` and the workload died on its
-  first missing variable. The gateway resolves inference itself at
-  `inference.local`; do not attach a provider for it.
-- **Project credentials are plaintext, deliberately, and disclosed.** The
-  sandbox used to refuse credential-shaped names in `environment`. That was
-  stricter than the substrate for no gain — OpenShell carries caller-supplied
-  env with no classification of its own — and it assumed every credential can be
-  endpoint-bound, which is false for non-HTTP protocols, self-signing SDKs and
-  runtime-resolved endpoints. Refusing those made projects unevaluable, not
-  safer. Binding is still the governed path and still preferred; everything else
-  is listed in `coverage_limitations` by name. The pack says *credential-shaped
-  variable*, not *credential*, because classification is by name and the run
-  never observed that the value is really a secret.
-- **`.env.sandbox` is an ordinary dotenv file**, deliberately NOT `.env` or
-  `.env.local` — the evaluator never reads those, so a run carries only what was
-  copied deliberately. No prefixes. The only prefixed names are two runner
-  directives, `OPENBOX_SANDBOX_MODEL_ROUTE` and `_MODEL_DIGEST`, matched exactly
-  and never passed to the guest.
-- **The connector is per-environment, the pin is not this repo's.** Core URL,
-  backend URL and the OpenBox provider name resolve once in `resolveConnector`
-  (env → `dev.json` → local-stack default). The OpenShell version pin lives in
-  openbox-sandbox; this repo asks one capability question and treats a `no` as
-  `not_runnable`. `OpenShellVersion` here was dead and is deleted — do not
-  reintroduce a version assertion.
-- **`effects.model_route.model_digest` is optional, and that was a schema fix,
-  not a workaround.** It was required with a sha256 pattern, which left a
-  project on OpenAI or Anthropic no way to run except to invent a content
-  address — a fabrication in sealed evidence. Dropping it from `required` is a
-  WIDENING: every previously valid v1 artifact still validates, so it needs no
-  version bump under ADR-0020. The field is written by nobody's decision — grep
-  confirms nothing reads it — and absent now means "this route publishes no
-  digest". Do not re-require it.
-
-**Reports suggest real OpenBox rules** (2026-09-24, reversing the Phase 4
-"no rule bodies" decision at the user's request). Three things hold it safe
-and are worth not re-litigating:
-
-- **The model finds, deterministic code prescribes.** The analyst names
-  defects and cites evidence; `securityreport` fills rule bodies from templates
-  and the cited action. The candidate's forbidden-key check still rejects any
-  control the model tries to write. The lane never applies a rule.
-- **Only suggest what OpenBox can enforce.** An approval-gate policy rule on
-  the cited action is enforceable; prompt injection and cross-event sequences
-  are not (no semantic injection guardrail; behavior rules see only prior steps
-  within one event), and the report says so instead of suggesting a rule that
-  would silently do nothing. Several shipped backend templates are inverted —
-  `credential-read-then-egress`, `untrusted-input-then-egress`,
-  `mcp-fetch-then-write`, and guardrail `prompt-injection-markers` — so do not
-  template from them.
-- **Delivery is a new policy version, never PUT.** A policy change is a new
-  version and POST makes it the only active one. The report says "POST the
-  current rules plus this one", and the dashboard's Accept does exactly that
-  (ADR-0022). Evaluation checks run on read in the backend, not in core,
-  because approval decisions land after a session ends.
-- **`inconclusive` needs a missing REQUIRED authority.** The demo once came out
-  `inconclusive` with a complete defect chain sitting in `backend.json`, because
-  `behavior.json` is only an index and the analyst never decoded the records it
-  points at. Skill 1.0.3 says to, and treats absent corroboration as a
-  limitation, never a block.
-
-The demo is two scripts under
-`testbed/project-assurance/mastra-security-demo/` — `prepare-demo.zsh` then
-`launch-claude.zsh`, with `RUNBOOK.md` for the end-to-end sequence and the
-direct-CLI lane. There is no editor-task dependency; `.zed/` is gitignored.
+Mastra loads only inside the backend's analyst runner: it is ESM-first, Jest cannot
+load it, and `yarn check:mastra` is its boundary test in that repo.
 
 Next: the Cursor adapter; policy template packs. The one dependency this repo now
 has is `golang.org/x/term v0.34.0`, **pinned** — v0.35.0+ declares `go 1.24.0` and
