@@ -2,13 +2,12 @@ FROM docker.io/library/node:26.7.0-bookworm-slim@sha256:4db36457f406501e6f608802
 
 WORKDIR /app
 
-# Reuse the conformance project's exact dependency lock and vendored OpenBox
-# SDK artifacts. The demo changes application behavior, not its runtime tuple.
-COPY mastra-conformance/package.json mastra-conformance/package-lock.json ./
-COPY mastra-conformance/vendor ./vendor
+# The exact dependency lock and vendored OpenBox SDK artifacts.
+COPY package.json package-lock.json ./
+COPY vendor ./vendor
 RUN npm ci --ignore-scripts
 
-COPY mastra-security-demo/src ./src
+COPY src ./src
 RUN npm run check \
     && npm run typecheck \
     && npm prune --omit=dev \

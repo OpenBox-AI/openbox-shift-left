@@ -1,5 +1,5 @@
 {
-  "name": "openbox-project-assurance-mastra-conformance",
+  "name": "openbox-project-assurance-mastra-security-demo",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,10 +8,9 @@
   },
   "scripts": {
     "check": "node --check src/index.mjs",
-    "image:build": "docker build --tag ai.openbox/mastra-conformance:local .",
-    "image:test": "node image-contract-test.mjs",
     "typecheck": "tsc --allowJs --checkJs --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2024 src/index.mjs",
-    "start": "node src/index.mjs"
+    "start": "node src/index.mjs",
+    "image:build": "docker build --pull=false --tag ai.openbox/mastra-security-demo:local ."
   },
   "dependencies": {
     "@mastra/core": "1.8.0",
