@@ -49,6 +49,16 @@ model on finding quality.
 8. **Per organization, not defaults yet.** Each org configures its own models. A
    platform default for each is a later decision.
 
+9. **Delivery follows the backend's policy rules.** The backend replaced the
+   aggregate policy API with per-rule resources (`agent/:agentId/policy-rule`)
+   while this work was open. The suggested rule is now the create body for one
+   policy rule, Accept creates it through the Policies tab's own mutation, and the
+   report's control posture reads `agent_policy_rules`. This supersedes the "new
+   policy version carrying the current rules" delivery in ADR-0022 and ADR-0023 §5.
+   The evaluation queue processor also declares and enforces a system
+   authorization action (`job:security-evaluation.run`), as the backend's
+   authorization gateway now requires of every queue processor.
+
 ### Data changes (no new table)
 
 `llm_connectors` gains `kind` (`llm` | `decision`) and uniqueness becomes

@@ -145,10 +145,11 @@ with no issues, or an `inconclusive` one, is **not** a security pass.
 ## What a report suggests
 
 - **Excessive agency (LLM06)** yields a policy rule: `REQUIRE_APPROVAL` when
-  `activity_type` equals the cited action, in the policy_builder v2 shape the
-  dashboard's policy editor uses. Every policy change is a new version and `POST`
-  makes it the only active one, so delivery is a `POST` carrying the current rules
-  plus this one. The dashboard's Accept does exactly that (ADR-0022).
+  `activity_type` equals the cited action. A policy rule is its own versioned
+  resource, so delivery is one `POST /agent/{agentId}/policy-rule` with the rule
+  (`rule_name`, `priority`, `match_mode`, `conditions`, `decision`). The dashboard's
+  Accept does exactly that, through the same create mutation as the Policies tab
+  ([ADR-0024](adr/ADR-0024-decision-model-cascade.md), amending ADR-0022).
 - **Prompt injection** yields no rule, and the report says why: OpenBox has no
   semantic prompt-injection guardrail.
 - **Effect sequences** yield no rule: a behavior rule only sees prior steps within

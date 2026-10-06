@@ -408,7 +408,7 @@ migration code. Five things are worth not re-litigating:
 - **Only suggest what OpenBox can enforce.** An approval-gate policy rule on the
   cited action is enforceable; prompt injection and cross-event sequences are not
   (no semantic injection guardrail; behavior rules see only prior steps within
-  one event) and the report says so. Delivery is a new policy version, never PUT.
+  one event) and the report says so. Delivery is one POST of a policy rule to `agent/:agentId/policy-rule` (ADR-0024; it was a new aggregate policy version before the backend moved to policy rules).
 - **The key is the minimum.** `openbox auth` accepts exactly `create:agent`,
   `read:agent`, `update:agent` and `evaluate:agent_security`; the last grants no
   read of sessions, logs or controls. The local-stack bootstrap key is a broader
