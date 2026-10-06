@@ -54,6 +54,14 @@ of it (prompts, tool inputs and outputs, signals) to the **organization's own mo
 endpoint**, the one an admin configured. OpenBox supplies no model and holds no
 model credential; the org's key is stored sealed and no API returns it.
 
+An organization configures two models ([ADR-0024](adr/ADR-0024-decision-model-cascade.md)):
+a **decision model** that judges each tool activity first, and the language model
+that takes what the decision model is unsure of. The decision model receives a small,
+credential-redacted state per tool activity (the tool name and input, the operator
+goal, untrusted text that preceded it). If an org points it at TypeSafe's hosted
+System One, that is a **second third-party egress** of session content, under the
+same BYOK key rule.
+
 That is new egress, and two limits stay true: Core-side redaction is not wired, so a
 secret that reached an event is only caught by the backend's credential-shape
 redaction before the analyst sees it, and the report itself can quote session

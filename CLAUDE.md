@@ -422,6 +422,16 @@ migration code. Five things are worth not re-litigating:
   entrypoint's Core endpoint and never enters the VM. Runs are bearer-observed
   (`signing_required=false`) and reports say signed attribution is absent.
 
+**The evaluation is a cascade** (ADR-0024, 2026-10-06): the org's TypeSafe System
+One **decision model** judges each tool activity first (Noul questions only), and
+only what it is unsure of (p between 0.2 and 0.8) goes to the language model. Three
+things are worth not re-litigating: an org needs **both** connectors (422
+`connector_required` with `missing`), a configured decision model that fails fails
+the evaluation (no silent LLM fallback), and rules stay in code while the model
+supplies judgments. The local proof (Ollama `tev1:0.8b`) is uncertain about
+everything, so the LLM decides every finding; that proves the mechanism, not
+accuracy.
+
 Mastra loads only inside the backend's analyst runner: it is ESM-first, Jest cannot
 load it, and `yarn check:mastra` is its boundary test in that repo.
 

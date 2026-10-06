@@ -20,8 +20,9 @@ openbox project evaluate --image IMAGE --env-file FILE --openbox-agent AGENT_ID 
    (`POST /agent/{agentId}/security-evaluations`). That request is the **only**
    thing that starts an evaluation; nothing evaluates on its own.
 4. The backend waits for the session's terminal event, reads the session from its
-   own tables, runs the analyst on the organization's own model, validates the
-   result, and stores a report. Without `--wait` the CLI prints the evaluation id
+   own tables, judges it with the organization's decision model, sends what that is
+   unsure of to the organization's language model, validates the result, and
+   stores a report. Without `--wait` the CLI prints the evaluation id
    and exits; with `--wait` it polls and prints a summary.
 5. The report appears in the dashboard's Evaluation tab. A suggested rule is
    applied only when a person clicks Accept; the evaluator never writes a
@@ -72,12 +73,19 @@ is the one governed credential: the generated sandbox policy names the provider 
 a `credential_binding`, the gateway resolves it, and it appears in no request this
 lane sends.
 
-### 3. Model connector — once per organization
+### 3. Model connectors — once per organization
 
-Evaluation uses the **organization's own model** (bring your own key). An org
-admin sets it in the dashboard: an OpenAI-compatible base URL, a model name and an
-API key. The key is write-only — no API ever returns it — and is stored sealed.
-Without a connector, the request is refused with `connector_required`.
+Evaluation uses the **organization's own models** (bring your own key), and needs
+both ([ADR-0024](adr/ADR-0024-decision-model-cascade.md)). An org admin sets them in
+the dashboard:
+
+- a **decision model**: a TypeSafe System One endpoint (`POST {base}/v1/systemone`).
+  Production uses TypeSafe's hosted `jev-latest` with a key. For local experiments,
+  Ollama serves the same API for the open `tev1:0.8b`, with no key;
+- a **language model**: an OpenAI-compatible base URL, a model name and an API key.
+
+Keys are write-only — no API ever returns them — and stored sealed. Without both,
+the request is refused with `connector_required`, and the CLI says which is missing.
 
 ### 4. Project — per project, in `.env.sandbox`
 
@@ -113,10 +121,19 @@ A credential baked into the image's own `Config.Env` is refused outright.
 
 - **Reads** the session from `governance_events`, spans and the Merkle attestation —
   bounded, with credential-shaped text redacted before the analyst sees it.
-- **Analyzes** with a Mastra agent on the org's connector, one focused pass per
-  issue type (a small model asked for everything reports only the most salient
-  issue). The analyst names defects and cites event ids; it never writes a control,
-  a severity or an action target.
+- **Judges** each tool activity with the decision model: four yes/no probabilities
+  (sends data out, changes state, instructs the agent, the operator goal allows it).
+  At p ≥ 0.8 or ≤ 0.2 the answer is certain and code assembles the finding; the
+  rules (ran without approval, untrusted input came first) are code, not model.
+- **Escalates** what the decision model is unsure of to a Mastra agent on the org's
+  language model, one focused pass per issue type (a small model asked for
+  everything reports only the most salient issue). The analyst names defects and
+  cites event ids; it never writes a control, a severity or an action target. A
+  decision model that is configured but fails fails the evaluation: there is no
+  silent switch to the language model.
+- **Suggests integration steps** from a fixed menu (capture content, attest
+  sessions, raise the event budget, add an effect receipt, mark untrusted inputs,
+  require approval in the project), from session evidence only.
 - **Validates** deterministically: every citation must resolve to an event in that
   session, standards must exist in the pinned catalog, and a finding that fails is
   listed under `rejected_candidates` rather than hidden.
@@ -146,7 +163,7 @@ catalog versions. It does not claim signed attribution: runs are bearer-observed
 ## Data and authority
 
 - The session content the analyst reads leaves the backend for the **organization's
-  own model endpoint**, which it configured. Secrets that reached an event reach the
+  own model endpoints** (decision and language), which it configured. Secrets that reached an event reach the
   analyst because Core-side redaction is not wired; credential-shaped text is
   redacted before it is sent.
 - Independent receipts of external effects and of the model route are not collected,

@@ -14,8 +14,8 @@ order wrong.
 Project security evaluation is separate from the developer-runtime setup below.
 `openbox project evaluate` runs one local image in the OpenBox Sandbox and asks the
 backend to evaluate the run; the report and any suggested rule appear in the
-dashboard. It needs the sandbox, an organization model connector (set once in the
-dashboard) and an explicit request, and it never evaluates on its own. See
+dashboard. It needs the sandbox, a decision model and a language model connector for the
+organization (set once in the dashboard) and an explicit request, and it never evaluates on its own. See
 [Project assurance](project-assurance.md).
 
 Examples use `--provider claude-code`; substitute `--provider codex` and most steps

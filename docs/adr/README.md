@@ -39,3 +39,4 @@ Every ADR not marked "reconstructed" in the table below is an original.
 | [0021](ADR-0021-openbox-sandbox-projectrun-v2.md) | Versioned OpenBox Sandbox ProjectRun v2 | Historical direction; deferred and superseded for Shift Left execution |
 | [0022](ADR-0022-agent-evaluation-and-published-reports.md) | Agent evaluation and published security reports | Accepted for local-stack (§4 superseded by 0023) |
 | [0023](ADR-0023-backend-owned-security-evaluation.md) | Backend-owned security evaluation | Accepted |
+| [0024](ADR-0024-decision-model-cascade.md) | Decision-model cascade for security evaluation (both models per org) | Accepted (proof of mechanism; amends 0023 §3) |

@@ -78,9 +78,11 @@ Two paths, deliberately separate:
 
 Project assurance is separate from the developer hook engine. The CLI runs one
 local image in the OpenBox Sandbox and then asks the backend to evaluate the run;
-the backend reads the session Core already stored, runs the analyst on the
-organization's own model, validates the result and stores a report with suggested
-OpenBox rules ([ADR-0023](adr/ADR-0023-backend-owned-security-evaluation.md)).
+the backend reads the session Core already stored, judges it with the
+organization's decision model, escalates what that is unsure of to the
+organization's language model, validates the result and stores a report with
+suggested OpenBox rules ([ADR-0023](adr/ADR-0023-backend-owned-security-evaluation.md),
+[ADR-0024](adr/ADR-0024-decision-model-cascade.md)).
 Evaluation starts only on an explicit request, never automatically. OpenShell
 observations are coverage, not production-enforcement proof, and the evaluator
 never writes a control. See [Project assurance](project-assurance.md).
