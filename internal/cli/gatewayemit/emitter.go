@@ -1,0 +1,621 @@
+package gatewayemit
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	obgit "github.com/openbox-ai/openbox-shift-left/internal/adapters/common/git"
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/sessionkey"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
+)
+
+// sessionHeader named through sessionkey rather than as a
+// second copy of the literal: this emitter is Claude Code's own proxy-lane
+// producer, so it reads that provider's one cell of the table. The value is
+// unchanged, so every existing test here stays byte-identical.
+var sessionHeader = sessionkey.ProxyHeader(sessionkey.ClaudeCode)
+
+// agentHeader unlike the session header it is conditional; Claude Code emits
+// it only when an agent context exists; so its absence is normal and must
+// never be treated as a fault.
+const agentHeader = "X-Claude-Code-Agent-Id"
+
+const warnInterval = time.Hour
+
+const upstreamRequestHeader = "Request-Id"
+
+// Emitter turns each relayed model call into a governance event and hands it
+// straight to Deliver -- the two lane daemons' in-process, bounded-pool send,
+// never a spool a separate flusher process signs for later.
+type Emitter struct {
+	// Lane names the producer this emitter speaks for. Required; there is no
+	// default, deliberately.
+	Lane Lane
+
+	// Deliver is how this emitter actually gets an event to core: the two
+	// lane daemons hand it a bounded pool's Submit, in-process, never a spool
+	// write. Required; nil is a wiring
+	// defect reported the same way a missing Lane or Elected is. It returns
+	// false when the record was NOT accepted (a saturated pool), which stops
+	// the pair's loop: Completed is never sent after a dropped Started.
+	Deliver func(ctx context.Context, ev client.DevEvent) bool
+
+	// Flush fires ONCE per successfully delivered call, after every one of its
+	// events has been accepted by Deliver -- never once per event, which is
+	// what a captured call's two halves (Started, Completed) would otherwise
+	// trigger it twice for. Nil disables the nudge (what a test wants; the
+	// hooks lane's own gateway.go is the one production caller, since a lane
+	// daemon's in-process Deliver has no separate nudge to make).
+	Flush func(sessionID string)
+
+	// DID resolves the developer identity, and it is a function because this is a
+	// long-lived daemon. With Providers unset it is Claude Code's.
+	DID func() string
+
+	// Providers holds one identity per provider this relay speaks for, keyed
+	// by provider name (which is also Tool.Name on the events it emits). A
+	// call is attributed to exactly one of them by its host and carrier
+	// header (CandidatesForHost, sessionkey.AttributeProxy); a provider with
+	// no entry here records nothing. A claude-code call with no entry falls
+	// back to the DID/Elected/ElectionProblem/ElectedName fields, which are
+	// Claude Code's own lane.
+	Providers map[string]ProviderLane
+
+	// CandidatesForHost lists the providers whose host rows cover a call's
+	// host, most specific carrier first. Nil, or a host it does not know,
+	// resolves to claude-code alone.
+	CandidatesForHost func(host string) []string
+
+	// Warn reports a dropped event.
+	Warn func(format string, args ...any)
+
+	// Verbose reports the capture outcome of every call, unthrottled. Nil ⇒
+	// silent. It prints identifiers and counts only; never a header, a body, or
+	// the credential fingerprint.
+	Verbose func(format string, args ...any)
+
+	// Now is injectable so a test can pin a timestamp; nil ⇒ time.Now.
+	Now func() time.Time
+
+	// Elected stops two lanes describing the same turn. Resolved PER RECORD (see
+	// electedFn); nil is a WIRING DEFECT, not a setting, and is reported as one.
+	Elected func() bool
+
+	// ElectionProblem reports why the election could not be RESOLVED, or "".
+	ElectionProblem func() string
+
+	// RunStore resolves this session's run identity (RunID/RunGeneration on
+	// Identity), so this lane names the same run a hook event would. The
+	// zero value resolves to runs/ under the resolved DefaultSessionDir() --
+	// what a production daemon gets from its unit's OPENBOX_SESSION_DIR
+	// (a daemon has no $HOME) -- and a test points Dir at a temp
+	// directory so it never touches the developer's real registry.
+	RunStore obgit.RunStore
+
+	// ElectedName is WHICH lane the election named, "" when it named none.
+	//
+	// Elected() being false has two causes and one is healthy: another lane won,
+	// and is emitting. If it named NOBODY -- what a settings rewrite leaves --
+	// then no lane emits at all while this relay is holding the call. Without the
+	// name those are indistinguishable, and the second was skipped quietly under a
+	// log line asserting a producer that does not exist. Nil ⇒ unknown.
+	ElectedName func() string
+
+	mu                 sync.Mutex
+	lastBadSessionWarn time.Time
+	lastNoSessionWarn  time.Time
+	// lastNoSessionOtherWarn throttles every class EXCEPT a completion separately, so
+	// probe noise cannot silence the one case that is a real defect.
+	lastNoSessionOtherWarn time.Time
+	lastNoDIDWarn          map[string]*time.Time
+	lastNoElectionWarn     time.Time
+	lastUndecidedWarn      time.Time
+	lastNoRoutedLaneWarn   time.Time
+	cachedDID              map[string]string
+	fallbackSeq            uint64
+	// probesSkipped counts token-count probes classified and deliberately not
+	// spooled. It is the local audit fact that survives the dropped emission:
+	// identifiers and counts only, reported through vlog, never egressed.
+	probesSkipped uint64
+	// announcedChats holds the chat conversations this daemon has opened a
+	// session for (bounded; see maxAnnouncedChats).
+	announcedChats map[string]struct{}
+}
+
+// ProviderLane is one provider's identity and election on the proxy lane.
+// Every function is resolved per call: a daemon is long-lived and what they
+// read can change under it.
+type ProviderLane struct {
+	// DID resolves the provider's developer identity ("" when it has none yet).
+	DID func() string
+	// Elected reports whether this relay is the provider's model-call
+	// producer. Nil is a wiring defect, not a setting.
+	Elected func() bool
+	// ElectionProblem reports why the election could not be resolved, or "".
+	ElectionProblem func() string
+	// ElectedName is the lane the election named, "" for none. Nil ⇒ unknown.
+	ElectedName func() string
+}
+
+const claudeCodeName = string(sessionkey.ClaudeCode)
+
+// laneFor resolves the lane a provider's calls run under. claude-code with no
+// map entry is the emitter's own top-level fields.
+func (e *Emitter) laneFor(name string) (ProviderLane, bool) {
+	if l, ok := e.Providers[name]; ok {
+		return l, true
+	}
+	if name == claudeCodeName {
+		return ProviderLane{DID: e.DID, Elected: e.Elected, ElectionProblem: e.ElectionProblem, ElectedName: e.ElectedName}, true
+	}
+	return ProviderLane{}, false
+}
+
+// candidates lists the providers a host could belong to; an unknown host is
+// Claude Code's alone, which is what this relay did before it knew any other.
+func (e *Emitter) candidates(host string) []string {
+	if e.CandidatesForHost != nil {
+		if got := e.CandidatesForHost(host); len(got) > 0 {
+			return got
+		}
+	}
+	return []string{claudeCodeName}
+}
+
+func (l ProviderLane) electionProblem() string {
+	if l.ElectionProblem == nil {
+		return ""
+	}
+	return l.ElectionProblem()
+}
+
+// electedName reports the lane the election named. The bool is whether the
+// question could be ANSWERED, which is not the same as the answer being empty.
+func (l ProviderLane) electedName() (string, bool) {
+	if l.ElectedName == nil {
+		return "", false
+	}
+	return l.ElectedName(), true
+}
+
+// noDIDWarnClock throttles the missing-identity warning per provider, so one
+// provider's warning cannot silence another's.
+func (e *Emitter) noDIDWarnClock(name string) *time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.lastNoDIDWarn == nil {
+		e.lastNoDIDWarn = map[string]*time.Time{}
+	}
+	t, ok := e.lastNoDIDWarn[name]
+	if !ok {
+		t = new(time.Time)
+		e.lastNoDIDWarn[name] = t
+	}
+	return t
+}
+
+// skippedUnattributed is the skip-and-count for a call on a host several
+// providers reach whose carrier names none of them, or more than one. It is
+// never guessed: the reason lands in the local capture trace, where it is
+// counted, and in the verbose log.
+func (e *Emitter) skippedUnattributed(c gateway.Captured, class PathClass, reason string) {
+	e.vlog("  capture: SKIPPED; %s (%s)", reason, class.Subject(c.HTTPURL))
+	e.traceOutcome("skipped", reason, c)
+}
+
+func (e *Emitter) noSessionWarnClock(class PathClass) *time.Time {
+	if class == ClassCompletion {
+		return &e.lastNoSessionWarn
+	}
+	return &e.lastNoSessionOtherWarn
+}
+
+func (e *Emitter) developerDID(name string, lane ProviderLane) string {
+	e.mu.Lock()
+	if did := e.cachedDID[name]; did != "" {
+		e.mu.Unlock()
+		return did
+	}
+	e.mu.Unlock()
+
+	if lane.DID == nil {
+		return ""
+	}
+	did := lane.DID()
+	if did == "" {
+		return ""
+	}
+	e.mu.Lock()
+	if e.cachedDID == nil {
+		e.cachedDID = map[string]string{}
+	}
+	e.cachedDID[name] = did
+	e.mu.Unlock()
+	return did
+}
+
+// Emit records one relayed call. It never returns an error and never panics.
+func (e *Emitter) Emit(ctx context.Context, c gateway.Captured) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.warn("openbox gateway: dropped a captured call after a panic: %v", r)
+		}
+	}()
+
+	// Latent today: WithGate has no production caller, so nothing is gated and
+	// this path cannot fire.
+
+	if !e.Lane.valid() {
+		e.vlog("  capture: DROPPED; this emitter has no lane configured")
+		e.warn("openbox: a model-call emitter was constructed with no lane, so captured calls " +
+			"cannot be attributed to a producer and are being DROPPED. This is a wiring defect, not a setting.")
+		e.traceOutcome("dropped", "no_lane_configured", c)
+		return
+	}
+
+	// A claude.ai chat completion has exactly one possible producer, this
+	// relay: no hook fires for it and no telemetry exports it. The election
+	// decides which lane describes a tool session's model calls, so it has
+	// nothing to say about a chat, and losing it must not silence one. A chat
+	// is signed by the claude-code identity, the store that governs
+	// Anthropic's hosts on this machine.
+	class := classifyPath(c.HTTPURL)
+	chat := class == ClassChatCompletion && e.Lane.Name == LaneProxy.Name
+
+	// Which provider's call this is: the host names the candidates, and on a
+	// host several providers reach the carrier header picks exactly one. A
+	// host only one provider reaches needs no carrier to know whose it is;
+	// the missing header is the session check's own skip below.
+	name := claudeCodeName
+	sessionID := ""
+	if !chat {
+		candidates := e.candidates(requestHost(c.HTTPURL))
+		if len(candidates) == 1 {
+			name = candidates[0]
+			sessionID, _ = sessionkey.ResolveProxy(sessionkey.Provider(name), c.RequestHeaders)
+		} else {
+			p, id, skip := sessionkey.AttributeProxy(candidates, c.RequestHeaders)
+			if skip != "" {
+				e.skippedUnattributed(c, class, skip)
+				return
+			}
+			name, sessionID = string(p), id
+		}
+	}
+	lane, ok := e.laneFor(name)
+	if !ok {
+		e.vlog("  capture: SKIPPED; this relay has no lane for %s", name)
+		e.traceOutcome("skipped", "provider_not_wired", c)
+		return
+	}
+	if lane.Elected == nil {
+		e.vlog("  capture: DROPPED; this emitter has no election gate configured")
+		e.warnThrottled(&e.lastNoElectionWarn, "openbox: a model-call emitter was constructed with no election gate, "+
+			"so it cannot know whether it is this machine's producer and captured calls are being DROPPED. "+
+			"This is a wiring defect, not a setting.")
+		e.traceOutcome("dropped", "no_election_gate", c)
+		return
+	}
+	if !chat && !lane.Elected() {
+		if problem := lane.electionProblem(); problem != "" {
+			e.vlog("  capture: DROPPED; the election cannot be resolved: %s", problem)
+			e.warnThrottled(&e.lastUndecidedWarn, "openbox: %s. Until that is readable this lane "+
+				"cannot know whether it is this machine's producer, so captured model calls are "+
+				"being DROPPED -- which is NOT the same as another lane winning. Re-run `openbox "+
+				"init` so the unit carries --settings, or pass --elected. The model calls "+
+				"themselves are unaffected.", problem)
+			e.traceOutcome("dropped", "election_unresolved: "+problem, c)
+			return
+		}
+		if elected, known := lane.electedName(); known && elected == "" {
+			// Resolved cleanly, and named nobody, while this relay is holding a call:
+			// a routing gap, not another lane's turn. The old code took the skip
+			// below and logged another lane as the producer, the one thing that
+			// cannot be true here.
+			e.vlog("  capture: DROPPED; the election names no producer, yet this relay observed the call")
+			e.warnThrottled(&e.lastNoRoutedLaneWarn, "openbox: this relay is observing model calls but "+
+				"the tool's settings route NO lane, so no lane is this machine's elected producer and "+
+				"captured model calls are being DROPPED by every lane. Something rewrote the settings "+
+				"file after install; a running tool keeps the environment it started with, so this is "+
+				"invisible from inside the session. `openbox doctor` names the missing keys and "+
+				"`openbox init --provider %s` rewrites them. The model calls "+
+				"themselves are unaffected.", name)
+			e.traceOutcome("dropped", "no_routed_producer", c)
+			return
+		}
+		e.vlog("  capture: SKIPPED; another lane is this machine's elected model-call producer")
+		e.traceOutcome("skipped", "not_elected", c)
+		return
+	}
+
+	did := e.developerDID(name, lane)
+	if did == "" {
+		e.vlog("  capture: SKIPPED; no developer DID configured (run `openbox init --provider %s`)", name)
+		e.warnThrottled(e.noDIDWarnClock(name), "openbox gateway: no developer DID configured for %s, so its relayed model calls are NOT being recorded. Run `openbox init --provider %s`.", name, name)
+		e.traceOutcome("skipped", "no_developer_did", c)
+		return
+	}
+
+	if chat {
+		e.emitChat(ctx, c, did)
+		return
+	}
+
+	carrier := sessionkey.CarrierHeader(sessionkey.Provider(name))
+	if sessionID != "" && !usableSessionID(sessionID) {
+		e.vlog("  capture: SKIPPED; %s is not a usable session id", carrier)
+		e.warnThrottled(&e.lastBadSessionWarn, "openbox gateway: relayed calls carry a %s header that is not a usable session id "+
+			"(too long, or not printable ASCII), so nothing can be attributed to a session. The model calls themselves are unaffected.", carrier)
+		e.traceOutcome("skipped", "unusable_session_id", c)
+		return
+	}
+	if sessionID == "" {
+		e.vlog("  capture: SKIPPED; the call carries no %s header, so it cannot be attributed to a session", carrier)
+		// isModelCall stays permissive for the WARN decision; the class decides care.
+		if isModelCall(c) && class.WarnsOnMissingSession() {
+			e.warnThrottled(e.noSessionWarnClock(class), "openbox gateway: no %s header on %s, so nothing can be attributed to a session and no governance event is being sent. "+
+				"The model calls themselves are unaffected.", carrier, class.Subject(c.HTTPURL))
+		}
+		e.traceOutcome("skipped", "no_session_id", c)
+		return
+	}
+
+	if !class.Emits() {
+		n := atomic.AddUint64(&e.probesSkipped, 1)
+		e.vlog("  capture: SKIPPED; %s is a token-count probe, which is classified but never emits a governance event (%d seen so far)",
+			class.Subject(c.HTTPURL), n)
+		e.traceOutcome("skipped", "token_count_probe", c)
+		return
+	}
+
+	runID, runGen := e.resolveRun(sessionID, c)
+	id := Identity{
+		SessionID:     sessionID,
+		DeveloperDID:  did,
+		RunID:         runID,
+		RunGeneration: runGen,
+		ToolName:      name,
+	}
+	if name == claudeCodeName {
+		// Claude Code's own agent header; no other provider sends it.
+		id.AgentID = usableAgentID(c.RequestHeaders[agentHeader])
+	}
+	requestID := e.requestID(c)
+	events, err := EventsFor(e.Lane, id, requestID, e.now(), c)
+	if err != nil {
+		e.vlog("  capture: DROPPED; %v", err)
+		e.warn("openbox: dropped a captured call: %v", err)
+		e.traceOutcome("dropped", "events_for_failed: "+err.Error(), c)
+		return
+	}
+	if !e.deliverAll(ctx, events, requestID) {
+		e.traceOutcome("dropped", "delivery_pool_saturated", c)
+		return
+	}
+	e.recorded(c, sessionID, requestID, len(events))
+	e.traceOutcome("recorded", "", c)
+}
+
+// traceOutcome writes the local, full-fidelity capture.outcome record every
+// Emit path produces -- recorded/skipped/dropped plus why, and the redacted
+// bodies gatewayemit already has in hand (the raw, pre-redaction view is a
+// separate, earlier observer wired at the relay itself; see
+// gateway.WithRawObserver). Best-effort like every trace.Emit: it never
+// blocks and never fails this Emit.
+func (e *Emitter) traceOutcome(outcome, reason string, c gateway.Captured) {
+	detail := map[string]any{
+		"lane":          e.Lane.Name,
+		"method":        c.HTTPMethod,
+		"url":           c.HTTPURL,
+		"status":        c.HTTPStatus,
+		"request_body":  trace.Body(c.RequestBody),
+		"response_body": trace.Body(c.ResponseBody),
+	}
+	if reason != "" {
+		detail["reason"] = reason
+	}
+	trace.Emit(trace.Record{
+		Stage:   trace.StageCapture,
+		Outcome: outcome,
+		Detail:  detail,
+	})
+}
+
+// emitChat records a claude.ai chat completion under its conversation's key,
+// opening that session first when this daemon has not yet: no hook ever will.
+// It is signed by the claude-code identity (did), the store that governs
+// Anthropic's hosts on this machine.
+func (e *Emitter) emitChat(ctx context.Context, c gateway.Captured, did string) {
+	key, ok := sessionkey.ResolveChat(requestHost(c.HTTPURL), requestPath(c.HTTPURL))
+	if !ok {
+		// Unreachable while classifyPath and ResolveChat share one predicate.
+		e.vlog("  capture: SKIPPED; a chat completion with no usable conversation id")
+		e.traceOutcome("skipped", "chat_no_conversation_id", c)
+		return
+	}
+	id := Identity{SessionID: key, DeveloperDID: did, ToolName: chatToolName}
+	requestID := e.requestID(c)
+	events, err := EventsFor(e.Lane, id, requestID, e.now(), c)
+	if err != nil {
+		e.vlog("  capture: DROPPED; %v", err)
+		e.warn("openbox: dropped a captured call: %v", err)
+		e.traceOutcome("dropped", "chat_events_for_failed: "+err.Error(), c)
+		return
+	}
+	for i := range events {
+		events[i].Metadata = chatMetadata(c)
+	}
+	announce := !e.chatAnnounced(key)
+	if announce {
+		started, _ := boundsOf(c, e.now())
+		events = append([]client.DevEvent{e.chatSessionStarted(id, started, chatMetadata(c))}, events...)
+	}
+	if !e.deliverAll(ctx, events, requestID) {
+		e.traceOutcome("dropped", "chat_delivery_pool_saturated", c)
+		return
+	}
+	if announce {
+		e.markChatAnnounced(key)
+	}
+	e.recorded(c, key, requestID, len(events))
+	e.traceOutcome("recorded", "chat", c)
+}
+
+// deliverAll submits events in order and reports whether every one was
+// accepted. Order matters twice: an opening event must be SUBMITTED first;
+// and the loop STOPS when a submission is refused (the pool is saturated),
+// because submitting Completed after Started was dropped files the
+// single-sided activity this pairing eliminates. Delivery itself happens off
+// this goroutine; accepted here means queued for one attempt, not confirmed
+// on the wire.
+func (e *Emitter) deliverAll(ctx context.Context, events []client.DevEvent, requestID string) bool {
+	if e.Deliver == nil {
+		e.vlog("  capture: DROPPED; this emitter has no delivery seam configured")
+		e.warn("openbox: a model-call emitter was constructed with no Deliver seam, so captured calls " +
+			"cannot reach core and are being DROPPED. This is a wiring defect, not a setting.")
+		return false
+	}
+	accepted := 0
+	for _, ev := range events {
+		if ok := e.Deliver(ctx, ev); !ok {
+			e.vlog("  capture: DROPPED; the delivery pool is saturated")
+			e.warn("openbox gateway: dropped event %s (%s) for activity %s: the delivery pool is saturated. %s",
+				ev.EventID, ev.EventType, requestID, abandonNote(accepted))
+			return false
+		}
+		accepted++
+	}
+	return true
+}
+
+func (e *Emitter) recorded(c gateway.Captured, sessionID, requestID string, n int) {
+	e.vlog("  capture: recorded session=%s activity=%s:%s:%s as %d event(s) in %s",
+		sessionID, sessionID, e.Lane.Name, requestID, n, c.Elapsed().Round(time.Millisecond))
+	if e.Flush != nil {
+		e.Flush(sessionID)
+	}
+}
+
+// isModelCall deliberately permissive in the other direction; any POST counts,
+// including one to a path this code has never heard of; because the failure
+// directions are not symmetric.
+func isModelCall(c gateway.Captured) bool {
+	return strings.EqualFold(c.HTTPMethod, http.MethodPost)
+}
+
+// resolveRun reads the shared run record ONCE per captured pair and applies
+// the straddle rule: a call whose observed start precedes the record's own bump timestamp
+// belongs to the run the bump sealed, not the one it opened. Read failure
+// (absent/unreadable/corrupt/inconsistent record) fails open to generation 0
+// -- this lane never blocks or drops a captured call over it.
+func (e *Emitter) resolveRun(sessionID string, c gateway.Captured) (runID string, runGen int) {
+	rec, err := e.RunStore.Read(sessionID)
+	if err != nil || rec.Generation == 0 {
+		return "", 0
+	}
+	started, _ := boundsOf(c, e.now())
+	if started.UnixNano() < rec.UpdatedAt {
+		return rec.PreviousRunID, rec.Generation - 1
+	}
+	return rec.RunID, rec.Generation
+}
+
+func (e *Emitter) requestID(c gateway.Captured) string {
+	if id := c.ResponseHeaders[upstreamRequestHeader]; usableRequestID(id) {
+		return id
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// A process-local counter cannot collide with itself, which is the property
+		// actually needed.
+		return GatewayIDPrefix + "seq-" + strconv.FormatUint(atomic.AddUint64(&e.fallbackSeq, 1), 36) +
+			"-" + strconv.FormatInt(e.now().UTC().UnixNano(), 36)
+	}
+	return e.Lane.IDPrefix + hex.EncodeToString(b[:])
+}
+
+func (e *Emitter) now() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
+}
+
+func (e *Emitter) vlog(format string, args ...any) {
+	if e.Verbose != nil {
+		e.Verbose(format, args...)
+	}
+}
+
+func (e *Emitter) warn(format string, args ...any) {
+	if e.Warn != nil {
+		e.Warn(format, args...)
+	}
+}
+
+func (e *Emitter) warnThrottled(last *time.Time, format string, args ...any) {
+	e.mu.Lock()
+	now := e.now()
+	if !last.IsZero() && now.Sub(*last) < warnInterval {
+		e.mu.Unlock()
+		return
+	}
+	*last = now
+	e.mu.Unlock()
+	e.warn(format, args...)
+}
+
+const maxRequestIDLen = 128
+
+const maxSessionIDLen = 128
+
+func usableSessionID(id string) bool {
+	if !printableASCII(id, maxSessionIDLen) {
+		return false
+	}
+	return !strings.ContainsAny(id, `/\`) && id != "." && id != ".."
+}
+
+func usableAgentID(id string) string {
+	if printableASCII(id, maxRequestIDLen) {
+		return id
+	}
+	return ""
+}
+
+func usableRequestID(id string) bool {
+	return printableASCII(id, maxRequestIDLen)
+}
+
+func printableASCII(s string, n int) bool {
+	if s == "" || len(s) > n {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// abandonNote says what a dropped Deliver call cost, which differs by which
+// half was refused. Worded for either backing (a spool append, for the hooks
+// lane's own gateway.go; an in-process pool submission, for telemetry.go/
+// transport.go) rather than naming one, since Deliver is the shared seam both
+// use.
+func abandonNote(accepted int) string {
+	if accepted == 0 {
+		return "the whole activity is abandoned, so no half-record is stored"
+	}
+	return "its opening half was already accepted and will store UNPAIRED"
+}

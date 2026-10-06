@@ -1,0 +1,15 @@
+{
+  "_fixture_provenance": "SYNTHETIC, not captured. tool_input keys and shapes derived from the input_schema object of the Agent-shaped tool in internal/transport/testdata/corpus/messages-json.json (a committed API-request corpus whose tool descriptions are scrubbed but whose input_schema property names/types/required are real: properties={description,prompt,subagent_type,model,...}). The literal tool name \"Agent\" does not appear in that corpus (the name field is scrubbed); this fixture assumes the schema carrying subagent_type is the Agent tool. Free-text values below are scrub placeholders, not model output.",
+  "hook_event_name": "PreToolUse",
+  "session_id": "s-fixture-agent-01",
+  "cwd": "/repo",
+  "permission_mode": "default",
+  "tool_name": "Agent",
+  "tool_use_id": "toolu_agent_fixture_01",
+  "tool_input": {
+    "description": "<scrubbed: subagent task description>",
+    "prompt": "<scrubbed: subagent prompt>",
+    "subagent_type": "code-reviewer",
+    "model": "claude-opus-5"
+  }
+}

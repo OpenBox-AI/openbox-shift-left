@@ -1,0 +1,333 @@
+// Package backend is the OpenBox control-plane client used only during
+// onboarding.
+//   - Path is POST /agent/create; the backend sets no global prefix and no
+//     versioning, so there is no /api/v1 here (unlike the core /evaluate
+//     path).
+//   - Auth is a global JwtAuthGuard accepting either a Keycloak Bearer JWT
+//     (which also requires the x-openbox-client header) or an org control-
+//     plane key via X-API-Key (obx_key_...). Organization_id is derived from
+//     the caller identity, never from the body.
+//   - A minimal valid body is agent_name + icon + full aivss_config; icon is
+//     @IsNotEmpty on the DTO.
+package backend
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/aivss"
+)
+
+// APIError is a non-2xx response from the backend.
+type APIError struct {
+	StatusCode int
+	Body       string
+	// URL is the absolute endpoint that produced this response. It is carried
+	// because the most common control-plane failure is not a broken request but
+	// a right request sent to the wrong deployment -- an organization token for
+	// one backend reaching another, which answers 401 with nothing naming a
+	// host. Every message built from this error then names the host for free.
+	URL string
+}
+
+func (e *APIError) Error() string {
+	if e.URL == "" {
+		return fmt.Sprintf("backend returned HTTP %d: %s", e.StatusCode, strings.TrimSpace(e.Body))
+	}
+	return fmt.Sprintf("backend returned HTTP %d from %s: %s",
+		e.StatusCode, e.URL, strings.TrimSpace(e.Body))
+}
+
+// Client talks to the openbox-backend control plane.
+type Client struct {
+	BaseURL    string
+	HTTP       *http.Client
+	authHeader string // "Authorization" or "X-API-Key"
+	authValue  string
+	clientID   string // value for the x-openbox-client header (JWT path only)
+}
+
+// New builds a control-plane client. The credential is never logged (INV-1).
+func New(baseURL, credential, clientID string) *Client {
+	c := &Client{
+		BaseURL:  strings.TrimRight(baseURL, "/"),
+		HTTP:     &http.Client{Timeout: 30 * time.Second},
+		clientID: clientID,
+	}
+	if strings.HasPrefix(credential, "obx_key_") {
+		c.authHeader, c.authValue = "X-API-Key", credential
+	} else {
+		c.authHeader, c.authValue = "Authorization", "Bearer "+credential
+	}
+	return c
+}
+
+// CreateAgentRequest is the subset of CreateAgentDto the CLI populates.
+type CreateAgentRequest struct {
+	AgentName   string         `json:"agent_name"`
+	AgentType   string         `json:"agent_type"`
+	Icon        string         `json:"icon"`
+	Description string         `json:"description,omitempty"`
+	ModelName   string         `json:"model_name,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
+	AivssConfig aivss.Config   `json:"aivss_config"`
+	Config      map[string]any `json:"config,omitempty"`
+	// IdentityVerification requests a keycloak_workload identity be issued
+	// (mode "generate") or linked (mode "link"). Nil omits the field
+	// entirely, so a v1 openbox_did request stays byte-identical; method
+	// defaults to openbox_did on the backend when absent.
+	IdentityVerification *IdentityVerification `json:"identity_verification,omitempty"`
+}
+
+// IdentityVerification is CreateAgentIdentityVerificationDto's generate-mode
+// subset: method/mode/source_type plus the public half of the RSA keypair.
+// Only PublicJWK leaves the machine -- never a private parameter (d, p, q,
+// dp, dq, qi).
+type IdentityVerification struct {
+	Method     string            `json:"method"`
+	Mode       string            `json:"mode"`
+	SourceType string            `json:"source_type"`
+	PublicJWK  map[string]string `json:"public_jwk"`
+}
+
+type createResponse struct {
+	Data struct {
+		Agent    agentBody            `json:"agent"`
+		Token    string               `json:"token"`
+		Identity WorkloadIdentityInfo `json:"identity"`
+	} `json:"data"`
+}
+
+// WorkloadIdentityInfo is the non-secret half of buildCreateResponse()
+// (agent-registration-identity.service.ts:471-485): everything needed to
+// authenticate with the issued keycloak_workload identity, never a private
+// key or credential secret.
+type WorkloadIdentityInfo struct {
+	Method                         string `json:"method"`
+	SourceType                     string `json:"source_type"`
+	WorkloadIdentityID             string `json:"workload_identity_id"`
+	CredentialID                   string `json:"credential_id"`
+	ServiceAccountID               string `json:"service_account_id"`
+	ClientID                       string `json:"client_id"`
+	Kid                            string `json:"kid"`
+	TokenEndpoint                  string `json:"token_endpoint"`
+	Audience                       string `json:"audience"`
+	PrivateKeyAvailableFromOpenBox bool   `json:"private_key_available_from_openbox"`
+}
+
+type agentBody struct {
+	ID             string `json:"id"`
+	AgentName      string `json:"agent_name"`
+	AgentType      string `json:"agent_type"`
+	OrganizationID string `json:"organization_id"`
+	Tier           string `json:"tier"`
+	TrustScore     any    `json:"trust_score"`
+}
+
+// Registration is the credential material captured from a successful create.
+// APIKey is a secret (INV-1) and must go straight to the secret store; never
+// logged, never written to a config file.
+type Registration struct {
+	AgentID    string
+	AgentName  string
+	APIKey     string // obx_(live|test)_+48hex; shown once
+	Tier       string
+	TrustScore string
+	// Identity is the workload identity info from a keycloak_workload create.
+	// Its PrivateKeyAvailableFromOpenBox is always false: the private key never
+	// leaves this machine, and never left this response either.
+	Identity WorkloadIdentityInfo
+}
+
+// Create registers a developer agent.
+func (c *Client) Create(ctx context.Context, req CreateAgentRequest) (*Registration, error) {
+	var out createResponse
+	if err := c.do(ctx, http.MethodPost, "/agent/create", req, &out); err != nil {
+		return nil, err
+	}
+	reg := &Registration{
+		AgentID:    out.Data.Agent.ID,
+		AgentName:  out.Data.Agent.AgentName,
+		APIKey:     out.Data.Token,
+		Tier:       out.Data.Agent.Tier,
+		TrustScore: fmt.Sprint(out.Data.Agent.TrustScore),
+		Identity:   out.Data.Identity,
+	}
+	return reg, nil
+}
+
+// AgentSummary is the identifying subset of a listed agent (no secrets).
+type AgentSummary struct {
+	ID             string `json:"id"`
+	AgentName      string `json:"agent_name"`
+	AgentType      string `json:"agent_type"`
+	DID            string `json:"did"`
+	OrganizationID string `json:"organization_id"`
+}
+
+type listResponse struct {
+	Data json.RawMessage `json:"data"`
+}
+
+// FindByName looks up an existing agent by exact agent_name via GET
+// /agent/list for idempotent re-init.
+func (c *Client) FindByName(ctx context.Context, name string) (*AgentSummary, error) {
+	var lr listResponse
+	if err := c.do(ctx, http.MethodGet, "/agent/list?all=true", nil, &lr); err != nil {
+		return nil, err
+	}
+	agents, err := parseAgentList(lr.Data)
+	if err != nil {
+		return nil, err
+	}
+	for i := range agents {
+		if strings.EqualFold(agents[i].AgentName, name) {
+			return &agents[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// parseAgentList tolerates either a bare array or a paginated {items:[...]}.
+// It reports an error rather than returning nil on a shape it cannot read.
+func parseAgentList(raw json.RawMessage) ([]AgentSummary, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var arr []AgentSummary
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return arr, nil
+	}
+	var paged struct {
+		Items *[]AgentSummary `json:"items"`
+		Data  *[]AgentSummary `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &paged); err == nil {
+		if paged.Items != nil {
+			return *paged.Items, nil
+		}
+		if paged.Data != nil {
+			return *paged.Data, nil
+		}
+	}
+	return nil, fmt.Errorf("agent list: unrecognized response shape (neither an array, {items:[…]}, nor {data:[…]})")
+}
+
+// Policy is the current per-agent policy read from the control plane. RegoCode
+// is intentionally not exposed as a field beyond a presence signal; it is
+// never printed/logged (INV-1) and cannot be localized.
+type Policy struct {
+	ID            string
+	UpdatedAt     string
+	PolicyBuilder json.RawMessage // config.policy_builder, or nil when absent
+	HasRawRego    bool            // rego_code present but no policy_builder → unlocalized
+	// Signed is the backend's signature over the authoritative policy, when it
+	// serves one. Nil from a backend that does not sign yet, which `dev
+	// sync` treats as the compatibility path rather than an error.
+	Signed *SignedPolicy
+}
+
+// SignedPolicy mirrors the response's signature block.
+type SignedPolicy struct {
+	KeyID        string `json:"key_id"`
+	Algorithm    string `json:"algorithm"`
+	CanonicalB64 string `json:"canonical_b64"`
+	SigB64       string `json:"sig_b64"`
+}
+
+type policyEnvelope struct {
+	Data *policyEntity `json:"data"`
+}
+
+type policyEntity struct {
+	ID        string          `json:"id"`
+	RegoCode  string          `json:"rego_code"`
+	Config    json.RawMessage `json:"config"`
+	UpdatedAt string          `json:"updated_at"`
+	Signed    *SignedPolicy   `json:"signed"`
+}
+
+// GetCurrentPolicy fetches GET /agent/<agentID>/policies/current with the org
+// control-plane credential (read:agent_policy is org-scoped; the org key, not
+// the agent runtime obx_ key). The org key and the fetched rego are never
+// logged (INV-1).
+func (c *Client) GetCurrentPolicy(ctx context.Context, agentID string) (*Policy, error) {
+	if strings.TrimSpace(agentID) == "" {
+		return nil, fmt.Errorf("agent id is required to read the current policy")
+	}
+	var env policyEnvelope
+	if err := c.do(ctx, http.MethodGet, "/agent/"+agentID+"/policies/current", nil, &env); err != nil {
+		return nil, err
+	}
+	if env.Data == nil {
+		return nil, nil // no current policy → allow / no-policy bundle
+	}
+	p := &Policy{ID: env.Data.ID, UpdatedAt: env.Data.UpdatedAt, Signed: env.Data.Signed}
+	if pb := extractPolicyBuilder(env.Data.Config); pb != nil {
+		p.PolicyBuilder = pb
+	} else if strings.TrimSpace(env.Data.RegoCode) != "" {
+		p.HasRawRego = true // raw rego with no builder config → unlocalized residual
+	}
+	return p, nil
+}
+
+func extractPolicyBuilder(config json.RawMessage) json.RawMessage {
+	if len(config) == 0 {
+		return nil
+	}
+	var wrapper struct {
+		PolicyBuilder json.RawMessage `json:"policy_builder"`
+	}
+	if err := json.Unmarshal(config, &wrapper); err != nil {
+		return nil
+	}
+	if len(wrapper.PolicyBuilder) == 0 || string(wrapper.PolicyBuilder) == "null" {
+		return nil
+	}
+	return wrapper.PolicyBuilder
+}
+
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal request: %w", err)
+		}
+		rdr = bytes.NewReader(b)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, rdr)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set(c.authHeader, c.authValue)
+	if c.authHeader == "Authorization" && c.clientID != "" {
+		httpReq.Header.Set("x-openbox-client", c.clientID)
+	}
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := c.HTTP.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return &APIError{StatusCode: resp.StatusCode, Body: string(respBody), URL: c.BaseURL + path}
+	}
+	if out != nil {
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("decode %s response: %w", path, err)
+		}
+	}
+	return nil
+}

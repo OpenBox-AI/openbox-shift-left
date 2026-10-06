@@ -1,0 +1,20 @@
+{
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "submit_reminder_decision",
+  "tool_input": {
+    "advisory_text": "",
+    "confidence": "high",
+    "decision": "none",
+    "priority": "low",
+    "reason": "No matching trigger.",
+    "skill_id": "bundled:example",
+    "visible_for_steps": 1
+  },
+  "session_id": "sess-0002",
+  "turn_id": "sess-0002",
+  "cwd": "/tmp/proj",
+  "transcript_path": null,
+  "model": "muse-spark-1.3-contributor",
+  "permission_mode": "default",
+  "model_provider": "meta"
+}

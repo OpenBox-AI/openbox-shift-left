@@ -1,0 +1,558 @@
+package claudecode
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log"
+
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/decision"
+)
+
+func TestIsHighRiskClass(t *testing.T) {
+	cases := map[string]bool{
+		"Bash":                      true,  // arbitrary shell execution
+		"mcp__github__create_issue": true,  // MCP tool call
+		"mcp__db__query":            true,  // MCP tool call
+		"Edit":                      false, // file; T1 only
+		"Write":                     false, // file; T1 only
+		"Read":                      false, // file; T1 only
+		"WebFetch":                  false, // shell-catch-all, not arbitrary exec
+		"Task":                      false, // shell-catch-all
+		"TodoWrite":                 false, // shell-catch-all
+	}
+	for tool, want := range cases {
+		if got := isHighRiskClass(tool); got != want {
+			t.Errorf("isHighRiskClass(%q) = %v, want %v", tool, got, want)
+		}
+	}
+}
+
+func TestDecisionTightens(t *testing.T) {
+	tighten := []client.Verdict{client.VerdictHalt, client.VerdictBlock, client.VerdictRequireApproval}
+	for _, v := range tighten {
+		if !decisionTightens(decision.Decision{Evaluation: client.Evaluation{Verdict: v}}) {
+			t.Errorf("decisionTightens(%s) = false, want true", v)
+		}
+	}
+	proceed := []client.Verdict{client.VerdictAllow, client.VerdictConstrain, client.VerdictUnknown}
+	for _, v := range proceed {
+		if decisionTightens(decision.Decision{Evaluation: client.Evaluation{Verdict: v}}) {
+			t.Errorf("decisionTightens(%s) = true, want false", v)
+		}
+	}
+	gf := decision.Decision{Evaluation: client.Evaluation{
+		Verdict:   client.VerdictAllow,
+		Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii"}}},
+	}}
+	if !decisionTightens(gf) {
+		t.Error("decisionTightens(allow + failed guardrail) = false, want true")
+	}
+}
+
+func TestEvaluationDecision(t *testing.T) {
+	real := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictBlock, Reason: "policy"})
+	if real.FailOpen {
+		t.Error("a real BLOCK verdict must be hookflow.FailOpen=false")
+	}
+	if real.Source != hookflow.SourceEvaluate {
+		t.Errorf("Source = %q, want %q", real.Source, hookflow.SourceEvaluate)
+	}
+	if real.Evaluation.Verdict != client.VerdictBlock {
+		t.Errorf("verdict = %q, want BLOCK", real.Evaluation.Verdict)
+	}
+	allow := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictAllow})
+	if allow.FailOpen {
+		t.Error("a real ALLOW verdict must be hookflow.FailOpen=false")
+	}
+	unknown := hookflow.EvaluationDecision(client.Evaluation{Verdict: client.VerdictUnknown})
+	if !unknown.FailOpen {
+		t.Error("VerdictUnknown must be hookflow.FailOpen=true (no real server verdict)")
+	}
+	if unknown.Source != hookflow.SourceEvaluateFailOpen {
+		t.Errorf("Source = %q, want %q", unknown.Source, hookflow.SourceEvaluateFailOpen)
+	}
+}
+
+func TestEvaluationFailOpen(t *testing.T) {
+	d := hookflow.EvaluationFailOpen("evaluation credentials unavailable")
+	if !d.FailOpen || d.Source != hookflow.SourceEvaluateFailOpen {
+		t.Errorf("tier2FailOpen must be hookflow.FailOpen + fail-open source, got %+v", d)
+	}
+	if d.Evaluation.Verdict != client.VerdictUnknown {
+		t.Errorf("verdict = %q, want UNKNOWN", d.Evaluation.Verdict)
+	}
+	if d.Evaluation.Reason != "evaluation credentials unavailable" {
+		t.Errorf("reason = %q, want the content-free cause", d.Evaluation.Reason)
+	}
+}
+
+func TestResolveTier2(t *testing.T) {
+	isolateConfig(t) // no config → default OFF
+	if ResolveTier2() {
+		t.Error("ResolveTier2 default must be OFF (opt-in)")
+	}
+	t.Setenv(envTier2, "1")
+	if !ResolveTier2() {
+		t.Error("OPENBOX_TIER2=1 must enable T2")
+	}
+	t.Setenv(envTier2, "0")
+	if ResolveTier2() {
+		t.Error("OPENBOX_TIER2=0 must disable T2")
+	}
+}
+
+// TestPinnedClockStableEventID: with the Mapper clock
+// pinned (as RunHook does per-invocation), mapping the same PreToolUse payload
+// twice; the Observe spool copy + the T2 /evaluate copy; yields the same
+// deterministic event_id, so the two collapse under one Idempotency-Key.
+func TestPinnedClockStableEventID(t *testing.T) {
+	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
+		ToolInput: []byte(`{"command":"echo hi"}`)}
+
+	pinned := time.Now()
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	m.Now = func() time.Time { return pinned }
+	e1, ok1 := m.Map(HookPreToolUse, ev)
+	e2, ok2 := m.Map(HookPreToolUse, ev)
+	if !ok1 || !ok2 {
+		t.Fatal("Map should succeed for a valid PreToolUse event")
+	}
+	if e1.EventID == "" || e1.EventID != e2.EventID {
+		t.Errorf("pinned clock must yield a stable event_id: %q vs %q", e1.EventID, e2.EventID)
+	}
+
+	mu := NewMapper(Identity{DeveloperDID: testDID})
+	u1, _ := mu.Map(HookPreToolUse, ev)
+	time.Sleep(2 * time.Millisecond)
+	u2, _ := mu.Map(HookPreToolUse, ev)
+	if u1.EventID == u2.EventID {
+		t.Errorf("unpinned clock unexpectedly produced identical ids (%q); the pin fix would be moot", u1.EventID)
+	}
+}
+
+// TestEnforceBudgetStaysUnderTheDeclaredCeiling the verdict-before-ceiling
+// pin. It is stated against the SPI-declared ceiling and the timeout the
+// installer actually writes, never a literal, so raising one raises the other
+// and the two cannot drift apart silently.
+func TestEnforceBudgetStaysUnderTheDeclaredCeiling(t *testing.T) {
+	ceiling := Engine{}.HookCeilings()
+	installed := time.Duration(preToolUseHookTimeoutSec) * time.Second
+	if ceiling.Gating != installed {
+		t.Errorf("declared gating ceiling %v must equal the installed PreToolUse timeout %v",
+			ceiling.Gating, installed)
+	}
+	budget := hookflow.EnforceBudget(ceiling)
+	if budget >= ceiling.Gating {
+		t.Errorf("whole-hook budget %v must stay strictly under the ceiling %v; "+
+			"a hook killed mid-gate lets the tool run ungoverned", budget, ceiling.Gating)
+	}
+	if evaluator.MaxTimeout != 0 {
+		t.Errorf("evaluator.MaxTimeout = %v; production must leave it zero or it re-clamps the gate's escalation budget",
+			evaluator.MaxTimeout)
+	}
+	if worst := hookflow.GateDrainAttemptTimeout + hookflow.DefaultEvaluationTimeout + hookflow.MaxStripeWait; worst >= budget {
+		t.Errorf("contended gate worst case %v must stay under the whole-hook budget %v", worst, budget)
+	}
+	if ceiling.Other <= 0 {
+		t.Error("a non-gating ceiling of zero would make every non-gate hook budget negative")
+	}
+}
+
+// TestInstalledHookTimeoutMatchesWhatIsRegistered pins the PreToolUse
+// `timeout` an install actually writes to the constant the enforce budgets
+// derive from. It reads the written settings file rather than a manifest: the
+// bundle no longer ships one, because a plugin's copy of these handlers does
+// not de-duplicate against the settings-level registrations and anything that
+// loaded it would have doubled every event.
+func TestInstalledHookTimeoutMatchesWhatIsRegistered(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
+	if err := writeHooks(path, "/opt/openbox/bin/openbox"); err != nil {
+		t.Fatalf("writeHooks: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the written settings: %v", err)
+	}
+	var f struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command       string `json:"command"`
+				Timeout       int    `json:"timeout"`
+				StatusMessage string `json:"statusMessage"`
+				AsyncRewake   bool   `json:"asyncRewake"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("parse the written settings: %v", err)
+	}
+	groups := f.Hooks["PreToolUse"]
+	if len(groups) != 1 || len(groups[0].Hooks) != 2 {
+		t.Fatalf("PreToolUse should register the gate and the rewake watcher, got %+v", groups)
+	}
+	gate, watcher := groups[0].Hooks[0], groups[0].Hooks[1]
+
+	if gate.AsyncRewake {
+		t.Fatal("the GATE must be synchronous; an asyncRewake handler cannot block a tool call")
+	}
+	if gate.Timeout != preToolUseHookTimeoutSec {
+		t.Errorf("registered PreToolUse timeout = %d, want preToolUseHookTimeoutSec = %d", gate.Timeout, preToolUseHookTimeoutSec)
+	}
+	if gate.StatusMessage == "" {
+		t.Error("the gating hook needs a statusMessage so a hold shows a reason")
+	}
+
+	if !watcher.AsyncRewake {
+		t.Error("the watcher must set asyncRewake; that is the only channel that wakes a session on exit 2")
+	}
+	if !strings.Contains(watcher.Command, "rewake claude-code") {
+		t.Errorf("watcher command = %q, want the rewake subcommand", watcher.Command)
+	}
+	if watcher.Timeout != rewakeHookTimeoutSec || time.Duration(watcher.Timeout)*time.Second < 30*time.Minute {
+		t.Errorf("watcher timeout = %ds, want rewakeHookTimeoutSec (%ds) covering the approval window",
+			watcher.Timeout, rewakeHookTimeoutSec)
+	}
+
+	ups := f.Hooks["UserPromptSubmit"]
+	if len(ups) != 1 || len(ups[0].Hooks) != 1 {
+		t.Fatalf("UserPromptSubmit should register exactly the prompt gate, got %+v", ups)
+	}
+	if got := ups[0].Hooks[0].Timeout; got != preToolUseHookTimeoutSec {
+		t.Errorf("registered UserPromptSubmit timeout = %d, want preToolUseHookTimeoutSec = %d", got, preToolUseHookTimeoutSec)
+	}
+	if ups[0].Hooks[0].StatusMessage == "" {
+		t.Error("the prompt gate needs a statusMessage so a hold shows a reason")
+	}
+
+	for event, gs := range f.Hooks {
+		// ConfigChange also carries the raised ceiling: it is
+		// the third hook where a human decision (here, a settings edit) must not
+		// be lost to a budget too tight to evaluate against.
+		if event == "PreToolUse" || event == "UserPromptSubmit" || event == "SessionEnd" || event == "ConfigChange" {
+			continue
+		}
+		for _, g := range gs {
+			for _, hh := range g.Hooks {
+				if hh.Timeout >= preToolUseHookTimeoutSec {
+					t.Errorf("%s timeout = %d; only a gating hook may carry the raised ceiling", event, hh.Timeout)
+				}
+			}
+		}
+	}
+}
+
+// serveEvaluate delegates to the shared fake core rather than standing up a
+// fourth mock.
+func serveEvaluate(t *testing.T, verdictJSON string, status int, delay time.Duration) (url string, srv *fakecore.Server) {
+	t.Helper()
+	f := fakecore.New(t, fakecore.Script{
+		Default:      verdictJSON,
+		AlwaysStatus: status,
+		Delay:        delay,
+	})
+	return f.URL(), f
+}
+
+func serveVerdict(t *testing.T, verdictJSON string) {
+	t.Helper()
+	url, _ := serveEvaluate(t, verdictJSON, 200, 0)
+	evalCreds(t, url)
+}
+
+// evalCreds points the resolver at the workload identity fakecore's
+// process-wide fake Keycloak actually verifies: fakecore.WorkloadPrivateKey/
+// APIKey/AgentID, not a literal (the repo's standing rule).
+func evalCreds(t *testing.T, baseURL string) {
+	t.Helper()
+	t.Setenv(envBaseURL, baseURL)
+	t.Setenv(envAPIKeyDirect, fakecore.APIKey())
+	t.Setenv(envWorkloadPrivateKey, fakecore.WorkloadPrivateKey())
+	t.Setenv(envAgentID, fakecore.AgentID())
+	t.Setenv(envContentCapture, "0")
+	// A stale cached token would point a client freshly pinned at a NEW
+	// fakecore instance's baseURL at a bearer that instance never issued (the
+	// on-disk cache path is keyed by HOME+tool, not by base URL, and several
+	// call sites share one isolateConfig'd HOME across subtests). A 401 is
+	// never resent (a stale bearer would be refused and its cache invalidated,
+	// never retried), so a leftover cache file would silently cost the whole
+	// subtest its one delivery attempt.
+	if p, err := devconfig.WorkloadTokenCachePath(); err == nil {
+		_ = os.Remove(p)
+	}
+}
+
+func TestEscalateTier2_RealVerdict(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	url, hits := serveEvaluate(t, `{"verdict":"block","reason":"tier2 exec policy","policy_id":"t2-pol"}`, 200, 0)
+	evalCreds(t, url)
+
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
+		ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
+
+	if hits.V3EvaluateAttempts() != 1 {
+		t.Fatalf("/evaluate hits = %d, want 1", hits.V3EvaluateAttempts())
+	}
+	if dec.FailOpen {
+		t.Error("a real BLOCK from core must be hookflow.FailOpen=false")
+	}
+	if dec.Evaluation.Verdict != client.VerdictBlock {
+		t.Errorf("verdict = %q, want BLOCK", dec.Evaluation.Verdict)
+	}
+	if dec.Source != hookflow.SourceEvaluate {
+		t.Errorf("Source = %q, want %q", dec.Source, hookflow.SourceEvaluate)
+	}
+}
+
+func TestEscalateTier2_Outage(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	url, _ := serveEvaluate(t, `boom`, 500, 0)
+	evalCreds(t, url)
+
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
+		ToolInput: []byte(`{"command":"echo hi"}`)}
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
+	if !dec.FailOpen {
+		t.Error("a /evaluate outage must yield a fail-open decision")
+	}
+	if dec.Source != hookflow.SourceEvaluateFailOpen {
+		t.Errorf("Source = %q, want %q", dec.Source, hookflow.SourceEvaluateFailOpen)
+	}
+}
+
+func TestEscalateTier2_NoCredentials(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+	t.Setenv(envBaseURL, url)
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
+		ToolInput: []byte(`{"command":"echo hi"}`)}
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, time.Second)
+	if !dec.FailOpen {
+		t.Error("missing credentials must degrade to a fail-open decision")
+	}
+	if hits.V3EvaluateAttempts() != 0 {
+		t.Errorf("no /evaluate call should be made without credentials; hits=%d", hits.V3EvaluateAttempts())
+	}
+}
+
+func TestEscalateTier2_BudgetBound(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	url, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 2*time.Second)
+	evalCreds(t, url)
+	m := NewMapper(Identity{DeveloperDID: testDID})
+	ev := &HookEvent{HookEventName: "PreToolUse", SessionID: "s", Cwd: "/tmp", ToolName: "Bash",
+		ToolInput: []byte(`{"command":"echo hi"}`)}
+	start := time.Now()
+	dec := escalateEvaluation(context.Background(), log.New(&nopWriter{}, "", 0), m, ev, 150*time.Millisecond)
+	elapsed := time.Since(start)
+	if elapsed > time.Second {
+		t.Errorf("escalateEvaluation took %v, must return near the 150ms budget", elapsed)
+	}
+	if !dec.FailOpen {
+		t.Error("a budget-exceeding /evaluate must yield a fail-open decision")
+	}
+}
+
+// escalateEvaluation maps a PreToolUse event and escalates it through the
+// adapter's own production evaluator, so these tests exercise the real
+// credential and client wiring the gate uses.
+func escalateEvaluation(ctx context.Context, logger *log.Logger, m Mapper, ev *HookEvent, budget time.Duration) decision.Decision {
+	devEv, ok := m.Map(HookPreToolUse, ev)
+	if !ok {
+		return hookflow.EvaluationFailOpen("event not mappable")
+	}
+	return evaluator.Escalate(ctx, logger, devEv, budget)
+}
+
+type nopWriter struct{}
+
+func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+// ── conformance: Tier-2 sync /evaluate escalation (C12-C17)
+// ──────
+func TestEnforcementConformance_Tier2(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
+	t.Setenv(envContentCapture, "0")
+	t.Setenv(envEnforce, "1")
+
+	const dangerBash = `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`
+	const benignBash = `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+	const editCall = `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Edit","tool_input":{"file_path":"/tmp/a.txt","old_string":"x","new_string":"y"}}`
+
+	run := func(payload string) string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&nopWriter{}, "", 0))
+		return stdout.String()
+	}
+	allowT1 := func(t *testing.T) {
+		serveVerdict(t, `{"verdict":"allow"}`)
+	}
+
+	t.Run("C12 T1 allow + T2 BLOCK on Bash → deny (floor closed)", func(t *testing.T) {
+		allowT1(t)
+		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"tier2 exec policy","policy_id":"t2-pol"}`, 200, 0)
+		evalCreds(t, url)
+		t.Setenv(envTier2, "1")
+		t.Setenv(envFailClosed, "0")
+		out := run(dangerBash)
+		d, reason := parsePermissionDecision(t, []byte(out))
+		if d != ccDecisionDeny {
+			t.Fatalf("permissionDecision = %q, want deny (T2 must close the T1-allow floor); stdout=%q", d, out)
+		}
+		if !strings.Contains(reason, "tier2 exec policy") || !strings.Contains(reason, "t2-pol") {
+			t.Errorf("reason = %q, want the T2 policy reason + id", reason)
+		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1", hits.V3EvaluateAttempts())
+		}
+		if strings.Contains(out, "rm -rf") {
+			t.Errorf("stdout leaked the command (INV-2): %q", out)
+		}
+	})
+
+	t.Run("C13 T1 allow + T2 ALLOW on Bash → proceed", func(t *testing.T) {
+		allowT1(t)
+		url, hits := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+		evalCreds(t, url)
+		t.Setenv(envTier2, "1")
+		t.Setenv(envFailClosed, "0")
+		if out := run(benignBash); strings.TrimSpace(out) != "" {
+			t.Errorf("a real T2 ALLOW must proceed (empty stdout); got %q", out)
+		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1", hits.V3EvaluateAttempts())
+		}
+	})
+
+	t.Run("C14 every gated class evaluates inline, incl. Edit ", func(t *testing.T) {
+		allowT1(t)
+		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"edit policy","policy_id":"e-pol"}`, 200, 0)
+		evalCreds(t, url)
+		t.Setenv(envFailClosed, "0")
+		out := run(editCall)
+		d, reason := parsePermissionDecision(t, []byte(out))
+		if d != ccDecisionDeny {
+			t.Fatalf("Edit must be decided by /evaluate; permissionDecision = %q, want deny (stdout=%q)", d, out)
+		}
+		if !strings.Contains(reason, "edit policy") {
+			t.Errorf("reason = %q, want the server's policy reason", reason)
+		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1 for Edit", hits.V3EvaluateAttempts())
+		}
+	})
+
+	// C15 pinned "fail-open proceeds / fail-closed denies" (two outcomes from
+	// the SAME outage, gated on the fail_closed value). Delivery is now
+	// always fail-closed: every outage denies. Once the recorded copy's
+	// attempt and one retry both fail, that is a recorded finding
+	// (RecordDeliveryFailure), never a latch -- so every later call keeps
+	// draining its own backlog and keeps escalating its own event, spending
+	// a fresh /evaluate attempt every time, denying fail-closed on ordinary
+	// (never session-halt) wording throughout. The deprecated fail_closed
+	// key sets nothing either way.
+	t.Run("C15 a T2 outage never halts the run; every call keeps draining and escalating", func(t *testing.T) {
+		allowT1(t)
+		url, hits := serveEvaluate(t, `boom`, 500, 0)
+		evalCreds(t, url)
+		t.Setenv(envTier2, "1")
+		t.Setenv(envFailClosed, "0") // deprecated: parsed, ignored; delivery is always fail-closed
+
+		start := time.Now()
+		out := run(dangerBash)
+		elapsed := time.Since(start)
+		d, reason := parsePermissionDecision(t, []byte(out))
+		if d != ccDecisionDeny {
+			t.Fatalf("a T2 outage must deny (delivery is always fail-closed); got %q (stdout=%q)", d, out)
+		}
+		if strings.Contains(reason, "halted") {
+			t.Errorf("reason = %q, want the ordinary fail-closed-outage wording, never the session-halt wording", reason)
+		}
+		if elapsed > 4500*time.Millisecond {
+			t.Errorf("the deny took %v; must land before CC's 5s hook timeout", elapsed)
+		}
+		if strings.Contains(out, "rm -rf") {
+			t.Errorf("stdout leaked the command (INV-2): %q", out)
+		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want exactly 1 (the escalation; its failure requeues, never retries inline)", hits.V3EvaluateAttempts())
+		}
+		if _, halted := hookflow.SessionHalted("s"); halted {
+			t.Error("a transient outage must never latch the run")
+		}
+
+		out2 := run(dangerBash)
+		d2, reason2 := parsePermissionDecision(t, []byte(out2))
+		if d2 != ccDecisionDeny {
+			t.Fatalf("the next call must also deny; got %q", d2)
+		}
+		if strings.Contains(reason2, "halted") {
+			t.Errorf("reason = %q, want the ordinary fail-closed-outage wording, never the session-halt wording", reason2)
+		}
+		// This call's own drain sends the requeued copy once and retries it
+		// once (hits 1 -> 3), both fail, recorded as a finding -- never a
+		// latch -- so this call's own gate still proceeds to its own
+		// escalation (hit 4), which also fails and requeues.
+		if hits.V3EvaluateAttempts() != 4 {
+			t.Errorf("/evaluate hits = %d, want 4 (the requeued copy's attempt and one retry, then this call's own escalation)", hits.V3EvaluateAttempts())
+		}
+		if _, halted := hookflow.SessionHalted("s"); halted {
+			t.Error("a transient outage must never latch the run, however many calls repeat it")
+		}
+
+		out3 := run(dangerBash)
+		if d3, reason3 := parsePermissionDecision(t, []byte(out3)); d3 != ccDecisionDeny {
+			t.Fatalf("the next call must also deny; got %q", d3)
+		} else if strings.Contains(reason3, "halted") {
+			t.Errorf("reason = %q, want the ordinary fail-closed-outage wording, never the session-halt wording", reason3)
+		}
+		// Same shape again: this call's own drain retries call2's own
+		// requeued copy (hits 4 -> 6), then this call's own escalation
+		// (hit 7).
+		if hits.V3EvaluateAttempts() != 7 {
+			t.Errorf("/evaluate hits = %d, want 7: an un-halted run keeps spending a fresh attempt every call", hits.V3EvaluateAttempts())
+		}
+	})
+
+	// A fresh session id: C15 above deliberately latches session "s"'s run,
+	// which every earlier subtest here shares, so this one needs its own
+	// unlatched run to test the opt-out in isolation.
+	t.Run("C16 the deprecated tier2=0 opt-out no longer disables evaluation", func(t *testing.T) {
+		allowT1(t)
+		url, hits := serveEvaluate(t, `{"verdict":"block","reason":"still governed"}`, 200, 0)
+		evalCreds(t, url)
+		t.Setenv(envTier2, "0") // deprecated: parsed, ignored
+		t.Setenv(envFailClosed, "0")
+		out := run(`{"hook_event_name":"PreToolUse","session_id":"s-c16","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/x"}}`)
+		if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
+			t.Fatalf("tier2=0 must not suppress the verdict; permissionDecision = %q, want deny (stdout=%q)", d, out)
+		}
+		if hits.V3EvaluateAttempts() != 1 {
+			t.Errorf("/evaluate hits = %d, want 1; the opt-out is ignored", hits.V3EvaluateAttempts())
+		}
+	})
+
+}

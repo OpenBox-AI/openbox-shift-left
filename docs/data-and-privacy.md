@@ -1,326 +1,417 @@
 # Data and privacy
 
-What leaves the machine, what never does, and the one setting that changes it.
+What leaves your machine, what never does, and the switches that change it.
 
-## The short version
+## Summary
 
-| | Sent to OpenBox | Notes |
+Content capture and usage capture are **on by default**. Each can be turned
+off per tool in `~/.openbox/<tool>/dev.json`, or with an environment variable
+(see [Settings](getting-started.md#settings)). An org can lock either one
+through managed config.
+
+| What | Sent? | Switch |
 |---|---|---|
-| Session, tool and MCP **metadata** | always | tool name, kind (`shell`/`file`/`mcp`), file path, MCP server + tool name, timing |
-| **Token counts and the model id** | yes, by default | per model turn. `finops: false` turns it off — see [Usage capture](#usage-capture) |
-| **Prompt text** | yes, by default | `content_capture: false` turns it off |
-| **The assistant's reply text** | yes, by default | **this changed** — one message per model turn, scanned locally for secrets and REDACTED first, truncated at 64KB. Same `content_capture` switch. See [What a model turn sends](#what-a-model-turn-sends) |
-| **The assistant's thinking** | **never** | not captured today. [ADR-0019](adr/ADR-0019-full-content-capture.md) is where that would be decided — it is deferred, not ruled out |
-| **Shell command text** | on a **gated** call, with capture on | never on ordinary telemetry — see [What an enforced call sends](#what-an-enforced-call-sends) |
-| **File contents** (a Write/Edit body) | on a **gated** call, with capture on | **this changed** — see below. Scanned locally for secrets and REDACTED before it is sent, and truncated at 64KB |
-| **File contents** (a file you read) | **never** | |
-| **Tool output** | **never** | |
-| **Credentials** | **never** | they stay on your machine — in a plaintext file readable by you, see [Where credentials live](#where-credentials-live) |
-| Git **commit trailer** and signed attestation | yes | commit sha, tree sha, session id — no diff, no file content |
+| Session, tool and MCP metadata: tool name and kind, file path, MCP server and tool name, timing, success or failure | always | none |
+| Paths of changed files, working directory, `/clear` and resume events | always | none (never file contents) |
+| Token counts and model id, per turn | by default | `finops` |
+| Prompt text | by default | `content_capture` |
+| Assistant reply text and thinking | by default | `content_capture` |
+| Shell commands, file bodies written or read, tool and MCP output (including error text) | by default | `content_capture` |
+| The prompt you give a subagent (the whole `Agent` tool input) | by default | `content_capture` |
+| Notification text, task titles and descriptions, `/compact` instructions and summary, MCP elicitation prompts and your answers | by default | `content_capture` |
+| Why a tool was refused; a failed turn's error detail | by default | `content_capture` |
+| Model-call request and response bodies (the transport lane; Muse's telemetry lane joins them in too; see [below](#model-calls)) | by default | `content_capture` |
+| Your Claude account email and organization UUID, once per session | if signed in | none (see [Account attribution](#account-attribution)) |
+| A one-way fingerprint of the provider credential used for a model call | transport lane only | none |
+| Git commit trailer: commit sha, tree sha, session id | always | `OPENBOX_INSTALL_GIT_HOOK=false` |
+| `CommitCreated` event metadata (commit/tree/parent shas, repo, branch, patch id, session id): first producer is the `git post-commit` hook, only where the hook is installed, agent commits only | always (structural, not content) | `OPENBOX_INSTALL_GIT_HOOK=false` |
+| Your credentials, HTTP headers of model calls, slash-command expansions, displayed message text | **never** | |
 
-The rule behind the table: content is gated at one choke point in the client, so a
-new field cannot start egressing by accident. Structural identifiers (paths, tool
-names, MCP server names) are metadata and always flow; bodies are content and do
-not.
+Structural identifiers (paths, tool names, ids) are metadata and always flow.
+Bodies are content, and all of them answer to the one `content_capture` key.
 
-A tool call used to be reported as a hand-built telemetry span, and that span had
-two fields — a request body and a response body — which *could* have carried a
-tool's input or output text. Nothing ever put anything in them, and
-[ADR-0013](adr/ADR-0013-tool-call-as-activity.md) removed the span from tool
-events entirely. What a completed tool call reports instead is counts — bytes
-read, bytes written, lines changed, and an exit code if the tool provides one —
-plus, since [ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md), whether it
-**succeeded or failed**. Never the output itself.
+**Why one switch.** A separate switch per content type would let an org
+believe it had turned content off while one type kept flowing. The cost is
+that you cannot, for example, keep prompts and drop tool output.
 
-**One span came back, deliberately, and it carries content.** This page
-previously said the response-body channel "cannot be re-opened by an adapter
-mistake plus a content-capture opt-in". That is no longer true, and the honest
-version is: a model turn now carries exactly one span whose response body is the
-assistant's reply, because OpenBox's goal-alignment engine reads assistant text
-from that field and from nowhere else. It is a deliberate widening with three
-bounds — the `content_capture` switch, local secret redaction before it is sent,
-and a 64KB cap — and it applies to **one** carrier. Tool calls remain span-less
-and carry no bodies at all.
+**Muse Code sends the same classes, by a different route.** Its hooks carry
+the prompt, tool input and tool output (with error text on a failure), the
+assistant reply (the `Stop` payload), each model call's whole request, and
+notification and compaction text. Thinking summaries and each call's response
+are read from Muse's own session journal on this machine (see
+[Muse Code](#muse-code)). No hook carries token counts: those come from Muse's
+separate telemetry export. All of it answers to `content_capture`.
 
-Neither paragraph is a privacy improvement claim. The first is a narrowing of
-what *could* egress; the second is a widening of what does.
+**Codex sends tool content too.** Codex hooks carry the prompt, the assistant
+reply and thinking, and, since this release, **tool input and tool output**:
+`tool_input` on the call and `tool_response` on the result, redacted before
+they are attached and gated on `content_capture`. That is new egress for
+Codex: earlier releases sent a Codex tool's input only to a gated call's
+decision, never as the call's own record, and never its output. A gated Codex
+call still sends its tool input for the decision (see
+[below](#what-an-enforced-call-sends)). The telemetry lane also sends each
+model call's request and response bodies, read from Codex's rollout (see
+[Model calls](#model-calls)).
 
-*When* it leaves: events are delivered in near-real-time by default — a detached
-flusher drains the local spool within ~2 seconds of each tool call
-(`hookflow.RealtimeTrigger`), with a final drain at session end.
-`realtime_flush: false` (or `OPENBOX_REALTIME=0`) delays delivery to session end
-instead. Either way this changes only *timing*: what egresses is governed solely
-by the table above and the content-capture posture below.
+## How content is protected
+
+Every body goes through three steps, in this order:
+
+```mermaid
+flowchart LR
+  B["body<br/>(prompt, command,<br/>file, output)"] --> R["1. redact secrets<br/>on this machine"]
+  R --> G{"2. content_capture<br/>on?"}
+  G -- yes --> C["3. cap at 64KB"] --> W(["sent to platform"])
+  G -- no --> X(["not sent;<br/>metadata only"])
+```
+
+1. **Local secret redaction** (`secret_detection`, on by default). Anything
+   that looks like a credential is replaced with `${OPENBOX_REDACTED_…}`.
+2. **Attachment** to the event, only if `content_capture` is on.
+3. **Size cap**: at most the first 64KB (65,536 characters; bytes for model
+   calls) is sent.
+
+Redacting before attaching is the only protection content has in transit.
+There is no server-side redaction.
+
+Redaction is keyword- and pattern-driven. A secret with no known format,
+labelled with a key name the detector does not recognise, is sent as ordinary
+text. The most likely place for that is a value you type into an MCP
+elicitation form. Details and measured limits:
+[What the scanner catches](credentials-and-secrets.md#what-the-scanner-catches-and-where-it-stops).
+If that matters for your data, turn `content_capture` off.
+
+## Turning content capture off
+
+With `content_capture: false`, sessions still produce full metadata, lineage,
+token usage, tool success or failure and lifecycle events. You lose prompt
+text, replies, thinking, tool input and output, and every dashboard panel
+that reads them (goal alignment and drift go empty).
+
+It also weakens enforcement, **silently**. A policy can only match what reaches
+the platform:
+
+- Rules about **which file was touched** keep working: file path and operation
+  are metadata.
+- Rules about **what a command said** stop matching: the command text is
+  content. That covers pipe-to-shell, credential sweeps, recursive deletes,
+  destructive SQL and similar rules.
+
+An unmatched rule fails safe, so nothing errors and nothing warns.
+`openbox doctor` shows whether capture is on, but not which policies stopped
+firing.
 
 ## Usage capture
 
-Usage capture is **on by default**. It answers "which model spent how many tokens,
-when" for a coding session — the same finops question the agent runtime already
-answers — and it is what makes a dev session visible in the cost dashboards.
+Per model turn: four token counts (input, output, cache creation, cache read),
+the model id, the turn index and duration, and the subagent id if one ran the
+turn. No cost: the platform computes it from its own pricing table.
 
-**Exactly what is sent, per model turn:**
+The counts come from the session transcript file, which is the only source.
+The parser reads an allowlist of fields from it: the token counts, the model
+id, timestamps, a subagent marker and the thinking blocks. A test seeds every
+other field with markers and checks none of them reach the wire.
 
-| | |
-|---|---|
-| four integers | input tokens, output tokens, cache-creation tokens, cache-read tokens |
-| one string | the model id, e.g. `claude-opus-5`, `gpt-5.6-sol` |
-| the turn's index and duration | `<session>:turn:3`, `duration_ms` |
-| the subagent id, when a subagent ran the turn | so per-agent spend is attributable |
+`finops: false` stops all of it: no counts, no turn events, and the transcript
+is never opened. Because reply text and thinking ride the turn event, turning
+`finops` off removes them too.
 
-**Exactly what is not sent, on this path:** no prompt, no thinking block, no stop
-reason, no tool command, no tool output, no file body — **and no cost.** Cost is
-derived server-side from a model-keyed pricing table; deriving it here would mean
-inventing a number from a table this client does not own.
+Claude Code and Codex report usage per turn; Muse reports it only through its telemetry export, never a hook (its turn event carries the reply and thinking, no counts). Codex derives each turn's counts from its
+own rollout file; a Codex session that ends with no completed turn sends one
+per-session total instead.
 
-The assistant's reply used to be on that list. It is not any more — it rides the
-same turn event, under content capture, and has its own section below. The
-numbers above and the reply text are separately switchable: `finops: false`
-removes the numbers *and* the turn events they ride on (so the reply goes too),
-while `content_capture: false` removes only the reply.
+## Thinking
 
-*When*: per model turn for Claude Code (its `Stop` hook), and once per session for
-Codex — Codex's per-turn hook exists but is deliberately not wired, so its usage
-arrives as a single session rollup. The numbers are a **sum over the turn**: a turn
-usually contains several model calls, and hooks do not fire per call, so per-call
-attribution is not available from either tool.
+The model's extended thinking is sent in its own field
+(`activity_output.thinking`), redacted and capped like everything else.
 
-Turn it off per install:
+This goes further than the provider does: Anthropic's own telemetry export
+always removes thinking. Thinking often repeats prompts, file contents and any
+credential the model saw, so redaction matters most here.
 
-```jsonc
-// ~/.openbox/dev.json
-{ "finops": false }
-```
-
-or per session with `OPENBOX_FINOPS=0`. The env setting wins either way, and an org
-can pin it through the managed config. With it off, **nothing** on this path is
-sent: no counts, no model id, no turn events — and the session transcript is never
-opened at all.
-
-Every session records which state was in effect, in the posture block on its
-`SessionStarted` event. That is deliberate: a default that sends new data is only
-defensible if you can tell afterwards which sessions it applied to.
-
-> **How this reads the transcript, stated precisely.** The token counts are not
-> available from any hook — the session transcript file is the only source, so the
-> engine parses it. It binds four numeric fields, plus the model id, plus a line
-> timestamp (used to compute the turn's duration and then discarded) and a boolean
-> marking subagent lines. Nothing else in that file — prompts, completions,
-> thinking blocks, tool inputs, tool results, file snapshots — is bound, so it has
-> nowhere to land and cannot reach an event.
->
-> This used to be a structural guarantee: the parser held only numbers, so content
-> was *impossible* to capture. It is now an **allowlist**, because the model id is a
-> string. The allowlist is enforced by a test that seeds the transcript with marker
-> strings in four content field classes and asserts they are absent from the actual
-> signed request body while the model id is present. See
-> [ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md), which
-> records the narrowing rather than leaving the older, stronger claim standing.
-
-## Content capture
-
-Content capture is **on by default**. Prompt text is sent so that governance can act
-on it — guardrails, drift detection and policy that reasons about intent all need it.
-
-Turn it off per install:
-
-```jsonc
-// ~/.openbox/dev.json
-{ "content_capture": false }
-```
-
-or per session with `OPENBOX_CONTENT_CAPTURE=0`. With it off, sessions still produce
-full metadata, lineage, token usage, tool success/failure and the lifecycle signals
-— you lose prompt visibility, the assistant's reply, enforced-call bodies, and any
-policy or dashboard panel that depends on them (goal alignment and drift go empty).
-Content capture and usage capture are separate settings on purpose: usage capture
-sends no content of its own, so turning content off does not turn usage off, and
-vice versa.
-
-An org can pin the setting so a developer cannot change it, via the managed config
-(`deploy/managed/`). `openbox doctor` always reports the effective value and where it
-came from.
-
-> **Redaction at source is not implemented yet.** With capture on, prompt text is
-> sent as-is; the server-side Guardrail redaction layer is not wired. If that matters
-> for your data, run with capture off until it is.
->
-> Note the asymmetry, because it is real: the assistant's reply and enforced-call
-> bodies ARE scanned locally for secrets before they are sent. The **prompt** is
-> not. Nothing about that changed here — it is the same gap, now standing beside
-> two paths that do have a control.
-
-## What a model turn sends
-
-**This section describes a change in what leaves your machine.** Since
-[ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md), a model turn carries the
-**assistant's reply text** — one message per turn, the same text you saw in your
-terminal.
-
-Why it is sent at all: OpenBox's goal-alignment and drift detection score what the
-agent said against what you asked for. Those two dashboard panels were empty for
-every developer session, and no amount of extra metadata could fill them — the
-feature reads the assistant's words or it reads nothing.
-
-What bounds it:
-
-- **The `content_capture` switch**, the same one that governs prompt text. With it
-  off, no reply text is sent — not truncated, not summarized: the field and the
-  span carrying it are absent from the payload entirely.
-- **`finops: false` also removes it**, since the reply rides the turn event and
-  turn events exist only under usage capture.
-- **Local secret detection runs first**, over the whole message, before it is
-  attached. This is better than the prompt path, which has no such control.
-- **64KB cap.** A longer reply is truncated before it is sent.
-
-What is NOT sent on this path: the assistant's **thinking blocks**, the stop
-reason, and any tool output the reply describes. Thinking is deferred to a future
-posture decision ([ADR-0019](adr/ADR-0019-full-content-capture.md)), not ruled out.
-
-Two consequences worth knowing rather than discovering:
-
-- **The reply is stored server-side** as a span row, with its own integrity leaf.
-  That is a real increase in what OpenBox retains about a session.
-- **`secret_detection: false` with capture on sends replies unredacted**, the same
-  way it does for enforced-call bodies.
+`init --provider claude-code` sets `showThinkingSummaries: true` in your
+Claude Code settings, because otherwise thinking arrives empty.
+`openbox uninstall` restores the previous value.
 
 ## What an enforced call sends
 
-**This section describes a change in what leaves your machine.** Until
-[ADR-0017](adr/ADR-0017-inline-policy-evaluation.md), only shell and MCP calls were
-sent for a decision, and a file body never was. Every gated call is now decided by
-OpenBox, so a **Write or Edit body is sent** — when content capture is on.
+A gated tool call is sent to the platform for a decision before it runs:
 
-An enforced call sends, in this order:
+1. **Metadata, always**: tool name and kind, file path and operation, MCP
+   server and tool name.
+2. **Secret detection** runs locally on the whole body.
+3. **Content, only if `content_capture` is on.**
 
-1. **Structural fields, always.** Tool name and kind, file path and operation, MCP
-   server and tool name. These are metadata and flow whatever the capture setting.
-2. **Secret detection runs locally, on the whole body.** Anything it recognizes is
-   replaced with a placeholder before the payload is built.
-3. **The content, only if `content_capture` is on** — and it is the **redacted**
-   body, the same bytes your tool call is rewritten to. The command for a shell
-   call, the arguments for an MCP call, the file body for a write.
+On Claude Code, content is redacted by default, with two deliberate
+exceptions:
 
-Three limits, stated rather than implied:
+| Call | What is sent |
+|---|---|
+| A shell tool Claude Code names (`Bash`, `BashOutput`, `KillShell`) | the `command`, **verbatim, not redacted** |
+| An MCP tool | the whole `tool_input`, **verbatim, not redacted** |
+| A file write (`Write`, `Edit`) | the redacted body: the same bytes written to disk |
+| Everything else: subagent prompts (`Agent`, `ToolSearch`), read arguments, glob and grep patterns, unknown tools | redacted |
 
-- **The server sees at most the first 64KB** of a body (`capBody`). Content-based
-  policy is therefore not a complete check on a large file: a rule that would match
-  at byte 70,000 does not fire. Local secret detection is *not* subject to this —
-  it runs before the cap and sees everything.
-- **`content_capture: false` means structural-only enforcement.** No body is sent
-  for any class, and policy decides on the metadata axes alone. That is coarser, not
-  broken — and it is the honest trade: fidelity scales with what you let leave the
-  machine.
-- **`secret_detection: false` with capture on sends bodies unredacted.** Turning off
-  the local detector removes the only in-transit protection there is; guardrail
-  redaction at source is still not wired.
+**Why shell and MCP are verbatim:** a policy deciding whether a command is
+dangerous has to see the exact command that will run. The consequence: a
+gated `curl -H "Authorization: Bearer …"` reaches the platform with the token
+intact. The ordinary telemetry copy of the same call is redacted.
 
-The observe copy of the same call is mapped separately and never carries content, so
-ordinary telemetry is unaffected either way.
+The shell exception is an allowlist by tool name, so a tool name Claude Code
+adds later gets the redacted default.
 
-**Prompts gate too** ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)):
-in enforce mode the `PromptSubmitted` event is sent for a decision **at submit
-time**, before the prompt is processed, instead of riding the near-real-time flush
-a moment later. What the event carries did not change — prompt text only under
-`content_capture`, and the prompt remains the one content path with **no local
-redaction** (the asymmetry above, unchanged). What changed is only the timing and
-that the verdict is applied: HALT/BLOCK refuses the prompt, and a HALT ends the
-session.
+On **Codex**, a gated call sends its tool input as-is, except a file body,
+which is redacted.
+
+Limits:
+
+- The platform sees at most the first 64KB of a body, so content policy cannot
+  match past that point. Local redaction sees the whole body.
+- `secret_detection: false` sends everything unredacted.
+
+**Prompts are gated too.** A prompt is sent for a decision when you submit it,
+under the same content rules. BLOCK or HALT refuses the prompt; HALT also ends
+the session.
+
+## Model calls
+
+The **transport** lane (Claude Code, see
+[Getting started](getting-started.md#model-call-lanes-claude-code)) sees real
+model-call traffic. For a call tied to a session, it sends:
+
+- a **selection** of the request: the model id, about the first 4KB of the
+  system prompt, and the newest conversation messages that fit in 48KB. Tool
+  definitions and older messages are dropped. The record says how many were
+  dropped;
+- the model's response, from its start;
+- the method, URL (without query string), status and a credential
+  fingerprint. These are not gated by `content_capture`: they are the evidence
+  of which account made the call;
+- **never** HTTP headers.
+
+Compressed responses (`gzip`, `br`) are decompressed first so redaction can
+see them. Any other encoding is stored as a marker naming it. A call that gets
+no response is still recorded, with no status. A call with no session header
+is recorded nowhere. Token-count probes (`/v1/messages/count_tokens`) send
+nothing.
+
+The **telemetry** lane sends model id, four token counts, duration and a
+request id. For Muse (see [Muse Code](#muse-code)) and Codex it also joins the
+call's request and response bodies onto the row; for Claude Code it sends no
+content.
+
+**Codex's bodies come from its rollout.** With `content_capture` on, the
+telemetry daemon reads Codex's own rollout file for the thread
+(`<CODEX_HOME>/sessions/…/rollout-….jsonl`, the directory the telemetry unit
+carries as `--codex-sessions`) and attaches to each `llm_completion` pair the
+call's **request**, the conversation items sent (your prompts, the developer
+and system messages, earlier tool calls and their outputs), newest first up to
+64KB, and its **response** (the assistant's message, reasoning summaries and
+tool calls). This is new egress for Codex. Both are redacted on this machine
+before they are attached, and the reader decodes only an allowlist of fields,
+so Codex's opaque encrypted reasoning blobs and its own instructions are never
+sent. The daemon waits up to two seconds for the rollout and ships a call
+without a half it could not match (a call is matched to its rollout record by
+token counts and time, and never guessed); the reason goes to the local trace
+without any content. An install from before this release has no
+`--codex-sessions` in its unit, so it sends no bodies until
+`openbox init --provider codex` is run again; `openbox doctor` says so. Nothing
+is copied from the rollout when `content_capture` is off.
+
+**claude.ai chats (macOS).** With the system proxy active, each claude.ai chat
+in a browser or the desktop app becomes its own session, keyed on the
+conversation. Each completion is one record with the request and reply,
+redacted and gated like any other body. The session cookie never leaves the
+machine. Nothing else on claude.ai is recorded.
+
+**api.meta.ai (macOS, any provider).** `api.meta.ai` is in every provider's
+host rows, Claude Code's included, so with the system proxy active your
+browser's traffic to it is decrypted by the relay, skipped (no session header)
+and kept raw in the local trace for 7 days.
+
+**Codex on macOS: browser traffic on the same hosts.** With Codex installed on
+macOS the system proxy also routes Codex's hosts through the relay: its API
+host, `chatgpt.com` with every subdomain, and `api.meta.ai`. Codex's own model
+calls are recorded from the relay once it has seen one (see
+[Coverage](coverage.md#1b-model-call-coverage-matrix)). Your **browser's**
+`chatgpt.com` and `api.meta.ai` traffic passes through the same relay and is
+decrypted by it. It carries no Codex session header, so it is skipped and
+nothing of it is sent. Once the relay is elected for Codex, telemetry stands by,
+so a Codex-host call the relay cannot record is recorded nowhere; `openbox doctor`
+counts those. It is still written raw to the local trace for 7 days
+(see [The local trace](#the-local-trace)), the same posture as claude.ai
+traffic that is not a chat completion.
+
+## Muse Code
+
+Muse's model calls are recorded by the **telemetry lane** only (see
+[Coverage](coverage.md#1b-model-call-coverage-matrix)); no proxy lane exists,
+because Muse ignores the system proxy and rejects the relay's certificate.
+Two things leave the machine: what its hooks send, and what its own telemetry
+export sends.
+
+- **Muse's telemetry export is redirected.** `openbox init --provider muse`
+  sets `telemetry` in `~/.config/muse/settings.json` to
+  `{enabled: true, destination: "external", endpoint: <the loopback receiver>}`.
+  `destination: external` **redirects Muse's own telemetry export to OpenBox's
+  receiver instead of Meta's destinations**, so while it is set Meta does not
+  receive that export. The previous value is recorded in
+  `~/.openbox/muse-prior-settings.json` and restored by `openbox uninstall`.
+- **That export is metadata only.** Muse exports no prompt, tool input, file
+  body or reply. OpenBox reads one event, `model_call`, and sends the model, the
+  provider, the response id (its activity id), the duration and the input,
+  output and cached token counts, for a session's subagents in that session.
+  None of that is content, and the export itself carries none; the session, turn and other events Muse exports are
+  received and skipped. The receiver also writes each record's attributes (ids
+  and numbers) to the local trace ([The local trace](#the-local-trace)), which
+  never leaves the machine. `telemetry: false` in Muse's dev config records
+  nothing. The export is metadata only; the call's bodies are not in it but
+  are joined in locally under `content_capture`, as the next item says.
+- **Bodies are joined onto that row, under `content_capture`.** The telemetry
+  daemon attaches the call's **request** (from the copy the `PostLLMCall` hook
+  stashed, below) and its **response**: the reply text, reasoning summaries
+  and tool calls, read from Muse's session journal under the `--muse-sessions`
+  directory the telemetry unit carries. Both are redacted before they are
+  attached and capped at 64KB. The daemon waits up to two seconds for them, so
+  the row can arrive that much late, and a half it could not find ships
+  without it; a content-free note of why goes to the local trace. A unit
+  installed before this release has no `--muse-sessions`, so it sends no
+  bodies until `openbox init --provider muse` is run again; `openbox doctor`
+  says so.
+
+What the hooks send leaves the machine like this; each body is redacted before
+attachment and capped like any other:
+
+- **Prompt, tool input and tool output**, under `content_capture`. A gated
+  shell command and MCP arguments go to the platform verbatim so a policy can
+  judge what will run; a file write goes redacted. The same carve-outs as
+  Claude Code (see [What an enforced call sends](#what-an-enforced-call-sends)).
+- **The reply and thinking.** At `Stop` (and a subagent's `SubagentStop`) the
+  assistant's reply from the hook payload, and the reasoning summaries read
+  from the session journal, ride the turn event under `content_capture`,
+  redacted. The same reply also rides the telemetry lane's model-call row
+  above, so a consumer sees it twice, as it does on Claude Code.
+- **Notifications and compaction.** A `Notification` hook sends its type, its
+  title and its message; `PreCompact` and `PostCompact` send the trigger
+  (`soft` or `hard`). The title and message are content, gated the same way.
+- **Model-call gate.** Every `PreLLMCall` is evaluated before the request is
+  sent. Metadata always goes: provider, model, message and tool counts and tool
+  names. Under `content_capture` it also sends **the request itself**: the
+  messages and tool definitions, redacted, cut from the head to the last 64KB
+  so the newest turn survives. That includes the system prompt and tool
+  descriptions Muse puts in the request. The closing `PostLLMCall` is metadata
+  only (status, finish reason, response id, an error class).
+- **The request is kept on disk for a few minutes.** So the telemetry row can
+  carry it, the `PostLLMCall` hook writes the already-redacted request body to
+  `.openbox/requests/` under the Muse spool directory (`0600`, readable by
+  anything running as you), and the daemon takes and deletes it when the
+  matching export arrives. An entry nothing took is removed after ten minutes,
+  when the next hook writes one, so a stopped daemon leaves bodies there until
+  then. With `content_capture` off nothing is written. Alongside it, two
+  indexes of ids only (tool-use id to session, response id to turn) live for
+  24 hours.
+- **Stays local.** `PostLLMCall`'s usage numbers and the request's trace
+  context go to the local trace only, never to the platform. Usage reaches the
+  platform only through the telemetry lane above.
+- **Muse's session log is read locally.** At `Stop` and `SessionEnd`, OpenBox
+  reads `~/.local/share/muse/sessions/…/session.jsonl` for the join fields of
+  each recorded tool action (its type, name, time, and id where present) to
+  spot an action whose hook never ran. That pass copies, logs and sends
+  nothing from it. A separate reader takes the reasoning summaries (at `Stop`)
+  and each call's reply and tool calls (in the telemetry daemon) from the same
+  file, under `content_capture` only; those, and only those, leave the
+  machine, redacted, as described above. If the file's format stops matching
+  what the reader was built on, it reads nothing and `doctor` reports it.
+- **The gate ledger is content-free.** It lists tool names and ids the gate
+  was asked about, under the Muse spool directory's `reconcile/` folder, and
+  is swept after 14 days.
+
+## Account attribution
+
+Once per session, `openbox` sends your Claude account **email** and
+**organization UUID**, read from Claude Code's own `~/.claude.json`. Nothing
+else from that file is sent (not the organization name, role, seat tier or
+billing type).
+
+The email is personal data. It is not covered by `content_capture`, because it
+identifies who ran the session rather than what they did. There is no switch
+for it other than not signing in. If you are not signed in, nothing is sent.
+
+Anything running as you can edit `~/.claude.json`. For a stronger signal, use
+the transport lane's credential fingerprint, which comes from the credential
+actually sent on the wire.
 
 ## Local files
 
-Two directories, and the split is worth knowing.
+Configuration lives under `~/.openbox/` (move it with `OPENBOX_HOME`).
+Runtime state lives in the OS config directory:
+`~/Library/Application Support/openbox/` on macOS, `~/.config/openbox/` on
+Linux, `%AppData%\openbox\` on Windows (move the queue with
+`OPENBOX_SPOOL_DIR`). Both are readable only by you, except on Windows.
 
-**Configuration** lives under `~/.openbox/` — relocate the whole directory with
-`OPENBOX_HOME`.
-
-**Runtime state** — spool and audit logs — lives under the OS config
-directory instead, and `OPENBOX_HOME` does **not** move it:
-`~/.config/openbox/` on Linux (or `$XDG_CONFIG_HOME`),
-`~/Library/Application Support/openbox/` on macOS, `%AppData%\openbox\` on
-Windows. `OPENBOX_SPOOL_DIR` relocates the spool specifically.
-
-Both are readable only by you.
-
-| File | Where | What it holds |
+| File | Where | Holds |
 |---|---|---|
-| `.env` | `~/.openbox/` | **your credentials**, in plaintext, `0600` — see below |
-| `dev.json` | `~/.openbox/` | non-secret coordinates and your posture. No credentials |
-| `approver.json` | `~/.openbox/` | approver config, if you run one. No credentials |
+| `.env`, `<tool>/.env` | `~/.openbox/` | credentials, plaintext ([details](credentials-and-secrets.md#where-credentials-live)) |
+| `dev.json`, `<tool>/dev.json` | `~/.openbox/` | URLs, agent id, settings; no secrets |
+| `transport-ca.pem`, `transport-ca.key` | `~/.openbox/` | the transport lane's CA and private key |
+| `activation.json` | `~/.openbox/` | every setting the lanes changed, with its previous value; on macOS also the previous network proxy settings |
+| `claude-code-prior-settings.json` | `~/.openbox/` | the previous `showThinkingSummaries` value |
+| `telemetry.log`, `transport.log` | `~/.openbox/` | lane diagnostics; no traffic |
+| `*-delivery-status.json` | `~/.openbox/` | how many lane records the platform did not accept; no content |
+| `cc-spool/`, `codex-spool/`, `muse-spool/` | runtime dir | the per-session event queue, already redacted, in plaintext. Normally empty: each event is attempted once and then removed. `muse-spool/.openbox/` also holds Muse request bodies (redacted, ten minutes) and id-only indexes (24 hours), described under [Muse Code](#muse-code) |
+| `enforcements.jsonl` | runtime dir | what enforcement did: verdict, source, redaction categories. Never the secret or the body |
+| `advisories.jsonl` | runtime dir | guardrail findings |
+| `halted-sessions/` | runtime dir | one small file per halted run: the reason and a timestamp. It keeps that run refused |
+| `pending-approvals/` | runtime dir | content-free approval markers |
+| `trace/trace-YYYY-MM-DD.jsonl[.gz]` | runtime dir (move with `OPENBOX_TRACE_DIR`) | **the local trace: everything, including raw bodies before redaction and any secrets in them.** See [The local trace](#the-local-trace) |
 
-| File | What it holds |
-|---|---|
-| `policy-bundle.json` | **inert leftover.** There is no local policy bundle since [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md); nothing reads this file and it can be deleted |
-| `enforcements.jsonl` | what enforcement did: verdict, source, whether it blocked, redaction *categories* — never the secret, never the body |
-| `advisories.jsonl` | advisory verdicts and guardrail findings |
-| `cc-spool/` | events awaiting flush |
-| `cc-spool/turns/` | how far each turn window has been read: a byte offset and a turn index, nothing else |
-| `pending-approvals/`, `stale/` | content-free markers keyed by session id |
-| `halted-sessions/` | one small file per HALTed session — the policy reason, policy id and a timestamp, never tool content. It is what keeps a halted session refused ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)); deleting it un-halts only this machine's view, and every verdict is already recorded server-side |
-| `approvals-auto.jsonl` | an autonomous approver's decisions, if you run one |
+On macOS, `init` also adds the transport CA to the System keychain and sets a
+proxy auto-config URL on each enabled network service. `openbox uninstall`
+reverses both.
 
-## Where credentials live
+A queued event nothing has attempted yet is deleted after 30 days, and the
+count is logged in `.discarded` in the queue directory.
 
-`~/.openbox/.env`, in **plaintext**. Nothing is sent to OpenBox — but there is no
-encryption at rest either, and the difference matters, so here it is plainly
-([ADR-0015](adr/ADR-0015-plaintext-credential-file.md)):
+## The local trace
 
-```
-OPENBOX_API_KEY='obx_…'                 # your agent's runtime key
-OPENBOX_AGENT_PRIVATE_KEY='…'           # the Ed25519 key this machine signs with
-OPENBOX_CONTROL_TOKEN='obx_key_…'       # approver installs only — see below
-```
+Every `openbox` process (`init`, `auth`, each hook, the lane daemons,
+`doctor`, `uninstall`) appends a record of what it does to
+`trace/trace-YYYY-MM-DD.jsonl` in the runtime directory: process start and
+exit, each hook's raw input and output, local decisions and redactions, what
+each lane captured and why it skipped or dropped a call, every delivery
+attempt and core's answer, queue drops, halts, and each install and uninstall
+step.
 
-- **On macOS and Linux** the file is `0600` under a `0700` directory, so other
-  local users cannot read it. Anything running **as you** can: a shell one-liner,
-  a dependency's install script, and **the coding agent under governance**, which
-  by design runs arbitrary commands as you.
-- **On Windows there is no at-rest protection at all.** `0600` is a no-op there —
-  it only toggles the read-only attribute — so the file inherits the parent ACL
-  and other local accounts can read it. Use full-disk encryption; do not treat
-  this file as protected.
-- **It is the only copy.** OpenBox shows the API key and signing key exactly once,
-  at registration, and does not store them. Lose the file and you rotate
-  (`openbox auth --rotate`) or re-register.
-- **Never commit it.** The file's own header comment says so; it lives in your
-  home directory rather than anywhere near a repo for that reason.
+**It holds content both before and after redaction, whatever
+`content_capture` says.** A secret in a prompt, a command, a file or a model
+call is in this file in plaintext, next to its redacted form. It is never sent
+anywhere: `content_capture` and managed config govern only what egresses. It
+is protected the same way `.env` is: readable only by you (`0600`) on macOS
+and Linux, unprotected on Windows, and readable by anything running as you,
+including the agent being governed. Treat the directory as a credential.
 
-What that means for evidence: a signed event or commit attestation proves
-**origin-of-config** — a machine holding this agent's key produced it — not
-tamper-resistance against the developer or the agent they run. The OS keychain
-this replaced did not actually change that, since it was unlocked for the whole
-desktop session and readable by the same processes; the plaintext file just makes
-it obvious.
+API keys, bearer tokens and private keys are never written to it. A body over
+512 KiB is stored as its first 512 KiB plus its length and SHA-256.
 
-**Approver installs carry a bigger credential.** If you run `openbox approve`, the
-same file holds `OPENBOX_CONTROL_TOKEN`. When that is an `obx_key_…` organization
-key, it can **create and rotate agents across your whole organization** — the
-signing key above compromises one agent, this one compromises the fleet. Prefer a
-short-lived JWT where your deployment allows it, and do not put an approver
-install on a shared host.
+Files are per UTC day. Today's file stays plain; the lane daemons compress
+earlier days to `.gz` and delete anything older than 7 days (and older days
+first if the directory passes 512 MiB). `openbox trace <session>` prints one
+session's timeline; `openbox trace --against-core --agent <id>` compares it
+with what the platform stored and flags events it is missing, events it filed
+with no session, and activities with only one half.
 
-A real environment variable always beats the file, so CI can supply credentials
-without writing anything to disk:
+## Uninstall
 
-```
-secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var  >  ~/.openbox/.env
-coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json  >  default
-```
+`openbox uninstall` deletes all of the above except your organization's
+managed config files and the local trace, which is the record of the
+uninstall itself; `openbox uninstall --purge-trace` deletes that too. It restores every setting it changed, tries to deliver
+queued events first, and reports what could not be delivered. Deletion is an
+ordinary unlink, not a secure erase. Details in
+[Getting started](getting-started.md#uninstall).
 
-Secrets and non-secrets never share a file, and no value lives in two places.
+## How this is checked
 
-## Secret detection stays local
-
-In enforce mode, a `Write`/`Edit` body is scanned locally for credential patterns
-before the tool runs. A hit is redacted **in the tool input** — the file is written
-with `OPENBOX_REDACTED…` in place of the secret — and the audit records the category
-(`aws_key`, `entropy`, …), never the value. Nothing about the finding except the
-category leaves the machine.
-
-## Verified, not asserted
-
-The end-to-end suite proves this rather than documenting it: a real session writes a
-file containing a synthetic AWS key and runs a shell command containing a marker,
-both sourced from files so neither appears in the prompt. It then asserts the prompt
-marker **is** present in what reached OpenBox and the command and file markers are
-**absent from every row** the session produced. See
-[`docs/testbed/e2e.md`](testbed/e2e.md) § capture.
+The conformance suite checks each rule on the actual bytes sent: a gated field
+is absent with capture off, and present, redacted and capped with it on. It
+runs on every change. Nothing here has been checked against a live platform;
+see [Provider coverage](coverage.md) for what is proven.

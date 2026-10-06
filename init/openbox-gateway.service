@@ -1,0 +1,20 @@
+# ILLUSTRATIVE COPY. NOT LOADED, NOT INSTALLED, NOT AUTHORITATIVE.
+#
+# The unit actually installed on a machine is RENDERED at install time by
+# internal/cli/laneservice with that machine's binary path, HOME, chosen address
+# and a stop timeout matched to the daemon's own --shutdown-grace. This file was
+# produced by that same renderer with placeholder values, so it shows the SHAPE
+# and nothing more. See README.md in this directory.
+[Unit]
+Description=OpenBox local gateway (model-call governance)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart="/Users/dev/.local/bin/openbox" gateway --addr "127.0.0.1:8788" --upstream "https://api.anthropic.com" --shutdown-grace 30s
+Restart=always
+RestartSec=2
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

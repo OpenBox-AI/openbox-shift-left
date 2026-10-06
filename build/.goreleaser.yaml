@@ -1,0 +1,64 @@
+# GoReleaser config for the unified `openbox` engine (one static, no-cgo
+# binary that is CLI + hook + sidecar + git-hook). Produces per-platform archives
+# + a checksums.txt that install.sh downloads and verifies, so `curl … | bash`
+# drops a prebuilt binary with NO Go toolchain on the developer's machine.
+#
+# The engine lives in cmd/openbox + internal/cli. One module, no `replace`
+# directives and no workspace, so the build needs neither a `dir:` nor a
+# GOWORK override — it resolves from the repository root exactly as a consumer
+# would.
+#
+# Release: push a tag `vX.Y.Z`; the release workflow runs `goreleaser release`.
+version: 2
+
+project_name: openbox
+
+builds:
+  - id: openbox
+    main: ./cmd/openbox
+    binary: openbox
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: openbox
+    ids:
+      - openbox
+    formats:
+      - tar.gz
+    # Deterministic, script-parseable name: openbox_<version>_<os>_<arch>.tar.gz
+    # (install.sh constructs this exact name from uname). {{ .Version }} is the tag
+    # without its leading `v`.
+    name_template: "openbox_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+release:
+  github:
+    owner: OpenBox-AI
+    name: openbox-shift-left
+  prerelease: auto
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

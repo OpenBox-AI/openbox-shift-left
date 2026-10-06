@@ -1,0 +1,15 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-0001",
+  "turn_id": "turn-0001",
+  "cwd": "/tmp/proj",
+  "transcript_path": null,
+  "model": "muse-spark-1.3-contributor",
+  "permission_mode": "default",
+  "model_provider": "meta",
+  "tool_name": "mcp__docs__search",
+  "tool_input": {
+    "query": "health check conventions"
+  },
+  "tool_use_id": "call_0005"
+}

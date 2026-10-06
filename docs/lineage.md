@@ -1,98 +1,117 @@
-# Lineage — session → commit → deploy
+# Lineage: session → commit → deploy
 
-The question lineage answers: *for this commit, or this deploy, which session
-produced it, with which agent, under which policy — and how sure are we?*
+Lineage answers: *for this commit or deploy, which coding session produced it,
+with which agent, and how sure are we?*
 
-## How the chain is produced
+## How the chain is built
 
 ```mermaid
 flowchart LR
-  S["dev session<br/>(sessions · events · Merkle-sealed)"]
+  S["coding session<br/>(events, sealed at end)"]
   C(["commit"])
-  N["signed attestation<br/>refs/notes/openbox-attest"]
   D["Deploy event<br/>run_id = deploy-&lt;env&gt;-&lt;sha&gt;"]
-  L[("deploy_session_links<br/>the queryable JOIN")]
-  S -- "prepare-commit-msg stamps<br/>OpenBox-Session: &lt;session&gt;" --> C
-  C --> N
-  C -- "openbox-git-action reads trailer + note" --> D
+  L[("deploy_session_links")]
+  S -- "commit hook stamps<br/>OpenBox-Session: &lt;session&gt;" --> C
+  C -- "openbox-git-action reads the trailer" --> D
   D --> L
   L --> S
 ```
 
 Three producers, all in this repo:
 
-1. **The session** emits its events as it runs. When it ends, core seals it — a Merkle
-   root over its leaves, signed.
-2. **The commit hook** (`prepare-commit-msg`) stamps `OpenBox-Session: <id>` into the
-   commit message, mirrors it into `refs/notes/openbox`, and signs an attestation
-   envelope into `refs/notes/openbox-attest` covering the commit sha, the tree sha
-   and the session ids
-   ([ADR-0010](adr/ADR-0010-signed-commit-attestation.md)).
-3. **The deploy action** (`openbox-git-action`) resolves the pushed range back to
-   sessions, carries the attestation, and emits one Deploy event per environment —
-   idempotent on `deploy-<env>-<sha>`, so re-running a pipeline does not duplicate.
+1. **The session** sends its events as it runs. When it ends, the platform
+   seals it with a signed Merkle root.
+2. **The commit hook** (`prepare-commit-msg`, installed by `openbox init`)
+   adds an `OpenBox-Session: <id>` trailer to each commit made during a
+   governed session, and mirrors it into `refs/notes/openbox`. A second,
+   `post-commit` hook then sends one `commit_created` event into that
+   session's own event stream, when the commit was made by a governed agent
+   tool (see Limits) -- this is the evidence a deploy link grades against,
+   not the trailer.
+3. **The deploy action** (`openbox-git-action`, in `cmd/openbox-git-action/`)
+   runs in CI. It resolves the pushed commits back to sessions and sends one
+   Deploy event per environment. It is idempotent on `deploy-<env>-<sha>`, so
+   re-running a pipeline does not duplicate it.
 
-Core then materialises `deploy_session_links`, which is what makes the chain
-*queryable* rather than a string of references buried in event metadata.
+The platform then fills `deploy_session_links`, which makes the chain
+queryable.
 
-**A deploy is never a member of its authoring session.** By deploy time that session
-is terminal and Merkle-sealed, and appending to a sealed session is rejected — that
-rejection *is* the tamper-evidence guarantee. So the link is a reference, not
-membership.
+A deploy is linked to its session by reference, never added to it. The
+tamper-evidence guarantee is the session's sealed, signed Merkle root, which
+exists only after the session sends `SessionEnded`.
 
-## How sure are we — three honest states
+## How sure are we
 
-| State | Means | Rendered as |
-|---|---|---|
-| `unattributed` | no trailer: a human commit, or a tool with no adapter | a gap, never a guess |
-| `inferred` | the trailer says which session was live | amber — an unverified claim |
-| `verified` | ownership **and** an accepted signed attestation both hold | green |
-
-A trailer can be hand-written, so `inferred` is exactly that: a claim. Getting to
-`verified` needs the pipeline to fetch `refs/notes/openbox-attest` (not the default)
-and the platform to have a verifier for the signing DID. The distinction is surfaced
-rather than smoothed over — a chain that showed green for an unverified claim would be
-worse than one that showed nothing.
-
-## The join keys
-
-| Concept | Key |
+| State | Means |
 |---|---|
-| session identity | `(workflow_id = agent DID, run_id = tool session id)` |
-| commit → session | the `OpenBox-Session` trailer (a claim) + the attestation note (proof) |
-| deploy → commit → session | `deploy_session_links (deploy_id, commit_sha, session_run_id, session_id, verified, source)` |
-| deploy identity | `run_id = deploy-<env>-<sha>` — idempotent by construction |
+| `unattributed` | no trailer: a human commit, or a tool with no adapter. Shown as a gap, never a guess |
+| `unverified` | the trailer names the session that was live, but the platform found no matching commit event from the deploying agent's session. A trailer can be hand-written, so this is a claim, not proof |
+| `linked` | the deploying agent's own session sent a `commit_created` event matching the claim commit and session; the platform tied it to this deploy, but that session has not sealed (yet, or ever) |
+| `attested` | the commit event is a leaf in that session's sealed Merkle root, signed with a publicly verifiable key -- the strongest guarantee the platform makes. `verified` (as a boolean) is true only in this state |
 
-A fan-in — several sessions in one push — gets one link row per session. There is no
-"primary session" to pick.
+`inferred` is a different, narrower name that survives only inside
+`openbox-git-action`'s own `Resolution.Status`: "session id(s) were recovered
+from the push, but ownership of the pusher was not verified." That is a
+question about who pushed; the four grades above are a question about what the
+platform can prove about the commit itself. Do not conflate the two.
+
+## Limits
+
+- **Agent commits only.** A commit event is produced only when the tool
+  marker of the agent that made the commit (Claude Code, Codex) agrees with
+  the session's own recorded tool. A hand commit made inside a governed
+  worktree keeps its trailer claim but never produces a commit event, so it
+  stays `unverified`.
+- **Local-signed sessions never attest.** A session sealed with the local
+  dev-mode key (`OPENBOX_LOCAL_KMS_SECRET`, a shared-secret HMAC) is not
+  publicly verifiable, so it can reach `linked` but never `attested`.
+- **Deploy before seal reads `linked`.** Deploying a commit before its
+  session ends grades `linked`; if the session later seals, a reconcile pass
+  run at seal time upgrades the existing link to `attested` -- there is no
+  re-deploy and no new event.
+- **A commit event stored after its session sealed stays `linked`.** The
+  sealed root cannot cover a leaf added later.
+- **A crashed or never-ended session stays `linked` forever.** There is no
+  idle-seal: a session that never sends `SessionEnded` never seals, so any
+  link resting on it never advances past `linked`.
+- **History rewrites are not covered.** A rebase, squash, or cherry-pick
+  changes the commit sha, so the rewritten commit is not the one the original
+  commit event named. The new commit falls back to whatever its own trailer
+  or notes mirror provides (`unattributed` or `unverified`).
+- **Both `linked` and `attested` need a server that records commit
+  evidence** (a leaf keyed to the deploying agent, the claim commit sha, and
+  the claim session id). Against an older server that does not, a deploy
+  still resolves and sends, but never grades past `unverified`.
+
+## Join keys
+
+| Link | Key |
+|---|---|
+| session | `workflow_id` = the agent's derived attribution id, `run_id` = the tool's session id |
+| commit → session | the `OpenBox-Session` trailer |
+| commit evidence → session | `claim_commit_sha`, `evidence_state` (the commit event's own grading state, joined by the claim commit and claim session id, not by `link.session_id`) |
+| deploy → commit → session | `deploy_session_links (deploy_id, commit_sha, session_run_id, session_id, verified, source)` |
+| deploy | `run_id = deploy-<env>-<sha>` |
+
+A push containing commits from several sessions gets one link row per session.
 
 ## Reading it back
 
-The control plane exposes the chain from any anchor: `GET /lineage/deploys`,
-`/lineage/commits/:sha`, `/lineage/sessions/:id/chain`, and the dashboard renders the
-five hops with per-hop evidence. Two things to expect:
+The platform exposes the chain from any starting point:
+`GET /lineage/deploys`, `/lineage/commits/:sha` and
+`/lineage/sessions/:id/chain`. The dashboard renders each hop with its
+evidence. A deployed commit with no authoring session has no chain: the
+commit view returns 404.
 
-- **The production-runtime hop is not joined yet.** A chain shows four of five hops
-  and reports the fifth as a known gap.
-- **A deployed commit with no authoring session has no chain** — the deploy appears in
-  the feed, but the commit-anchored view returns 404 rather than a chain whose session
-  hop reads "missing". That is a read-side gap, tracked in
-  [`docs/testbed/e2e.md`](testbed/e2e.md) §9a.
-
-## Doing it yourself
+## Try it
 
 ```bash
-# in a governed session, commit as usual — the trailer is stamped for you
+# in a governed session, commit as usual, then:
 git log -1 --format='%(trailers:key=OpenBox-Session,valueonly)'
-git notes --ref=openbox-attest show HEAD          # the signed envelope
 
 # in CI, after the push
 openbox-git-action --sha "$GITHUB_SHA" --repo "$GITHUB_REPOSITORY" --environment production
 ```
 
-Add `--dry-run` to see the resolution — sessions, source, attribution status — without
-emitting anything. For CI to reach `verified`, fetch the notes ref:
-
-```yaml
-- run: git fetch origin 'refs/notes/*:refs/notes/*'
-```
+Add `--dry-run` to print the resolved event without sending it. Use `--base`
+to resolve a specific commit range (`base..sha`).

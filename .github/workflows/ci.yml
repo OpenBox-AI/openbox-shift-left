@@ -1,10 +1,8 @@
 name: ci
 
-# Build, vet and test every module in the workspace on every change.
+# Build, vet and test the repository on every change.
 #
-# Modules are discovered from go.work rather than listed here, so a new module
-# is covered the moment it joins the workspace — the previous state of this repo
-# (11 modules, no CI at all) is the failure mode worth engineering against.
+# `./...` covers everything because there is one module.
 on:
   push:
     branches: [main]
@@ -25,9 +23,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
+        # A SUPPORTED major, and the reason is security rather than features.
+        # Go patches only the two most recent majors, so a pin to an older one
+        # stops receiving stdlib fixes entirely while still building green.
+        #
+        # The go.mod language floor is 1.27.0 too, so the two currently coincide.
+        # They remain independent knobs — a newer toolchain compiles an older
+        # language version — and only the toolchain is a security input, so keep
+        # bumping this on its own schedule rather than waiting for a floor
+        # decision.
+        #
+        # A MAJOR, not a full version, so patch releases — which is what
+        # security fixes are — arrive without a commit here.
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.27"
 
       - name: Check formatting
         run: |
@@ -38,51 +48,97 @@ jobs:
             exit 1
           fi
 
-      - name: Check go.work covers every module
-        # Discovery below reads go.work, so a module missing from it would be
-        # silently unverified — the exact hole this workflow exists to close.
-        run: |
-          on_disk=$(find . -name go.mod -not -path './.git/*' | wc -l)
-          in_workspace=$(go list -m | wc -l)
-          if [ "$on_disk" -ne "$in_workspace" ]; then
-            echo "::error::$on_disk go.mod files on disk but $in_workspace modules in go.work — add the new module to go.work"
-            exit 1
-          fi
-
-      - name: Resolve workspace modules
-        # The repo root is not itself a module, so `./...` matches nothing;
-        # every module's package pattern has to be named explicitly.
-        run: echo "MODS=$(go list -m -f '{{.Dir}}/...' | tr '\n' ' ')" >> "$GITHUB_ENV"
-
       - name: Build
-        run: go build $MODS
+        run: go build ./...
 
       - name: Vet
-        run: go vet $MODS
+        run: go vet ./...
 
       - name: Test
         # -race matters here: the spool, the liveness registry and the findings
         # cursor are all concurrently-written files with existing race tests.
         # No -short: the tests that exec the real built binary are the ones
         # that pin the INV-3 hook contract (exit 0, empty stdout).
-        run: go test -race $MODS
+        #
+        # -count=1 is a CORRECTNESS flag, not a speed knob, and removing it
+        # silently disables five guards.
+        #
+        # A test's own file reads are tracked by the cache; a CHILD PROCESS's are
+        # not, because they never reach the test log. internal/depguard's
+        # conformance closure guard shells out to `go list`, so without this flag
+        # it can serve a stale `ok` while the closure has actually changed.
+        run: go test -race -count=1 ./...
+
+      - name: Every top-level directory is documented
+        # Fails when a top-level DIRECTORY on disk is missing from
+        # docs/architecture.md's Layout table. It reads ONE table, so the layout
+        # has exactly one authority and cannot drift against a second copy.
+        run: |
+          layout=$(sed -n '/^## Layout/,/^## /p' docs/architecture.md)
+          if [ -z "$layout" ]; then
+            echo "::error::no '## Layout' section in docs/architecture.md — this check would pass vacuously"
+            exit 1
+          fi
+          missing=""
+          for dir in */; do
+            d="${dir%/}"
+            case "$d" in .*|plans) continue;; esac
+            # An exact FIRST-CELL match, which is the rule stated directly:
+            # "there is a row whose first cell is this directory". A bare grep
+            # would match any mention, and a regex would let `a.b` match `aXb`;
+            # awk string equality needs no escaping.
+            printf '%s\n' "$layout" | awk -F'|' -v want="\`$d/\`" '
+              NF > 2 { cell = $2; gsub(/^[ \t]+|[ \t]+$/, "", cell); if (cell == want) found = 1 }
+              END { exit !found }' || missing="$missing $d"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::these top-level directories have no row in docs/architecture.md '## Layout':$missing"
+            echo "add a row saying what belongs in each one AND what must not go there, or delete the directory"
+            exit 1
+          fi
+          echo "every top-level directory is documented"
+
+      - name: Vulnerability scan
+        # The gate that makes the pin above self-maintaining. Without it, the
+        # toolchain silently ages out of support and nothing says so.
+        #
+        # A RED result here usually means "bump the toolchain", not "this change
+        # broke something": a newly published stdlib advisory fails an unrelated
+        # PR. That is the intended direction for a governance product — a known
+        # reachable vulnerability in a shipped binary is worse than a blocked
+        # merge — and the remedy is one line above.
+        #
+        # Per module, because the repo root is not a module. -show=verbose is
+        # omitted: the default output already names the reachable symbol traces,
+        # which is what turns a report into an action.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          failed=""
+          for dir in $(go list -m -f '{{.Dir}}'); do
+            echo "::group::govulncheck $dir"
+            (cd "$dir" && govulncheck ./...) || failed="$failed $dir"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::reachable vulnerabilities in:$failed"
+            exit 1
+          fi
 
       - name: Cross-compile for Windows
-        # ADR-0015 made Windows a supported target for the first time: credentials
-        # are a plaintext file, so there is no platform secret-store subprocess to
+        # Windows became a supported target when credentials moved to a plaintext
+        # file, so there is no platform secret-store subprocess to
         # port. Nothing in CI RUNS on Windows, and a cross-compile is not runtime
         # verification — but it catches the most likely regression class by far, a
         # stray unix-only call (syscall.Umask, /dev/null, os/exec of `security`),
         # and it costs one step with no extra runner.
         #
-        # Everything about Windows beyond "it compiles" is in phase 8's manual
-        # checklist and stated as unverified in the docs. Do not let this step be
-        # read as more than it is.
-        run: GOOS=windows GOARCH=amd64 go build $MODS
+        # Everything about Windows beyond "it compiles" is stated as unverified
+        # in the docs. Do not let this step be read as more than it is.
+        run: GOOS=windows GOARCH=amd64 go build ./...
 
       - name: Cross-compile for Linux arm64
         # The other target a macOS/amd64-centric dev loop can silently break.
-        run: GOOS=linux GOARCH=arm64 go build $MODS
+        run: GOOS=linux GOARCH=arm64 go build ./...
 
       - name: Fuzz (short)
         # The secret redactor reads attacker-adjacent strings on the enforce
@@ -90,15 +146,13 @@ jobs:
         # shallow cases on every change; the corpus persists in testdata for
         # anything found.
         #
-        # The two rego-path fuzzers went with the local evaluator (ADR-0017).
-        # FuzzRedact was defined in the same file and had to be deliberately
-        # kept: it covers code that still runs on every gated call with a body.
+        # FuzzRedact covers code that runs on every gated call with a body.
         run: |
-          cd decision
+          cd internal/decision
           go test -run XXX -fuzz FuzzRedact -fuzztime 20s ./
 
       - name: No tier vocabulary in user-facing docs
-        # ADR-0017 replaced the tier model with three named features. This gate
+        # The tier model was replaced with three named features. This gate
         # covers the documents a USER reads, where "Tier 2" would describe a
         # layering the product does not have.
         #
@@ -107,16 +161,104 @@ jobs:
         # explaining what the tiers WERE are how a reader understands why a
         # deprecated key exists at all. A gate failing on those would be pressure
         # to delete the explanation, which is the opposite of what is wanted.
-        #
-        # ADRs are records and keep their own words; the upgrade note names the
-        # deprecated keys on purpose.
         run: |
-          hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md \
-            | grep -v '^docs/adr/' \
-            | grep -v '^docs/upgrading-to-inline-evaluation.md' \
-            || true)
+          hits=$(grep -rniE '\btier[- ]?[123]\b' docs README.md || true)
           if [ -n "$hits" ]; then
-            echo "tier vocabulary in user-facing docs (ADR-0017 retired it):"
+            echo "tier vocabulary in user-facing docs (the tier model is retired):"
             echo "$hits"
             exit 1
           fi
+
+      - name: Gateway units invoke only flags that exist
+        # A generated service unit that passes a flag the CLI does not define
+        # is rejected by flag parsing, so the lane would fail to start on EVERY
+        # BOOT — discoverable only by running it. Mechanical rather than a
+        # review habit.
+        run: |
+          go test -run 'TestUnitsUseFlagsThatExist|TestUnitStopTimeoutMatchesTheGracePeriod' ./internal/cli/gatewayservice/
+
+      - name: No prevention claims about gateway bypass
+        # The base assurance claim is DETECTION. Bypass is visible and
+        # attributable, never prevented — prevention belongs to the org's MDM and
+        # is out of OpenBox's scope. A doc that says "cannot be bypassed" is the
+        # overstatement this product exists to prevent, and it is the kind of
+        # sentence that gets written by accident while summarising.
+        #
+        # Phrases, not vocabulary: "not prevented" and "prevention needs your MDM"
+        # are the CORRECT phrasings, so banning the word would push the wording in
+        # exactly the wrong direction.
+        #
+        # Known limit, stated so the fix is obvious: this cannot distinguish a
+        # CLAIM from a DISCLAIMER. The remedy is to REWORD the doc, not to weaken
+        # the gate: prose that disclaims a phrase reads almost the same as prose
+        # that asserts it, and a reader skimming will not tell them apart either.
+        run: |
+          hits=$(grep -rniE 'cannot be bypassed|cannot bypass|bypass is prevented|impossible to bypass|tamper-proof' \
+            docs README.md 2>/dev/null || true)
+          if [ -n "$hits" ]; then
+            echo "prevention claim about bypass in user-facing docs:"
+            echo "$hits"
+            exit 1
+          fi
+
+      - name: No tracked file points at the retired end-to-end suite
+        # The end-to-end suite lives in Go tests, not a top-level shell
+        # directory. A stale path is worse than a missing one: a contributor
+        # follows it, finds nothing, and cannot tell whether the suite moved or
+        # the document is wrong.
+        #
+        # Driven off `git ls-files` so it scans tracked files only, which
+        # excludes untracked local state without a path list that would rot.
+        #
+        # The needle is assembled at run time rather than written out, so this
+        # gate does not match its own source -- which would make it fail
+        # forever, and a gate that fails forever gets deleted rather than fixed.
+        #
+        # The three exclusions are each a real false positive, verified against
+        # the tree: the grpc bufconn dependency path, named in the architecture
+        # doc; a depguard fixture module string; and a reserved-TLD URL in a
+        # relay characterization test.
+        run: |
+          n="te"; n="${n}st/"
+          hits=$(git ls-files -z | xargs -0 grep -n "$n" \
+            | grep -v "^$n" \
+            | grep -vE "${n}bufconn|github\.com/${n}|[a-z]\.${n}" || true)
+          if [ -n "$hits" ]; then
+            echo "these tracked files still point at the retired suite:"
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "no tracked file references the retired suite"
+
+      - name: Docs never show an openbox flag the CLI does not define
+        # A documented command with a flag the CLI does not define fails the
+        # moment a reader copies it — for a service unit, on EVERY BOOT.
+        #
+        # Scoped to COPYABLE commands — lines inside ``` fences, or lines that are
+        # themselves an invocation. Prose is excluded on purpose: a sentence saying
+        # "there is no --config flag" is correct and must not fail. The
+        # prevention-claim gate above learned that same lesson by failing on its
+        # own disclaimer.
+        run: |
+          declared=$(grep -rhoE '\.(Bool|String|Int64|Int|Duration)Var\(&[A-Za-z0-9_.]+, *"[a-z][a-z0-9-]*"|\.(Bool|String|Int64|Int|Duration)\("[a-z][a-z0-9-]*"' cmd/openbox/*.go \
+            | grep -oE '"[a-z][a-z0-9-]*"$' | tr -d '"' | sort -u)
+          if [ -z "$declared" ]; then
+            echo "could not extract any declared flags — the extractor broke, which would make this gate vacuous"
+            exit 1
+          fi
+          # Only lines that a reader could copy: a fenced/indented command, or a
+          # line whose first token is `openbox`.
+          # [[:space:]] not \s: BSD grep (macOS, where this is developed) does not
+          # support \s in ERE, so the pattern would silently match almost nothing.
+          used=$(grep -rhE '^[[:space:]]*(\$ )?openbox [a-z]' docs README.md 2>/dev/null \
+            | grep -oE '\-\-[a-z][a-z0-9-]+' | sed 's/^--//' | sort -u)
+          bad=""
+          for f in $used; do
+            echo "$declared" | grep -qx "$f" || bad="$bad $f"
+          done
+          if [ -n "$bad" ]; then
+            echo "docs show openbox flags the CLI does not define:$bad"
+            echo "declared flags were:"; echo "$declared" | tr '\n' ' '; echo
+            exit 1
+          fi
+          echo "all openbox flags shown in copyable commands are declared"

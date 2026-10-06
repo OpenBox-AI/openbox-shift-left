@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.11",
+  "event_id": "evt-invalid-metadata-unknown",
+  "event_type": "SessionStarted",
+  "openbox_session_id": "sess-abc123",
+  "developer_did": "did:aip:7f3c9b2e-0000-5000-a000-000000000001",
+  "timestamp": "2026-07-07T12:00:00Z",
+  "tool": {
+    "name": "claude-code",
+    "kind": "shell"
+  },
+  "metadata": {
+    "provider": "claude-code",
+    "totally_unexpected_field": "x"
+  }
+}

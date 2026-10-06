@@ -1,0 +1,72 @@
+{
+  "hook_event_name": "PreLLMCall",
+  "provider": "model.meta.response",
+  "request_id": "turn-0001:0:1",
+  "attempt": 1,
+  "step": 0,
+  "messages": [
+    {
+      "role": "developer",
+      "content": [
+        {
+          "type": "text",
+          "text": "You are a coding agent working in /tmp/proj."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "list the workspace files"
+        }
+      ]
+    }
+  ],
+  "message_count": 2,
+  "tools": [
+    {
+      "name": "bash",
+      "description": "Neutral tool description.",
+      "has_parameters": true,
+      "strict": false
+    },
+    {
+      "name": "read_file",
+      "description": "Neutral tool description.",
+      "has_parameters": true,
+      "strict": false
+    },
+    {
+      "name": "search",
+      "description": "Neutral tool description.",
+      "has_parameters": true,
+      "strict": false
+    },
+    {
+      "name": "write_file",
+      "description": "Neutral tool description.",
+      "has_parameters": true,
+      "strict": false
+    },
+    {
+      "name": "edit_file",
+      "description": "Neutral tool description.",
+      "has_parameters": true,
+      "strict": false
+    }
+  ],
+  "tool_count": 5,
+  "options": {
+    "meta.max_output_tokens": 128000,
+    "meta.reasoning.effort": "max"
+  },
+  "session_id": "sess-0001",
+  "turn_id": "turn-0001",
+  "cwd": "/tmp/proj",
+  "transcript_path": null,
+  "model": "muse-spark-1.3-contributor",
+  "permission_mode": "default",
+  "model_provider": "meta"
+}

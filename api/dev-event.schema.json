@@ -1,0 +1,1609 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbox.ai/schemas/dev-event/1.11/dev-event.schema.json",
+  "title": "OpenBox Developer-Runtime Normalized Event",
+  "description": "Tool-agnostic, versioned ADAPTER-FACING event contract for developer-runtime coding tools (Claude Code, Codex, Cursor). Every provider adapter maps its native payload onto this shape (SPI emit()). The OpenBox client then RE-EXPRESSES it onto the base SDK's unified wire model — WorkflowStarted/WorkflowCompleted/SignalReceived/ActivityStarted+hook_trigger — on POST /api/v3/governance/evaluate (see docs/mapping.md). This is NOT a verbatim event_type pass-through: core accepts only its own wire types, never a developer-runtime event type. Adding a provider never changes this contract or the wire model. The wire model is the OpenBox core server's governance event contract, shared with the base SDK.",
+  "x-schema-version": "1.11",
+  "x-changelog": {
+    "1.11": "ModelCallRequested carries the pending request itself. Under content capture the gate's activity_input.content is the redacted request ({\"messages\":[...],\"tools\":[...]}), tail-kept at 65536 bytes (the newest turn is at the end), and the producer supplies it as span.request_body; the client reads that one field and drops every other span field. With capture off the key is absent. metadata.message_previews is retired: no producer sets it and the client drops it; it stays declared so a 1.10 producer's event still validates. Additive: a 1.10 event restamped 1.11 validates. ModelCallFinished is unchanged (metadata only).",
+    "1.10": "Adds the model-call GATE: a provider's pre-send hook evaluated through policy as an activity of its own, paired with the hook that reports the call finished. Two new event types, ModelCallRequested -> ActivityStarted and ModelCallFinished -> ActivityCompleted, both with activity_type model_call_gate (a new member of the closed activity_type vocabulary), paired by activity_id <session>:llmgate:<model_call_request_id> -- a namespace disjoint from the tool ids, <session>:turn:<n> and the :proxy:, :otel:, :gateway: and :usage:rollup shapes. `model_call_request_id` is the provider's request id, a '.', and the attempt number, bounded like the three producer ids (1-128 printable ASCII). A gate is NOT a model-call record: it is never llm_completion, carries no usage (`tokens`, `cost`) on either half, is not a turn (no `turn_index`), names no lane producer (no `gateway_request_id`, `otel_request_id`, `proxy_request_id`, `session_rollup`) and sends no spans[]; the contract rejects all of them on these two types, and the client drops them before egress regardless. ModelCallRequested's activity_input carries model, provider, message_count, tool_count, tool_names and, under content capture only, `message_previews` (each cut to 256 characters, at most 16, after local redaction; gated content, stripped with capture off like every other content key). ModelCallFinished's activity_output is metadata only: status, finish_reason, response_id, error_class, tool_call_count, model, provider -- never the reply, thinking or a body; `status` follows the ToolResult rule (completed or failed). A pre-send deny, or a call that never reports finished, leaves the started row only; a completion is never fabricated. PRECONDITION, an ordering constraint: core must evaluate an ActivityStarted with activity_type model_call_gate through policy (so a policy can match and deny it), must not count it as llm_completion or as a turn in metrics, goal alignment or judge input, and must not route it onto the approval-bypass path. Verified against openbox-core source on 2026-09-30: usage extraction and observability key on the literal llm_completion, and the bypass path requires hook_trigger together with spans, which this client never sets. That core must be deployed before a client speaking 1.10 reaches a developer. Also adds the gate's structural metadata keys `message_count`, `tool_count`, `tool_names`, `finish_reason`, `response_id`, `error_class` and `tool_call_count`. A 1.9 payload restamped 1.10 still validates.",
+    "1.9": "Turns a lifecycle signal's payload into an enforcement surface. Every SignalReceived except prompt_submitted now projects its structural metadata keys -- and, when content capture is on, its one per-class content key -- into signal_args as well as metadata. WHY: metadata has no reader in any governance engine. OPA matches signal_name plus signal_args; Guardrails read signal_args and nothing else on a signal. So the 21 classes v1.8 added were write-only telemetry: a policy could match THAT a config_change happened, never that it touched `.env`. v1.8 stated the opposite rule and was right to: core read any SignalReceived with non-empty signal_args as a NEW USER GOAL, unconditionally. That entry is left exactly as shipped and is not amended -- what changed is core, not the reasoning. PRECONDITION, and it is an ordering constraint rather than a note: core's goal gate (which suppresses goal creation when source is developer-runtime and signal_name is not prompt_submitted) MUST be running on the control plane before a client speaking 1.9 reaches a developer. Against an ungated core, each of the ~140 signals a session emits overwrites the session goal and every later action is judged against the last one. prompt_submitted's signal_args is unchanged and byte-identical: it IS the goal, and core's preference order over prompt/message/input/text/content means a second key there could silently become the goal text. The projection duplicates and never moves: `metadata` keeps every key it carried, because the correlation keys the SQL forensics path reads live there. Also adds `activity_output.reply_text` on a hook-lane turn completion -- the reassembled assistant reply, which core's judge keys on the presence of, with no fallback to activity_output.content, so before this no assistant turn had ever been judged; a relayed model call, whose text is raw SSE, deliberately does NOT carry it. Binds two fields this adapter decoded and left unread, as gated content in `metadata.notification_title` (Notification's title) and `metadata.task_description` (TaskCreated/TaskCompleted), each beside the signal_detail sibling that already owns their class's `content.signal_detail`. permission_suggestions, including rules[].ruleContent, stays deliberately unbound: it needs an array-capable carrier on the highest privacy-risk item in the inventory, and it can embed literal command text. PRIVACY: this widens where signal payload is SHOWN, and adds two keys that are newly sent at all. The Verify tab already rendered metadata, so these values were not invisible before; signal_args is rendered in more surfaces (session replay's event stream, event details, the signal_received overview, the monitor's issue detail, guardrail violation records, compliance source evidence), so the seven v1.8 content keys move from one JSON block to first-class text in several views and into stored violation and evidence records. notification_title and task_description are the two that newly egress. See docs/data-and-privacy.md. Additive on the wire: no field removed, no type changed, no event gains an activity_id, and every 1.8 payload remains valid at 1.9 once its version marker is restamped. ALSO IN 1.9: four span properties for Claude Code's own per-call correlation block, parsed in-process from the raw request body and never egressed as raw text -- `span.prompt_id`, `span.previous_request_id`, `span.is_subagent`, `span.entrypoint` -- each rehomed into `metadata` ungated exactly like `span.credential_fingerprint`, so the `:gateway:` and `:proxy:` lanes carry the same classifier the OTel lane's query_source/prompt.id promotion already provides. `is_subagent` is OMITTED, never emitted as a false value, when its source entry is absent. Purely additive: no field removed, no type changed, and every event that validated before this addition still validates unchanged. ALSO IN 1.9: two span properties reporting a relayed model call's own response completeness, populated by the in-path lanes only, like the four above -- `span.response_bytes_seen`, `span.response_truncated` -- combined with this client's own `capModelCallBody` cut into `activity_output.openbox_capture` ({truncated, original_bytes}), attached beside `activity_output.content`: the response-side twin of the request side's openbox_selection note. `truncated: false` is emitted, never omitted -- that is the \"this reply is complete\" signal a UI needs, the same \"loss is acceptable, unreported loss is not\" rule the openbox_selection note already follows. Present only alongside `activity_output.content`, so it is absent under `content_capture: false` along with the body it describes, and on a hook-sourced turn, which has no gateway sink to report from. Purely additive: no field removed, no type changed, and every event that validated before this addition still validates unchanged. AMENDMENT (still 1.9, no version bump): `span.response_truncated` now also drives `metadata.openbox_capture.truncated_paths`, not only `activity_output.openbox_capture.truncated`. The client-side cut this summary indexes used to fire only from this client's own `capModelCallBody` cut (`len(response_body) > 65,536` bytes); a gateway cut whose stored buffer already landed at or under that same bound left the index silent about a body the row's own `truncated: true` admitted was incomplete. `metadata.openbox_capture.truncated_paths` now keys off the client's own cut ORed with `span.response_truncated`, the identical OR `activity_output.openbox_capture.truncated` already computes, so the bool and the index are two readings of one condition and cannot disagree. No field added, removed or retyped.",
+    "1.8": "Adds 21 developer-runtime lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult), taking event_type.enum and oneOf from 12 to 33. Every one of the 21 rides stock SignalReceived with a unique signal_name (its EventType's snake_case) — no new wire type is proposed, because core's wire event_type is closed at 7 and a developer-runtime-specific wire type was already tried and deliberately withdrawn. None of the 21 carries signal_args (core reads any SignalReceived with non-empty signal_args as a NEW USER GOAL and would overwrite the session's goal 21 times over) and none carries activity_id (none is paired as an Activity). SessionEnd keeps mapping to WorkflowCompleted for EVERY reason, byte-identically — there is no session_suspended class: every SessionEnd seals its run. A `/clear` does NOT continue that run -- as of Claude Code 2.1.263, it mints a NEW session id, so the SessionStart that follows belongs to a session the control plane has never seen and starts at generation 0. `--resume` is the one source that reuses the session id, and therefore the one that opens a continued run. WorktreeCreate is deliberately NOT registered: its stdout last line IS the created worktree path, so an observer that emits nothing would break `claude --worktree`; ceiling is 32 of 33 documented hooks, by choice. The 7 new content-gated metadata keys (requested_tool_input, notification_message, task_subject, compact_instructions, compact_summary, elicitation_message, elicitation_response) land in `metadata` under the existing `content.signal_detail` carrier — no new Content field. Also adds three additive run-identity properties: `run_id` (a wire-payload field since v1.0, declared in THIS schema for the first time — a session's first run keeps run_id == openbox_session_id; a run opened by a SessionStart(source = resume) mints a fresh UUIDv4 client-side instead; clear, startup, compact and fork do not continue a run), `run_generation` (0 for the original run; informational, may restart after record loss), and `continued_from_run_id` (the sealed run a generation ≥ 1 run continues from, set only on that generation's WorkflowStarted — lineage is a property of the boundary, not of every row). All three are optional and omitempty; a generation-0 event sets none of them, so every 1.7 payload remains a valid 1.8 payload unchanged once its version marker is restamped. Nothing is added to the top-level required array.",
+    "1.7": "Repairs what a relayed model call is CALLED, and adds the field that carries the answer. `activity_type` names the class of an event's activity explicitly, from a closed vocabulary (llm_completion | token_count | tool_telemetry | provider_request), overriding the label the client would otherwise derive. It exists because the in-path lanes classified a relayed call by HTTP METHOD alone, so every POST to the intercepted host became `activity_type: llm_completion` — and roughly 40% of those rows were `POST /v1/messages/count_tokens` probes, which carry no usage, no assistant text and no completion. They distorted every llm_completion metric and every turn count. The producer that classified the call now says so, rather than leaving the client to re-derive it from a URL, which would put one classification table in two packages; and the value must survive the spool, because a flush can happen long after the process that classified the call exited. Core RECOMPUTES semantic_type per span and ignores what the client sends, but activity_type is a pass-through column the dashboard reads first, so this vocabulary is genuinely the client's to pick — docs/mapping.md is its authority. A path the table has never heard of is still emitted, under the `activity_type` value \"provider_request\": unknown traffic to the provider is exactly what an auditor wants to see, and the failure directions are not symmetric. Purely additive: an event omitting the field gets the derived label it always got. ALSO IN 1.7, and the reason this version exists at all: a model call's captured bodies stop riding `spans[]` and move to the wire payload's \"activity_input\" / \"activity_output\", which map to dedicated governance_events.input / .output columns and demonstrably round-trip. `spans[]` did not. Core parses that array on the normal path, uses it in memory for policy, behaviour and goal checks, and then DISCARDS it: persistence is gated on \"hook_trigger\" plus a pre-existing event row, and this client deliberately never sets \"hook_trigger\", because doing so would put a model turn on core's approval-bypass fingerprint path. So every response body sent that way was parsed and dropped. The client now sends NO span at all -- a span describes work nested INSIDE an activity, and for a model call \"llm_completion\" IS the activity, so nesting one in it would represent the same call twice. `span.request_body` / `span.response_body` stay declared here, because they remain the ADAPTER-FACING carrier an adapter fills in and the content gate clears; what changed is where the client puts them on the wire. `span.request_headers` / `span.response_headers` are no longer populated by any producer: nothing ever read them (they only reached core inside the discarded array) and they were the highest-risk class this client carried, since the developer's live provider credential is on every model request. `span.credential_fingerprint` is rehomed to the payload's `metadata`, ungated as ever -- which is a rehoming rather than a regression, because span attributes never persisted for a developer session, so account binding has in fact never had anything to match on. Finally the in-path and telemetry lanes emit BOTH halves of their activity: every activity_id must carry exactly one ActivityStarted and one ActivityCompleted, and every model-call row those lanes produced was single-sided, which is a contract violation rather than a documentable choice. Purely additive to this contract's shape: no declared field changed type or meaning, and a 1.6 event is a valid 1.7 event once its version marker is restamped.",
+    "1.6": "Adds two model-call PRODUCERS and repairs a third. `otel_request_id` names a turn observed by the local TELEMETRY receiver (`<session>:otel:<id>`) and `proxy_request_id` one observed by the local TRANSPORT relay (`<session>:proxy:<id>`), symmetric with `gateway_request_id`: one self-describing field per producer, so the client branches on a field's PRESENCE and never on a value. Both ids originate upstream and reach a stored key verbatim, so they carry their bound declaratively here (128 characters, printable ASCII, no whitespace) and a producer added later inherits it from the contract instead of having to remember it. `gateway_request_id` is retrofitted to the same bound in this version. It was first left alone on the theory that tightening a shipped field breaks it, and that theory was false: GatewayRequestID has exactly ONE production assignment path, already gated by gatewayemit.usableRequestID at the identical 128-character printable-ASCII rule, so the retrofit rejects nothing any gateway can emit. Three fields of one kind now sit at one contract depth. THE REPAIR: both turn branches now require EXACTLY ONE producer discriminator, where 1.5 required `turn_index` unconditionally on TurnStarted and one of two on TurnCompleted. That made Codex's session-rollup pair fail its own contract on both halves — `session_rollup` was not even a declared property, so `additionalProperties: false` rejected it a second time — and the gateway had shipped with the same defect. `session_rollup` is therefore declared here for the first time. Exactly-one is the invariant every model-call lane rests on: the five producers describe the same kind of turn, and core's dedupe key includes activity_id, so a shared namespace loses half the evidence with no error and two discriminators on one event attribute it to a producer that did not observe it. Purely additive to what already validated: every 1.5 event that passed still passes once its version marker is restamped (`schema_version` is const-pinned per version, as in every prior bump), no existing bytes move — the wire payload carries no `schema_version` key at all — and the shapes that BEGIN to validate are ones the client was already emitting and the contract was rejecting.",
+    "1.5": "Adds the LOCAL GATEWAY's span fields : `span.request_headers`, `span.response_headers`, `span.http_method`, `span.http_url`, `span.http_status`, `span.credential_fingerprint`, and `gateway_request_id` on the event. The header pair is CONTENT and gated like every other content field (stripContent nils both), and it is the highest-risk class this client carries because the developer's live provider credential is on every model request — so capture redacts credential headers BY KEY NAME before the gate is even consulted, keeping the key and dropping the value. `credential_fingerprint` is deliberately NOT gated: it is one-way derived evidence for account binding, and letting a privacy setting remove it would let an org opt out of being identified; what is asserted instead is that the raw value is absent while the fingerprint is present. The `http_*` keys exist because core RECOMPUTES semantic_type per span and `isLLMCall` reads http.method plus an LLM domain in http.url, so a gateway span without them stores as something else and alignment silently dies; `http_url` carries host+path with the query dropped. `gateway_request_id` puts the gateway's activity ids in a namespace disjoint from the hook path's `<session>:turn:<n>`, because both producers describe the same turn and core's dedupe would otherwise absorb one as a duplicate of the other. Purely additive: every 1.4 event is a valid 1.5 event, and a hook-only install sends byte-identical payloads.",
+    "1.4": "Adds `content.thinking` — the model's extended-thinking text for a turn, its `thinking` content blocks concatenated in file order across the turn's transcript window, landing in the wire payload's `activity_output.thinking` on a TurnCompleted. This bump widens the transcript allowlist: the projection that reads token counts out of the session transcript now binds one free-form CONTENT string, where before it bound only an identifier, a timestamp and a bool. The transcript is the only source — no hook payload carries thinking, and Claude Code's own OTel export redacts it unconditionally with every content flag enabled, so capturing it goes further than the provider itself will. It rides activity_output rather than the assistant span deliberately: that span feeds core's goal-alignment extractor, which reads it as the assistant's REPLY, and chain-of-thought there would score every later turn's drift against the model's reasoning instead of its answer. Content-gated (INV-2) — absent unless the org opted in — redacted at source before attachment and capped at 64KB before signing. Purely additive: every 1.3 event is a valid 1.4 event, and an org with content capture off sends byte-identical payloads.",
+    "1.3": "Adds `content.tool_output` — what a tool PRODUCED, carried on ToolResult and landing in the wire payload's `activity_output.output`, the field core stores as the row's `output` and runs Guardrails stage 1 over. A failed call carries its own free-text error there instead of a result body; `status` already says which it is. This RETIRES the earlier rule that tool commands and file bodies never egress on observe events: tool input now also rides `content.tool_input` on the observe ToolCall, not only on a gated call's evaluation event. Also adds `content.signal_detail` for the PermissionDenied / APIError free text, which reaches `metadata` and deliberately never `signal_args`. Both are content-gated (INV-2) — absent unless the org opted in — redacted at source before attachment and capped at 64KB before signing. `content.tool_input` itself is not new to the wire (gated calls already carried it); it was simply never listed here, and is documented in this bump. Purely additive: every 1.2 event is a valid 1.3 event.",
+    "1.2": "Adds `status` on tool results — the field core's per-tool success metric reads and no producer had ever written, which pinned Tool Health SUCCESS at 0%. Closed enum completed|failed, ToolResult only (payload.status also writes the row's workflow_status column, so it must not ride a lifecycle event), derived structurally and NOT content-gated. Also adds the failure/lifecycle event types SubagentStarted/PermissionDenied/APIError, which ride stock SignalReceived. Purely additive: every 1.1 event is a valid 1.2 event.",
+    "1.1": "Adds the turn pair (TurnStarted/TurnCompleted → ActivityStarted/ActivityCompleted with activity_type llm_completion) and the fields it needs: model, turn_index, agent_id. Widens $defs.tokens with cache_creation_input/cache_read and RE-DEFINES `input` as PURE input — the Claude Code SessionEnd rollup used to fold both cache counts into it. Additive except for that one semantic, which is why this is a version bump and not a silent edit.",
+    "1.0": "Initial contract (dev events unified onto the base wire model; the span layer was later retired without changing this shape)."
+  },
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "event_type",
+    "openbox_session_id",
+    "developer_did",
+    "timestamp",
+    "tool"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "Version of THIS event contract carried on the wire. Bumped on a breaking change to the normalized shape.",
+      "const": "1.11"
+    },
+    "event_id": {
+      "description": "Client-generated unique id for idempotent ingestion. Retries/buffered flush reuse the same id so tokens/cost/lineage are never double-counted.",
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "description": "Developer-runtime LIFECYCLE type (adapter-facing). NOTE: CommitCreated's first producer is the `git post-commit` hook (ALSO IN 1.9): one event per resolved session, only where the git hook is installed AND only for an agent commit (the tool's own env marker must agree with the resolving session's recorded tool -- a hand commit in a governed worktree keeps its trailer but never produces this event). The client re-maps each onto a base-SDK wire type: SessionStarted->WorkflowStarted, SessionEnded->WorkflowCompleted, PromptSubmitted/CommitCreated/Deploy/SubagentStarted/PermissionDenied/APIError and the 21 v1.8 lifecycle classes (Setup, InstructionsLoaded, UserPromptExpansion, MessageDisplay, PermissionRequest, PostToolBatch, Notification, TaskCreated, TaskCompleted, TeammateIdle, ConfigChange, CwdChanged, DirectoryAdded, FileChanged, WorktreeRemove, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, Elicitation, ElicitationResult)->SignalReceived(signal_name), ToolCall/ToolResult->ActivityStarted/ActivityCompleted (paired by a shared activity_id; no span is sent), TurnStarted/TurnCompleted->ActivityStarted/ActivityCompleted with activity_type llm_completion (paired by activity_id <session>:turn:<index>). ModelCallRequested/ModelCallFinished->ActivityStarted/ActivityCompleted with activity_type model_call_gate (v1.10; paired by activity_id <session>:llmgate:<model_call_request_id>; never llm_completion, no usage). NOT a verbatim core event_type: core accepts only its own wire types. See docs/mapping.md.",
+      "enum": [
+        "SessionStarted",
+        "PromptSubmitted",
+        "ToolCall",
+        "ToolResult",
+        "SessionEnded",
+        "CommitCreated",
+        "Deploy",
+        "TurnStarted",
+        "TurnCompleted",
+        "ModelCallRequested",
+        "ModelCallFinished",
+        "SubagentStarted",
+        "PermissionDenied",
+        "APIError",
+        "Setup",
+        "InstructionsLoaded",
+        "UserPromptExpansion",
+        "MessageDisplay",
+        "PermissionRequest",
+        "PostToolBatch",
+        "Notification",
+        "TaskCreated",
+        "TaskCompleted",
+        "TeammateIdle",
+        "ConfigChange",
+        "CwdChanged",
+        "DirectoryAdded",
+        "FileChanged",
+        "WorktreeRemove",
+        "PreCompact",
+        "PostCompact",
+        "PreModelSwitch",
+        "PostModelSwitch",
+        "Elicitation",
+        "ElicitationResult"
+      ]
+    },
+    "activity_type": {
+      "description": "The class of work this event's activity is, set by a producer that can tell one class from another and passed through to core's activity_type column (which the OpenBox dashboard's Activity column reads FIRST). Closed vocabulary. `llm_completion` is a real model turn. `token_count` is a POST /v1/messages/count_tokens probe: auditable, and deliberately not called a completion — filing probes as completions is what made ~40% of llm_completion rows describe no model turn at all. `tool_telemetry` is the governed tool reporting on ITSELF to its vendor over the same host the relay intercepts (/api/event_logging, /api/claude_code/metrics, hundreds a day, all without a session header). `provider_request` is a provider path this client has never heard of — emitted, never dropped and never mislabelled. OMIT the field to keep the label the client derives from event_type and tool name; a hook event does not set it. `model_call_gate` (v1.10) is a provider's pre-send hook evaluated through policy: set by the client on ModelCallRequested/ModelCallFinished whatever an adapter supplies, and never a completion. Structural (INV-2): it is a class name, never content.",
+      "enum": [
+        "llm_completion",
+        "token_count",
+        "tool_telemetry",
+        "provider_request",
+        "model_call_gate"
+      ]
+    },
+    "openbox_session_id": {
+      "description": "Opaque logical session id. The client synthesizes core's jointly-unique NOT-NULL (workflow_id, run_id) from it via runIDFor (v1.8): run_id is openbox_session_id for a session's first run, and a FRESH UUID for each subsequent run opened by a SessionStart(source = resume), linked to its predecessor by continued_from_run_id. Only resume continues a run: it is the one source that reuses the session id. A clear mints a NEW session id, so the session after it starts at generation 0 under its own id; startup, compact and fork likewise open nothing. workflow_id is unchanged: a stable per-workspace/developer identity (e.g. developer_did or repo). Core requires both. Note that openbox_session_id itself stays stable across a continue — that is what makes the lineage recoverable at all.",
+      "type": "string",
+      "minLength": 1
+    },
+    "developer_did": {
+      "description": "The session's attribution coordinate, not a credential. For a keycloak_workload agent it is derived in memory as uuid5(namespace, agent_id) on every event and carried only here in the body; it is never stored server-side for that agent and never sent as a request header (authentication is the agent's obx_ API key plus an exchanged workload bearer). Shares the DID namespace runtime agents use.",
+      "type": "string",
+      "pattern": "^did:aip:"
+    },
+    "run_id": {
+      "description": "The minted run id of a CONTINUED run (v1.8): a v4 UUID, set by the adapter at hook time from the run record. Absent at generation 0, where runIDFor falls back to openbox_session_id — every 1.7 payload is a valid 1.8 payload unchanged. NOT previously a schema property: this is a wire-payload key since v1.0 (see the base payload's run_id), but the DevEvent contract only ever mentioned it inside openbox_session_id's description; declared here for the first time so additionalProperties:false accepts it. Produced by the adapter from its run record.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "run_generation": {
+      "description": "0 is the original run; a SessionStart(source = resume) -- the one source that reopens an already-seen session id -- opens generation n+1 (v1.8). Present on every event type once produced. Informational: a local counter that MAY RESTART after record loss — an ordering hint for the dashboard, never a key and never something to derive an id from. Absent at generation 0. Produced by the adapter from its run record.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "continued_from_run_id": {
+      "description": "The sealed run this one continues from (v1.8), set ONLY on the WorkflowStarted of generation >= 1 — lineage is a property of the boundary, not of every row. May be a bare openbox_session_id (the run being continued from generation 0, which never minted its own run_id) or a prior generation's minted run_id. Absent on every other event and at generation 0. Produced by the adapter from its run record.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "timestamp": {
+      "description": "Event time, RFC3339. Maps verbatim to core payload's string `timestamp`.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "started_at": {
+      "description": "Optional start time for spanning events (ToolCall/session). RFC3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "description": "Optional end time for spanning events (ToolResult/session). RFC3339.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tool": {
+      "$ref": "#/$defs/tool"
+    },
+    "tokens": {
+      "$ref": "#/$defs/tokens"
+    },
+    "cost": {
+      "$ref": "#/$defs/cost"
+    },
+    "span": {
+      "$ref": "#/$defs/span"
+    },
+    "content": {
+      "$ref": "#/$defs/content"
+    },
+    "model": {
+      "description": "Provider model id that spent this event's tokens ('claude-opus-4-8', 'gpt-5-codex'). Identifier-class metadata, NOT content (INV-2) — it is the one free-form string the transcript/rollout usage projections egress, and it is bounded at the adapter boundary. Load-bearing: the backend aggregates token rollups under model-keyed composite metric keys, so a turn with no model is invisible to the dashboards it feeds. Absent when the projection found none — never back-filled from the session's model, which would attribute tokens to a model that may not have spent them.",
+      "type": "string"
+    },
+    "turn_index": {
+      "description": "Zero-based index of the model turn this event belongs to, within its session (or within its subagent). Both halves of a turn pair carry the same value; the client derives activity_id = <session>[:agent:<agent_id>]:turn:<index> from it, which is what pairs them onto one row. Set on TurnStarted/TurnCompleted only.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "agent_id": {
+      "description": "Subagent this event occurred inside. On turn events it partitions the activity_id so a subagent's turns never collide with the main thread's. Empty/absent on the main thread. Structural identifier (INV-2).",
+      "type": "string"
+    },
+    "status": {
+      "description": "Outcome of a tool call (v1.2). Set on ToolResult and, since v1.10, ModelCallFinished ONLY — the client drops it on every other event type, because core copies payload.status into the row's workflow_status column for ANY event type and a lifecycle event's workflow_status means something else. This scope cannot be expressed in the subset of JSON Schema the conformance validator implements, so it is enforced by client.statusFor and asserted on the outbound bytes by the conformance suite. Structural, NOT content (INV-2): derived from which provider hook fired, or from a bound bool/int — never parsed from tool output — so it is not content-gated and ships identically with content_capture off. Core reads the literal 'completed' and nothing else, which is why the enum is closed rather than free-form.",
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    },
+    "gateway_request_id": {
+      "description": "The LOCAL GATEWAY's id for one relayed model call (v1.5): the provider's own Request-Id when it sent one, otherwise a locally minted `gw-` id. Its ONLY job is to put a gateway turn's activity_id in a namespace disjoint from the hook path's `<session>:turn:<n>` — both producers describe the same turn, so a shared namespace would let core's dedupe absorb one as a duplicate of the other and half the evidence would vanish with no error anywhere. Structural identifier (INV-2), bounded and charset-checked by its producer (gatewayemit.usableRequestID) because it originates upstream and reaches a stored key verbatim — and, since 1.6, declared here too, so all three producer ids sit at one contract depth. The retrofit rejects nothing a gateway can emit: GatewayRequestID has exactly one production assignment path, which returns either a usableRequestID-gated upstream id or a locally minted `gw-` id of ~35 printable-ASCII characters. gatewayemit.TestGatewayIDBoundMatchesTheContract asserts the declared bound and the producer's own agree on every boundary value, so the two cannot drift apart.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
+    "session_rollup": {
+      "description": "Marks a turn activity covering the WHOLE SESSION rather than one turn, giving it activity_id `<session>:usage:rollup`. It is Codex's granularity: its per-turn hook exists but is deliberately unwired, so its usage arrives once, at SessionEnd. Declared for the first time in 1.6 — the client has emitted it since 1.1, but the schema never carried it, so with `additionalProperties: false` every Codex rollup pair failed its own contract. An explicit flag rather than 'a turn event with no turn_index' deliberately: inferring it from an absent index would turn a provider bug into a silent collapse of every turn in the session onto one activity_id. Structural identifier (INV-2), locally derived, never upstream text.",
+      "type": "boolean"
+    },
+    "otel_request_id": {
+      "description": "The local TELEMETRY receiver's id for one observed model call (v1.6), putting that turn's activity_id at `<session>:otel:<id>`. Symmetric with `gateway_request_id` and `proxy_request_id`: one self-describing field per producer, so client.turnActivityIDFor branches on PRESENCE and never on a value. Structural identifier (INV-2), never derived from prompt or body text. The bound is declared rather than left to the producer, because the value originates upstream (the provider's own request id, relayed through an OTLP payload the receiver does not author) and reaches a stored key verbatim — the same exposure gatewayemit.usableRequestID guards imperatively.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
+    "proxy_request_id": {
+      "description": "The local TRANSPORT relay's id for one in-path model call (v1.6), putting that turn's activity_id at `<session>:proxy:<id>`. Same shape and same reasoning as `otel_request_id`; the two lanes differ in vantage point, not in contract. Structural identifier (INV-2), never derived from prompt or body text, bounded and charset-checked declaratively because it too reaches a stored key verbatim.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
+    "model_call_request_id": {
+      "description": "One model-call gate's id (v1.10): the provider's request id, a '.', and the attempt number, so a retry of one request is a new gate. Required on ModelCallRequested and ModelCallFinished, and putting that gate's activity_id at `<session>:llmgate:<id>`. Same shape and same reasoning as `proxy_request_id`: structural identifier (INV-2), never derived from prompt or body text, bounded and charset-checked declaratively because it reaches a stored key verbatim; client.UsableModelCallRequestID applies the same rule imperatively and the client refuses to build a gate event that fails it.",
+      "type": "string",
+      "maxLength": 128,
+      "pattern": "^[\\x21-\\x7e]+$"
+    },
+    "metadata": {
+      "description": "Additive per-type key/values. NOT verbatim at the far end: core stores a UNION of this object and the flattened `span`, renaming `invocation_id` to `tool_use_id` on the way, so a stored `metadata` and this one are not the same shape. Never carries credentials/secrets (INV-1) or raw content (INV-2 — content lives only under `content`); those two are enforced by `contentMetadataKeys` in code, and only partly here.",
+      "type": "object",
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "description": "PermissionRequest's own tool_name (v1.8); not the redundant ToolCall/ToolResult copy of tool.name, which the adapter does not emit into metadata."
+        },
+        "provider": {
+          "type": "string"
+        },
+        "message_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ModelCallRequested (v1.10): how many messages the pending model call carries."
+        },
+        "tool_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ModelCallRequested (v1.10): how many tool definitions the pending model call offers."
+        },
+        "tool_names": {
+          "type": "array",
+          "description": "ModelCallRequested (v1.10): the offered tools' names, at most 64. Array; element shape is not constrained because this schema's reviewed keyword set has no items. Identifier-class, not content."
+        },
+        "message_previews": {
+          "type": "array",
+          "x-content-gated": true,
+          "description": "DEPRECATED (v1.11): retired in favour of activity_input.content, which carries the whole request; the client drops it. ModelCallRequested (v1.10): short previews of the pending call's messages, each cut to 256 characters after redaction, at most 16. Gated content: absent with capture off. Array; element shape is not constrained because this schema's reviewed keyword set has no items."
+        },
+        "finish_reason": {
+          "type": "string",
+          "description": "ModelCallFinished (v1.10): the provider's own reason the call ended."
+        },
+        "response_id": {
+          "type": "string",
+          "description": "ModelCallFinished (v1.10): the provider's response id."
+        },
+        "error_class": {
+          "type": "string",
+          "description": "ModelCallFinished (v1.10): the class of a failure, never its text."
+        },
+        "tool_call_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "ModelCallFinished (v1.10): how many tool calls the model asked for."
+        },
+        "surface": {
+          "type": "string",
+          "enum": ["claude-ai"],
+          "description": "The consumer chat surface a relayed chat record came from (a chat: session, which no tool opened). Set only by the transport lane's chat mapper."
+        },
+        "chat_client": {
+          "type": "string",
+          "enum": ["desktop", "browser"],
+          "description": "Which client of the chat surface made the call, from its User-Agent. Attribution detail only: the conversation, not the client, is the session."
+        },
+        "source": {
+          "type": "string",
+          "description": "Meaning is per event type (session source, directory-add source, config-change source, model-switch source); kept as a plain string here because those vocabularies differ."
+        },
+        "model": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "permission_mode": {
+          "type": "string",
+          "enum": [
+            "default",
+            "plan",
+            "acceptEdits",
+            "auto",
+            "dontAsk",
+            "bypassPermissions"
+          ]
+        },
+        "account_email": {
+          "type": "string"
+        },
+        "account_org_uuid": {
+          "type": "string"
+        },
+        "posture": {
+          "description": "Session posture snapshot (SessionStarted only, when the adapter resolved one). The 8 flags are always all present; the rest are omitted when the adapter could not determine them or the value looked secret-shaped.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enforce",
+            "fail_closed",
+            "secret_detection",
+            "content_capture",
+            "findings",
+            "telemetry",
+            "finops",
+            "realtime_flush"
+          ],
+          "properties": {
+            "enforce": {
+              "type": "boolean"
+            },
+            "fail_closed": {
+              "type": "boolean"
+            },
+            "secret_detection": {
+              "type": "boolean"
+            },
+            "content_capture": {
+              "type": "boolean"
+            },
+            "findings": {
+              "type": "boolean"
+            },
+            "telemetry": {
+              "type": "boolean"
+            },
+            "finops": {
+              "type": "boolean"
+            },
+            "realtime_flush": {
+              "type": "boolean"
+            },
+            "adapter": {
+              "type": "string"
+            },
+            "adapter_version": {
+              "type": "string"
+            },
+            "provider_version": {
+              "type": "string"
+            },
+            "decision_authority": {
+              "type": "string",
+              "enum": [
+                "control_plane"
+              ]
+            },
+            "failure_policy": {
+              "type": "string",
+              "enum": [
+                "fail_open",
+                "fail_closed"
+              ]
+            },
+            "provider_managed": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false",
+                "unknown"
+              ]
+            },
+            "config_source": {
+              "description": "Where each posture flag's value came from.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enforce": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "fail_closed": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "secret_detection": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "content_capture": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "findings": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "telemetry": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "finops": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                },
+                "realtime_flush": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "user",
+                    "env",
+                    "managed",
+                    "managed_default"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "prompt_id": {
+          "type": "string"
+        },
+        "prompt_source": {
+          "type": "string",
+          "enum": [
+            "user",
+            "sdk",
+            "system",
+            "loop_wakeup",
+            "schedule_wakeup",
+            "poll_event",
+            "task_notification"
+          ]
+        },
+        "prompt_source_inferred": {
+          "const": true
+        },
+        "agent_id": {
+          "type": "string"
+        },
+        "agent_type": {
+          "type": "string"
+        },
+        "subagent_type": {
+          "type": "string"
+        },
+        "tool_use_id": {
+          "type": "string"
+        },
+        "is_interrupt": {
+          "type": "boolean"
+        },
+        "pair_recovered": {
+          "const": true
+        },
+        "error_type": {
+          "type": "string",
+          "enum": [
+            "authentication_failed",
+            "oauth_org_not_allowed",
+            "billing_error",
+            "rate_limit",
+            "overloaded",
+            "invalid_request",
+            "model_not_found",
+            "server_error",
+            "max_output_tokens",
+            "unknown"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "clear",
+            "resume",
+            "logout",
+            "prompt_input_exit",
+            "bypass_permissions_disabled",
+            "other"
+          ]
+        },
+        "evidence_state": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "degraded"
+          ]
+        },
+        "evidence_undelivered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_discarded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "trigger": {
+          "type": "string",
+          "description": "Meaning is per event type (Setup: init|maintenance; Pre/PostCompact: manual|auto from Claude Code and Codex, soft|hard from Muse, passed through as the tool says it)."
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "memory_type": {
+          "type": "string",
+          "enum": [
+            "User",
+            "Project",
+            "Local",
+            "Managed"
+          ]
+        },
+        "load_reason": {
+          "type": "string",
+          "enum": [
+            "session_start",
+            "nested_traversal",
+            "path_glob_match",
+            "include",
+            "compact"
+          ]
+        },
+        "trigger_file_path": {
+          "type": "string"
+        },
+        "parent_file_path": {
+          "type": "string"
+        },
+        "globs": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet. Capped at 32 by the adapter (maxInstructionGlobs)."
+        },
+        "expansion_type": {
+          "type": "string",
+          "enum": [
+            "slash_command",
+            "mcp_prompt"
+          ]
+        },
+        "command_name": {
+          "type": "string"
+        },
+        "command_source": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "final": {
+          "type": "boolean"
+        },
+        "turn_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "batch_tool_use_ids": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet. Capped at 64 by the adapter (maxBatchToolUseIDs)."
+        },
+        "notification_type": {
+          "type": "string",
+          "enum": [
+            "permission_prompt",
+            "idle_prompt",
+            "auth_success",
+            "elicitation_dialog",
+            "elicitation_url_dialog",
+            "elicitation_complete",
+            "elicitation_response",
+            "agent_needs_input",
+            "agent_completed",
+            "quota_auto_resume_fired",
+            "quota_auto_resume_stale",
+            "quota_auto_resume_disabled"
+          ]
+        },
+        "notification_title": {
+          "type": "string",
+          "x-content-gated": true
+        },
+        "task_id": {
+          "type": "string"
+        },
+        "teammate_name": {
+          "type": "string"
+        },
+        "team_name": {
+          "type": "string"
+        },
+        "task_description": {
+          "type": "string",
+          "x-content-gated": true
+        },
+        "old_cwd": {
+          "type": "string"
+        },
+        "new_cwd": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "change",
+            "add",
+            "unlink"
+          ]
+        },
+        "worktree_path": {
+          "type": "string"
+        },
+        "from_model": {
+          "type": "string"
+        },
+        "to_model": {
+          "type": "string"
+        },
+        "requested_model": {
+          "type": "string"
+        },
+        "cache_ttl": {
+          "type": "string",
+          "enum": [
+            "5m",
+            "1h"
+          ]
+        },
+        "pricing": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "catalog",
+            "default"
+          ]
+        },
+        "context_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt_cache_warm": {
+          "type": "boolean"
+        },
+        "estimated_cache_write_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "mcp_server_name": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "form",
+            "url"
+          ]
+        },
+        "url": {
+          "type": "string"
+        },
+        "elicitation_id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "accept",
+            "decline",
+            "cancel"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "root_session_id": {
+          "type": "string"
+        },
+        "query_source": {
+          "type": "string",
+          "description": "Telemetry-lane classifier: which query produced a relayed model call (e.g. background|conversation). Absent means unclassified."
+        },
+        "usage_scope": {
+          "const": "session"
+        },
+        "commit_sha": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "tree_sha": {
+          "type": "string",
+          "description": "ALSO IN 1.9. CommitCreated's own commit tree object id."
+        },
+        "parent_shas": {
+          "type": "array",
+          "description": "ALSO IN 1.9. CommitCreated's own parent commit shas, in git's own order. Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet."
+        },
+        "patch_id": {
+          "type": "string",
+          "description": "ALSO IN 1.9. CommitCreated's own best-effort `git patch-id --stable`, diagnostic only."
+        },
+        "openbox_session_id": {
+          "type": "string",
+          "description": "ALSO IN 1.9. CommitCreated's own copy of the trailer's session id, so core can bind a resumed run's claim (the wire `run_id` is a minted UUID that never appears in the trailer)."
+        },
+        "deploy_id": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "deploy_did": {
+          "type": "string"
+        },
+        "attribution_status": {
+          "type": "string",
+          "enum": [
+            "attributed",
+            "inferred",
+            "unattributed"
+          ]
+        },
+        "session_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet. Each element is a session-claim object (session_id, source, commit, verified, reason?, attestation?)."
+        },
+        "verified_session_ids": {
+          "type": "array",
+          "description": "Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet."
+        },
+        "scope_walked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scope_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attribution_reason": {
+          "type": "string",
+          "enum": [
+            "no-trailer",
+            "trailer-stripped",
+            "non-agent"
+          ]
+        },
+        "attribution_note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "title": "SessionStarted",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "SessionStarted"
+        }
+      }
+    },
+    {
+      "title": "PromptSubmitted",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PromptSubmitted"
+        }
+      }
+    },
+    {
+      "title": "ToolCall",
+      "required": [
+        "event_type",
+        "span"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ToolCall"
+        }
+      }
+    },
+    {
+      "title": "ToolResult",
+      "required": [
+        "event_type",
+        "span"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ToolResult"
+        }
+      }
+    },
+    {
+      "title": "SessionEnded",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "SessionEnded"
+        }
+      }
+    },
+    {
+      "title": "CommitCreated",
+      "required": [
+        "event_type",
+        "metadata"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "CommitCreated"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "commit_sha",
+            "repo"
+          ],
+          "properties": {
+            "commit_sha": {
+              "type": "string",
+              "minLength": 1
+            },
+            "repo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "branch": {
+              "type": "string"
+            },
+            "tree_sha": {
+              "description": "ALSO IN 1.9. The commit's tree object id (git rev-parse of the commit's ^{tree}). Optional: omitted only if the git read itself failed, which already aborts the whole event.",
+              "type": "string"
+            },
+            "parent_shas": {
+              "description": "ALSO IN 1.9. The commit's parent commit shas, in git's own order; empty array for a root commit, two or more for a merge. Array; element shape is not constrained because this schema's reviewed keyword set has no `items`/`maxItems` support yet.",
+              "type": "array"
+            },
+            "patch_id": {
+              "description": "ALSO IN 1.9. `git patch-id --stable` over the commit's own diff; best-effort and diagnostic only (never a security boundary). Omitted on a merge commit (more than one parent, so there is no single-parent diff to identify), a git error, or the hook's own timeout bound.",
+              "type": "string"
+            },
+            "openbox_session_id": {
+              "description": "ALSO IN 1.9. The trailer's own session id, copied into metadata so core can bind this leaf to a resumed run's claim: a resumed run's wire `run_id` is a minted UUID that never appears in the trailer, so without this copy core cannot join the two.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "Deploy",
+      "required": [
+        "event_type",
+        "metadata"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "Deploy"
+        },
+        "metadata": {
+          "type": "object",
+          "required": [
+            "deploy_id",
+            "commit_sha"
+          ],
+          "properties": {
+            "deploy_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "commit_sha": {
+              "type": "string",
+              "minLength": 1
+            },
+            "repo": {
+              "type": "string"
+            },
+            "environment": {
+              "type": "string"
+            },
+            "deploy_did": {
+              "description": "DID minted for the deploy = git hash + timestamp.",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "title": "TurnStarted",
+      "description": "Opens one model turn. Carries no usage — the numbers are known only at the close. Names its producer with exactly one discriminator, exactly as TurnCompleted does: until v1.6 this branch required turn_index UNCONDITIONALLY, and v1.5 repaired only the closing branch. What that actually rejected is the Codex session-rollup pair's opening half — the gateway emits no TurnStarted at all, so it was never affected — and it would equally have rejected any later lane that emits a pair.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "TurnStarted"
+        }
+      },
+      "$ref": "#/$defs/turnProducer"
+    },
+    {
+      "title": "TurnCompleted",
+      "description": "Closes one model turn and carries what it spent: tokens (all four counts the provider reports) and the model that spent them. Both are optional — a turn the projection could not measure is still a real turn, and zero-filling would claim it spent nothing. Names its producer with exactly one discriminator, like TurnStarted; $defs.turnProducer is the shared rule and the reason both halves cannot drift apart again.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "TurnCompleted"
+        }
+      },
+      "$ref": "#/$defs/turnProducer"
+    },
+    {
+      "title": "ModelCallRequested",
+      "description": "Opens one model-call gate (v1.10). Rides ActivityStarted with activity_type model_call_gate, evaluated through policy before the call is sent; activity_id <session>:llmgate:<model_call_request_id>. Never a turn and never a completion: no usage, no turn_index, no lane producer id. Its only span field is request_body (v1.11), gated content that rides activity_input.content (tail-kept at 65536 bytes); every other span field is dropped. Metadata keys: provider, message_count, tool_count, tool_names.",
+      "required": [
+        "event_type",
+        "model_call_request_id"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ModelCallRequested"
+        },
+        "activity_type": {
+          "const": "model_call_gate"
+        },
+        "tokens": false,
+        "cost": false,
+        "turn_index": false,
+        "session_rollup": false,
+        "gateway_request_id": false,
+        "otel_request_id": false,
+        "proxy_request_id": false
+      }
+    },
+    {
+      "title": "ModelCallFinished",
+      "description": "Closes one model-call gate (v1.10). Rides ActivityCompleted with activity_type model_call_gate, sharing the started half's activity_id. Metadata only: status, finish_reason, response_id, error_class, tool_call_count, model, provider -- no reply, thinking or body, and no usage. Absent when the call never reports finished; never fabricated.",
+      "required": [
+        "event_type",
+        "model_call_request_id"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ModelCallFinished"
+        },
+        "activity_type": {
+          "const": "model_call_gate"
+        },
+        "tokens": false,
+        "cost": false,
+        "turn_index": false,
+        "session_rollup": false,
+        "gateway_request_id": false,
+        "otel_request_id": false,
+        "proxy_request_id": false,
+        "span": false
+      }
+    },
+    {
+      "title": "SubagentStarted",
+      "description": "A subagent spawned (v1.2). Rides SignalReceived(subagent_started). Metadata-only: agent_id + agent_type. Since v1.9 those keys ALSO ride signal_args, which is the only field a governance engine reads on a signal (OPA matches signal_name + signal_args; Guardrails read signal_args alone). Until v1.9 they did not, because core read any SignalReceived with non-empty signal_args as a NEW USER GOAL, unconditionally; core's goal gate now suppresses that for a developer-runtime signal whose name is not prompt_submitted, and that gate must be running before a 1.9 client ships. metadata is unchanged and still carries every key.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "SubagentStarted"
+        }
+      }
+    },
+    {
+      "title": "PermissionDenied",
+      "description": "A policy or classifier refused a tool call (v1.2). Rides SignalReceived(permission_denied). Records THAT a decision happened, which tool it was about, and — under content capture since v1.3 — why: the provider's free-text `reason` rides content.signal_detail into metadata.denial_reason, and since v1.9 into signal_args as well. Never the tool's own content. Note the provider limit: Claude Code 2.1.229 fires its PermissionDenied hook only after an auto-mode classifier denial, so a static deny rule denies WITHOUT producing this event — absence is not evidence that nothing was denied.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PermissionDenied"
+        }
+      }
+    },
+    {
+      "title": "APIError",
+      "description": "A model turn ended in a provider-side error instead of an answer (v1.2). Rides SignalReceived(api_error). metadata.error_type is the provider's own closed enum (rate_limit, overloaded, authentication_failed, oauth_org_not_allowed, billing_error, invalid_request, model_not_found, server_error, max_output_tokens, unknown), allowlisted at the adapter; anything else is dropped rather than egressed. Free-text error detail is NOT carried.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "APIError"
+        }
+      }
+    },
+    {
+      "title": "Setup",
+      "description": "Claude Code's Setup hook fired (v1.8). Rides SignalReceived(setup). metadata.trigger ∈ {init, maintenance}. Registered ASYNC: the hook cannot block, and execution continues regardless of its exit code. prompt_id is absent here — it does not exist until the first user prompt.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "Setup"
+        }
+      }
+    },
+    {
+      "title": "InstructionsLoaded",
+      "description": "A CLAUDE.md/instructions file was loaded (v1.8). Rides SignalReceived(instructions_loaded). metadata.file_path, memory_type ∈ {User, Project, Local, Managed}, load_reason ∈ {session_start, nested_traversal, path_glob_match, include, compact}, globs[], trigger_file_path, parent_file_path. Registered ASYNC for observability only — no blocking. Fires many times per session; volume, not rarity, is the expected shape.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "InstructionsLoaded"
+        }
+      }
+    },
+    {
+      "title": "UserPromptExpansion",
+      "description": "A slash command or MCP prompt expanded the user's input (v1.8). Rides SignalReceived(user_prompt_expansion). metadata.expansion_type ∈ {slash_command, mcp_prompt}, command_name, command_source (free-form, capped). Structural-only — no content field. Exit 2 blocks the expansion upstream; this adapter always exits 0, so registered ASYNC. command_args and prompt are deliberately unbound: prompt is the PRE-expansion original text, which would duplicate prompt_submitted under a second key.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "UserPromptExpansion"
+        }
+      }
+    },
+    {
+      "title": "MessageDisplay",
+      "description": "A message rendered in the UI (v1.8). Rides SignalReceived(message_display). metadata.turn_id, message_id, index (integer), final (boolean) — correlation key (turn_id, message_id). Structural-only: delta/displayContent are never bound. Registered ASYNC (render path, 10s timeout). message_id is NOT the provider's own msg_… id; no transcript join exists from it.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "MessageDisplay"
+        }
+      }
+    },
+    {
+      "title": "PermissionRequest",
+      "description": "A permission prompt was shown to the developer (v1.8), distinct from PermissionDenied's auto-mode classifier denial. Rides SignalReceived(permission_request). metadata.tool_name, permission_mode; the requested tool input rides content.signal_detail -> metadata.requested_tool_input, and since v1.9 into signal_args as well. No correlation key — the native payload carries no tool_use_id. Registered SYNC, though exit 2 is not honoured on this hook regardless. Since v1.9 tool_name, permission_mode and requested_tool_input also ride signal_args. permission_suggestions is STILL deliberately NOT bound at all: its rules[].ruleContent can embed literal command text, it is an array where content.signal_detail is a single string, and it is the highest privacy-risk item in the inventory. Reviewed and deferred again at v1.9; revisit only if a policy needs it.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PermissionRequest"
+        }
+      }
+    },
+    {
+      "title": "PostToolBatch",
+      "description": "A batch of tool calls completed together (v1.8). Rides SignalReceived(post_tool_batch). metadata.batch_size (integer), batch_tool_use_ids[] (bounded to 64) — correlation key is tool_use_id per item. Structural-only: tool_calls[] is span-shaped and tool_input/tool_response are never bound. Registered ASYNC; exit 2 stops the agentic loop upstream.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PostToolBatch"
+        }
+      }
+    },
+    {
+      "title": "Notification",
+      "description": "The provider surfaced a system notification (v1.8). Rides SignalReceived(notification). metadata.notification_type (a closed 12-value enum); the notification text rides content.signal_detail -> metadata.notification_message, and since v1.9 into signal_args as well. Registered ASYNC. Since v1.9 the title rides metadata.notification_title as gated content, beside notification_message rather than replacing it — content.signal_detail holds one string and this class already spends it. Both also ride signal_args.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "Notification"
+        }
+      }
+    },
+    {
+      "title": "TaskCreated",
+      "description": "A teammate task was created (v1.8). Rides SignalReceived(task_created). metadata.task_id (correlation key), teammate_name (free-form, capped), team_name (free-form, capped, deprecated); the subject line rides content.signal_detail -> metadata.task_subject, and since v1.9 into signal_args as well. Registered SYNC; exit 2 rolls back the task's creation upstream. Two signals (with TaskCompleted), never an Activity pair. Since v1.9 task_description rides metadata.task_description as gated content, beside task_subject rather than replacing it. Both also ride signal_args.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "TaskCreated"
+        }
+      }
+    },
+    {
+      "title": "TaskCompleted",
+      "description": "A teammate task completed (v1.8). Rides SignalReceived(task_completed). Same metadata shape as TaskCreated; pairs with it by metadata.task_id ONLY — never by activity_id, because a task can be abandoned or completed in a different session than the one that created it. Registered SYNC.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "TaskCompleted"
+        }
+      }
+    },
+    {
+      "title": "TeammateIdle",
+      "description": "A teammate agent went idle (v1.8). Rides SignalReceived(teammate_idle). metadata.teammate_name, team_name — teammate_name is a label, not a correlation key. Registered ASYNC; exit 2 would keep the teammate working upstream (not honoured on an async hook).",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "TeammateIdle"
+        }
+      }
+    },
+    {
+      "title": "ConfigChange",
+      "description": "A settings file changed (v1.8). Rides SignalReceived(config_change). metadata.source ∈ {user_settings, project_settings, local_settings, policy_settings, skills}, file_path. No content field — the provider's `reason` is an OUTPUT field, rendered locally, and is never egressed. Registered SYNC 30s and GATED: the one v1.8 class this contract arms for enforcement. policy_settings is never gated — it is unblockable by design.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ConfigChange"
+        }
+      }
+    },
+    {
+      "title": "CwdChanged",
+      "description": "The working directory changed (v1.8). Rides SignalReceived(cwd_changed). metadata.old_cwd, new_cwd. Registered ASYNC; no decision control. watchPaths output is never emitted.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "CwdChanged"
+        }
+      }
+    },
+    {
+      "title": "DirectoryAdded",
+      "description": "A directory was registered into the session (v1.8). Rides SignalReceived(directory_added). metadata.directory, source ∈ {slash_command, register_repo_root}. Registered ASYNC; the tool does not wait on it (600s default timeout upstream).",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "DirectoryAdded"
+        }
+      }
+    },
+    {
+      "title": "FileChanged",
+      "description": "A watched file changed (v1.8). Rides SignalReceived(file_changed). metadata.file_path, event ∈ {change, add, unlink}. Registered ASYNC. The registered matcher IS the watch list — no wildcard; it is a bounded governance list.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "FileChanged"
+        }
+      }
+    },
+    {
+      "title": "WorktreeRemove",
+      "description": "A git worktree was removed (v1.8). Rides SignalReceived(worktree_remove). metadata.worktree_path (correlation key). Registered ASYNC. Unpaired by construction: it correlates to WorktreeCreate, which this contract deliberately refuses to register (see the 33rd, unregistered hook, below the enum ceiling of 32).",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "WorktreeRemove"
+        }
+      }
+    },
+    {
+      "title": "PreCompact",
+      "description": "A context compaction is about to run (v1.8). Rides SignalReceived(pre_compact). metadata.trigger ∈ {manual, auto}; custom instructions ride content.signal_detail -> metadata.compact_instructions. Registered ASYNC; exit 2 blocks compaction upstream (not honoured on an async hook).",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PreCompact"
+        }
+      }
+    },
+    {
+      "title": "PostCompact",
+      "description": "A context compaction finished (v1.8). Rides SignalReceived(post_compact). metadata.trigger ∈ {manual, auto}; the summary rides content.signal_detail -> metadata.compact_summary, and since v1.9 into signal_args as well. Registered ASYNC; no decision control.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PostCompact"
+        }
+      }
+    },
+    {
+      "title": "PreModelSwitch",
+      "description": "A model switch is about to occur (v1.8). Rides SignalReceived(pre_model_switch). metadata.from_model, to_model, requested_model, source ∈ {command, picker, sdk}, context_tokens (integer, absent not zero when unknown), prompt_cache_warm (boolean), cache_ttl ∈ {5m, 1h}, estimated_cache_write_usd (number), pricing ∈ {configured, catalog, default}. No correlation key. No content field — permissionDecisionReason is an OUTPUT field, never egressed. Registered ASYNC with exit 0 as the whole mitigation: unlike every other hook, a PreModelSwitch that does NOT respond before its 30s timeout BLOCKS the switch upstream — the inverse of PreToolUse. Enforcement is out of scope for this class.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PreModelSwitch"
+        }
+      }
+    },
+    {
+      "title": "PostModelSwitch",
+      "description": "A model switch completed (v1.8). Rides SignalReceived(post_model_switch). Same metadata shape as PreModelSwitch; source additionally allows {auto, resume} (a superset — every PreModelSwitch source value is also a valid PostModelSwitch source value). No content field — additionalContext is an OUTPUT field, never egressed. Registered ASYNC. Fires with no Pre half on an automatic or resumed switch; a Pre fires with no Post half when the switch is denied — this is not a pair in either direction.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "PostModelSwitch"
+        }
+      }
+    },
+    {
+      "title": "Elicitation",
+      "description": "An MCP server requested structured input from the developer (v1.8). Rides SignalReceived(elicitation). metadata.mcp_server_name, mode ∈ {form, url}, url, elicitation_id (optional correlation key); the prompt text rides content.signal_detail -> metadata.elicitation_message, and since v1.9 into signal_args as well. requested_schema is deliberately NOT bound (its internals could embed arbitrary structure). Registered SYNC; exit 2 denies the elicitation upstream.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "Elicitation"
+        }
+      }
+    },
+    {
+      "title": "ElicitationResult",
+      "description": "An MCP elicitation was resolved (v1.8). Rides SignalReceived(elicitation_result). metadata.mcp_server_name, action ∈ {accept, decline, cancel}, mode, elicitation_id (correlation key). The submitted form values (JSON-serialized) ride content.signal_detail -> metadata.elicitation_response, and since v1.9 into signal_args as well — ordinary GATED content: local secret detection is keyword-driven, so a value typed into an unrecognized field name is invisible to the redactor and egresses as ordinary text once an org opts into content capture (see docs/data-and-privacy.md). v1.9 raises the stakes on that rather than changing it: signal_args is rendered by the Verify tab where metadata is not, so submitted form values are now DISPLAYED to anyone who can read the session, not merely stored and queryable. This is the most sensitive item the projection newly exposes. Registered SYNC.",
+      "required": [
+        "event_type"
+      ],
+      "properties": {
+        "event_type": {
+          "const": "ElicitationResult"
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "turnProducer": {
+      "title": "exactly one model-call producer",
+      "description": "A turn event names the producer that observed it with EXACTLY ONE discriminator field, and this oneOf is what enforces it. Five producers describe the same kind of thing — one model turn — and client.turnActivityIDFor derives a disjoint activity_id per producer by branching on which of these fields is PRESENT. Core's dedupe key includes activity_id, so two producers able to mint one id would have half their evidence absorbed as a duplicate with no error anywhere; two discriminators on ONE event is the same failure from the other side, attributing the turn to a producer that did not observe it. BOTH turn branches $ref this definition rather than restating it: v1.5 stated the rule on TurnCompleted alone and TurnStarted kept requiring turn_index unconditionally, so a pair-emitting producer had its opening half rejected while its closing half validated. Concretely that was the Codex rollup, the only pair-emitting non-hook producer at the time; the gateway emits no TurnStarted and was unaffected. A sixth producer is added HERE, once, and both halves accept it.",
+      "oneOf": [
+        {
+          "title": "hook-observed turn",
+          "description": "The provider's own hook, over the transcript cursor. activity_id <session>[:agent:<id>]:turn:<n> — the index is what pairs the two halves onto one row.",
+          "required": [
+            "turn_index"
+          ]
+        },
+        {
+          "title": "gateway-observed model call",
+          "description": "The local gateway relay (v1.5). activity_id <session>:gateway:<id>.",
+          "required": [
+            "gateway_request_id"
+          ]
+        },
+        {
+          "title": "session usage rollup",
+          "description": "One usage activity for a whole session — Codex's granularity, since its per-turn hook is deliberately unwired. activity_id <session>:usage:rollup. Declared in v1.6; the client has emitted this shape since v1.1 and the schema rejected all of it. The value is const TRUE, not merely present, because the client's derivation is truthiness-based (`if ev.SessionRollup`): presence alone would let `session_rollup:false` satisfy this branch, producing a contract-valid turn for which turnActivityIDFor mints NO id — and would simultaneously make it match this branch AND turn_index's, rejecting a legitimate hook turn that happened to marshal the false. Go's omitempty hides both from this client; the contract is adapter-facing and an adapter need not be Go.",
+          "required": [
+            "session_rollup"
+          ],
+          "properties": {
+            "session_rollup": {
+              "const": true
+            }
+          }
+        },
+        {
+          "title": "telemetry-observed model call",
+          "description": "The local OTLP receiver (v1.6). activity_id <session>:otel:<id>. Client-asserted evidence: the tool reports its own calls, so this lane is suppressible by the governed tool and ranks below the in-path lanes as evidence.",
+          "required": [
+            "otel_request_id"
+          ]
+        },
+        {
+          "title": "transport-observed model call",
+          "description": "The local in-path TLS relay (v1.6). activity_id <session>:proxy:<id>. In-path, so it outranks the client-asserted lanes in the producer election.",
+          "required": [
+            "proxy_request_id"
+          ]
+        }
+      ]
+    },
+    "tool": {
+      "description": "The developer tool/action that produced the event. `kind` is the provider-agnostic tool class; `mcp_server` is required when kind=mcp (enforced by the conformance harness).",
+      "type": "object",
+      "required": [
+        "name",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Native tool name, e.g. 'Bash', 'Edit', 'mcp__github__create_issue'. Metadata only (INV-2).",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "description": "Provider-agnostic tool class. shell=command execution; file=file read/write/open/delete; mcp=MCP tool call.",
+          "enum": [
+            "shell",
+            "file",
+            "mcp"
+          ]
+        },
+        "mcp_server": {
+          "description": "MCP server name when kind=mcp (e.g. 'github').",
+          "type": "string"
+        }
+      }
+    },
+    "tokens": {
+      "description": "Token usage for the turn or the session rollup (metadata only). Absent when unknown; each count absent rather than zero when the provider does not report it. Since v1.1 `input` is PURE input and the two cache counts have their own fields — v1.0's Claude Code rollup folded both into `input`, which made cache efficiency unmeasurable and a cache-heavy session look like it had spent its whole context on fresh input.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "description": "Prompt tokens that were neither served from nor written to the prompt cache.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "output": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_creation_input": {
+          "description": "Input tokens WRITTEN to the prompt cache (Anthropic cache_creation_input_tokens; Codex cache_write_input_tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_read": {
+          "description": "Input tokens SERVED from the prompt cache (Anthropic cache_read_input_tokens; Codex cached_input_tokens).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "total": {
+          "description": "Whole throughput: input + output + both cache counts.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "cost": {
+      "description": "Monetary cost for the turn/tool (metadata only). Absent when unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        },
+        "currency": {
+          "type": "string"
+        }
+      }
+    },
+    "span": {
+      "description": "One semantic span for a tool call/result. Mirrors the subset of core's SpanData an adapter SETS; core COMPUTES `semantic_type` server-side from these source fields — the value here is the intended target and a hint. Carried in the core payload's `spans[]`.",
+      "type": "object",
+      "required": [
+        "semantic_type",
+        "stage"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "semantic_type": {
+          "description": "Target core span semantic type. Subset relevant to developer tools; every value is one core defines.",
+          "enum": [
+            "file_read",
+            "file_write",
+            "file_open",
+            "file_delete",
+            "mcp_tool_call",
+            "llm_tool_call",
+            "llm_completion",
+            "internal"
+          ]
+        },
+        "stage": {
+          "description": "Maps to core SpanData.stage. ToolCall emits 'started'; ToolResult emits 'completed'.",
+          "enum": [
+            "started",
+            "completed"
+          ]
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "file_operation": {
+          "type": "string"
+        },
+        "bytes_read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lines_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "function": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string"
+        },
+        "mcp_server": {
+          "type": "string"
+        },
+        "invocation_id": {
+          "description": "THIS attempt at the operation (the provider's tool_use_id). Pairs a call's started and completed spans onto one span_id and keys the duration stash. LOCAL: normalized-event and spool only — never emitted as a field on the core wire payload, where it survives solely as an input to the opaque span_id hash.",
+          "type": "string",
+          "x-local-only": true
+        },
+        "operation_id": {
+          "description": "WHAT the call does, identical across a RETRY of the same operation, so an approval can be consumed by the retry: activity_id derives from it, activity_id is the approval key, and core scopes both bypass grants by activity_id. Per class — shell: a hash of the command; MCP: a hash of the argument shape; otherwise the invocation (classes with no structural discriminator are never gated). Structural or hashed, never content (INV-2). LOCAL, like invocation_id: an input to the opaque activity_id hash, never a wire field.",
+          "type": "string",
+          "x-local-only": true
+        },
+        "request_body": {
+          "description": "Tool input content. GATED (INV-2): present only when content-capture is enabled for the org; Guardrail-redacted at source, and capped to 65536 chars before egress (capBody). Maps to core SpanData.request_body. On the WIRE (v1.7) this lands in the payload's `activity_input.content` for a model call, not in `spans[]`: core discards embedded spans on the normal path, and the key is `content` because Goal Alignment's per-operation cap orders keys by a fixed priority list and drops unlisted ones first. Request bodies keep their TAIL when capped -- a /v1/messages body is a conversation whose newest turn is at the end, so head-truncating one stores the boilerplate and discards the actual turn.",
+          "type": "string",
+          "x-content-gated": true
+        },
+        "response_body": {
+          "description": "Tool output content. GATED (INV-2); capped to 65536 chars before egress (capBody). Maps to core SpanData.response_body. On the WIRE (v1.7) this lands in the payload's `activity_output.content` for a model call, not in `spans[]`. Response bodies keep their HEAD when capped, because a reply starts at its beginning. Both directions are bounded in BYTES for a model call, not characters: the bound exists to manage the cost of core's synchronous OPA and Guardrails evaluation, and 64Ki runes of CJK is 192 KB on the wire.",
+          "type": "string",
+          "x-content-gated": true
+        },
+        "request_headers": {
+          "description": "NO LONGER POPULATED BY ANY PRODUCER (v1.7), and still declared so an adapter that has a reason to can. The request headers of a gateway-observed model call (v1.5). GATED (INV-2) and the highest-risk content class this client carries, because the developer's live provider credential is on every model request — so capture replaces credential values BY KEY NAME before the gate is even consulted, keeping the key (that a call was authenticated is governance-relevant) and dropping the value. Bounded per value and per map before egress (capHeaders). The in-path lanes stopped sending them because they only ever reached core inside `spans[]`, which the normal path parses and discards, so nothing has ever read them -- while they were the highest-risk class this client handled.",
+          "type": "object",
+          "x-content-gated": true
+        },
+        "response_headers": {
+          "description": "NO LONGER POPULATED BY ANY PRODUCER (v1.7), and still declared so an adapter that has a reason to can. The response headers of a gateway-observed model call (v1.5). GATED (INV-2), redacted by key name and bounded exactly like request_headers — an upstream header block is bounded only by the Transport's MaxResponseHeaderBytes (10 MiB by default), so an unbounded map here would make core reject the whole event and lose the evidence. The in-path lanes stopped sending them because they only ever reached core inside `spans[]`, which the normal path parses and discards, so nothing has ever read them -- while they were the highest-risk class this client handled.",
+          "type": "object",
+          "x-content-gated": true
+        },
+        "http_method": {
+          "description": "The observed HTTP method of a relayed model call (v1.5). On the WIRE (v1.7) it lands in the payload's `activity_input.http_method`, not in `spans[]`: core parses an embedded spans[] on the normal path and then discards it. Emitted ONLY alongside a captured request body, and that is load-bearing rather than incidental — core's primary Goal Alignment path is an ActivityStarted with a non-empty activity_input, so a token-count probe or a lane that synthesizes this pair without observing one would ship a judgeable operation describing no work. Structural (INV-2).",
+          "type": "string"
+        },
+        "http_url": {
+          "description": "The observed destination of a relayed model call (v1.5): scheme, host and path, with the QUERY DROPPED so a provider that ever accepts content or a token as a query parameter cannot turn this structural field into an ungated content leak. On the WIRE (v1.7) it lands in `activity_input.http_url`, and like http_method only alongside a captured request body. Structural (INV-2).",
+          "type": "string"
+        },
+        "http_status": {
+          "description": "The observed response status of a relayed model call (v1.5). On the WIRE (v1.7) it lands in the payload's `metadata.http_status`, rehomed alongside credential_fingerprint: it used to be spelled `http_status_code` inside spans[], which core parses and discards, so no relayed call's status was ever stored. Without it a 5xx, and a call whose transport failed before any response existed, are indistinguishable from a success whose reply happened not to be captured. Absent (omitempty) when no response was observed at all. Structural (INV-2), so it survives the content gate.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "credential_fingerprint": {
+          "description": "A one-way digest of the provider credential that made a relayed model call (v1.5), for account binding. On the WIRE (v1.7) it lands in the payload's `metadata.credential_fingerprint`: it used to ride spans[], which core discards, so account binding has in fact never had anything to match on. NOT content-gated, deliberately: it is derived evidence for a governance control, and letting a privacy setting remove it would let an org opt out of being identified. What is asserted instead is that the raw credential is absent while the fingerprint is present.",
+          "type": "string"
+        },
+        "prompt_id": {
+          "description": "Claude Code's own per-call correlation id (v1.9), parsed in-process from the request's x-anthropic-billing-header system-block text (gatewayemit.ParseRequestAttribution) -- a system[] TEXT ELEMENT despite the header-like name, never an HTTP header, and never egressed itself. On the WIRE it lands in `metadata.prompt_id`, the SAME key the OTel lane's `prompt.id` attribute already promotes, so both an in-path and a telemetry producer group a session's calls under one name. Absent when the source entry is absent, which means UNCLASSIFIED -- never inferred as background. Structural (INV-2), so it survives the content gate; bounded as a vendor identifier because it is derived from a body an attacker controls.",
+          "type": "string"
+        },
+        "previous_request_id": {
+          "description": "The prior call's upstream Request-Id (v1.9), parsed from the same attribution block as prompt_id (its cc_prev_req entry). Equals the previous call's activity_id suffix for this lane, so a consumer can order calls into a chain with no new correlation scheme. On the WIRE it lands in `metadata.previous_request_id`. Structural (INV-2), bounded as a vendor identifier.",
+          "type": "string"
+        },
+        "is_subagent": {
+          "description": "Whether this call's attribution block carried cc_is_subagent=true (v1.9). Set ONLY when that entry was present and exactly \"true\"; OMITTED, never `false`, when it was absent -- a consumer reading a stored `false` as \"confirmed not a subagent\" would mislabel every call this lane does not classify. On the WIRE it lands in `metadata.is_subagent`, alongside `metadata.agent_id` (from X-Claude-Code-Agent-Id), so a subagent's turns can be labelled even though this client ships them flat rather than nested under their parent turn. Structural (INV-2).",
+          "type": "boolean"
+        },
+        "entrypoint": {
+          "description": "Claude Code's own entrypoint label for this call (v1.9): cli / sdk / desktop, vendor-owned and not enumerated here. Parsed from the same attribution block as prompt_id (its cc_entrypoint entry). On the WIRE it lands in `metadata.entrypoint`. Structural (INV-2), bounded as a vendor identifier because it is derived from a body an attacker controls.",
+          "type": "string"
+        },
+        "response_bytes_seen": {
+          "description": "The local gateway capture sink's own byte counter for a relayed model call (v1.9): every byte the sink was OFFERED, incremented before its bound and clamp, so it can exceed the stored response_body and is the honest pre-cut count a length check on the stored body cannot recover. Populated only by the in-path lanes (gatewayemit.span(), from gateway.Captured.ResponseBytesSeen); zero on a hook-sourced turn, which has no gateway sink to report from. It is NOT projected to any wire field: `activity_output.openbox_capture.original_bytes` is `len(span.response_body)` instead, because this counter is measured before decoding and ~98% of real replies are compressed, which would make it smaller than the decoded content it claimed to bound. Structural (INV-2): a byte count, never response content.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "response_truncated": {
+          "description": "Whether the local gateway's own copy of a relayed model call's response is incomplete (v1.9): true when its capture sink dropped bytes past its bound, or the stored response_body already carries the capture path's cut mark (the compressed-body bound in decodeCapturable, or the rune bound in capRunes) -- either means the gateway's copy was cut before this client ever saw it. Populated only by the in-path lanes, like response_bytes_seen; zero (false) on a hook-sourced turn. On the WIRE it is ORed with this client's own capModelCallBody cut and lands in `activity_output.openbox_capture.truncated`, present (`false` included, never omitted) alongside `activity_output.content` and absent otherwise -- the response-side twin of `openbox_selection` on the request side. This same bool also drives `metadata.openbox_capture.truncated_paths`: a `true` value here yields a `truncated_paths` entry naming `activity_output.content` whenever that content is on the wire -- and, like the `openbox_capture` note beside it, is absent when there is no stored body to index (a stream that aborted before any bytes, or `content_capture: false`), so a gateway cut whose stored buffer lands at or under this client's own byte cap cannot leave the index silent about a body the row already admits is incomplete. Structural (INV-2): a bool about completeness, never response content.",
+          "type": "boolean"
+        }
+      }
+    },
+    "content": {
+      "description": "The ONLY location for raw prompt/output/file content. GATED (INV-2): absent by default; present only when an org opts in, and then Guardrail-redacted at source before egress. The conformance harness rejects any event carrying this when content-capture is disabled.",
+      "type": "object",
+      "x-content-gated": true,
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "file_text": {
+          "type": "string"
+        },
+        "tool_input": {
+          "description": "What a tool was asked to do — the shell command, the MCP arguments, the file body. Rides the gated call's evaluation event and, since v1.3, the observe-path ToolCall as well. Lands in the wire payload's activity_input under a per-class key (command|arguments|content), because a reviewer reading `command: <a file body>` would be misled about what was executed.",
+          "type": "string"
+        },
+        "signal_detail": {
+          "description": "A lifecycle signal's free text (v1.3): why a classifier refused a call (PermissionDenied), what the provider said when a turn failed (APIError). Since v1.8 also carries: the tool input Claude Code asks a human to approve (PermissionRequest -> requested_tool_input), a system notification's message (Notification -> notification_message), a task's subject line (TaskCreated/TaskCompleted -> task_subject), a compaction's custom instructions or summary (PreCompact -> compact_instructions, PostCompact -> compact_summary), and an MCP elicitation's prompt or submitted response (Elicitation -> elicitation_message, ElicitationResult -> elicitation_response). Lands in the wire payload's metadata under a per-type key beside that signal's structural fields. Since v1.9 it lands in signal_args as well, because that is the only field a governance engine reads on a signal and free text is often exactly what a policy must match. Until v1.9 it deliberately did not: core read any SignalReceived with non-empty signal_args as a NEW USER GOAL and overwrote the session's goal with it. What removed that constraint is core's source-and-name goal gate, not a change of mind about the hazard — and prompt_submitted's own signal_args is still the goal, which is why its shape is frozen. Content capture gates both destinations from one implementation, so a key cannot be gated in one and not the other. The conformance suite asserts both halves for every key: the original two, the seven v1.8 keys and the two v1.9 ones.",
+          "type": "string"
+        },
+        "thinking": {
+          "description": "The model's extended-thinking text for a turn (v1.4): its `thinking` content blocks, concatenated in file order across the turn's transcript window, bounded so a single window cannot hold unbounded text. Lands in the wire payload's `activity_output.thinking` on TurnCompleted, where core runs Guardrails stage 1 and OPA over it — reasoning a policy can see is reasoning a policy can judge. Deliberately NOT on the assistant span : that span exists to feed core's goal-alignment extractor, which reads it as the assistant's REPLY, so chain-of-thought there would score every later turn's drift against the model's reasoning instead of its answer, and would fail silently. This field widens the transcript allowlist — the first free-form content string that projection binds — so its gate, its redaction and its cap are each asserted on outbound bytes rather than trusted.",
+          "type": "string"
+        },
+        "tool_output": {
+          "description": "What a tool PRODUCED — the result body of a completed call, or the tool's own free-text error when it failed (v1.3). Lands in the wire payload's activity_output.output. Deliberately NOT `output`, which carries the assistant's turn text : overloading one field across both would put turn text on tool events and tool output into core's goal-alignment extractor the moment either mapping slipped.",
+          "type": "string"
+        }
+      }
+    },
+    "verdict": {
+      "description": "Canonical governance verdict for PARSING /evaluate responses. Priority: HALT > BLOCK > REQUIRE_APPROVAL > CONSTRAIN > ALLOW. NOTE: core serializes the response `verdict` field as the LOWERCASE wire strings in x-wire-mapping, and also emits a legacy `action` field (x-legacy-action). Every gated call acts on the verdict (INV-3). CONSTRAIN is core's sandbox-enforcement tier (Verdict=1).",
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "CONSTRAIN",
+        "REQUIRE_APPROVAL",
+        "BLOCK",
+        "HALT"
+      ],
+      "x-wire-mapping": {
+        "ALLOW": "allow",
+        "CONSTRAIN": "constrain",
+        "REQUIRE_APPROVAL": "require_approval",
+        "BLOCK": "block",
+        "HALT": "halt"
+      },
+      "x-legacy-action": {
+        "allow": "continue",
+        "constrain": "continue",
+        "require_approval": "require-approval",
+        "block": "stop",
+        "halt": "stop"
+      }
+    }
+  }
+}

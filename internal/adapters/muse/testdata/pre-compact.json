@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PreCompact",
+  "trigger": "soft",
+  "session_id": "sess-0001",
+  "turn_id": "turn-0001",
+  "cwd": "/tmp/proj",
+  "transcript_path": null,
+  "model": "muse-spark-1.3-contributor",
+  "permission_mode": "default",
+  "model_provider": "meta"
+}

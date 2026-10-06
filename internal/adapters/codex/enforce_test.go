@@ -1,0 +1,329 @@
+package codex
+
+import (
+	"bytes"
+	"encoding/json"
+
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/client/workloadauth"
+	"github.com/openbox-ai/openbox-shift-left/internal/decision"
+)
+
+func isolateConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv(devconfig.EnvConfigPath, filepath.Join(t.TempDir(), "none.json"))
+	t.Setenv(devconfig.EnvHome, t.TempDir())
+	// DefaultHaltDir falls back to the REAL OS $HOME (os.UserConfigDir), not
+	// devconfig.EnvHome above: without this, a test that hits a real explicit
+	// HALT verdict latches into the process-wide sentinel HOME
+	// (testmain_test.go) and a LATER test reusing the same session/run id
+	// reads back an unrelated latch from an earlier test.
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+	bindForTest(t, "codex")
+}
+
+// bindForTest binds for the length of one case. Every production caller of
+// this adapter runs under `openbox hook codex`, which binds before anything
+// resolves a credential; a fixture that left this unbound would exercise a
+// path no command takes, and identity does not resolve at all without it.
+func bindForTest(t *testing.T, tool string) {
+	t.Helper()
+	release, err := devconfig.BindProvider(tool)
+	if err != nil {
+		t.Fatalf("bind %s: %v", tool, err)
+	}
+	t.Cleanup(release)
+}
+
+func parsePreToolUse(t *testing.T, out []byte) (decisionVal, reason string, updatedInput json.RawMessage) {
+	t.Helper()
+	if len(bytes.TrimSpace(out)) == 0 {
+		return "", "", nil
+	}
+	var o preToolUseOutput
+	if err := json.Unmarshal(out, &o); err != nil {
+		t.Fatalf("stdout not valid PreToolUse JSON: %v (%q)", err, out)
+	}
+	if o.HookSpecificOutput.HookEventName != string(HookPreToolUse) {
+		t.Errorf("hookEventName = %q, want %q", o.HookSpecificOutput.HookEventName, HookPreToolUse)
+	}
+	return o.HookSpecificOutput.PermissionDecision, o.HookSpecificOutput.PermissionDecisionReason, o.HookSpecificOutput.UpdatedInput
+}
+
+// serveVerdict delegates to the shared fake core. The function stays local
+// because the two adapters install credentials under different env names, and
+// unifying that is Codex work this change does not carry -- but the server
+// behind it is now the one fake, which is what stopped the enforcement path
+// drifting per adapter.
+func serveVerdict(t *testing.T, verdictJSON string) {
+	t.Helper()
+	f := fakecore.New(t, fakecore.Script{Default: verdictJSON})
+	t.Setenv("OPENBOX_BASE_URL", f.URL()) // loopback http allowed (INV-1 guard)
+	t.Setenv(devconfig.EnvAPIKeyDirect, fakecore.APIKey())
+	workloadKey, err := workloadauth.NormalizePrivateKey(fakecore.WorkloadPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(devconfig.EnvWorkloadPrivateKey, workloadKey)
+	// A stale cached token would point a client freshly pinned at a NEW
+	// fakecore instance's baseURL at a bearer that instance never issued (the
+	// on-disk cache path is keyed by HOME+tool, not by base URL, and several
+	// call sites share one isolateEnforce'd HOME across subtests). A 401 is
+	// never resent (a stale bearer is refused and its cache invalidated,
+	// never retried), so a leftover cache file would silently cost the whole
+	// subtest its one delivery attempt.
+	if p, err := devconfig.WorkloadTokenCachePath(); err == nil {
+		_ = os.Remove(p)
+	}
+}
+
+// TestResolveEnforce_Codex inverts the old config/env precedence test:
+// enforce is deprecated and inert now, so no combination of config field or
+// env override can change ResolveEnforce's answer. The key still parses (no
+// error on any of these files), it just selects nothing.
+func TestResolveEnforce_Codex(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	write := func(j string) { _ = os.WriteFile(cfgPath, []byte(j), 0o600) }
+	t.Setenv(devconfig.EnvConfigPath, cfgPath)
+	os.Unsetenv(devconfig.EnvEnforce)
+
+	write(`{"developer_did":"` + testDID + `"}`)
+	if !ResolveEnforce() {
+		t.Error("an absent enforce field must resolve to ON")
+	}
+	write(`{"developer_did":"` + testDID + `","enforce":false}`)
+	if !ResolveEnforce() {
+		t.Error("enforce:false in config must be ignored")
+	}
+	write(`{"developer_did":"` + testDID + `","enforce":true}`)
+	if !ResolveEnforce() {
+		t.Error("enforce:true in config should still resolve ON")
+	}
+	t.Setenv(devconfig.EnvEnforce, "false")
+	if !ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=false must be ignored")
+	}
+}
+
+func TestBuildDecisionRequest_Codex(t *testing.T) {
+	id := Identity{DeveloperDID: testDID}
+
+	t.Run("bash carries the local-only command axis", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s1", PermissionMode: "default", ToolName: "Bash",
+			ToolInput: []byte(`{"command":"rm -rf /tmp/x"}`)}
+		req := buildDecisionRequest(id, ev, false)
+		if req.SessionID != "s1" || req.DeveloperDID != testDID {
+			t.Fatalf("identity not carried: %+v", req)
+		}
+		if req.EventType != client.EventToolCall {
+			t.Errorf("event_type = %q, want ToolCall", req.EventType)
+		}
+		if req.Tool.Name != "Bash" || req.Tool.Kind != client.ToolShell {
+			t.Errorf("tool = %+v, want Bash/shell", req.Tool)
+		}
+		if got := req.Attributes["command"]; got != "rm -rf /tmp/x" {
+			t.Errorf("command attr = %q, want the shell command (local-only)", got)
+		}
+		if req.Content != nil {
+			t.Errorf("shell tool must not carry Content, got %+v", req.Content)
+		}
+	})
+
+	t.Run("apply_patch carries file_operation + patch body Content when redaction on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s2", ToolName: "apply_patch",
+			ToolInput: []byte(`{"command":"*** Begin Patch\n+secret\n*** End Patch"}`)}
+		req := buildDecisionRequest(id, ev, true)
+		if req.Tool.Kind != client.ToolFile {
+			t.Errorf("tool kind = %q, want file", req.Tool.Kind)
+		}
+		if got := req.Attributes["file_operation"]; got != "edit" {
+			t.Errorf("file_operation = %v, want edit", got)
+		}
+		if _, ok := req.Attributes["command"]; ok {
+			t.Errorf("apply_patch must NOT carry a command match axis (no file_path either): %+v", req.Attributes)
+		}
+		if req.Content == nil || !strings.Contains(req.Content.FileText, "+secret") {
+			t.Errorf("patch body must ride Content.FileText for redaction, got %+v", req.Content)
+		}
+	})
+
+	t.Run("redaction off ⇒ no Content (byte-identical to no-redaction)", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s3", ToolName: "apply_patch",
+			ToolInput: []byte(`{"command":"*** Begin Patch\n+x\n*** End Patch"}`)}
+		if req := buildDecisionRequest(id, ev, false); req.Content != nil {
+			t.Errorf("localRedaction off must leave Content nil, got %+v", req.Content)
+		}
+	})
+}
+
+// TestMapVerdict_Codex mapVerdict / applyDecision; the provider-shaped apply
+// edge.
+func TestMapVerdict_Codex(t *testing.T) {
+	cases := []struct {
+		name    string
+		eval    client.Evaluation
+		want    string
+		wantSub string // substring the reason must contain ("" = proceed)
+	}{
+		{"HALT→deny", client.Evaluation{Verdict: client.VerdictHalt, Reason: "halted"}, codexDecisionDeny, "halted"},
+		{"BLOCK→deny", client.Evaluation{Verdict: client.VerdictBlock, Reason: "blocked"}, codexDecisionDeny, "blocked"},
+		{"guardrail-fail→deny", client.Evaluation{Verdict: client.VerdictAllow, Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii"}}}}, codexDecisionDeny, "pii"},
+		{"REQUIRE_APPROVAL→deny", client.Evaluation{Verdict: client.VerdictRequireApproval}, codexDecisionDeny, "approval"},
+		{"CONSTRAIN→proceed", client.Evaluation{Verdict: client.VerdictConstrain}, "", ""},
+		{"ALLOW→proceed", client.Evaluation{Verdict: client.VerdictAllow}, "", ""},
+		{"UNKNOWN→proceed", client.Evaluation{Verdict: client.VerdictUnknown}, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// A missed case in Render falls through to "write nothing", which would
+			// silently proceed a halted call; this is the pin.
+			d, reason := hookflow.MapVerdict(c.eval, contract)
+			_, applied := contract.Render(d, reason, nil)
+			if applied != c.want {
+				t.Fatalf("rendered decision = %q, want %q", applied, c.want)
+			}
+			if c.want == codexDecisionDeny && c.wantSub != "" && !strings.Contains(reason, c.wantSub) {
+				t.Errorf("reason = %q, want it to contain %q", reason, c.wantSub)
+			}
+			if applied == codexDecisionAllow {
+				t.Errorf("the cascade must never emit allow (tighten-only)")
+			}
+		})
+	}
+}
+
+func TestApplyDecision_Codex(t *testing.T) {
+	t.Run("deny emits permissionDecision:deny + reason, no updatedInput", func(t *testing.T) {
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope", PolicyID: "p1"}}
+		var out bytes.Buffer
+		applied, emitted := applyDecision(&out, dec, false, []byte(`{"command":"x"}`))
+		if !emitted || applied != codexDecisionDeny {
+			t.Fatalf("applied=%q emitted=%v, want deny/true", applied, emitted)
+		}
+		d, reason, ui := parsePreToolUse(t, out.Bytes())
+		if d != codexDecisionDeny || !strings.Contains(reason, "nope") || len(ui) != 0 {
+			t.Errorf("deny output wrong: d=%q reason=%q ui=%s", d, reason, ui)
+		}
+	})
+
+	t.Run("proceed with no redaction writes NOTHING (observe-identical)", func(t *testing.T) {
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
+		var out bytes.Buffer
+		applied, emitted := applyDecision(&out, dec, true, []byte(`{"command":"x"}`))
+		if emitted || applied != "" || out.Len() != 0 {
+			t.Errorf("proceed must write nothing, got applied=%q out=%q", applied, out.String())
+		}
+	})
+
+	t.Run("redaction emits allow+updatedInput (Codex rewrite contract), never bare allow", func(t *testing.T) {
+		dec := decision.Decision{
+			Evaluation:      client.Evaluation{Verdict: client.VerdictAllow},
+			RedactedContent: &client.Content{FileText: "*** Begin Patch\n+KEY=${OPENBOX_REDACTED_AWS_KEY}\n*** End Patch"},
+		}
+		orig := []byte(`{"command":"*** Begin Patch\n+KEY=AKIAIOSFODNN7EXAMPLE\n*** End Patch"}`)
+		var out bytes.Buffer
+		applied, emitted := applyDecision(&out, dec, true, orig)
+		if !emitted || applied != codexDecisionAllow {
+			t.Fatalf("applied=%q emitted=%v, want allow/true", applied, emitted)
+		}
+		d, _, ui := parsePreToolUse(t, out.Bytes())
+		if d != codexDecisionAllow {
+			t.Fatalf("redaction must ride permissionDecision:allow (Codex rejects a bare updatedInput), got %q", d)
+		}
+		if len(ui) == 0 {
+			t.Fatal("allow must carry a non-empty updatedInput")
+		}
+		if strings.Contains(out.String(), "AKIAIOSFODNN7EXAMPLE") {
+			t.Errorf("raw secret must not appear on stdout: %s", out.String())
+		}
+		if !strings.Contains(out.String(), "OPENBOX_REDACTED") {
+			t.Errorf("expected the redaction placeholder in updatedInput: %s", out.String())
+		}
+		var m map[string]any
+		_ = json.Unmarshal(ui, &m)
+		if _, ok := m["command"]; !ok {
+			t.Errorf("updatedInput must keep the command field, got %v", m)
+		}
+	})
+
+	t.Run("nil stdout fails open (never wedges)", func(t *testing.T) {
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock}}
+		if applied, emitted := applyDecision(nil, dec, false, nil); emitted || applied != "" {
+			t.Errorf("nil stdout must fail open, got applied=%q emitted=%v", applied, emitted)
+		}
+	})
+}
+
+func TestRedactToolInput_Codex(t *testing.T) {
+	t.Run("swaps command, preserves other fields verbatim", func(t *testing.T) {
+		orig := json.RawMessage(`{"command":"secret-body","note":"keep-me"}`)
+		out := hookflow.RedactToolInput(orig, "clean-body", contract.ContentFieldKeys())
+		var m map[string]any
+		if err := json.Unmarshal(out, &m); err != nil {
+			t.Fatalf("bad output: %v", err)
+		}
+		if m["command"] != "clean-body" {
+			t.Errorf("command = %v, want clean-body", m["command"])
+		}
+		if m["note"] != "keep-me" {
+			t.Errorf("structural field note must survive verbatim, got %v", m["note"])
+		}
+	})
+	t.Run("no recognized content field ⇒ nil (nothing safe to rewrite)", func(t *testing.T) {
+		if out := hookflow.RedactToolInput(json.RawMessage(`{"other":"x"}`), "y", contract.ContentFieldKeys()); out != nil {
+			t.Errorf("expected nil for no content field, got %s", out)
+		}
+	})
+	t.Run("non-object ⇒ nil", func(t *testing.T) {
+		if out := hookflow.RedactToolInput(json.RawMessage(`"a string"`), "y", contract.ContentFieldKeys()); out != nil {
+			t.Errorf("expected nil for non-object, got %s", out)
+		}
+	})
+}
+
+func TestApplyFailurePolicy_Codex(t *testing.T) {
+	realAllow := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, FailOpen: false, Source: "local-bundle"}
+	outage := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictUnknown}, FailOpen: true, Source: "fail-open:no-bundle"}
+
+	if got := hookflow.ApplyFailurePolicy(outage, hookflow.FailOpen); got.Evaluation.WouldBlock() {
+		t.Error("fail-open + outage must proceed")
+	}
+	if got := hookflow.ApplyFailurePolicy(outage, hookflow.FailClosed); !got.Evaluation.WouldBlock() {
+		t.Error("fail-closed + outage must synthesize a HALT (deny)")
+	}
+	if got := hookflow.ApplyFailurePolicy(realAllow, hookflow.FailClosed); got.Evaluation.WouldBlock() {
+		t.Error("fail-closed must NOT deny a REAL allow (engages on no-verdict only)")
+	}
+}
+
+// TestEnforceDecision_ObtainsRealVerdict is deleted with the local evaluator :
+// EnforceDecision now runs secret redaction and produces no verdict at all, so
+// "obtains a real BLOCK" has no local meaning.
+
+// TestClampsDerivedFromInstalledTimeout the adapter-owned clamps are derived
+// from the installed gate-hook timeout, not copied from Claude Code's
+// constants.
+func TestClampsDerivedFromInstalledTimeout(t *testing.T) {
+	if (Engine{}).HookCeilings().Gating != time.Duration(preToolUseHookTimeoutSec)*time.Second {
+		t.Errorf("(Engine{}).HookCeilings().Gating must derive from the installer's preToolUseHookTimeoutSec")
+	}
+	if hookflow.EnforceBudget((Engine{}).HookCeilings()) != (Engine{}).HookCeilings().Gating-hookflow.HookBudgetMargin {
+		t.Errorf("hookflow.EnforceBudget((Engine{}).HookCeilings()) must be the installed timeout minus the margin")
+	}
+	if hookflow.EnforceBudget((Engine{}).HookCeilings()) >= (Engine{}).HookCeilings().Gating {
+		t.Errorf("the whole-hook budget must land strictly before Codex's hook kill (Codex fails open on a kill)")
+	}
+	if evaluator.MaxTimeout != 0 {
+		t.Errorf("evaluator.MaxTimeout = %v; production must leave it zero or it re-clamps the gate's escalation budget", evaluator.MaxTimeout)
+	}
+}

@@ -1,5 +1,7 @@
-# Claude Code tooling (local tooling, not project content)
+# Local editor/agent tooling state (never project content)
 .claude/
+.fab7/
+.codegraph/
 
 # OS / editor cruft
 .DS_Store
@@ -9,24 +11,30 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Build output (compiled Go binaries — built per-platform, never committed)
+# Build output (compiled Go binaries — built per-platform, never committed).
+# `go build ./...` in a `main` package writes the binary into the current
+# directory, so a cross-compile gate can leave one beside the source.
 bin/
 /openbox
+*.exe
 
 # Env / secrets
 .env
 .env.*
 !.env.example
 
-# Testbed local state (config isolation, minted credentials, session output)
-testbed/.state/
-testbed/env.local.sh
-
-# Local agent tooling state (never project content)
-.fab7/
-
-# Supplied API dumps used as one-off probe evidence. Real governance data:
-# agent, session and run identifiers from a live org. They belong in a report,
-# never in the tree of a PUBLIC repo — f6690e7 committed them by accident,
-# against a decision already written down in plans/reports/.
+# Local working notes and scratch evidence; never part of the published tree.
+plans/
 .probe-evidence/
+
+# `tools/` holds source only: goreleaser builds none of it, and a committed
+# binary is a supply chain nobody reviewed. Allow-list rather than
+# pattern-match the artefacts — `go build` with no -o drops a binary named
+# after its directory, which no extension rule can catch.
+/tools/**
+!/tools/**/
+!/tools/**/*.go
+!/tools/**/*.md
+
+# GoReleaser output (config lives under build/, artefacts land in dist/).
+/dist/

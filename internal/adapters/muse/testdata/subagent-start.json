@@ -1,0 +1,12 @@
+{
+  "hook_event_name": "SubagentStart",
+  "subagent_id": "skill-reminder",
+  "child_session_id": "sess-0002",
+  "session_id": "sess-0002",
+  "turn_id": "sess-0002",
+  "cwd": "/tmp/proj",
+  "transcript_path": null,
+  "model": "muse-spark-1.3-contributor",
+  "permission_mode": "default",
+  "model_provider": "meta"
+}

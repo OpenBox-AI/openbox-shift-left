@@ -1,0 +1,85 @@
+package devconfig
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// Update is what one `openbox init` run supplies for the dev config. That
+// distinction is the whole point: re-running `init` to repair hooks must not
+// be able to turn enforcement off, and the only honest way to know it was not
+// asked for is to record that the flag was never passed.
+type Update struct {
+	// BaseURL coordinates.
+	BaseURL    string
+	AgentID    string
+	BackendURL string
+	// IdentityMethod, when it equals IdentityMethodKeycloakWorkload, marks this
+	// write as a v3 registration: WriteConfig sets it and clears any legacy
+	// developer_did on disk, since a v3 identity has no DID to keep. Empty
+	// leaves cfg.IdentityMethod alone, same as every other string field here.
+	IdentityMethod string
+
+	// ContentCapture posture and preferences. Nil ⇒ leave whatever is on disk (or
+	// the product default on a first install); non-nil ⇒ this run chose it
+	// explicitly, including a deliberate downgrade.
+	ContentCapture *bool
+	Tier2          *bool
+	Findings       *bool
+	InstallGitHook *bool
+}
+
+// WriteConfig merges u over the config already at path and writes the result.
+func WriteConfig(path string, u Update) error {
+	// That is the right direction for a repair command: `init` must still work
+	// against a corrupted config.
+	cfg, _ := Load(path)
+
+	setString(&cfg.BaseURL, u.BaseURL)
+	setString(&cfg.AgentID, u.AgentID)
+	setString(&cfg.BackendURL, u.BackendURL)
+	setString(&cfg.IdentityMethod, u.IdentityMethod)
+	if u.IdentityMethod == IdentityMethodKeycloakWorkload {
+		// setString cannot clear a field (WriteEnvFile's map merge has the same
+		// shape); a re-init over a legacy store would otherwise keep its DID
+		// forever, since a v3 identity never supplies one to overwrite it with.
+		cfg.DID = ""
+	}
+
+	setBool(&cfg.InstallGitHook, u.InstallGitHook)
+	setBoolPtr(&cfg.ContentCapture, u.ContentCapture)
+	setBoolPtr(&cfg.Tier2, u.Tier2)
+	setBoolPtr(&cfg.Findings, u.Findings)
+
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("dev config: marshal: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("dev config: create dir: %w", err)
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("dev config: write %s: %w", path, err)
+	}
+	return nil
+}
+
+func setString(dst *string, v string) {
+	if v != "" {
+		*dst = v
+	}
+}
+
+func setBool(dst *bool, v *bool) {
+	if v != nil {
+		*dst = *v
+	}
+}
+
+func setBoolPtr(dst **bool, v *bool) {
+	if v != nil {
+		*dst = v
+	}
+}

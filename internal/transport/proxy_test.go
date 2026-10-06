@@ -1,0 +1,567 @@
+package transport
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/gateway"
+)
+
+type stubEmitter struct {
+	mu sync.Mutex
+	c  []gateway.Captured
+}
+
+func (e *stubEmitter) Emit(_ context.Context, c gateway.Captured) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.c = append(e.c, c)
+}
+
+func (e *stubEmitter) count() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.c)
+}
+
+func (e *stubEmitter) last() gateway.Captured {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.c[len(e.c)-1]
+}
+
+// readConnectResponse consumes the CONNECT 200 the way a real client does.
+// Byte-at-a-time to the blank line, so nothing of the TLS record that follows
+// is swallowed into a buffer the tls.Client cannot see.
+func readConnectResponse(t *testing.T, c net.Conn) string {
+	t.Helper()
+	var head []byte
+	one := make([]byte, 1)
+	for !strings.HasSuffix(string(head), "\r\n\r\n") {
+		if len(head) > 4096 {
+			t.Fatalf("CONNECT response head exceeded 4096 bytes: %q", head)
+		}
+		n, err := c.Read(one)
+		if err != nil {
+			t.Fatalf("read CONNECT response: %v (so far: %q)", err, head)
+		}
+		head = append(head, one[:n]...)
+	}
+	return string(head)
+}
+
+func testCA(t *testing.T) *CA {
+	t.Helper()
+	ca, err := LoadOrCreateCA(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadOrCreateCA: %v", err)
+	}
+	return ca
+}
+
+// TestNewRefusesAConstructionWithNoEmitter. A fake at each end of a seam with
+// no implementation between them keeps both suites green and proves nothing
+// about the seam.
+func TestNewRefusesAConstructionWithNoEmitter(t *testing.T) {
+	_, err := New(Config{}, testCA(t), nil)
+	if err == nil {
+		t.Fatal("New accepted a nil emitter; a relay that cannot record is the gap this lane exists to close")
+	}
+	if !strings.Contains(err.Error(), "emitter") {
+		t.Errorf("error %q does not name the emitter", err)
+	}
+}
+
+// TestNewRefusesAConstructionWithNoCA: without a CA nothing can be terminated,
+// and the failure must be at construction rather than on the first model call.
+func TestNewRefusesAConstructionWithNoCA(t *testing.T) {
+	if _, err := New(Config{}, nil, &stubEmitter{}); err == nil {
+		t.Fatal("New accepted a nil CA")
+	}
+}
+
+// TestNewRefusesAnInvalidConfig: Validate's loopback rule has to be enforced
+// at construction, not merely available.
+func TestNewRefusesAnInvalidConfig(t *testing.T) {
+	if _, err := New(Config{Addr: "0.0.0.0:8790"}, testCA(t), &stubEmitter{}); err == nil {
+		t.Fatal("New accepted a non-loopback listen address")
+	}
+}
+
+// TestConnectActionInterceptsOnlyTheAllowlistedHost. An allowlisted host is
+// hijacked (we terminate TLS); everything else is accepted, which in goproxy
+// means a blind tunnel: forwarded byte-for-byte, never decrypted, never
+// captured.
+func TestConnectActionInterceptsOnlyTheAllowlistedHost(t *testing.T) {
+	p, err := New(Config{}, testCA(t), &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if !p.intercepts("api.anthropic.com:443") {
+		t.Error("the allowlisted host is not intercepted; the lane would capture nothing")
+	}
+	for _, host := range []string{
+		"evil.test:443",
+		"console.anthropic.com:443",
+		"api.anthropic.com.evil.test:443",
+		"github.com:443",
+	} {
+		if p.intercepts(host) {
+			t.Errorf("%q would be TLS-intercepted; only the allowlisted host may be", host)
+		}
+	}
+}
+
+// TestLegacyConstrainedCABlindTunnelsHostsOutsideItsConstraint is the safety
+// property a wider host table would otherwise break: a machine still holding
+// today's CA (constrained to api.anthropic.com) must not attempt a handshake
+// for claude.ai just because the allowlist now names it. That CONNECT stays
+// blind-tunnelled -- exactly today's behaviour, since claude.ai was never
+// intercepted under the legacy constraint either -- rather than hitting a mintLeaf
+// failure that closes the connection in a way that looks like the provider
+// being down. api.anthropic.com, which the legacy CA CAN issue for, is still
+// intercepted.
+func TestLegacyConstrainedCABlindTunnelsHostsOutsideItsConstraint(t *testing.T) {
+	dir := t.TempDir()
+	writeLegacyConstrainedCA(t, dir)
+	legacyCA, err := LoadOrCreateCA(dir)
+	if err != nil {
+		t.Fatalf("LoadOrCreateCA on the legacy CA file pair: %v", err)
+	}
+	if !CANeedsReissue(legacyCA) {
+		t.Fatal("setup: writeLegacyConstrainedCA did not produce a CA CANeedsReissue flags")
+	}
+
+	p, err := New(Config{}, legacyCA, &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	if !p.intercepts("api.anthropic.com:443") {
+		t.Error("api.anthropic.com is inside the legacy CA's constraint and must still be intercepted")
+	}
+	for _, host := range []string{"claude.ai:443", "www.claude.ai:443"} {
+		if p.intercepts(host) {
+			t.Errorf("%q is outside the legacy CA's constraint; it must stay blind-tunnelled until "+
+				"`openbox init` reissues the CA, not be attempted and fail mid-handshake", host)
+		}
+	}
+}
+
+// TestNewClearsInheritedProxyEnv is the self-loop guard. It happens in New
+// rather than being left to the caller because discipline is not a control: a
+// constructor that cannot be used without clearing is.
+func TestNewClearsInheritedProxyEnv(t *testing.T) {
+	keys := []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"}
+	for _, k := range keys {
+		t.Setenv(k, "http://127.0.0.1:8790")
+	}
+
+	p, err := New(Config{}, testCA(t), &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			t.Errorf("%s is still %q after New; the relay's upstream leg would dial itself", k, v)
+		}
+	}
+	if len(p.ClearedProxyEnv()) != len(keys) {
+		t.Errorf("ClearedProxyEnv() = %v, want all %d keys named", p.ClearedProxyEnv(), len(keys))
+	}
+}
+
+// TestNewAppliesItsOptions.
+func TestNewAppliesItsOptions(t *testing.T) {
+	var lines int
+	p, err := New(Config{}, testCA(t), &stubEmitter{},
+		WithVerbose(func(string, ...any) { lines++ }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	p.vlog("hello")
+	if lines != 1 {
+		t.Errorf("the verbose option passed to New was dropped: %d lines logged, want 1", lines)
+	}
+}
+
+// TestInterceptedRequestReachesTheHandlerOverRealTLS rehearses the whole
+// CONNECT choreography in memory: write the 200, terminate TLS with a leaf
+// from our CA, and serve HTTP/1.1 over it.
+func TestInterceptedRequestReachesTheHandlerOverRealTLS(t *testing.T) {
+	ca := testCA(t)
+	p, err := New(Config{}, ca, &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	var gotTarget, gotHost, gotProto string
+	p.handlerFor = func(string) (http.Handler, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotTarget, gotHost, gotProto = r.RequestURI, r.Host, r.Proto
+			w.Header().Set("X-Stub", "1")
+			io.WriteString(w, "pong")
+		}), nil
+	}
+
+	clientConn, serverConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close(); serverConn.Close() })
+
+	done := make(chan error, 1)
+	go func() { done <- p.interceptConn(serverConn, "api.anthropic.com:443") }()
+
+	if err := clientConn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		t.Fatalf("SetDeadline: %v", err)
+	}
+
+	if got := readConnectResponse(t, clientConn); !strings.HasPrefix(got, "HTTP/1.1 200") {
+		t.Fatalf("CONNECT response = %q, want a 200; the client will not begin its TLS handshake without one", got)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(ca.CertPEM()) {
+		t.Fatal("CA PEM did not parse")
+	}
+	tc := tls.Client(clientConn, &tls.Config{ServerName: "api.anthropic.com", RootCAs: pool})
+	if err := tc.Handshake(); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+	if got := tc.ConnectionState().NegotiatedProtocol; got == "h2" {
+		t.Fatal("ALPN negotiated h2; the handler behind this speaks HTTP/1.1, so the request would " +
+			"never parse and the model call would fail as if the network were broken")
+	}
+
+	req := "GET /v1/messages?beta=true HTTP/1.1\r\nHost: api.anthropic.com\r\n\r\n"
+	if _, err := io.WriteString(tc, req); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	buf := make([]byte, 512)
+	n, err := tc.Read(buf)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	resp := string(buf[:n])
+	if !strings.HasPrefix(resp, "HTTP/1.1 200") || !strings.Contains(resp, "X-Stub: 1") {
+		t.Errorf("response = %q, want a 200 from the stub handler", resp)
+	}
+
+	if gotTarget != "/v1/messages?beta=true" {
+		t.Errorf("handler saw RequestURI %q, want the origin-form target", gotTarget)
+	}
+	if gotHost != "api.anthropic.com" {
+		t.Errorf("handler saw Host %q", gotHost)
+	}
+	if gotProto != "HTTP/1.1" {
+		t.Errorf("handler saw %q, want HTTP/1.1", gotProto)
+	}
+
+	clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Error("interceptConn did not return after the client closed; the tunnel goroutine leaks")
+	}
+}
+
+// TestInterceptedTunnelServesMoreThanOneRequest.
+func TestInterceptedTunnelServesMoreThanOneRequest(t *testing.T) {
+	ca := testCA(t)
+	p, err := New(Config{}, ca, &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var served int
+	var mu sync.Mutex
+	p.handlerFor = func(string) (http.Handler, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			served++
+			n := served
+			mu.Unlock()
+			fmt.Fprintf(w, "reply-%d", n)
+		}), nil
+	}
+
+	clientConn, serverConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close(); serverConn.Close() })
+	go p.interceptConn(serverConn, "api.anthropic.com:443")
+
+	if err := clientConn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		t.Fatalf("SetDeadline: %v", err)
+	}
+	readConnectResponse(t, clientConn)
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(ca.CertPEM())
+	tc := tls.Client(clientConn, &tls.Config{ServerName: "api.anthropic.com", RootCAs: pool})
+	if err := tc.Handshake(); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
+
+	for i := 1; i <= 3; i++ {
+		if _, err := io.WriteString(tc, "GET /v1/models HTTP/1.1\r\nHost: api.anthropic.com\r\n\r\n"); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		buf := make([]byte, 256)
+		n, err := tc.Read(buf)
+		if err != nil {
+			t.Fatalf("request %d response: %v", i, err)
+		}
+		want := fmt.Sprintf("reply-%d", i)
+		if !strings.Contains(string(buf[:n]), want) {
+			t.Fatalf("request %d got %q, want it to contain %q; the tunnel stopped serving after "+
+				"the first request", i, buf[:n], want)
+		}
+	}
+}
+
+// TestProductionHandlerIsTheGatewayRelay.
+func TestProductionHandlerIsTheGatewayRelay(t *testing.T) {
+	em := &stubEmitter{}
+	p, err := New(Config{}, testCA(t), em)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+	g, ok := h.(*gateway.Gateway)
+	if !ok {
+		t.Fatalf("the production handler is %T, want *gateway.Gateway; this lane must reuse the "+
+			"proven relay rather than fork it", h)
+	}
+	if g == nil {
+		t.Fatal("the production handler is a nil *gateway.Gateway")
+	}
+}
+
+// TestProxyGoNeverRendersARefusalItself pins the seam boundary: proxy.go may
+// WIRE gateway.Gateway.WithGate (its own Evaluator and
+// gated predicate are cmd/openbox's to build, this package's import guard
+// excludes both hookflow and sessionkey), but it must never itself call
+// Decide, WriteRefusal or RefuseEverything -- the refusal decision and its rendering
+// stay inside gateway.Gateway.ServeHTTP, the one place they were reviewed.
+func TestProxyGoNeverRendersARefusalItself(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "proxy.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse proxy.go: %v", err)
+	}
+	forbidden := map[string]bool{"Decide": true, "WriteRefusal": true, "WriteRefusalAs": true, "RefuseEverything": true}
+
+	ast.Inspect(f, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok || !forbidden[sel.Sel.Name] {
+			return true
+		}
+		t.Errorf("%s: proxy.go calls %s directly. The refusal decision and its rendering belong inside "+
+			"gateway.Gateway.ServeHTTP, reached only through WithGate.", fset.Position(sel.Pos()), sel.Sel.Name)
+		return true
+	})
+}
+
+// TestWithGateDefaultsOffSoAnUnconfiguredRelayNeverGates pins the safe
+// default: a Proxy built without WithGate never calls an evaluator and
+// forwards every call, exactly as before this option existed.
+func TestWithGateDefaultsOffSoAnUnconfiguredRelayNeverGates(t *testing.T) {
+	p, err := New(Config{}, testCA(t), &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if p.evaluator != nil || p.gated != nil {
+		t.Fatalf("a Proxy built without WithGate carries evaluator=%v gated=%t, want both nil", p.evaluator, p.gated != nil)
+	}
+}
+
+// TestGoproxysBundledCAIsNeverReferenced. OkConnect's is inert (ConnectAccept
+// never reads TLSConfig) but naming it is one refactor away from using it, so
+// this module names it nowhere.
+func TestGoproxysBundledCAIsNeverReferenced(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
+		return !strings.HasSuffix(fi.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		t.Fatalf("parse package: %v", err)
+	}
+	forbidden := map[string]bool{
+		"GoproxyCa":       true,
+		"OkConnect":       true,
+		"MitmConnect":     true,
+		"HTTPMitmConnect": true,
+		"RejectConnect":   true,
+		"CA_CERT":         true,
+		"CA_KEY":          true,
+	}
+	seen := false
+	for _, pkg := range pkgs {
+		for name, f := range pkg.Files {
+			seen = true
+			ast.Inspect(f, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || !forbidden[sel.Sel.Name] {
+					return true
+				}
+				ident, ok := sel.X.(*ast.Ident)
+				if !ok || ident.Name != "goproxy" {
+					return true
+				}
+				t.Errorf("%s: %s references goproxy.%s, which carries goproxy's built-in CA. "+
+					"Its private key is published in the library source; terminating TLS with it "+
+					"would let anyone decrypt every intercepted model call.",
+					fset.Position(sel.Pos()), name, sel.Sel.Name)
+				return true
+			})
+		}
+	}
+	if !seen {
+		t.Fatal("parsed no non-test files; this guard would pass without scanning anything")
+	}
+}
+
+// TestNonAllowlistedHostIsNeverCaptured is the promise that makes that
+// decision reversal defensible, asserted rather than described: a host outside
+// the allowlist is not intercepted, so no capture can exist for it.
+func TestNonAllowlistedHostIsNeverCaptured(t *testing.T) {
+	em := &stubEmitter{}
+	p, err := New(Config{}, testCA(t), em)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if p.intercepts("github.com:443") {
+		t.Fatal("a non-allowlisted host is intercepted")
+	}
+	if em.count() != 0 {
+		t.Errorf("%d captures exist for a host that was never intercepted", em.count())
+	}
+}
+
+// TestRequestAttributionOptionReachesThePerHostRelay is the highest-risk
+// criterion this lane adds: the sample session that motivated attribution
+// classification ran on THIS lane, so an option that only reaches
+// internal/gateway's own tests -- and never the per-host relay newRelay
+// builds -- would deliver nothing for the case that mattered. This drives an
+// actual request through the PRODUCTION handler (p.handlerFor, never a
+// stubbed one) and asserts the closure's result lands on the emitted
+// Captured, exactly the path a real CONNECT would take.
+func TestRequestAttributionOptionReachesThePerHostRelay(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	em := &stubEmitter{}
+	var calls int
+	var gotRaw []byte
+	parse := func(raw []byte) map[string]string {
+		calls++
+		gotRaw = append([]byte(nil), raw...)
+		return map[string]string{"prompt_id": "attribution-reached-transport"}
+	}
+	p, err := New(Config{Upstream: upstream.URL}, testCA(t), em, WithRequestAttribution(parse))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+	if _, ok := h.(*gateway.Gateway); !ok {
+		t.Fatalf("handlerFor returned %T, want *gateway.Gateway -- this test must exercise the "+
+			"production relay, not a stub", h)
+	}
+
+	const body = `{"model":"claude-opus-4","messages":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("relay status = %d, want 200", rec.Code)
+	}
+	if calls != 1 {
+		t.Fatalf("attribution closure ran %d times through the transport-built relay, want 1", calls)
+	}
+	if string(gotRaw) != body {
+		t.Errorf("attribution closure saw %q, want the raw request body %q", gotRaw, body)
+	}
+	if got := em.last().Attribution["prompt_id"]; got != "attribution-reached-transport" {
+		t.Errorf("Captured.Attribution[prompt_id] = %q; the option built via transport.New did not "+
+			"reach the per-host gateway", got)
+	}
+}
+
+// TestWithRequestAttributionIsOptional: the option is not required, and a
+// Proxy built without it must not panic when a call is relayed.
+func TestWithRequestAttributionIsOptional(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	p, err := New(Config{Upstream: upstream.URL}, testCA(t), &stubEmitter{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("relay status = %d, want 200", rec.Code)
+	}
+}
+
+// TestRawObserverOptionReachesThePerHostRelay: the transport lane is the one
+// relaying claude.ai chats, so a raw observer passed to transport.New must
+// reach every per-host relay and see the body before redaction.
+func TestRawObserverOptionReachesThePerHostRelay(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	var seen []gateway.RawCapture
+	p, err := New(Config{Upstream: upstream.URL}, testCA(t), &stubEmitter{},
+		WithBodyCapture(func(*http.Request) bool { return true }),
+		WithRawObserver(func(c gateway.RawCapture) { seen = append(seen, c) }))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	h, err := p.handlerFor("api.anthropic.com:443")
+	if err != nil {
+		t.Fatalf("handlerFor: %v", err)
+	}
+
+	const body = `{"model":"claude-opus-4","messages":[]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(body)))
+
+	if len(seen) != 1 {
+		t.Fatalf("raw observer ran %d times through the transport-built relay, want 1", len(seen))
+	}
+	if seen[0].RequestBody != body {
+		t.Errorf("raw observer saw request body %q, want %q", seen[0].RequestBody, body)
+	}
+}

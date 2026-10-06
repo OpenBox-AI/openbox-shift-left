@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "execution": {
+    "allow_user_approval_override": false
+  },
+  "extensions": {
+    "hooks": {
+      "allowed_sources": ["managed"],
+      "allowed_env_vars": ["OPENBOX_HOME"]
+    }
+  }
+}

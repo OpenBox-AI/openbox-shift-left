@@ -1,313 +1,358 @@
 # Architecture
 
-One static binary, one engine, one thin adapter per coding tool. Adding a tool is
-an adapter; it is never a fork of the engine.
+One static Go binary, one engine, and one thin **adapter** per coding tool.
+Adding a tool means writing an adapter, not changing the engine.
 
-## The shape
+`openbox` does not have its own backend. It onboards the developer's machine
+onto the pipeline the OpenBox platform already runs for production agents:
+each installed tool registers as an agent (`kind=developer`), each coding
+session is a child record of that agent, and events go to the same
+`/api/v3/governance/evaluate` endpoint with the same auth and storage.
+
+## Key terms
+
+| Term | Meaning |
+|---|---|
+| **Platform** | The OpenBox service `openbox` talks to. Two parts: **core** (data plane: receives events, evaluates policy) and **backend** (control plane: agents, policies, approvals, dashboard). |
+| **Provider** / **tool** | A supported coding tool: `claude-code`, `codex` or `muse` (Muse Code). |
+| **Adapter** | The per-tool code that reads the tool's native hook payload, maps it to the common event, and writes the tool's expected hook response. |
+| **Engine** | The tool-independent code every adapter runs on (`hookflow`): queueing, delivery, enforcement, approvals, halts. |
+| **Agent** | The identity one tool install has on the platform. One per tool per machine. |
+| **Session** / **run** | One coding session. A run is one uninterrupted stretch of it; `--resume` continues a session in a new run. |
+| **Gated event** | A tool call or a prompt. It waits for the platform's verdict before the action runs. Everything else is sent in the background. |
+| **Verdict** | The platform's answer for a gated event: allow, block, require approval, or halt. |
+| **Halt latch** | A small local file written after a HALT verdict. It refuses the rest of that run locally, without asking the platform again. |
+| **Lane** | A local background service that records model calls, which hooks cannot see: `transport` (an HTTPS proxy) and `telemetry` (an OTLP receiver). |
+| **Content capture** | The single switch (`content_capture`) that decides whether text bodies (prompts, replies, commands, file contents, tool output) are sent. |
+
+## System context (C4 level 1)
+
+Who and what `openbox` interacts with. The diagrams follow the
+[C4 model](https://c4model.com): dark blue is a person, blue is `openbox`
+itself, grey is outside this repo.
 
 ```mermaid
 flowchart LR
-  subgraph TOOL["the developer's machine"]
-    CC["claude / codex<br/>(native hooks)"]
-    ENG["openbox engine<br/>hookflow"]
-    RED["secret redaction<br/>decision/ · µs, local"]
-    SPOOL[("spool")]
-    GIT["git prepare-commit-msg<br/>trailer + signed note"]
-  end
-  subgraph OPENBOX["OpenBox"]
-    CORE["openbox-core<br/>/api/v1/governance/evaluate"]
-    BE["openbox-backend<br/>agents · policy · approvals"]
-    DB[("sessions · governance_events<br/>deploy_session_links")]
-  end
-  CC -- "hook event" --> ENG
-  ENG --> RED
-  ENG -- "evaluate (gated call, blocking)" --> CORE
-  CORE -- "allow · deny · ask · redact" --> CC
-  ENG --> SPOOL --> CORE --> DB
-  ENG -- "poll approval" --> CORE
-  GIT --> CORE
-  BE -- "policy" --> CORE
-  BE -- "approval queue" --> CLI["openbox approve"]
+  dev(["<b>Developer</b>"]):::person
+  admin(["<b>Admin / approver</b><br/>writes policy, approves"]):::person
+  tool["<b>Claude Code / Codex / Muse Code</b><br/>AI coding tool"]:::external
+  ob["<b>openbox</b><br/>governs the coding tools<br/>on one machine"]:::system
+  model["<b>Model provider</b><br/>api.anthropic.com, claude.ai,<br/>OpenAI, api.meta.ai"]:::external
+  platform["<b>OpenBox platform</b><br/>core + backend + Keycloak"]:::external
+  ci["<b>CI pipeline</b><br/>runs openbox-git-action"]:::external
+  dev -- "works with" --> tool
+  tool -- "hook calls" --> ob
+  tool -- "model calls" --> model
+  ob -- "events, policy checks,<br/>token exchange" --> platform
+  ci -- "deploy events" --> platform
+  admin -- dashboard --> platform
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef store fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
 ```
 
-Two paths, deliberately separate:
+## Containers (C4 level 2)
 
-- **A gated tool call waits for OpenBox to decide it.** Every gated PreToolUse call
-  is evaluated by `/evaluate` before the tool runs
-  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). One policy
-  implementation, on the server. There is still no daemon and no socket
-  ([ADR-0006](adr/ADR-0006-in-process-decider.md) is untouched — a bounded outbound
-  call is not a resident process).
+The processes and stores on a developer machine, and the platform parts they
+reach.
 
-  This is the trade the ADR argues: enforcement now depends on reaching the control
-  plane, and under the default `fail_closed:false` a gated call PROCEEDS when it
-  cannot be reached. What it buys is that an org whose policy is hand-written rego
-  is actually enforced — the local evaluator could never evaluate that at all, so
-  those gates simply opened.
+```mermaid
+flowchart LR
+  tool["<b>Claude Code / Codex / Muse Code</b><br/>runs hooks, sends model calls"]:::external
+  subgraph machine["Developer machine"]
+    hook["<b>openbox hook</b><br/>short-lived process per hook call:<br/>map, redact, gate, queue"]:::container
+    transport["<b>transport lane</b><br/>background service: HTTPS proxy,<br/>records model-call bodies"]:::container
+    telemetry["<b>telemetry lane</b><br/>background service: OTLP receiver,<br/>records token usage"]:::container
+    githook["<b>git hooks</b><br/>stamp commits, report agent commits"]:::container
+    spool[("<b>per-session queue</b><br/>ordered, redacted events")]:::store
+    config[("<b>~/.openbox</b><br/>credentials, settings, CA")]:::store
+    trace[("<b>local trace</b><br/>7 days, never sent")]:::store
+  end
+  subgraph platform["OpenBox platform"]
+    core["<b>core</b><br/>/api/v3/governance/evaluate"]:::external
+    kc["<b>Keycloak</b><br/>workload tokens"]:::external
+    backend["<b>backend</b><br/>agents, policy, approvals, dashboard"]:::external
+  end
+  tool -- "hook stdin" --> hook
+  tool -- "model calls" --> transport
+  tool -- "usage (OTLP)" --> telemetry
+  hook -- "gated events (blocking)" --> core
+  hook -- "token exchange" --> kc
+  hook -. reads .-> config
+  hook -. writes .-> trace
+  hook --> spool
+  transport --> spool
+  telemetry --> spool
+  githook --> spool
+  spool -- "drained in order" --> core
+  backend -- policy --> core
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef store fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+```
 
-  The one thing that stays local is **secret redaction**: it must run before content
-  leaves the machine, and it sees the whole body where the server sees at most the
-  first 64KB.
-- **Telemetry is spooled and flushed off the hot path.** A slow or absent OpenBox
-  cannot slow a tool call or block one; undelivered events are retried, not dropped.
-  Delivery is near-real-time by default: after an event is spooled, the hook nudges a
-  detached, debounced flusher for its session (`hookflow.RealtimeTrigger`, ~2s
-  window), so events are queryable in core while the session is still running. The
-  hook process itself still performs zero network I/O — its worst case is one
-  lockfile check plus, at most once per window, spawning the flusher. SessionEnd's
-  flush remains the completeness safety net, and `realtime_flush:false` /
-  `OPENBOX_REALTIME=0` restores batch-at-session-end. Overlapping drains cannot
-  double-count: spool rotation is an atomic rename and core deduplicates on each
-  event's Idempotency-Key.
+Nothing needs to stay running for hooks to work: each hook call is its own
+short process. The two lanes are the only long-running services, and `init`
+installs them as launchd (macOS) or systemd (Linux) units.
 
-## Modules
+## Components of the engine (C4 level 3)
 
-| Module | What it owns |
-|---|---|
-| `provider/` | the SPI: `Installer` (install time) and `HookEngine` (runtime + capabilities) |
-| `adapters/common/hookflow/` | **the engine** — spool, duration stash, advisory sink, findings loop, the enforce cascade, inline evaluation, approval hold, rewake |
-| `adapters/claude-code/`, `adapters/codex/` | one thin adapter each: native event shape, mapper, `OutputContract`, installer |
-| `adapters/common/devconfig/`, `adapters/common/git/` | shared config/posture resolution; commit trailer, notes and attestation |
-| `client/` | the openbox-core client: wire payload, AIP signing, verdict parsing |
-| `decision/` | local secret detection and redaction (all that survives [ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)) |
-| `cli/` | the `openbox` CLI — `auth`, `init`, `dev verify`, `hook`, `approve`, `doctor`, `managed` |
-| `actions/openbox-git-action/` | commit → deploy lineage for CI |
-| `contracts/dev-event/` | the normalized event contract + wire mapping + conformance suite |
+What happens inside one `openbox hook` process.
 
-An adapter is only four things: its native hook shape, its mapper, an
-`OutputContract` (how it spells a hook response, where a redactable body lives, what
-an approval verdict becomes) and its installer. If something is
-provider-agnostic it belongs in `hookflow` or `devconfig` — that rule exists because
-the engine was once copy-pasted per adapter, and the copies drifted on the
-enforcement path.
+```mermaid
+flowchart LR
+  tool["<b>Claude Code / Codex / Muse Code</b>"]:::external
+  subgraph bin["openbox hook process"]
+    adapter["<b>Adapter</b><br/>internal/adapters/&lt;tool&gt;<br/>native payload ⇄ common event"]:::component
+    engine["<b>Engine</b><br/>internal/adapters/common/hookflow<br/>queue, delivery, enforcement,<br/>approvals, halts"]:::component
+    redact["<b>Secret redaction</b><br/>internal/decision"]:::component
+    cfg["<b>Settings</b><br/>internal/adapters/common/devconfig"]:::component
+    client["<b>Core client</b><br/>internal/client<br/>auth, wire payload, verdicts"]:::component
+  end
+  core["<b>OpenBox core</b>"]:::external
+  tool -- "hook event" --> adapter
+  adapter -- "common event" --> engine
+  engine --> redact
+  engine --> cfg
+  engine --> client
+  client -- HTTPS --> core
+  adapter -- "allow / deny response" --> tool
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef store fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+```
 
-## Governance levels
+## A gated tool call, step by step
 
-Each install runs at exactly one level, and reports which:
+```mermaid
+sequenceDiagram
+  participant T as Claude Code / Codex / Muse Code
+  participant H as openbox hook
+  participant C as OpenBox core
+  T->>H: PreToolUse (tool name, input)
+  H->>H: map to common event, redact secrets
+  H->>C: evaluate (tool call)
+  alt allow
+    C-->>H: allow
+    H-->>T: proceed
+  else block
+    C-->>H: block
+    H-->>T: deny this call
+  else require approval
+    C-->>H: require_approval + approval id
+    H->>C: poll approval status (up to approval_hold_ms)
+    H-->>T: proceed, or deny naming the approval id
+  else halt
+    C-->>H: halt
+    H->>H: write halt latch for this run
+    H-->>T: deny, and refuse every later call in the run locally
+  else no answer / error
+    H-->>T: deny this call only
+  end
+  T->>H: PostToolUse (output)
+  H->>H: queue the result for background delivery
+```
 
-| Level | What happens | Cost to a tool call |
+### Why the platform is the only decider
+
+There is no local policy. Every gated event goes to the platform, and risk is
+a property of the policy, not of the client. Enforcement therefore depends on
+reaching the platform, but any rule the platform can express is actually
+enforced. An earlier local evaluator could not run hand-written policy at all,
+so those rules silently never fired.
+
+Secret redaction is the one thing that stays local. It has to run before
+content leaves the machine, and it is the only protection content has in
+transit.
+
+### Delivery rules
+
+- All events of a session go through **one ordered queue**, drained by one
+  process at a time, in the order they were appended.
+- Each event gets **one attempt**, plus **one retry** for a transient failure
+  (timeout, network error, 5xx). A 401 is retried once with a freshly fetched
+  token. Any other 4xx is not retried.
+- **A delivery failure denies only the call it belongs to.** It never halts
+  the run: the next gated call, prompt or model call gets its own attempt.
+- **Only a HALT verdict halts a run.** `/clear` or `--resume` on Claude Code
+  starts a new run and is not halted.
+- **`WorkflowStarted` (session start) always reaches the platform first.**
+  Beyond that, ordering is best effort: a gate may send its own evaluation
+  before older queued events when the queue is busy.
+
+Why only one retry: a platform hiccup retried without limit by every tool call
+of every session becomes a flood. One retry lets a session survive a brief
+blip, and a real outage still ends in each affected call being denied. The
+cost: the platform deduplicates a resend only once it has finished the first
+attempt, so a retry racing a slow first attempt can store an event twice.
+
+### Identity and auth
+
+Each tool registers its own agent, with a `keycloak_workload` identity. `init`
+generates an RSA key pair and keeps the private key in `~/.openbox/<tool>/.env`.
+To call the platform, the client signs a short-lived client assertion with that
+key and exchanges it at Keycloak for a bearer token, cached on disk for a few
+minutes and renewed before it expires (`internal/client/workloadauth/`). A
+failure anywhere in that exchange counts as a delivery failure: the call is
+denied, the run is not halted.
+
+### Model-call lanes
+
+| Lane | What it is | Sees | Installed for |
+|---|---|---|---|
+| `transport` | local HTTPS proxy with a machine-generated CA | real request and response bytes | Claude Code; Codex on macOS (through the system PAC) |
+| `telemetry` | local OTLP receiver | the tool's own usage report; no content in the export itself (the daemon joins bodies on locally where a tool keeps them, see Coverage) | Claude Code, Codex, Muse Code |
+
+Rules that keep this correct:
+
+- **Only one lane reports each model call.** An election, derived from where
+  the tool's settings route model calls, picks one. Two lanes reporting the
+  same call would double every token count. Codex's is derived from its
+  `config.toml` and the system-PAC record, and the relay is elected over
+  telemetry only after the PAC is committed **and** the relay has seen a Codex
+  model call (a marker in Codex's spool directory). Both daemons resolve it
+  from paths in their unit (`--codex-settings`, `--pac-record`), per record.
+- **Each lane has its own `activity_id` namespace** (`:proxy:`, `:otel:`), so
+  the platform's deduplication never merges one lane's record into another's.
+  The model-call gate (`:llmgate:`, Muse's pre-send hook) has its own too.
+- **Install order is a safety property:** write the service unit, start it,
+  confirm it listens, and only then point the tool at it. Pointing the tool at
+  a dead port would break every model call while `init` reported success.
+  Uninstall reverses the order.
+- **Containment is the host allowlist, not the certificate.** Only hosts in
+  `internal/transport/hosttable.go` are decrypted; everything else is tunnelled
+  untouched.
+- The transport lane refuses a model call only when its run is halted.
+
+The code also contains a third, older lane, `gateway` (a base-URL relay),
+which `init` no longer installs.
+
+**Muse Code has the telemetry lane only.** It ignores the system PAC and
+rejects the relay's CA (measured on 1.4.1, not seen to change on 1.4.2), so there is no transport arm. Its
+own `settings.json` can redirect its export: `telemetry` set to
+`{enabled: true, destination: "external", endpoint: "http://127.0.0.1:8789"}`
+makes Muse post OTLP to `<endpoint>/muse-code/telemetry/{logs,traces}` instead
+of Meta's destinations. `init --provider muse` therefore starts the receiver,
+proves it listens, **then** records Muse's previous `telemetry` value and writes
+that object; `uninstall` restores the recorded value (or deletes the key) and
+leaves one the developer changed since. The receiver serves Muse's two paths
+through a path-rewriting middleware on the one OTLP server, routes a record by
+its `session_id` attribute (Claude Code's is `session.id`, Codex's
+`conversation.id`; a record carrying more than one is refused), and maps only the
+`model_call` log to a model-call pair: the response id as the request id, model,
+provider, and input, output and cached token counts, which carry no content.
+Under `content_capture` the daemon then joins the call's request (a redacted
+copy the `PostLLMCall` hook stashed) and response (read from Muse's session
+journal) onto that pair, which is why the unit carries `--muse-sessions`.
+There is nothing to outrank, so the election is whether Muse's settings point at
+this receiver on loopback, re-read per record from the path the unit's
+`--muse-settings` carries. A subagent's call folds into the parent session
+the hook path recorded for that child, so both lanes put the child in one place;
+a child the hook path never linked stays a session of its own. Its
+pre-send hook is also evaluated as a `model_call_gate` activity: a policy check,
+not a record of the call (see
+[Coverage](coverage.md#1b-model-call-coverage-matrix)). `api.meta.ai` is a
+host row of all three tools, so a relayed call on it is attributed by its
+carrier header and skipped when none or several match.
+
+## Layout
+
+One Go module, `github.com/openbox-ai/openbox-shift-left`. One row per
+top-level directory, with what belongs there **and what does
+not**. A CI step fails if a top-level directory has no row here.
+
+| Directory | What belongs | What must not go here |
 |---|---|---|
-| **Observe** (default) | normalized telemetry, lineage, cost. Never blocks. | none — spooled |
-| **Advisory** | verdicts and guardrail findings are recorded and surfaced back into the session, never applied | none |
-| **Enforce** (default since [ADR-0016](adr/ADR-0016-default-install-posture.md)) | the PreToolUse and UserPromptSubmit gates apply the verdict: deny/block, ask, or redact — and a HALT stops the whole session ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)) | one round-trip to `/evaluate` per gated hook, bounded by the provider's hook ceiling |
+| `api/` | machine-readable contract files; today, the dev-event JSON Schema | prose *about* the wire, which lives in `docs/` |
+| `build/` | packaging and release configuration (`.goreleaser.yaml`) | anything a build produces; artefacts are git-ignored |
+| `cmd/` | one directory per **shipped** executable (`openbox`, `openbox-git-action`), `main` package only | a binary nothing ships; a dev instrument belongs in `tools/` |
+| `deployments/` | managed-settings files an org deploys with its own MDM | anything this repo's code reads at runtime or installs for you |
+| `docs/` | design and user documents | anything a program parses |
+| `init/` | **illustrative** copies of the lane service units, and only that | a `go:embed`, or anything treated as authoritative; `internal/cli/laneservice` renders the real ones |
+| `internal/` | every package; this repo publishes no importable package | a package meant for external import |
+| `tools/` | supporting dev instruments: `corpusfixture`, `refusal-injector` | anything the release builds |
 
-Enforce is three named things, not three tiers. They are independent — any one can
-be on without the others:
+`install.sh` and `.github/workflows/` stay at the root because `curl … | bash`
+needs a stable URL and GitHub requires its own path.
 
-- **Local secret redaction.** A Write/Edit body is scanned before anything leaves
-  the machine; a detected secret is replaced and the call proceeds with the redacted
-  body (redact-and-continue) rather than being blocked. On by default
-  (`secret_detection`).
-- **Inline evaluation.** The gated call is sent to `/evaluate` and the verdict is
-  applied before the tool runs. Every gated class, not a risk-selected subset —
-  risk is a property of the policy. Prompts gate the same way: `UserPromptSubmit`
-  evaluates the `PromptSubmitted` event before the prompt is processed, and a
-  HALT/BLOCK blocks (and erases) the prompt ([ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)).
-  If the control plane cannot be reached, the
-  org's `fail_closed` decides: fail-open proceeds (the default), fail-closed denies.
-  No retry: one hiccup must not become a client-side amplifier across every tool
-  call of every session.
-- **HALT ends the session.** A HALT the control plane returns is a session
-  verdict, not a call verdict: the response carries Claude Code's
-  `continue:false` (the turn stops immediately) and a local latch
-  (`halted-sessions/` beside the other sinks) refuses every later prompt and
-  tool call in that session with no re-evaluation — `--resume` included. BLOCK
-  stays per-call. A *synthesized* HALT — the fail-closed outage answer, an
-  unanswered approval — never ends the session: only the server's own HALT
-  does. Codex has no session-stop lever, so a HALT there renders as its
-  strongest per-call deny and no latch is written.
-- **Findings.** Asynchronous guardrail and drift findings surfaced back into the
-  session after the fact. Off by default (`findings`).
+### Inside `internal/`
 
-`REQUIRE_APPROVAL` is the one verdict that is a *question* rather than an answer:
-the server files it as a real record and the hook holds briefly for a decision.
+| Package | What it owns |
+|---|---|
+| `provider/` | the adapter interface: `Installer` (install time) and `HookEngine` (runtime) |
+| `adapters/common/hookflow/` | **the engine**: queue, delivery, enforcement, approvals, halts, plus the plumbing every adapter shares (hook prologue, tool classification, identity, mapper base) |
+| `adapters/claude-code/`, `adapters/codex/`, `adapters/muse/` | one thin adapter each |
+| `adapters/common/devconfig/` | settings and where each value comes from |
+| `adapters/common/git/` | commit trailer, notes mirror, commit event |
+| `client/` | the core client: auth, wire payload, verdict parsing |
+| `decision/` | local secret detection and redaction |
+| `transport/` | the HTTPS proxy lane |
+| `telemetry/` | the OTLP receiver lane |
+| `gateway/` | the older base-URL relay lane, plus the request/response capture shared with `transport` |
+| `cli/` | everything behind the `openbox` commands, including lane install (`activation`, `laneservice`) |
+| `trace/` | the local trace and the reader behind `openbox trace` |
+| `conformance/` | the event contract's conformance suite |
+| `actions/openbox-git-action/` | commit-to-deploy lineage for CI |
+| `depguard/` | dependency and layering guards |
 
-## Approvals
+`internal/gateway/internal/dialhook` keeps a nested `internal/` on purpose: it
+limits importers to the `internal/gateway` subtree.
 
-A gated call is filed as a real governance event with an approval window, and the
-session holds briefly (~20s) while someone answers. Answer inside the hold and the
-call proceeds and the developer sees nothing. Nobody answers and the call is denied
-with the approval reference in the reason — and if the decision lands later, a
-background watcher wakes the session with the outcome.
+**An adapter is four things:** its native hook shape, its mapper, an
+`OutputContract` (how it writes a hook response and what an approval verdict
+becomes), and its installer. Anything tool-independent belongs in `hookflow`
+or `devconfig`. The engine was once copied per adapter, and the copies drifted
+on the enforcement path.
 
-An approver is a separate principal with its own credential: the dashboard,
-`openbox approve`, or a bounded autonomous approver
-([ADR-0012](adr/ADR-0012-autonomous-approver.md)). Approving on the machine that
-filed the request is refused by default.
+**Layering is enforced by tests.** `internal/depguard` checks that no adapter
+imports another and holds `telemetry`, `transport`, `decision` and `gateway`
+to import allowlists. `internal/gateway` must never read the developer's
+provider credential. Do not widen an allowlist just to make an import pass.
 
-## Posture as evidence
+## Known limits
 
-Every session start reports its own effective posture — enforce on/off,
-fail-open/closed, who decides and what happens when they are unreachable, content
-capture, provider-managed config — so the control plane can tell a governed machine
-from an ungoverned one without trusting the endpoint's word for it. `openbox doctor` prints the same thing locally, with the
-provenance of each value (default, your config, environment, or org mandate).
+- **Credentials are plaintext.** Anything running as the developer, including
+  the governed agent, can read the agent's private key. A signed event proves
+  which machine's key produced it, not that nobody tampered with it. See
+  [Credentials](credentials-and-secrets.md).
+- **No events is not the same as no activity.** A machine that never ran
+  `init` sends nothing and looks the same as an idle one.
+- **Without managed settings, the developer can remove the hooks.** For Codex,
+  hooks cannot be mandated at all; the shipped managed config pins approval
+  and sandbox modes instead ([`deployments/managed/`](../deployments/managed/)).
+- **Muse Code's runtime fails open.** Its payload shapes were read off Muse
+  1.4.1 and 1.4.2 captures, and its refusal shapes were checked by hand on 1.4.1. A hook
+  that crashes, times out or answers invalidly lets the action proceed; a
+  deny-only `onFailure` successor and a non-zero exit on a gated crash backstop
+  that (observed on 1.4.1), except plain non-JSON output, which Muse allows and
+  the adapter never writes. A payload over 256 KiB
+  is never delivered to a hook: that gap is detected from Muse's own session
+  log (a local finding, `doctor` count), not prevented. A local administrator
+  can remove the hooks; an org-deployed managed hooks file is the only
+  stronger option, and its policy keys are unverified.
+- **The lanes detect bypass; they do not prevent it.** Unsetting one
+  environment variable routes around them, which shows as a gap in the record.
+  Prevention needs managed settings plus network egress control.
+- **Content policy sees at most the first 64KB** of a body.
+- **A platform HALT is trusted as a policy decision**, even when the platform
+  issues it for an internal reason (for example "Session is no longer active").
+- **Not verified against a live platform:** the model-call lanes (verified by
+  replaying recorded traffic through the real code), and Windows at runtime.
 
-## Assurance — what the evidence proves
+## How it is verified
 
-Being precise here is part of the product.
-
-- **Commit attribution.** The `OpenBox-Session` trailer records which session was
-  live when a commit was made. That is an *inferred claim*, and a trailer can be
-  hand-written. Server-side ownership verification raises it to `attributed`.
-  Cryptographic `verified` requires the signed attestation note
-  ([ADR-0010](adr/ADR-0010-signed-commit-attestation.md)): the commit hook signs an
-  envelope into `refs/notes/openbox-attest`, the deploy action carries it, and core
-  marks `verified` only when ownership **and** an accepted attestation both hold. CI
-  must fetch that ref, which is not the default.
-- **The signing key is readable by anything running as the developer.** It sits in
-  plaintext at `~/.openbox/.env` — `0600` on macOS/Linux, and on Windows `0600` is
-  a no-op so other local accounts can read it too
-  ([ADR-0015](adr/ADR-0015-plaintext-credential-file.md)). The coding agent under
-  governance runs arbitrary commands as that user, so it can read the key it is
-  being attested with. Attestation therefore proves **origin-of-config** — a
-  machine holding this agent's key produced this event or commit — and **not**
-  tamper-resistance against the developer or against the agent they run. The OS
-  keychain this replaced did not actually change that (it was unlocked for the
-  desktop session and readable by the same processes); the plaintext file makes it
-  legible. On an approver install the same file also holds an org key that can
-  create and rotate agents fleet-wide, which is a strictly larger blast radius
-  than one agent's seed.
-- **A project can hold a registration from an older engine until the next
-  `init`.** Hooks live in a file on the developer's machine, so an install run
-  with a different `HOME` used to leave a second OpenBox entry beside the current
-  one — both engines then fired for every hook, storing every governed tool call
-  twice, and an older engine reports fewer fields than the current one. `init` now
-  removes its own redundant entries — at another engine path, or the same one
-  registered twice — and prints what it retired, and `openbox doctor` reports both
-  conditions for the directory it is run from. Two limits stay: the repair happens
-  **only when `init` is next run in that directory**, and events already stored are
-  not corrected — so a fleet's history can contain duplicates that no client-side
-  change removes.
-- **Enforcement.** The gate is a hook in the developer's own config. Until the
-  provider's managed configuration is deployed (`deploy/managed/`), a developer can
-  remove it: prevention without assurance. For Codex the hook itself cannot yet be
-  mandated — a `requirements.toml` cannot define one — so the shipped mandate pins
-  approval and sandbox modes instead.
-- **The inline-evaluation path has not been exercised against a live stack.**
-  Every claim below about enforcement rests on tests that drive the real hook
-  against a local `/evaluate` stub — which is real HTTP and the real gate, but not
-  a real control plane. In particular, **that a raw-rego org is now enforced is
-  unproven**, and that is the headline argument for the change
-  ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)). The testbed phase that
-  would prove it exists and has not run.
-- **Enforcement depends on reaching the control plane, and under the default it
-  is bypassable.** Every gated tool call is decided by a synchronous `/evaluate`
-  call ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)); there is no local
-  policy to fall back on. If the control plane cannot be reached, the org's
-  `fail_closed` setting decides, and it defaults to **fail-open** — so blocking a
-  single hostname disables enforcement for that developer. An org that needs
-  enforcement to survive a developer who does not want it must set `fail_closed`,
-  and accept that a control-plane outage then blocks work. This replaced a local
-  evaluator that kept deciding while offline; the trade is deliberate, and the
-  reason it was worth making is that hand-written rego could never be evaluated
-  locally at all, so those orgs' gates simply opened.
-- **A control-plane verdict is applied even when no policy authored it.** The
-  enforce path trusts every `/evaluate` HALT as a policy decision, and core can
-  express an operational precondition failure as one: once its record of a session
-  goes terminal — observed when a `SessionEnded` was recorded while the session was
-  still live — it answers every later event `HALT` ("Session is no longer active")
-  with **no policy id and no governance event**. Both default-posture mitigations
-  miss it: "inert until your org publishes a policy" is falsified directly, and
-  fail-open never engages because the failure policy covers *no verdict*, not *a
-  HALT verdict*. One such HALT latches the server-side session, so the remainder of
-  that session denies until a new session restores a pending record — and the
-  denial itself stores no governance event, so the control plane holds no record of
-  the blocking it did. Since [ADR-0020](adr/ADR-0020-prompt-gate-and-halt-session-stop.md)
-  the client treats every server HALT as a session stop, so this precondition
-  failure now **ends the session outright** rather than denying calls until the
-  server record clears — a deliberately accepted consequence (the owner chose
-  uniform HALT trust over client-side discrimination), remedied when the core-side
-  fix lands (plan 260814-2235). The live diagnosis and
-  the options are in
-  [`debug-260814-1231-session-no-longer-active-halt.md`](../plans/reports/debug-260814-1231-session-no-longer-active-halt.md).
-- **Content-based policy sees at most the first 64KB of a write.** Bodies are
-  truncated by `capBody` (`client/payload.go`) before egress, so a rule that would
-  match past that offset does not fire. Content-based policy is not a complete
-  check on large files. Local secret detection is not subject to this — it runs
-  before the cap and sees the whole body.
-- **Absence of events is not evidence of absence of activity.** A bare
-  `openbox init` governs the current directory only
-  ([ADR-0016](adr/ADR-0016-default-install-posture.md)), because that is the only
-  scope the CLI can actually activate by itself — global activation is a
-  managed-settings deployment an administrator performs. Sessions started anywhere
-  else produce **no rows at all**, so an auditor cannot distinguish an
-  uninitialized project from an idle week, and enforcement applies only where
-  `init` ran. Fleet coverage requires `--scope global` plus managed settings;
-  Codex is user-scoped either way. `printGovernedScope` names the governed
-  directory at install time so the gap is visible at the moment it is created
-  rather than discovered from an empty dashboard.
-- **Egress.** OpenBox chooses where *its own* telemetry goes. It does not proxy,
-  intercept or allow-list the coding tool's traffic to its model provider — that is
-  the provider's plane plus your network controls. OpenBox records that posture as
-  evidence.
-- **Policy integrity is no longer a client-side claim.** There is no local bundle to
-  sign, hash or verify ([ADR-0017](adr/ADR-0017-inline-policy-evaluation.md)), so
-  the client makes no integrity claim about policy at all — the control plane holds
-  the policy it applied and its own record of applying it.
-  `require_verified_bundle` still parses and does nothing; it is deliberately absent
-  from the reported posture, because a control that cannot engage must not appear as
-  one.
-- **Telemetry evidence is event-level, plus one span per captured model turn.** A
-  developer session produces `governance_events` rows and their Merkle leaves. A
-  tool call is two events — `ActivityStarted` then `ActivityCompleted`, sharing an
-  `activity_id` — each independently evaluated and each with its own leaf, and
-  **no `spans` row** ([ADR-0013](adr/ADR-0013-tool-call-as-activity.md)). The
-  spans shift-left used to send for tool calls were fabricated by hand to satisfy
-  a wire shape; removing them removed a layer of evidence that was never measuring
-  anything, but it is a removal, and the tree is shallower than an agent-runtime
-  session's.
-
-  One exception, added deliberately
-  ([ADR-0018](adr/ADR-0018-dev-turn-content-carrier.md)): with content capture on,
-  a model turn carries **one** span whose response body is the assistant's reply,
-  because core's goal-alignment engine reads assistant text from `payload.Spans`
-  and from no other field. Those spans get span-level Merkle leaves and
-  server-side `semantic_type` classification, and their text is retained
-  server-side. Two honesty notes on that span: its classification attributes are
-  **synthesized** — they describe an HTTP request the client never made, because
-  that is the only input core's classifier accepts, and every such span carries
-  `openbox.span_synthetic: true` so an auditor can tell — and it is a stopgap,
-  retired by [openbox-core#130](https://github.com/OpenBox-AI/openbox-core/issues/130).
-  With `content_capture: false` there are no span rows at all.
-- **Token usage is stored, aggregated and queryable.** Per-turn model + usage is
-  emitted as an `llm_completion` activity pair
-  ([ADR-0014](adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)), and the
-  core-side extractor that aggregates activities has **merged**
-  (`ExtractModelMetricsFromActivity`, verified at `develop` 68f0398; PR #125
-  merged as `0643ad3`). The same change excludes `llm_completion` from core's
-  **tool** metrics, so turn events no longer appear as a fictional tool. This
-  paragraph previously said the work was "awaiting merge" and that the pollution
-  was live; both statements are retired.
-- **Tool success is reported.** An `ActivityCompleted` carries `status`
-  (`completed`/`failed`), derived from which provider hook fired and not gated on
-  content — it is the field core's per-tool success metric reads, and no producer
-  had ever written it. Claude Code only: Codex exposes no failure hook and no exit
-  code, so its tool success stays unknown rather than assumed
-  (ADR-0018).
-- **Neither cost table prices the current models, and they fail differently.**
-  `claude-opus-5`, `claude-fable-5`, `claude-opus-4-8`, `gpt-5.6-sol` and
-  `gpt-5.5` are absent from core's Go table and the backend's TS one. core falls
-  back to a default 1.00/3.00 per M — wrong but non-zero; the backend skips an
-  unpriced model entirely, so it contributes nothing to `total_cost` *and does not
-  appear in the cost breakdown at all*. Dev-session spend is therefore mispriced
-  or invisible until those tables are updated, which is a pricing decision rather
-  than a client one.
-- **Codex reports usage per session, not per turn.** Its `Stop` hook exists in
-  v0.145.0 and this adapter deliberately does not wire it, so its usage arrives as
-  one `<session>:usage:rollup` activity. Scope, not a provider limit — the upgrade
-  path is to subscribe `Stop` and delta the cumulative total.
-- **The transcript projection's INV-2 guarantee is now an allowlist.** It used to
-  be structural: the parser bound only numeric fields, so content could not enter
-  memory. Binding the model id — required, because the model is the backend's
-  aggregation key — replaced that with a curated allowlist enforced by a test.
-  The test is load-bearing, and ADR-0014 says so rather than leaving the older,
-  stronger claim in place.
-
-## Verification
-
-`testbed/` is a mock-free end-to-end suite: it drives real headless sessions against
-a real local OpenBox and asserts what arrived — including that tool commands and
-file bodies never egress on an **observe** event. (On a gated call they do, under
-content capture and redacted first — ADR-0017.) See
-[end-to-end tests](testbed/e2e.md).
+The governance evals (`go test -run TestGovernanceEval -v ./cmd/openbox/`) run
+the real hook binary against an in-process fake platform and check what the
+binary sent, what it showed the coding agent, and what it left on disk. They
+say nothing about what the platform does with the data.
+[Provider coverage § Evidence](coverage.md#5-evidence-what-is-proven-and-by-what)
+lists each claim and the test that proves it.

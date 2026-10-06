@@ -13,19 +13,28 @@
 #
 # If no prebuilt asset matches your platform (or you set OPENBOX_FROM_SOURCE=1), it
 # FALLS BACK to building the one unified static engine from source — which then
-# requires a Go 1.23+ toolchain + git. Same OD17 binary either way: one no-cgo
+# requires a Go 1.27+ toolchain + git. Same binary either way: one no-cgo
 # `openbox` that is CLI + hook + sidecar + git-hook.
 #
 # It deliberately does NOT register you with OpenBox or wire Claude Code. That is
 # the second step you run yourself once the binary is on PATH:
 #
-#   export OPENBOX_CONTROL_TOKEN=<keycloak-jwt-or-obx_key_…>   # never a flag (INV-1)
-#   openbox init --provider claude-code --backend-url https://<your-openbox-backend> [--base-url https://<your-openbox-core>] [--enforce]
+#   openbox auth                          # prompts for two URLs and the org token
+#   openbox init --provider claude-code   # registers this tool's agent, then
+#   openbox init --provider codex         # hooks, lanes and posture. Once per tool.
 #
-# which registers your agent, materializes the Claude Code plugin into
-# ~/.claude/plugins/openbox-observe (copying this same engine into its bin/), stores
-# your credentials, and pulls your org policy. Governance is AMBIENT thereafter —
-# no daemon to run and no runtime env to set (enforcement evaluates in-process).
+# `auth` connects this machine to an organization and registers nothing. `init`
+# registers that tool's own agent, then registers the hooks that govern EVERY
+# session on this machine, brings up the model-call lanes the provider supports,
+# and writes posture. Each governed tool carries its own identity, in its own
+# ~/.openbox/<tool>/ store, so run `init` once for each tool you use.
+# Enforcement evaluates in-process, so there is no daemon to run for it and no
+# runtime env to keep set.
+#
+# The organization control token can create and rotate agents across your whole
+# organization. `auth` persists it in plaintext to ~/.openbox/.env; export
+# OPENBOX_CONTROL_TOKEN for the one `init` run instead if you would rather it
+# never reach the disk. It is never a flag either way (INV-1).
 #
 # Tunables (all optional env vars):
 #   OPENBOX_INSTALL_DIR    where to place the binary        (default: ~/.local/bin)
@@ -47,7 +56,7 @@ REPO_URL="${OPENBOX_REPO_URL:-https://github.com/${GH_OWNER}/${GH_REPO}.git}"
 REF="${OPENBOX_REF:-main}"
 INSTALL_DIR="${OPENBOX_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="openbox"
-MIN_GO_MINOR=23   # require go 1.23+ for the SOURCE fallback only
+MIN_GO_MINOR=27   # require go 1.27+ for the SOURCE fallback only
 
 # ----------------------------------------------------------------------------- #
 # Pretty output (no color when not a tty)
@@ -168,7 +177,7 @@ install_prebuilt() {
 }
 
 # ----------------------------------------------------------------------------- #
-# Fallback path: build the unified engine from source (needs go 1.23+ and git)
+# Fallback path: build the unified engine from source (needs go 1.27+ and git)
 # ----------------------------------------------------------------------------- #
 build_from_source() {
   command -v git >/dev/null 2>&1 || die "git is required for the source build but was not found on PATH."
@@ -191,7 +200,7 @@ build_from_source() {
   local SRC
   if [ -n "${OPENBOX_SRC:-}" ]; then
     SRC="$OPENBOX_SRC"
-    [ -f "$SRC/cli/go.mod" ] || die "OPENBOX_SRC=$SRC does not look like an openbox-shift-left checkout (no cli/go.mod)."
+    [ -f "$SRC/go.mod" ] || die "OPENBOX_SRC=$SRC does not look like an openbox-shift-left checkout (no go.mod)."
     info "Building from existing checkout: $SRC"
   else
     SRC="$(mktemp -d "${TMPDIR:-/tmp}/openbox-shift-left.XXXXXX")"
@@ -212,7 +221,7 @@ build_from_source() {
   OUT="$SRC/${BIN_NAME}"
   info "Building ${BIN_NAME} ${VERSION} (static, no-cgo) …"
   (
-    cd "$SRC/cli"
+    cd "$SRC"
     CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$OUT" ./cmd/openbox
   )
   [ -x "$OUT" ] || die "build produced no binary at $OUT"
@@ -268,16 +277,17 @@ if [ "$ON_PATH" -ne 1 ]; then
   echo
 fi
 
-info "${BOLD}Next — wire OpenBox into Claude Code (one command):${RST}"
+info "${BOLD}Next — wire OpenBox into Claude Code (two commands):${RST}"
 echo
 printf '     export OPENBOX_CONTROL_TOKEN=<keycloak-jwt-or-obx_key_…>   # never a flag (INV-1)\n'
-printf '     %s%s init --provider claude-code --backend-url https://<your-openbox-backend> [--enforce]%s\n' "$BOLD" "$CMD" "$RST"
-printf '     %sSelf-hosted core? add%s --base-url https://<your-openbox-core> %s— without it the install points at the SaaS core.%s\n' "$DIM" "$RST" "$DIM" "$RST"
+printf '     %s%s auth%s                          # prompts; registers this machine\n' "$BOLD" "$CMD" "$RST"
+printf '     %s%s init --provider claude-code%s   # hooks, lanes and posture\n' "$BOLD" "$CMD" "$RST"
+printf '     %sSelf-hosted core? answer both URL prompts in%s %s auth %s— one default and one\n' "$DIM" "$RST" "$CMD" "$DIM"
+printf '     override sends your events to the SaaS core and surfaces later as a 401.%s\n' "$RST"
 echo
-printf '   That registers your agent, materializes the Claude Code plugin into\n'
-printf '   ~/.claude/plugins/openbox-observe, stores your credentials, and pulls your policy.\n'
-printf '   Governance is then AMBIENT — no daemon to run, no runtime env to set.\n'
-printf '   Verify anytime with:  %s dev verify\n' "$CMD"
+printf '   `auth` stores your credentials; `init` governs EVERY session on this machine,\n'
+printf '   in any directory, and takes effect immediately — nothing to restart.\n'
+printf '   Check anytime with:  %s doctor\n' "$CMD"
 printf '\n   Full walkthrough (credentials, self-hosted, troubleshooting):\n'
 printf '     %shttps://github.com/OpenBox-AI/openbox-shift-left/blob/main/docs/getting-started.md%s\n' "$DIM" "$RST"
 echo

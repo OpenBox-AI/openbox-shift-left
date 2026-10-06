@@ -1,0 +1,140 @@
+# OpenBox client; workload-identity-authenticated `/evaluate` transport
+
+The shared, reusable data-plane client every developer-runtime adapter
+(`internal/adapters/claude-code`, `internal/adapters/codex`) and the git action
+use to emit a normalized developer event to OpenBox.
+
+```
+normalized DevEvent ─▶ strip content (INV-2) ─▶ build GovernanceEventPayload
+                     ─▶ acquire workload bearer (cached, or cold bootstrap+
+                       exchange) ─▶ POST /api/v3/governance/evaluate
+                     ─▶ parse verdict
+```
+
+It is deliberately **not** the control-plane client. Onboarding/registration
+(`POST /agent/create`, human/org credential) lives in `internal/cli/backend`.
+This package is the **agent's own** runtime transport: auth is the agent's
+`obx_` runtime key on `Authorization` plus a Keycloak-issued workload bearer
+on `X-OpenBox-Workload-Token`, acquired and cached by
+`internal/client/workloadauth`. There is no request signature: the envelope
+carries no DID, timestamp, nonce or body-hash header, and no attribution
+coordinate at all (the DID is derived in memory from the agent id and never
+sent).
+
+## Usage
+
+```go
+c, err := client.New(client.Config{
+    BaseURL:            "https://core.openbox.ai",
+    APIKey:             obxRuntimeKey,      // obx_(live|test)_…; from the secret store (INV-1)
+    WorkloadPrivateKey: workloadPrivateKey, // PEM (PKCS#8) or base64 DER RSA key; from ~/.openbox/.env
+    TokenCachePath:     tokenCachePath,     // "" selects an in-memory cache (lane daemons, git-action, doctor)
+    // ContentCaptureEnabled is this struct's zero value, so it is false here.
+    // That is the LIBRARY default, not the product's: callers resolve the
+    // posture through devconfig, where an unset content_capture means ON.
+    ContentCaptureEnabled: true,
+    Logger:  myLogger,        // optional; fail-open drops are logged here
+})
+if err != nil { /* unusable identity; construction fault */ }
+
+verdict, err := c.Emit(ctx, client.DevEvent{
+    SchemaVersion: client.SchemaVersion,
+    EventID:       uuid,               // idempotency key
+    EventType:     client.EventToolCall,
+    SessionID:     openboxSessionID,   // → core run_id
+    DeveloperDID:  agentDID,
+    Timestamp:     time.Now().UTC().Format(time.RFC3339),
+    Tool:          client.Tool{Name: "Edit", Kind: client.ToolFile},
+    Span:          &client.Span{SemanticType: "file_write", Stage: "started", FilePath: p},
+})
+// err is only ever a caller precondition fault (e.g. no EventID); transport
+// failures are fail-open (verdict == VerdictUnknown, nil).
+//
+// The verdict is NOT advisory. `hookflow.evaluate` gates a call on it, and a
+// VerdictUnknown there becomes a fail-open decision the org's failure policy
+// then resolves. A caller that only reports telemetry may ignore it; a caller
+// on the enforcement path may not.
+```
+
+## Invariants enforced here
+
+| Invariant | Where |
+|---|---|
+| **INV-1** obx_ key + workload private key + bearer never logged/leaked | the private key lives only in `workloadauth.Authenticator`; `client.go` logs only ids/types/errors via `describeDrop`/`describeWorkloadError` (stage/status/reason/guidance, never the token); plaintext `http://` to a non-loopback host is refused (`checkBaseURL`) so the bearer key can't travel in the clear |
+| **INV-2** strip content when content-capture disabled | `payload.go:stripContent`, gated in `client.go:Emit`. The posture is the caller's: `devconfig` resolves it, and an unset `content_capture` resolves to ON |
+| **Fail-open on transport** | `client.go:Emit` returns `(VerdictUnknown, nil)` on any transport error. Fail-open *here* is not fail-open end to end: what an unknown verdict means for the call is the org's failure policy, applied after this returns |
+| **Idempotency**: client event id for idempotent ingestion | `DevEvent.EventID` required (deterministic + collision-safe; adapter `deriveID`); carried in `metadata.event_id` (core has no first-class field) **and** the `Idempotency-Key` header; retries reuse the identical key/body. **Server-side dedupe is partial**; see below |
+
+## No spans, so no semantic_type
+
+The client sends **no spans**. A tool call is two activity events; `ToolCall` →
+`ActivityStarted`, `ToolResult` → `ActivityCompleted`; sharing an `activity_id`,
+and neither carries `spans`, `span_count` or `hook_trigger`.
+
+Core computes `semantic_type` from a span (`ComputeSemanticTypeFromSpan`), so
+for developer sessions it computes none. `tool.kind` and the `activity_input`
+locators carry that distinction instead. The `DevEvent.Span` struct still exists
+- The adapter contract is frozen at schema v1.0 and adapters still populate it -
+  but the client now reads locators and counts *out* of it into
+  `activity_input`/`activity_output` rather than serializing it.
+  `docs/mapping.md` §3 is the authority on which fields it reads.
+
+## Idempotency: the client half is guaranteed
+
+The client owns **half** the idempotency contract and guarantees it:
+
+- **Stable + unique key.** The CC `event_id` is derived deterministically from
+  the event's own structural fields (internal/adapters/claude-code `deriveID`),
+  so the same logical event always hashes to the same id and two distinct events
+  never collide; robust even if the id is ever recomputed from the spooled
+  record.
+- **On the wire twice.** It rides in `metadata.event_id` **and** in a standard
+  `Idempotency-Key` request header (`== EventID`), constant across every retry.
+  The header is inert until core consumes it.
+- **Client at-most-once.** A retry re-sends the identical key (never a fresh
+  one); the spool never re-sends an acked event across rotate/flush/recovery.
+
+The **server-side half** is partial and not built here. Core dedupes on
+`(agent_id, workflow_id, run_id, activity_id, event_type)`, so a retried **tool** event does
+match an existing row and returns its cached verdict; tool events carry an
+`activity_id`. Lifecycle and signal events carry none, and
+`CheckExistingEventActivity` skips the duplicate check entirely without one, so a retry of a `SessionStarted`/`SignalReceived` after
+an ambiguous success (stored, but the 200 was lost) can still be counted twice.
+That is telemetry skew, not a safety issue, and closes when core keys
+dedupe on the `event_id` / `Idempotency-Key` value.
+
+## Alignment with core
+
+- **Workload identity** is a Keycloak-issued bearer, acquired via
+  `internal/client/workloadauth`: a cached token is reused as-is; a cold call
+  bootstraps (`GET /api/v3/auth/bootstrap`), builds an RS256 client assertion,
+  and exchanges it at the org's Keycloak token endpoint. `fakecore`'s v3 half
+  (`internal/client/fakecore/fakecorev3.go`) re-verifies the assertion
+  independently (`crypto/rsa`, never `workloadauth`'s own code) rather than
+  trusting anything the caller asserts about itself.
+- **Payload** mirrors the subset of core's `GovernanceEventPayload`
+  the client sets:
+  `source="developer-runtime"`, `run_id`=session, `workflow_id`=workspace/DID,
+  `duration_ms` as float milliseconds, `metadata` as `json.RawMessage`. Fields
+  core populates for Temporal events (`task_queue`, `parent_workflow_id`,
+  `attempt`) are deliberately omitted. See `docs/mapping.md`.
+- **Response** is core's public `GovernanceVerdictPublicResponse`: `verdict` is
+  a plain lowercase string (`allow|constrain|require_approval|block|halt`) with
+  a legacy `action` fallback; parsed in `verdict.go`.
+
+## No core accept-list patch
+
+The client never sends a developer `event_type` string. Every event maps onto
+one of five stock base wire types; `WorkflowStarted`, `WorkflowCompleted`,
+`SignalReceived`, `ActivityStarted`, `ActivityCompleted`; all of which are on
+core's accept-list, so a stock core
+accepts everything with no patch. `wireTypeFor` returns an error rather than
+falling back to the dev string, because emitting a non-accept-listed type
+produced a 400 that the fail-open path then swallowed: a new event type would
+have gone silently undelivered.
+
+## Test / validate
+
+```bash
+go build ./internal/client/... && go test ./internal/client/...
+```

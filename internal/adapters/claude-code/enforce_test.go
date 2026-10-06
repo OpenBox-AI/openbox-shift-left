@@ -1,0 +1,1157 @@
+package claudecode
+
+import (
+	"bytes"
+	"encoding/json"
+	"log"
+
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/client/fakecore"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/devconfig"
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/decision"
+)
+
+// TestResolveEnforce inverts the old config/env precedence test: enforce is
+// deprecated and inert now, so no combination of config field or env
+// override can change ResolveEnforce's answer. The key still parses (no
+// error on any of these files), it just selects nothing.
+func TestResolveEnforce(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "dev.json")
+	write := func(json string) { _ = os.WriteFile(cfgPath, []byte(json), 0o600) }
+	t.Setenv(envConfigPath, cfgPath)
+	os.Unsetenv(envEnforce) // env genuinely absent → config decides
+
+	write(`{"developer_did":"` + testDID + `"}`)
+	if !ResolveEnforce() {
+		t.Error("an absent enforce field must resolve to ON")
+	}
+	write(`{"developer_did":"` + testDID + `","enforce":false}`)
+	if !ResolveEnforce() {
+		t.Error("enforce:false in config must be ignored")
+	}
+
+	write(`{"developer_did":"` + testDID + `","enforce":true}`)
+	if !ResolveEnforce() {
+		t.Error("enforce:true in config should still resolve ON")
+	}
+
+	t.Setenv(envEnforce, "false")
+	if !ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=false must be ignored")
+	}
+	write(`{"developer_did":"` + testDID + `"}`)
+	t.Setenv(envEnforce, "1")
+	if !ResolveEnforce() {
+		t.Error("OPENBOX_ENFORCE=1 must still resolve ON")
+	}
+}
+
+func TestBuildDecisionRequest(t *testing.T) {
+	id := Identity{DeveloperDID: testDID}
+
+	t.Run("bash carries the local-only command", func(t *testing.T) {
+		ev := &HookEvent{
+			SessionID:      "sess-1",
+			PermissionMode: "default",
+			ToolName:       "Bash",
+			ToolInput:      []byte(`{"command":"rm -rf /tmp/x"}`),
+		}
+		req := buildDecisionRequest(id, ev, false)
+		if req.SessionID != "sess-1" || req.DeveloperDID != testDID {
+			t.Fatalf("identity not carried: %+v", req)
+		}
+		if req.EventType != client.EventToolCall {
+			t.Errorf("event_type = %q, want ToolCall", req.EventType)
+		}
+		if req.Tool.Name != "Bash" || req.Tool.Kind != client.ToolShell {
+			t.Errorf("tool = %+v, want Bash/shell", req.Tool)
+		}
+		if got := req.Attributes["command"]; got != "rm -rf /tmp/x" {
+			t.Errorf("command attr = %q, want the shell command (local-only)", got)
+		}
+		if got := req.Attributes["permission_mode"]; got != "default" {
+			t.Errorf("permission_mode = %q", got)
+		}
+	})
+
+	t.Run("file tool carries path + operation, not a command", func(t *testing.T) {
+		ev := &HookEvent{
+			SessionID: "sess-2",
+			ToolName:  "Write",
+			ToolInput: []byte(`{"file_path":"/etc/passwd","content":"secret"}`),
+		}
+		req := buildDecisionRequest(id, ev, false)
+		if req.Tool.Kind != client.ToolFile {
+			t.Errorf("kind = %q, want file", req.Tool.Kind)
+		}
+		if got := req.Attributes["file_path"]; got != "/etc/passwd" {
+			t.Errorf("file_path = %q", got)
+		}
+		if got := req.Attributes["file_operation"]; got != "write" {
+			t.Errorf("file_operation = %q, want write", got)
+		}
+		if _, ok := req.Attributes["command"]; ok {
+			t.Error("a file tool must not carry a command attribute")
+		}
+	})
+
+	t.Run("mcp tool carries server + function", func(t *testing.T) {
+		ev := &HookEvent{
+			SessionID: "sess-3",
+			ToolName:  "mcp__github__create_issue",
+		}
+		req := buildDecisionRequest(id, ev, false)
+		if req.Tool.Kind != client.ToolMCP || req.Tool.MCPServer != "github" {
+			t.Errorf("tool = %+v, want mcp/github", req.Tool)
+		}
+		if got := req.Attributes["mcp_function"]; got != "create_issue" {
+			t.Errorf("mcp_function = %q", got)
+		}
+	})
+
+	t.Run("content is nil when content-capture is off (INV-2 default)", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"secret"}`)}
+		if req := buildDecisionRequest(id, ev, false); req.Content != nil {
+			t.Errorf("Content must stay nil with content-capture off, got %+v", req.Content)
+		}
+	})
+}
+
+// TestBuildDecisionRequest_ContentGating: the file body is
+// carried on the local DecisionRequest only when content-capture is on, and
+// only for a file tool; it is never carried for a non-file tool and never with
+// capture off.
+func TestBuildDecisionRequest_ContentGating(t *testing.T) {
+	id := Identity{DeveloperDID: testDID}
+
+	t.Run("file write body carried when capture on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"api_key=SECRET"}`)}
+		req := buildDecisionRequest(id, ev, true)
+		if req.Content == nil || req.Content.FileText != "api_key=SECRET" {
+			t.Fatalf("Content = %+v, want the file body carried locally", req.Content)
+		}
+		if req.Content.Prompt != "" || req.Content.Output != "" {
+			t.Errorf("only the file body should be set, got %+v", req.Content)
+		}
+	})
+
+	t.Run("Edit new_string carried when capture on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Edit", ToolInput: []byte(`{"file_path":"/x","old_string":"a","new_string":"b-with-token"}`)}
+		req := buildDecisionRequest(id, ev, true)
+		if req.Content == nil || req.Content.FileText != "b-with-token" {
+			t.Fatalf("Content = %+v, want the new_string carried", req.Content)
+		}
+	})
+
+	t.Run("non-file tool carries no content even with capture on", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Bash", ToolInput: []byte(`{"command":"echo hi"}`)}
+		if req := buildDecisionRequest(id, ev, true); req.Content != nil {
+			t.Errorf("a Bash tool must carry no Content, got %+v", req.Content)
+		}
+	})
+
+	t.Run("empty body carries no content", func(t *testing.T) {
+		ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x"}`)}
+		if req := buildDecisionRequest(id, ev, true); req.Content != nil {
+			t.Errorf("an absent body must carry no Content, got %+v", req.Content)
+		}
+	})
+}
+
+func TestCapCommand_ByteBoundedRuneSafe(t *testing.T) {
+	if got := hookflow.CapCommand("rm -rf /"); got != "rm -rf /" {
+		t.Errorf("short command changed: %q", got)
+	}
+	long := strings.Repeat("é", hookflow.MaxCommandLen) // 2 bytes/rune → ~2× the byte budget
+	got := hookflow.CapCommand(long)
+	if len(got) > hookflow.MaxCommandLen {
+		t.Errorf("capCommand returned %d bytes, want <= %d (byte bound)", len(got), hookflow.MaxCommandLen)
+	}
+	if !utf8.ValidString(got) {
+		t.Error("capCommand split a multibyte rune (invalid UTF-8)")
+	}
+}
+
+// The surviving local step decides nothing and cannot block; the block
+// property moved to the server and is asserted end to end by C1 and C12
+// against a real /evaluate. Delivery is always fail-closed per call
+// now (RecordDeliveryFailure): a gated call with no reachable control plane
+// denies rather than silently proceeding. Enforcement itself is unconditional
+// now too (ResolveEnforce always reports true), so there is no "enforce off"
+// case left to prove takes a different path -- PreToolUse always runs the
+// gate.
+func TestRunHook_EnforceGate(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(devconfig.EnvHaltDir, t.TempDir())
+
+	payload := `{"hook_event_name":"PreToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+
+	var stderrBuf, stdoutBuf bytes.Buffer
+	logger := log.New(&stderrBuf, "", 0)
+	RunHook("PreToolUse", strings.NewReader(payload), &stdoutBuf, logger)
+	out, errOut := stdoutBuf.String(), stderrBuf.String()
+
+	if !strings.Contains(errOut, "enforce decision:") {
+		t.Errorf("PreToolUse must always obtain + log a decision; stderr=%q", errOut)
+	}
+	if d, _ := parsePermissionDecision(t, []byte(out)); d != ccDecisionDeny {
+		t.Errorf("no reachable control plane must deny (delivery is always fail-closed); permissionDecision = %q, stdout=%q", d, out)
+	}
+}
+
+// TestRunHook_EnforceOnlyPreToolUse guards that a non-PreToolUse hook never
+// dials the sidecar (the gate is a pre-execution concept), regardless of
+// enforcement (always on now).
+func TestRunHook_EnforceOnlyPreToolUse(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+
+	payload := `{"hook_event_name":"PostToolUse","session_id":"sess-1","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+	var stderr bytes.Buffer
+	logger := log.New(&stderr, "", 0)
+	RunHook("PostToolUse", strings.NewReader(payload), &bytes.Buffer{}, logger)
+	if strings.Contains(stderr.String(), "enforce decision:") {
+		t.Errorf("PostToolUse must not run the enforce gate; stderr=%q", stderr.String())
+	}
+}
+
+func parsePermissionDecision(t *testing.T, out []byte) (decision, reason string) {
+	t.Helper()
+	if len(bytes.TrimSpace(out)) == 0 {
+		return "", ""
+	}
+	var got preToolUseOutput
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("stdout is not valid PreToolUse JSON: %v (%q)", err, out)
+	}
+	if got.HookSpecificOutput.HookEventName != "PreToolUse" {
+		t.Errorf("hookEventName = %q, want PreToolUse", got.HookSpecificOutput.HookEventName)
+	}
+	return got.HookSpecificOutput.PermissionDecision, got.HookSpecificOutput.PermissionDecisionReason
+}
+
+// TestMapVerdict exercises the full SDK cascade port:
+// HALT/BLOCK/guardrail-fail → deny; REQUIRE_APPROVAL → ask; constrain/ALLOW/
+// unknown → proceed (no decision).
+//
+// This is the MAPPER, not the gate. The gate holds a REQUIRE_APPROVAL for a
+// real decision before anything is rendered, so the ask arm here is the
+// tighten-only fallback for a caller that renders without the hold -- it is
+// never what the coding agent receives. See outputcontract.ApprovalDecision.
+func TestMapVerdict(t *testing.T) {
+	guardFail := &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{{Type: "pii", Reason: "secret detail"}}}
+	guardPass := &client.GuardrailResult{Passed: true}
+
+	cases := []struct {
+		name         string
+		eval         client.Evaluation
+		wantDec      string
+		wantEmit     bool
+		reasonNoLeak string
+		reasonHas    string
+	}{
+		{"halt maps to the session-stop literal", client.Evaluation{Verdict: client.VerdictHalt, Reason: "kill switch"}, hookflow.DecisionHalt, true, "", "kill switch"},
+		{"block denies with policy id", client.Evaluation{Verdict: client.VerdictBlock, Reason: "no rm -rf", PolicyID: "p-1"}, ccDecisionDeny, true, "", "p-1"},
+		{"require_approval asks", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review"}, ccDecisionAsk, true, "", "needs review"},
+		{"require_approval surfaces approval id", client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "needs review", ApprovalID: "appr-42"}, ccDecisionAsk, true, "", "appr-42"},
+		{"constrain proceeds", client.Evaluation{Verdict: client.VerdictConstrain, Reason: "scoped"}, "", false, "", ""},
+		{"allow proceeds", client.Evaluation{Verdict: client.VerdictAllow}, "", false, "", ""},
+		{"unknown (fail-open) proceeds", client.Evaluation{Verdict: client.VerdictUnknown}, "", false, "", ""},
+		{"guardrail fail denies (category only)", client.Evaluation{Verdict: client.VerdictAllow, Guardrail: guardFail}, ccDecisionDeny, true, "secret detail", "pii"},
+		{"guardrail pass does not deny", client.Evaluation{Verdict: client.VerdictAllow, Guardrail: guardPass}, "", false, "", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dec, reason := hookflow.MapVerdict(c.eval, contract)
+			if dec != c.wantDec {
+				t.Errorf("decision = %q, want %q", dec, c.wantDec)
+			}
+			if (dec != "") != c.wantEmit {
+				t.Errorf("emit = %t, want %t", dec != "", c.wantEmit)
+			}
+			if c.reasonHas != "" && !strings.Contains(reason, c.reasonHas) {
+				t.Errorf("reason %q missing %q", reason, c.reasonHas)
+			}
+			if c.reasonNoLeak != "" && strings.Contains(reason, c.reasonNoLeak) {
+				t.Errorf("reason %q leaked guardrail free text %q (INV-2)", reason, c.reasonNoLeak)
+			}
+		})
+	}
+}
+
+// TestApplyDecisionSessionHaltSplit pins the session-halt discriminator at the
+// apply seam (plan 260818-1714): only a decision the gate marked SessionHalt
+// renders Claude Code's session stop (`continue:false` + stopReason, deny
+// riding along); every synthesized HALT; fail-closed outage, undecided
+// approval; stays a per-call deny with NO session stop.
+func TestApplyDecisionSessionHaltSplit(t *testing.T) {
+	halt := client.Evaluation{Verdict: client.VerdictHalt, Reason: "org kill switch", PolicyID: "p-9"}
+
+	t.Run("a server HALT renders the session stop", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: halt, Source: hookflow.SourceEvaluate, SessionHalt: true}
+		res := hookflow.ApplyDecision(&out, dec, false, nil, contract)
+		if !res.Emitted || res.Decision != hookflow.DecisionHalt {
+			t.Fatalf("applied = %+v, want an emitted %q", res, hookflow.DecisionHalt)
+		}
+		var got preToolUseOutput
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("stdout is not valid PreToolUse JSON: %v (%q)", err, out.Bytes())
+		}
+		if got.Continue == nil || *got.Continue {
+			t.Errorf("continue = %v, want false; the session stop", got.Continue)
+		}
+		if !strings.Contains(got.StopReason, "org kill switch") || !strings.Contains(got.StopReason, "p-9") {
+			t.Errorf("stopReason %q must carry the policy reason and id", got.StopReason)
+		}
+		if got.HookSpecificOutput.PermissionDecision != ccDecisionDeny {
+			t.Errorf("permissionDecision = %q, want deny riding along for the pending call", got.HookSpecificOutput.PermissionDecision)
+		}
+	})
+
+	t.Run("a synthesized HALT stays a per-call deny", func(t *testing.T) {
+		for name, dec := range map[string]decision.Decision{
+			"fail-closed":        {Evaluation: halt, Source: hookflow.SourceEvaluateFailOpen, FailOpen: true},
+			"undecided approval": {Evaluation: halt, Source: hookflow.SourceApprovalUndecided},
+			"latch-less HALT":    {Evaluation: halt, Source: hookflow.SourceEvaluate}, // gate did not mark it
+		} {
+			var out bytes.Buffer
+			res := hookflow.ApplyDecision(&out, dec, false, nil, contract)
+			if res.Decision != ccDecisionDeny {
+				t.Errorf("%s: applied = %q, want plain deny", name, res.Decision)
+			}
+			if bytes.Contains(out.Bytes(), []byte(`"continue"`)) {
+				t.Errorf("%s: stdout %q must not carry the session stop", name, out.Bytes())
+			}
+		}
+	})
+}
+
+// TestPromptContractRender pins the UserPromptSubmit output shapes: any
+// refusal is a top-level decision:"block" (the only literal the hook honours),
+// a session-halting HALT adds continue:false, and the proceed path writes
+// nothing; it must leave stdout to the findings surface.
+func TestPromptContractRender(t *testing.T) {
+	t.Run("halt blocks and stops the session", func(t *testing.T) {
+		line, applied := promptContract.Render(hookflow.DecisionHalt, "OpenBox governance: kill switch", nil)
+		if applied != hookflow.DecisionHalt {
+			t.Fatalf("applied = %q, want %q", applied, hookflow.DecisionHalt)
+		}
+		var got userPromptSubmitOutput
+		if err := json.Unmarshal(line, &got); err != nil {
+			t.Fatalf("not valid JSON: %v (%q)", err, line)
+		}
+		if got.Decision != ccPromptDecisionBlock || got.Continue == nil || *got.Continue || got.StopReason == "" {
+			t.Errorf("halt render = %+v, want decision:block + continue:false + stopReason", got)
+		}
+	})
+	t.Run("deny blocks the prompt only", func(t *testing.T) {
+		line, applied := promptContract.Render(hookflow.DecisionDeny, "OpenBox governance: blocked", nil)
+		if applied != ccPromptDecisionBlock {
+			t.Fatalf("applied = %q, want %q", applied, ccPromptDecisionBlock)
+		}
+		var got userPromptSubmitOutput
+		if err := json.Unmarshal(line, &got); err != nil {
+			t.Fatalf("not valid JSON: %v (%q)", err, line)
+		}
+		if got.Decision != ccPromptDecisionBlock || got.Continue != nil {
+			t.Errorf("deny render = %+v, want decision:block with no session stop", got)
+		}
+	})
+	t.Run("proceed writes nothing", func(t *testing.T) {
+		if line, applied := promptContract.Render("", "", nil); line != nil || applied != "" {
+			t.Errorf("proceed rendered (%q, %q), want nothing", line, applied)
+		}
+	})
+}
+
+func TestApplyDecision(t *testing.T) {
+	t.Run("block writes a deny permissionDecision", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "destructive"}}
+		applied, emitted := applyDecision(&out, dec, false, nil)
+		if !emitted || applied != ccDecisionDeny {
+			t.Fatalf("applied=%q emitted=%t, want deny/true", applied, emitted)
+		}
+		d, reason := parsePermissionDecision(t, out.Bytes())
+		if d != "deny" {
+			t.Errorf("permissionDecision = %q, want deny", d)
+		}
+		if !strings.Contains(reason, "destructive") {
+			t.Errorf("reason = %q, want the policy reason surfaced", reason)
+		}
+	})
+
+	t.Run("allow writes nothing (tighten-only)", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}}
+		if applied, emitted := applyDecision(&out, dec, false, nil); emitted || applied != "" {
+			t.Errorf("allow must emit nothing, got applied=%q emitted=%t", applied, emitted)
+		}
+		if out.Len() != 0 {
+			t.Errorf("allow wrote to stdout: %q", out.String())
+		}
+	})
+
+	t.Run("fail-open (unknown) writes nothing", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictUnknown}, FailOpen: true}
+		if _, emitted := applyDecision(&out, dec, false, nil); emitted || out.Len() != 0 {
+			t.Errorf("fail-open must not write a decision; stdout=%q", out.String())
+		}
+	})
+
+	t.Run("nil stdout never panics and reports not-emitted", func(t *testing.T) {
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock}}
+		if _, emitted := applyDecision(nil, dec, false, nil); emitted {
+			t.Error("a nil stdout must degrade to not-emitted (fail-open)")
+		}
+	})
+}
+
+func contentField(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("not an object: %s", raw)
+	}
+	for _, k := range []string{"content", "new_string"} {
+		if v, ok := m[k]; ok {
+			var s string
+			_ = json.Unmarshal(v, &s)
+			return s
+		}
+	}
+	return ""
+}
+
+// TestApplyInputRedaction covers the content-field reconstruction and
+// its gates: it rebuilds the original tool_input with only
+// the content field replaced by the redacted body, when local redaction is on
+// and the result differs; otherwise nil (no rewrite).
+func TestApplyInputRedaction(t *testing.T) {
+	writeOrig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
+	editOrig := json.RawMessage(`{"file_path":"/y","old_string":"a","new_string":"tok=SECRET"}`)
+	redactedBody := "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
+
+	rc := func(body string) *client.Content { return &client.Content{FileText: body} }
+
+	cases := []struct {
+		name           string
+		localRedaction bool
+		redacted       *client.Content
+		orig           json.RawMessage
+		wantContent    string // "" ⇒ expect nil (no rewrite); else expected content-field value
+	}{
+		{"applies to Write.content", true, rc(redactedBody), writeOrig, redactedBody},
+		{"applies to Edit.new_string", true, rc("tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"), editOrig, "tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"},
+		{"inert when local redaction off", false, rc(redactedBody), writeOrig, ""},
+		{"nil when no RedactedContent", true, nil, writeOrig, ""},
+		{"nil when empty RedactedContent body", true, rc(""), writeOrig, ""},
+		{"nil when redacted body equals original", true, rc("api_key=SECRET"), writeOrig, ""},
+		{"nil when original has no content field", true, rc(redactedBody), json.RawMessage(`{"file_path":"/x"}`), ""},
+		{"nil when original unparseable", true, rc(redactedBody), json.RawMessage(`{bad`), ""},
+		{"nil when original is an empty object", true, rc(redactedBody), json.RawMessage(`{}`), ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := hookflow.ApplyInputRedaction(decision.Decision{RedactedContent: c.redacted}, c.localRedaction, c.orig, contract.ContentFieldKeys())
+			if c.wantContent == "" {
+				if got != nil {
+					t.Errorf("want nil (no rewrite), got %s", got)
+				}
+				return
+			}
+			if cf := contentField(t, got); cf != c.wantContent {
+				t.Errorf("content field = %q, want %q (out=%s)", cf, c.wantContent, got)
+			}
+		})
+	}
+}
+
+// TestApplyInputRedaction_StructuralFieldsInviolable: the emitted updatedInput differs from the original only in
+// the content field; structural locators are carried over verbatim and can
+// never be altered by the sidecar's returned body (the body is a plain string;
+// only the content field can change).
+func TestApplyInputRedaction_StructuralFieldsInviolable(t *testing.T) {
+	orig := json.RawMessage(`{"file_path":"/etc/app.conf","content":"password=hunter2secret9999","mode":"0644"}`)
+	got := hookflow.ApplyInputRedaction(
+		decision.Decision{RedactedContent: &client.Content{FileText: "password=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}},
+		true, orig, contract.ContentFieldKeys())
+	if got == nil {
+		t.Fatal("expected a rewrite")
+	}
+	var o, g map[string]json.RawMessage
+	_ = json.Unmarshal(orig, &o)
+	_ = json.Unmarshal(got, &g)
+	for _, k := range []string{"file_path", "mode"} {
+		if string(o[k]) != string(g[k]) {
+			t.Errorf("structural field %q changed: %s → %s", k, o[k], g[k])
+		}
+	}
+	if string(o["content"]) == string(g["content"]) {
+		t.Error("content field was not redacted")
+	}
+	if strings.Contains(string(got), "hunter2secret9999") {
+		t.Errorf("secret survived: %s", got)
+	}
+}
+
+// TestApplyInputRedaction_NonEmptyFieldSelection: redactToolInput must write the redacted body into the same field
+// fileText() reads; the first NON-empty content key.
+func TestApplyInputRedaction_NonEmptyFieldSelection(t *testing.T) {
+	redactedBody := "tok=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"
+	for _, orig := range []json.RawMessage{
+		json.RawMessage(`{"file_path":"/x","content":"","new_string":"tok=AKIAIOSFODNN7EXAMPLE"}`),
+		json.RawMessage(`{"file_path":"/x","content":null,"new_string":"tok=AKIAIOSFODNN7EXAMPLE"}`),
+	} {
+		got := hookflow.ApplyInputRedaction(decision.Decision{RedactedContent: &client.Content{FileText: redactedBody}}, true, orig, contract.ContentFieldKeys())
+		if got == nil {
+			t.Fatalf("expected a rewrite for %s", orig)
+		}
+		if strings.Contains(string(got), "AKIAIOSFODNN7EXAMPLE") {
+			t.Errorf("secret survived (redacted the wrong field): %s → %s", orig, got)
+		}
+		var m map[string]json.RawMessage
+		_ = json.Unmarshal(got, &m)
+		var ns string
+		_ = json.Unmarshal(m["new_string"], &ns)
+		if ns != redactedBody {
+			t.Errorf("new_string not redacted: %s", got)
+		}
+	}
+}
+
+// TestApplyDecision_Redaction: on the proceed path a
+// redaction is emitted as updatedInput alone (no permissionDecision); a
+// deny/ask carries no updatedInput; and with local redaction off the proceed
+// path writes nothing (byte-identical to the no-redaction path).
+func TestApplyDecision_Redaction(t *testing.T) {
+	orig := json.RawMessage(`{"file_path":"/x","content":"api_key=SECRET"}`)
+	rc := &client.Content{FileText: "api_key=${OPENBOX_REDACTED_SECRET_ASSIGNMENT}"}
+
+	t.Run("proceed + redaction on → updatedInput alone", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
+		applied, emitted := applyDecision(&out, dec, true, orig)
+		if applied != "" || !emitted {
+			t.Fatalf("applied=%q emitted=%t, want proceed(\"\")/emitted(true)", applied, emitted)
+		}
+		var got preToolUseOutput
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("stdout not valid JSON: %v (%q)", err, out.String())
+		}
+		if got.HookSpecificOutput.PermissionDecision != "" {
+			t.Errorf("permissionDecision must be absent on a redaction-only output, got %q", got.HookSpecificOutput.PermissionDecision)
+		}
+		if cf := contentField(t, got.HookSpecificOutput.UpdatedInput); cf != rc.FileText {
+			t.Errorf("updatedInput content = %q, want redacted", cf)
+		}
+		if strings.Contains(out.String(), `"permissionDecision":"allow"`) {
+			t.Errorf("must never emit permissionDecision:allow (tighten-only): %q", out.String())
+		}
+	})
+
+	t.Run("proceed + redaction OFF → nothing", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictAllow}, RedactedContent: rc}
+		if _, emitted := applyDecision(&out, dec, false, orig); emitted || out.Len() != 0 {
+			t.Errorf("redaction off must write nothing, got %q", out.String())
+		}
+	})
+
+	t.Run("deny carries no updatedInput even with a redaction present", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictBlock, Reason: "nope"}, RedactedContent: rc}
+		applied, _ := applyDecision(&out, dec, true, orig)
+		if applied != ccDecisionDeny {
+			t.Fatalf("want deny, got %q", applied)
+		}
+		var got preToolUseOutput
+		_ = json.Unmarshal(out.Bytes(), &got)
+		if len(got.HookSpecificOutput.UpdatedInput) != 0 {
+			t.Errorf("a deny must not rewrite the input, got updatedInput=%s", got.HookSpecificOutput.UpdatedInput)
+		}
+	})
+
+	t.Run("ask carries no updatedInput (faithful to the SDK)", func(t *testing.T) {
+		var out bytes.Buffer
+		dec := decision.Decision{Evaluation: client.Evaluation{Verdict: client.VerdictRequireApproval}, RedactedContent: rc}
+		applied, _ := applyDecision(&out, dec, true, orig)
+		if applied != ccDecisionAsk {
+			t.Fatalf("want ask, got %q", applied)
+		}
+		var got preToolUseOutput
+		_ = json.Unmarshal(out.Bytes(), &got)
+		if len(got.HookSpecificOutput.UpdatedInput) != 0 {
+			t.Errorf("ask must not rewrite the input, got updatedInput=%s", got.HookSpecificOutput.UpdatedInput)
+		}
+	})
+}
+
+// TestRecordEnforcement_NoRedactionLeak: the redacted content
+// lives on the sidecar Decision (local-only) and must never be serialized into
+// the durable enforcement audit; the audit stays content-free even for a
+// proceed+redaction, carrying only the category names.
+func TestRecordEnforcement_NoRedactionLeak(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	dec := decision.Decision{Source: "local-bundle",
+		RedactedContent:     &client.Content{FileText: "api_key=REDACTION_SENTINEL"},
+		RedactionCategories: []string{"secret_assignment"},
+		Evaluation:          client.Evaluation{Verdict: client.VerdictAllow}}
+	ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x","content":"api_key=ORIGINAL_SENTINEL"}`)}
+
+	var out bytes.Buffer
+	res := hookflow.ApplyDecision(&out, dec, true, ev.ToolInput, contract)
+	recordEnforcement(logger, ev, dec, res)
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	for _, sentinel := range []string{"REDACTION_SENTINEL", "ORIGINAL_SENTINEL"} {
+		if strings.Contains(string(data), sentinel) {
+			t.Errorf("enforcement audit leaked content %q (INV-2): %s", sentinel, data)
+		}
+	}
+	if !strings.Contains(string(data), "secret_assignment") || !strings.Contains(string(data), `"redacted":true`) {
+		t.Errorf("expected content-free redaction signal in audit, got %s", data)
+	}
+	if !strings.Contains(out.String(), "REDACTION_SENTINEL") {
+		t.Errorf("expected the redacted body to be applied via updatedInput, stdout=%q", out.String())
+	}
+}
+
+// TestRunHook_EnforceApply_Block is the block end-to-end guard: enforce ON + a
+// live sidecar whose bundle blocks `rm -rf` → a PreToolUse hook writes a
+// `deny` permissionDecision to stdout AND appends a content-free durable
+// enforcement record.
+func TestRunHook_EnforceApply_Block(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforce, "1")
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	t.Setenv(envContentCapture, "1")
+	blockRmRf := fakecore.New(t, fakecore.Script{
+		Verdicts: map[string]string{
+			"toolu_danger": `{"verdict":"block","reason":"destructive recursive delete","policy_id":"test-policy"}`,
+		},
+		Default: `{"verdict":"allow"}`,
+	})
+	evalCreds(t, blockRmRf.URL())
+	t.Setenv(envContentCapture, "1")
+
+	run := func(payload string) string {
+		var stdout bytes.Buffer
+		logger := log.New(&bytes.Buffer{}, "", 0)
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, logger)
+		return stdout.String()
+	}
+
+	danger := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_use_id":"toolu_danger","tool_input":{"command":"rm -rf /tmp/x"}}`
+	out := run(danger)
+	d, reason := parsePermissionDecision(t, []byte(out))
+	if d != "deny" {
+		t.Fatalf("dangerous command: permissionDecision = %q, want deny (stdout=%q)", d, out)
+	}
+	if !strings.Contains(reason, "destructive recursive delete") || !strings.Contains(reason, "test-policy") {
+		t.Errorf("reason = %q, want the policy reason + id", reason)
+	}
+	if strings.Contains(out, "rm -rf") {
+		t.Errorf("stdout leaked the shell command (INV-2): %q", out)
+	}
+
+	benign := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+	if out := run(benign); strings.TrimSpace(out) != "" {
+		t.Errorf("benign command must not write a decision; stdout=%q", out)
+	}
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 enforcement records, got %d: %q", len(lines), data)
+	}
+	if strings.Contains(string(data), "rm -rf") || strings.Contains(string(data), "echo hi") {
+		t.Errorf("enforcement record leaked the shell command (INV-2): %q", data)
+	}
+	var first hookflow.EnforcementRecord
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+	if first.Verdict != string(client.VerdictBlock) || first.AppliedDecision != "deny" || !first.WouldBlock {
+		t.Errorf("first record = %+v, want BLOCK/deny/would_block", first)
+	}
+	if first.PolicyID != "test-policy" || first.ToolKind != string(client.ToolShell) {
+		t.Errorf("first record missing policy/tool metadata: %+v", first)
+	}
+}
+
+// TestApplyFailurePolicy: the transform synthesizes a
+// HALT only on a fail-open decision under fail-closed; every other case is a
+// no-op (fail-open proceeds; a real verdict is never overridden under either
+// policy).
+func TestApplyFailurePolicy(t *testing.T) {
+	failOpenDec := decision.Decision{
+		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
+		FailOpen:   true,
+		Source:     "fail-open:no-bundle",
+	}
+
+	t.Run("fail-open policy is a no-op even on an outage", func(t *testing.T) {
+		got := hookflow.ApplyFailurePolicy(failOpenDec, hookflow.FailOpen)
+		if got.Evaluation.Verdict != client.VerdictUnknown || got.Evaluation.WouldBlock() {
+			t.Errorf("fail-open must leave the outage as UNKNOWN/proceed, got %+v", got.Evaluation)
+		}
+	})
+
+	t.Run("fail-closed synthesizes HALT on an outage", func(t *testing.T) {
+		got := hookflow.ApplyFailurePolicy(failOpenDec, hookflow.FailClosed)
+		if got.Evaluation.Verdict != client.VerdictHalt || !got.Evaluation.WouldBlock() {
+			t.Errorf("fail-closed must synthesize a blocking HALT, got %+v", got.Evaluation)
+		}
+		if !strings.Contains(got.Evaluation.Reason, "fail-closed") {
+			t.Errorf("reason should mark fail-closed, got %q", got.Evaluation.Reason)
+		}
+		if !strings.Contains(got.Evaluation.Reason, "sidecar unavailable") {
+			t.Errorf("reason should carry the content-free cause, got %q", got.Evaluation.Reason)
+		}
+		if !got.FailOpen {
+			t.Error("fail-closed synthetic HALT must retain hookflow.FailOpen==true for the audit")
+		}
+	})
+
+	for _, v := range []client.Verdict{client.VerdictAllow, client.VerdictConstrain, client.VerdictBlock} {
+		t.Run("real "+string(v)+" untouched under fail-closed", func(t *testing.T) {
+			real := decision.Decision{Evaluation: client.Evaluation{Verdict: v}, FailOpen: false}
+			if got := hookflow.ApplyFailurePolicy(real, hookflow.FailClosed); got.Evaluation.Verdict != v {
+				t.Errorf("real %s verdict must pass through fail-closed unchanged, got %q", v, got.Evaluation.Verdict)
+			}
+		})
+	}
+}
+
+// TestLogEnforceDecision_PolicyLegible makes a fail-closed deny legible in the
+// stderr diagnostic: a synthesized HALT (would_block=true) that is also
+// fail_open would look contradictory without the policy label.
+func TestLogEnforceDecision_PolicyLegible(t *testing.T) {
+	if hookflow.FailOpen.String() != "fail_open" || hookflow.FailClosed.String() != "fail_closed" {
+		t.Fatalf("policy String() = %q/%q", hookflow.FailOpen, hookflow.FailClosed)
+	}
+	var buf bytes.Buffer
+	dec := hookflow.ApplyFailurePolicy(decision.Decision{
+		Evaluation: client.Evaluation{Verdict: client.VerdictUnknown, Reason: "sidecar unavailable"},
+		FailOpen:   true,
+	}, hookflow.FailClosed)
+	hookflow.LogEnforceDecision(log.New(&buf, "", 0), "Bash", dec, hookflow.FailClosed)
+	out := buf.String()
+	if !strings.Contains(out, "policy=fail_closed") || !strings.Contains(out, "fail_open=true") {
+		t.Errorf("diagnostic should mark the fail-closed policy + fail_open cause; got %q", out)
+	}
+}
+
+// TestRunHook_EnforceFailClosed is the fail-closed end-to-end guard: with enforce ON
+// and fail_closed ON, an unreachable sidecar → a `deny` on stdout (a fail-
+// closed deny), while a reachable sidecar's real ALLOW still proceeds (the
+// policy governs outages only).
+func TestRunHook_EnforceFailClosed(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	t.Setenv(envEnforcementFile, filepath.Join(t.TempDir(), "enf.jsonl"))
+
+	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo hi"}}`
+	run := func() string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
+		return stdout.String()
+	}
+
+	t.Setenv(envEnforce, "1")
+	t.Setenv(envFailClosed, "1")
+	out := run()
+	d, reason := parsePermissionDecision(t, []byte(out))
+	if d != ccDecisionDeny {
+		t.Fatalf("fail-closed + outage: permissionDecision = %q, want deny (stdout=%q)", d, out)
+	}
+	if !strings.Contains(reason, "fail-closed") {
+		t.Errorf("fail-closed deny reason = %q, want it to explain the fail-closed outage", reason)
+	}
+	if strings.Contains(out, "echo hi") {
+		t.Errorf("fail-closed reason leaked the shell command (INV-2): %q", out)
+	}
+
+	serveVerdict(t, `{"verdict":"allow"}`)
+	allowURL, _ := serveEvaluate(t, `{"verdict":"allow"}`, 200, 0)
+	evalCreds(t, allowURL)
+	if out := run(); strings.TrimSpace(out) != "" {
+		t.Errorf("fail-closed must NOT block a real allow; stdout=%q", out)
+	}
+}
+
+// TestRecordEnforcement_GuardrailCategoryOnly guards the durable-audit half of
+// INV-2: a guardrail-failure decision records
+// the category type only; never the guardrail reason free text (which can
+// describe detected content) or the field name.
+func TestRecordEnforcement_GuardrailCategoryOnly(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	dec := decision.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+		Verdict: client.VerdictAllow, // verdict alone would proceed…
+		Guardrail: &client.GuardrailResult{Passed: false, Reasons: []client.GuardrailReason{
+			{Type: "pii", Field: "ssn", Reason: "detected 123-45-6789 in the argument"},
+		}},
+	}}
+	res := hookflow.ApplyDecision(&bytes.Buffer{}, dec, false, nil, contract)
+	applied := res.Decision
+	if applied != ccDecisionDeny {
+		t.Fatalf("guardrail failure should deny, got %q", applied)
+	}
+	ev := &HookEvent{SessionID: "s", ToolName: "Write", ToolInput: []byte(`{"file_path":"/x"}`)}
+	recordEnforcement(logger, ev, dec, res)
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	if !strings.Contains(string(data), "pii") {
+		t.Errorf("record should carry the guardrail category; got %q", data)
+	}
+	for _, leak := range []string{"123-45-6789", "detected", "ssn"} {
+		if strings.Contains(string(data), leak) {
+			t.Errorf("record leaked guardrail free text/field %q (INV-2): %q", leak, data)
+		}
+	}
+	var rec hookflow.EnforcementRecord
+	_ = json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec)
+	if len(rec.GuardrailCategories) != 1 || rec.GuardrailCategories[0] != "pii" {
+		t.Errorf("guardrail_categories = %v, want [pii]", rec.GuardrailCategories)
+	}
+}
+
+// TestApprovalReason guards INV-2: the ask reason surfaces the content-
+// free approval context; the policy reason, the policy id, and the server
+// approval id (the one approval-specific evaluate field); with a generic
+// fallback when the policy carried no reason, and never any tool-content free
+// text.
+func TestApprovalReason(t *testing.T) {
+	t.Run("surfaces reason, policy id, and approval id", func(t *testing.T) {
+		r := hookflow.ApprovalReason(client.Evaluation{
+			Verdict:    client.VerdictRequireApproval,
+			Reason:     "production database migration",
+			PolicyID:   "pol-db-1",
+			ApprovalID: "appr-77",
+		})
+		for _, want := range []string{"production database migration", "pol-db-1", "appr-77"} {
+			if !strings.Contains(r, want) {
+				t.Errorf("approval reason %q missing %q", r, want)
+			}
+		}
+	})
+
+	t.Run("falls back to a generic approval message with no policy reason", func(t *testing.T) {
+		r := hookflow.ApprovalReason(client.Evaluation{Verdict: client.VerdictRequireApproval})
+		if !strings.Contains(strings.ToLower(r), "approval") {
+			t.Errorf("empty-reason approval must still say it requires approval, got %q", r)
+		}
+		if strings.Contains(r, "(approval:") || strings.Contains(r, "(policy:") {
+			t.Errorf("no ids present, but reason has an id fragment: %q", r)
+		}
+	})
+
+	t.Run("omits the approval fragment when core sends no approval id", func(t *testing.T) {
+		r := hookflow.ApprovalReason(client.Evaluation{Verdict: client.VerdictRequireApproval, Reason: "review needed", PolicyID: "p"})
+		if strings.Contains(r, "(approval:") {
+			t.Errorf("no approval id, but reason carries an approval fragment: %q", r)
+		}
+	})
+}
+
+// TestRecordEnforcement_ReasonAndTimestamp: the audit line
+// carries the verbatim policy-authored reason (never the "OpenBox
+// governance:" stdout framing) and a generated RFC3339Nano timestamp, so a
+// denial is diagnosable from one file instead of joining reason (stdout) and
+// clock (elsewhere).
+func TestRecordEnforcement_ReasonAndTimestamp(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	dec := decision.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+		Verdict:  client.VerdictBlock,
+		Reason:   "external repository mutation not permitted",
+		PolicyID: "mcp-policy",
+	}}
+	before := time.Now()
+	res := hookflow.ApplyDecision(&bytes.Buffer{}, dec, false, nil, contract)
+	ev := &HookEvent{SessionID: "s", ToolName: "mcp__github__create_issue", ToolInput: []byte(`{"title":"secret-project-x"}`)}
+	recordEnforcement(logger, ev, dec, res)
+	after := time.Now()
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	var rec hookflow.EnforcementRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+
+	if rec.Reason != "external repository mutation not permitted" {
+		t.Errorf("rec.Reason = %q, want the verbatim policy reason", rec.Reason)
+	}
+	if strings.Contains(rec.Reason, "OpenBox governance:") {
+		t.Errorf("rec.Reason = %q, must not carry the stdout governance framing", rec.Reason)
+	}
+
+	ts, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+	if err != nil {
+		t.Fatalf("rec.Timestamp = %q does not parse as RFC3339Nano: %v", rec.Timestamp, err)
+	}
+	if ts.Before(before.Add(-time.Minute)) || ts.After(after.Add(time.Minute)) {
+		t.Errorf("rec.Timestamp = %v, want within a generous window of [%v, %v]", ts, before, after)
+	}
+}
+
+// TestRecordEnforcement_ApprovalID guards the audit half of approval: an ask
+// decision carrying a server approval id records approval_ref (a correlation
+// id, not content) so the ask is tie-able to the governance approval; and the
+// audit stays content-free (INV-2).
+func TestRecordEnforcement_ApprovalID(t *testing.T) {
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	logger := log.New(&bytes.Buffer{}, "", 0)
+
+	dec := decision.Decision{Source: "local-bundle", Evaluation: client.Evaluation{
+		Verdict:    client.VerdictRequireApproval,
+		Reason:     "external repository mutation",
+		PolicyID:   "mcp-policy",
+		ApprovalID: "appr-77",
+	}}
+	var out bytes.Buffer
+	res := hookflow.ApplyDecision(&out, dec, false, nil, contract)
+	applied := res.Decision
+	if applied != ccDecisionAsk {
+		t.Fatalf("require_approval should ask, got %q", applied)
+	}
+	if _, reason := parsePermissionDecision(t, out.Bytes()); !strings.Contains(reason, "appr-77") || !strings.Contains(reason, "mcp-policy") {
+		t.Errorf("ask reason should carry the approval + policy ids, got %q", reason)
+	}
+
+	ev := &HookEvent{SessionID: "s", ToolName: "mcp__github__create_issue", ToolInput: []byte(`{"title":"secret-project-x"}`)}
+	recordEnforcement(logger, ev, dec, res)
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	if strings.Contains(string(data), "secret-project-x") {
+		t.Errorf("enforcement record leaked tool content (INV-2): %q", data)
+	}
+	var rec hookflow.EnforcementRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+	if rec.AppliedDecision != ccDecisionAsk || rec.Verdict != string(client.VerdictRequireApproval) {
+		t.Errorf("record = %+v, want REQUIRE_APPROVAL/ask", rec)
+	}
+	if rec.ApprovalRef != "appr-77" {
+		t.Errorf("record approval_ref = %q, want appr-77 (correlates the ask to the governance approval)", rec.ApprovalRef)
+	}
+}
+
+// TestApprovalRefFallsBackToGovernanceEventID: core
+// declares approval_id but never assigns it, so a reference built from that
+// field alone was always empty and the code quoting it was dead.
+func TestApprovalRefFallsBackToGovernanceEventID(t *testing.T) {
+	eval := client.Evaluation{
+		Verdict:           client.VerdictRequireApproval,
+		GovernanceEventID: "ge-42",
+	}
+	if got := eval.ApprovalRef(); got != "ge-42" {
+		t.Errorf("ApprovalRef with no approval_id = %q, want the governance event id", got)
+	}
+	if r := hookflow.ApprovalReason(eval); !strings.Contains(r, "ge-42") {
+		t.Errorf("approval reason %q must quote the resolvable reference", r)
+	}
+	eval.ApprovalID = "appr-1"
+	if got := eval.ApprovalRef(); got != "appr-1" {
+		t.Errorf("ApprovalRef = %q, want the approval id to take precedence", got)
+	}
+}
+
+// TestRunHook_EnforceApply_Approval is the approval end-to-end guard: enforce ON
+// + a live sidecar whose bundle requires approval for an MCP tool → a
+// PreToolUse hook writes an `ask` permissionDecision to stdout with a content-
+// free reason (policy reason + id), the durable audit records the ask, and
+// enforce-OFF is byte-identical (no ask even for the approval-required tool).
+func TestRunHook_EnforceApply_Approval(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv(envAgentID, testAgentID)
+	t.Setenv("OPENBOX_SPOOL_DIR", t.TempDir())
+	t.Setenv("OPENBOX_SESSION_DIR", t.TempDir())
+	enfFile := filepath.Join(t.TempDir(), "enforcements.jsonl")
+	t.Setenv(envEnforcementFile, enfFile)
+	t.Setenv(devconfig.EnvApprovalHold, "200")
+	serveVerdict(t, `{"verdict":"require_approval","reason":"external repository mutation","policy_id":"mcp-policy"}`)
+
+	payload := `{"hook_event_name":"PreToolUse","session_id":"s","cwd":"/tmp","tool_name":"mcp__github__create_issue","tool_input":{"title":"secret-project-x plans"}}`
+	run := func() string {
+		var stdout bytes.Buffer
+		RunHook("PreToolUse", strings.NewReader(payload), &stdout, log.New(&bytes.Buffer{}, "", 0))
+		return stdout.String()
+	}
+
+	t.Setenv(envEnforce, "1")
+	out := run()
+	d, reason := parsePermissionDecision(t, []byte(out))
+	if d != ccDecisionDeny {
+		t.Fatalf("approval-required tool: permissionDecision = %q, want deny after an "+
+			"unanswered hold (stdout=%q)", d, out)
+	}
+	if !strings.Contains(reason, "mcp-policy") {
+		t.Errorf("deny reason = %q, want it to name the deciding policy", reason)
+	}
+	if strings.Contains(out, "secret-project-x") {
+		t.Errorf("stdout leaked the tool input (INV-2): %q", out)
+	}
+
+	data, err := os.ReadFile(enfFile)
+	if err != nil {
+		t.Fatalf("enforcement sink not written: %v", err)
+	}
+	if strings.Contains(string(data), "secret-project-x") {
+		t.Errorf("enforcement record leaked tool content (INV-2): %q", data)
+	}
+	var rec hookflow.EnforcementRecord
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(data))), &rec); err != nil {
+		t.Fatalf("enforcement record is not valid JSON: %v", err)
+	}
+	if rec.AppliedDecision != ccDecisionDeny || rec.Verdict != string(client.VerdictHalt) {
+		t.Errorf("record = %+v, want an unanswered approval recorded as HALT/deny", rec)
+	}
+}
+
+// TestEscalationCarriesApprovalContext_ObserveNeverDoes the evaluation
+// context: a gated call must carry what it is asking to do, or neither the
+// server nor an approver can decide about it; `kind=shell tool_name=Bash`
+// tells them exactly nothing.
+func TestEscalationCarriesApprovalContext_ObserveNeverDoes(t *testing.T) {
+	isolateConfig(t)
+	m := testMapper()
+
+	for _, tc := range []struct {
+		name, tool, input, want string
+	}{
+		{"shell carries the command", "Bash", `{"command":"rm -rf /tmp/x"}`, "rm -rf /tmp/x"},
+		{"mcp carries the arguments", "mcp__github__create_issue", `{"title":"ship it"}`, "ship it"},
+		{"file carries the body", "Write", `{"file_path":"/tmp/a","content":"hello"}`, "hello"},
+		// The two rows below carry testSentinel (wired into testMapper()'s
+		// RedactContent) rather than plain text: a subagent spawn is
+		// shell-KINDED but "llm_tool_call"-semantic, so it takes no verbatim
+		// carve-out and keeps Map's redacted Content. What they pin is that
+		// "[REDACTED]" reaches /evaluate and the raw sentinel never does.
+		{"llm_tool_call (Agent) redacts the prompt", "Agent",
+			`{"description":"d","subagent_type":"code-reviewer","prompt":"` + testSentinel + `"}`, "[REDACTED]"},
+		{"llm_tool_call (ToolSearch) redacts the query", "ToolSearch",
+			`{"query":"` + testSentinel + `","max_results":5}`, "[REDACTED]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hookEv := &HookEvent{SessionID: "s1", ToolName: tc.tool, ToolInput: []byte(tc.input)}
+
+			escalated, ok := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: hookEv}.DevEvent(nil)
+			if !ok {
+				t.Fatal("escalation event did not map")
+			}
+			if escalated.Content == nil || !strings.Contains(escalated.Content.ToolInput, tc.want) {
+				t.Errorf("escalation lacks the approval context: %+v", escalated.Content)
+			}
+			// Pins the shell carve-out exactly (docs/data-and-privacy.md, §What an
+			// enforced call sends): not merely "contains the command" but IS the
+			// command, verbatim.
+			if escalated.Content != nil && tc.tool == bashToolName && escalated.Content.ToolInput != hookEv.command() {
+				t.Errorf("Bash escalation content = %q, want exactly the command (verbatim carve-out) %q",
+					escalated.Content.ToolInput, hookEv.command())
+			}
+
+			observed, _ := m.Map(HookPreToolUse, hookEv)
+			if observed.Content != nil {
+				t.Errorf("observe copy carries content with capture off: %+v", observed.Content)
+			}
+
+			on := m
+			on.CaptureContent = true
+			observedOn, _ := on.Map(HookPreToolUse, hookEv)
+			if observedOn.Content == nil || observedOn.Content.ToolInput != escalated.Content.ToolInput {
+				t.Errorf("observe copy with capture on = %+v, want the same extract as the "+
+					"gated copy (%q)", observedOn.Content, escalated.Content.ToolInput)
+			}
+		})
+	}
+
+	// Given a detection result, the attached body is the redacted one; the same
+	// bytes the tool call itself is rewritten to, never the original.
+	fileEv := &HookEvent{
+		SessionID: "s1", ToolName: "Write",
+		ToolInput: []byte(`{"file_path":"/tmp/a","content":"AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"}`),
+	}
+	red := &client.Content{FileText: "AWS_ACCESS_KEY_ID=OPENBOX_REDACTED"}
+	ev, _ := enforceTarget{id: Identity{DeveloperDID: testDID}, mapper: m, ev: fileEv}.DevEvent(red)
+	if ev.Content == nil {
+		t.Fatal("a gated Write must carry its body for evaluation")
+	}
+	if strings.Contains(ev.Content.ToolInput, "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("the RAW body was attached; redaction must precede attachment: %q", ev.Content.ToolInput)
+	}
+	if !strings.Contains(ev.Content.ToolInput, "OPENBOX_REDACTED") {
+		t.Errorf("the redacted body was not attached: %q", ev.Content.ToolInput)
+	}
+	if !strings.Contains(ev.Content.ToolInput, "/tmp/a") {
+		t.Errorf("file_path lost in the redacted rebuild: %q", ev.Content.ToolInput)
+	}
+}
+
+// TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator is the
+// companion to configchange_test.go's TestRunHook_ConfigChange_PolicySettingsNeverGated:
+// that test asserts on OUTPUT (stdout/stderr/enforcement-file all empty), which
+// is also exactly what an ALLOW verdict produces -- so it cannot distinguish
+// "the gate ran and allowed" from "the gate never ran at all". This asserts on
+// a SPY (the evaluator's own hit counter) instead: source=policy_settings must
+// make ZERO /evaluate round trips, even when the server is configured to block.
+func TestRunHook_ConfigChange_PolicySettingsNeverCallsTheEvaluator(t *testing.T) {
+	setupConfigChangeEnv(t)
+	url, hits := serveEvaluate(t, `{"verdict":"block","reason":"would have blocked","policy_id":"cc-pol-spy"}`, 200, 0)
+	evalCreds(t, url)
+
+	runConfigHook(t, configPayload("cc-spy", "policy_settings", "/etc/claude/policy.json"))
+
+	if got := hits.V3EvaluateAttempts(); got != 0 {
+		t.Errorf("policy_settings made %d /evaluate call(s), want 0: the gate must never run for this "+
+			"source, not merely produce no visible output", got)
+	}
+}

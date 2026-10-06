@@ -1,311 +1,187 @@
 # OpenBox Shift-Left
 
-**Governance for the coding agents your developers already use.**
+Governance for the AI coding tools your developers already use.
 
-OpenBox governs agents at runtime. This extends the same pipeline one step earlier —
-to Claude Code, OpenAI Codex and the other agentic tools that *write* the code — so
-you can answer, for any commit or deploy:
+If your team uses [Claude Code](https://claude.com/claude-code), [OpenAI
+Codex](https://openai.com/codex) or Meta's Muse Code, `openbox` lets your
+organization see and control what those tools do: the prompts sent, the commands run, the files
+changed, the tokens spent, and whether each action was allowed.
 
-> **who produced this, with which tools and prompts, at what cost — and was it allowed?**
+`openbox` is one small binary installed on each developer machine. It is a
+client: it connects to an **OpenBox platform** your organization already runs
+(hosted or self-hosted), which stores the events and decides the policy.
 
-One static binary. Two commands to set up. No daemon, no proxy, no second dashboard.
+```mermaid
+flowchart LR
+  dev(["<b>Developer</b><br/>uses Claude Code, Codex or Muse Code"]):::person
+  subgraph machine["Developer machine"]
+    tool["<b>Claude Code / Codex / Muse Code</b><br/>AI coding tool"]:::external
+    ob["<b>openbox</b><br/>this repo: hooks, local secret<br/>redaction, model-call lanes"]:::system
+  end
+  platform["<b>OpenBox platform</b><br/>stores sessions, evaluates<br/>policy, handles approvals"]:::external
+  model["<b>Model provider</b><br/>Anthropic / OpenAI / Meta"]:::external
+  admin(["<b>Admin / approver</b><br/>policy, review, approvals"]):::person
+  dev -- prompts --> tool
+  tool -- "runs as hooks" --> ob
+  tool -- "model calls" --> model
+  ob -- "events + policy checks (HTTPS)" --> platform
+  admin -- dashboard --> platform
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef system fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef container fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef component fill:#85bbf0,stroke:#5d82a8,color:#000
+  classDef store fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef external fill:#999999,stroke:#6b6b6b,color:#fff
+```
+
+## How it works
+
+Claude Code, Codex and Muse Code can run a program at fixed moments, called **hooks**:
+when a session starts, when you submit a prompt, before a tool runs, after it
+finishes. `openbox init` registers itself as those hooks. On every hook call,
+`openbox`:
+
+1. turns the tool's event into one common event shape;
+2. removes secrets from any text, on your machine, before anything is sent;
+3. for a tool call or a prompt, asks the platform's policy and applies the
+   answer **before** the action runs (allow, block, wait for approval, or
+   halt the session);
+4. sends everything else to the platform in the background;
+5. stamps each git commit with the session that made it, so a deploy can be
+   traced back to a session ([lineage](docs/lineage.md)).
+
+Hooks cannot see the requests sent to the model, so on Claude Code and Codex
+`openbox` also runs small local background services, the **model-call lanes**,
+that record them. Muse Code's calls are checked before they are sent, and
+recorded (model, token counts and ids only) by redirecting its own telemetry
+export to a local receiver. See [Architecture](docs/architecture.md) for the full picture.
 
 ## Quickstart
 
-**1. Install the engine.** CLI, hook engine and git hook in one no-cgo static
-binary.
+**You need:**
+
+- macOS or Linux, with Claude Code, Codex or Muse Code installed. (Windows builds but is
+  not tested end to end.)
+- An OpenBox platform. With the hosted service, the default URLs are correct.
+- An **organization API key** from the dashboard, **Organization → API Keys**.
+  It starts with `obx_key_` and needs the `create:agent` and `read:agent`
+  scopes. A key that starts with `obx_` but not `obx_key_` is an agent key and
+  will not work ([why](docs/getting-started.md#2-get-the-right-credential)).
+
+### 1. Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/OpenBox-AI/openbox-shift-left/main/install.sh | bash
+openbox version
 ```
 
-**2. Authenticate.** `openbox auth` asks for what it needs and stores it. The URLs
-prefill with sensible defaults or your current values, so a first run is mostly
-pressing Enter. The agent id is **never** prefilled: **leave it blank and a new
-agent is registered for you** — then it stops asking, because there is nothing left
-to ask.
+This downloads a prebuilt binary, checks its hash and puts it in
+`~/.local/bin`. No Go toolchain needed.
+
+### 2. Connect your organization
 
 ```bash
-export OPENBOX_CONTROL_TOKEN=obx_key_…    # your org key, from the dashboard
 openbox auth
 ```
+
+It asks for three values; press Enter to keep a default:
 
 ```
 Backend URL (control plane)   [https://api.openbox.ai]:
 Core URL (data plane)         [https://core.openbox.ai]:
-Agent id (blank registers a new agent):   ← press Enter
-
-  Register a new developer agent? [y/N] y
-  ✓ registered  agent 4f2a…  did:aip:9c1b…
-  ✓ wrote ~/.openbox/.env       (api key, signing key — 0600)
-  ✓ wrote ~/.openbox/dev.json   (agent id, DID, URLs)
-
-Next: openbox init --provider claude-code
+Organization control token (obx_key_… or JWT):   ← paste; not echoed
 ```
 
-Give an existing agent id instead and it asks for that agent's DID, API key and
-signing key — paste them and it writes the same two files. Secrets are masked as
-you type and **no flag ever takes a secret value**, so nothing lands in your shell
-history. Re-run `auth` any time to change any of it.
+> **Self-hosting?** Answer **both** URL prompts with your own hosts. If you
+> change only one, events go to the hosted service and fail with a 401.
 
-**3. Govern a project.** `openbox init` installs the hooks. It governs **the current
-directory only**, and it **enforces** — blocking, ask-for-approval and secret
-redaction are on by default, on tool calls and on submitted prompts alike, and a
-HALT verdict ends the whole session, not just the call
-([ADR-0020](docs/adr/ADR-0020-prompt-gate-and-halt-session-stop.md)). Blocking and
-approval come from OpenBox, so they need it reachable; secret redaction is local
-and does not. It never touches credentials; if they are missing it stops and
-points you back at `auth`.
+### 3. Govern a tool
 
 ```bash
-cd ~/code/my-project
 openbox init --provider claude-code
 ```
 
-Want telemetry without enforcement? `--enforce=false`. Note that enforcement acts on
-*your org's policy*, so until your org publishes one nothing is blocked and you get
-observability either way — with one diagnosed exception, documented in
-[What this does not prove](#what-this-does-not-prove).
+This registers an agent for Claude Code on your platform and adds the hooks to
+your user-wide settings. Every Claude Code session on this machine is now
+governed, in any folder, including sessions already open.
 
-**4. Use `claude` as normal.** Nothing to run, no runtime environment to set.
+Using Codex? Run `openbox init --provider codex` (and trust the new hooks with
+`/hooks` inside Codex). Using Muse Code 1.4.0 or newer? Run
+`openbox init --provider muse`; it installs hooks and points Muse's own
+telemetry export at a local receiver instead of Meta's destinations (metadata
+only; `openbox uninstall` puts your previous setting back). Run `init` once per
+tool; running it again is safe.
 
-```bash
-openbox doctor      # what posture is actually in effect
-openbox dev verify  # can this machine reach and authenticate to core?
-```
-
-→ **[Getting started](docs/getting-started.md)** for self-hosted, approvers,
-upgrading an existing install, and troubleshooting.
-
-### Two URLs, two planes
-
-The **backend** is the control plane (agents, policy, approvals) and defaults to
-`https://api.openbox.ai`. The **core** is the data plane (where events go) and
-defaults to `https://core.openbox.ai`. Both defaults are the hosted service.
-
-The control plane cannot tell the CLI where your core is, so **if you self-host, set
-both explicitly**. Accept one default and override the other and your events go to
-the hosted core, which surfaces much later as a 401 that reads as a broken install.
-
-## Scope: what "governed" means
+### 4. Check it
 
 ```bash
-openbox init --provider claude-code                  # this project only (default)
-openbox init --provider claude-code --scope global   # every project — see below
+openbox doctor
 ```
 
-**Project scope** writes the hook entries into `<project>/.claude/settings.local.json`
-and takes effect immediately. Re-running it removes any redundant OpenBox entry —
-one left at a different engine path, or one of ours registered twice — and says
-so, so a project cannot end up firing a hook more than once; hooks you added
-yourself are preserved. Sessions started **anywhere else
-are not governed and produce no events** — so on a machine set up this way, absence
-of events is not evidence of absence of work.
+`doctor` shows each tool's identity, every setting and where its value came
+from, whether the platform is reachable, and anything that is silently not
+working. Then use your tool as normal.
 
-**Global scope** is the real fleet rollout, and `init` cannot finish it alone: Claude
-Code activates a plugin org-wide through managed settings, which is an
-administrator's action, not a CLI's. `--scope global` installs the bundle and prints
-the exact snippet to deploy (see `deploy/managed/`). It tells you activation is
-pending rather than pretending it happened.
+The full walkthrough, with CI setup, approvals and troubleshooting, is in
+**[Getting started](docs/getting-started.md)**.
 
-Codex is **user-scoped only** — its hooks live at `~/.codex/hooks.json`, so
-`--scope local` is rejected rather than silently governing everything.
+## Good to know
 
-## Where things live
-
-```
-~/.openbox/
-  .env          your credentials — API key, signing key (0600, never commit)
-  dev.json      posture (enforce, capture, fail_closed) + coordinates (DID, agent id, URLs)
-  approver.json approver config, if you are one
-<project>/.claude/settings.local.json    which hooks fire here  (init --scope local)
-~/.claude/plugins/openbox-observe/       the plugin bundle + engine copy
-<os-config-dir>/openbox/                 runtime state: spool, audit logs
-                                         (~/.config on Linux, ~/Library/Application Support
-                                          on macOS, %AppData% on Windows — NOT relocated
-                                          by OPENBOX_HOME; OPENBOX_SPOOL_DIR moves the spool)
-```
-
-Secrets and non-secrets never share a file, and no value lives in two places. A real
-environment variable always wins, so CI can override anything without touching disk.
-`OPENBOX_HOME` relocates the configuration directory.
-
-```
-secrets      OPENBOX_API_KEY, OPENBOX_AGENT_PRIVATE_KEY   env var  >  ~/.openbox/.env
-coordinates  OPENBOX_AGENT_DID, OPENBOX_AGENT_ID, …       env var  >  dev.json  >  default
-```
-
----
-
----
-
-## What you get
-
-| | |
-|---|---|
-| **Session telemetry** | every session, prompt, tool call and MCP call as normalized governance events |
-| **Per-turn finops** | which model spent how many tokens, per turn — the same signal the agent runtime reports, on by default ([ADR-0014](docs/adr/ADR-0014-turn-as-activity-and-identifier-allowlist.md)) |
-| **Enforcement** | block, ask-for-approval, or redact secrets *before* a tool runs, from your org policy — **on by default** ([ADR-0016](docs/adr/ADR-0016-default-install-posture.md)) |
-| **Human approval** | a risky call pauses the session; an approver answers from the dashboard or `openbox approve` |
-| **Autonomous approval** | a bounded approver answers inside the pause, so routine work never waits ([ADR-0012](docs/adr/ADR-0012-autonomous-approver.md)) |
-| **Lineage** | `session → commit → deploy`, with a signed commit attestation |
-| **Evidence** | each session reports its own effective posture, so the control plane never has to trust the endpoint's word |
-
-## How it works
-
-```
- claude / codex ──hooks──▶ openbox engine ──┬──▶ redact secrets locally (µs)
-                                            │
-                                            ├──▶ openbox-core /evaluate  ⟵ BLOCKS the call
-                                            │      └─▶ allow · deny · ask · redact
-                                            ▼
-                                   spool ──▶ openbox-core ──▶ sessions · events · lineage
-                                              (AIP-signed, same endpoint as agent runtime)
-```
-
-A single static binary is the whole runtime: the CLI, the hook engine and the git
-hook. **OpenBox decides every gated tool call** — the hook asks `/evaluate` and
-waits for the verdict before the tool runs
-([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)). There is one policy
-implementation, on the server; nothing evaluates policy on your machine. Still no
-daemon and no socket ([ADR-0006](docs/adr/ADR-0006-in-process-decider.md) stands —
-a bounded outbound call is not a resident process).
-
-That is a trade, and it cuts both ways: enforcement now depends on reaching
-OpenBox, and under the default `fail_closed:false` a gated call proceeds when it
-cannot. What it buys is that an org whose policy is hand-written rego is enforced
-at all — the local evaluator this replaced could not evaluate rego, so those gates
-silently opened.
-
-The one thing still decided locally is **secret redaction**: it must run before
-content leaves the machine.
-
-Telemetry is unaffected — spooled and delivered off the hot path in near-real-time
-(a detached, debounced flusher drains the spool within ~2s of each tool call;
-SessionEnd remains the completeness safety net), so a slow or absent OpenBox never
-delays an event.
-
-Everything provider-agnostic lives in one engine; each tool adds only a thin
-adapter behind one SPI. Adding a tool is an adapter, not a fork.
-→ **[Architecture](docs/architecture.md)**
-
-## Provider support
-
-| Provider | Telemetry | Enforcement | Approvals | Scope | Org mandate |
-|---|---|---|---|---|---|
-| **Claude Code** | shipped — hooks + durable spool | deny · ask · redact | full, incl. waking a session on a late decision | project or global | managed settings |
-| **Codex** | shipped — hooks + durable spool | deny · redact (no native "ask") | deny + findings channel | user-wide only | `requirements.toml` / MDM (hook itself not yet mandatable) |
-| **Cursor** | not built | — | — | — | Team hooks available |
-
-Two capabilities are provider-independent and work with any tool: OpenBox
-registration and the git-trailer commit binding — so lineage and cost tracking
-still apply where no adapter exists.
-
-## What leaves your machine
-
-Two things are **on by default**, and both are opt-out:
-
-- **prompt content** — your prompts are sent, and so is **the assistant's reply
-  text**, one message per turn, scanned for secrets and redacted locally first
-  (`content_capture: false` to stop);
-- **token usage** — four token counts and the model id per turn
-  (`finops: false` to stop).
-
-The assistant's **thinking** is not captured. Tool commands and file bodies are
-**never** sent on ordinary telemetry. They ARE
-sent on a **gated** call under enforcement — OpenBox decides every gated call now
-([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)), and it cannot decide on
-content it cannot see. That is gated on `content_capture`, the body is scanned for
-secrets and redacted locally first, and the server sees at most its first 64KB.
-Credentials are never transmitted.
-
-The exact field list is in **[Data and privacy](docs/data-and-privacy.md)**.
-
-## What this does *not* prove
-
-A governance tool that overstates its guarantees is the failure it exists to
-prevent, so the limits are documented as first-class:
-
-- **Your credentials sit in a plaintext file.** `~/.openbox/.env` is `0600` on
-  macOS/Linux, but anything running as you — including the coding agent under
-  governance — can read your signing key and sign events as you. On Windows `0600`
-  is a no-op and other local accounts can read it. Attestation therefore proves
-  origin-of-config, not tamper-resistance against the developer
-  ([ADR-0015](docs/adr/ADR-0015-plaintext-credential-file.md)).
-- **Project scope means partial coverage.** With the default `init`, only the
-  initialized directory is governed, and sessions elsewhere produce no events at
-  all — so absence of events is not evidence of absence of work
-  ([ADR-0016](docs/adr/ADR-0016-default-install-posture.md)).
-- **Commit attribution is an inferred claim** unless the pipeline fetches the
-  signed attestation note — then it is cryptographically verified.
-- **Enforcement prevents mistakes, not motivated bypass**, for two independent
-  reasons. The hook lives in the developer's own config until the provider's managed
-  configuration is deployed (`deploy/managed/`) — and every gated call now asks the
-  control plane, so under the default `fail_closed:false` blocking one hostname
-  disables enforcement for that machine. An org that needs enforcement to survive a
-  developer who does not want it must set `fail_closed`, and accept that a
-  control-plane outage then blocks work
-  ([ADR-0017](docs/adr/ADR-0017-inline-policy-evaluation.md)).
-- **A control-plane HALT is applied even when no policy authored it.** Core can
-  express an operational failure — its record of a session gone terminal while the
-  session was still live — as a HALT verdict with no policy id, and the client
-  applies it, even in an org that has published no policy. Since
-  [ADR-0020](docs/adr/ADR-0020-prompt-gate-and-halt-session-stop.md) a HALT ends
-  the session outright (turn stops, later prompts and calls refused locally), so
-  this defect now ends sessions rather than denying calls until the record clears
-  — an accepted consequence of trusting every server HALT uniformly. Fail-open
-  does not engage, because it covers *no verdict*, not *a HALT verdict*. Diagnosed
-  live, core-side fix in flight
-  ([diagnosis](plans/reports/debug-260814-1231-session-no-longer-active-halt.md)).
-- **Egress is recorded, not controlled.** OpenBox does not proxy or allow-list the
-  coding tool's traffic to its model provider; it records that posture as evidence.
-- **Content-based policy sees at most the first 64KB of a write.** Bodies are
-  truncated before egress, so a rule that would match past that offset does not
-  fire. Local secret detection is not subject to the cap.
-- **Windows is build-verified, not runtime-verified.** CI cross-compiles it on
-  every change; no automated suite exercises it, and `install.sh` is bash.
-
-Details and current status: **[Assurance](docs/architecture.md#assurance--what-the-evidence-proves)**.
+- **Enforcement is always on.** It acts on your organization's policy, so
+  until a policy is published nothing is blocked and you only get visibility.
+- **It fails closed.** If a policy check gets no answer from the platform, that
+  one action is denied. The next action gets a fresh attempt.
+- **Content is sent by default.** Prompts, replies, tool commands and file
+  contents are sent after local secret redaction. Turn it off per tool with
+  `"content_capture": false`. See [Data and privacy](docs/data-and-privacy.md).
+- **Credentials are plaintext files** under `~/.openbox/`, readable by anything
+  running as you, including the coding agent. See
+  [Credentials](docs/credentials-and-secrets.md).
+- **It detects bypass; it does not prevent it.** A developer can remove the
+  hooks or route model calls around the lanes. Both show up in the record and
+  in `openbox doctor`. To make governance mandatory, deploy the managed
+  settings in [`deployments/managed/`](deployments/managed/) with your MDM.
 
 ## Commands
 
-| | |
+| Command | What it does |
 |---|---|
-| `openbox auth` | credentials for this machine — it asks for everything authentication needs and nothing else. `--rotate` re-issues them for an agent that already exists |
-| `openbox init` | install hooks + posture. `--scope`, `--enforce=false`, `--install-git-hook`, `--role approver` |
-| `openbox doctor` | the posture actually in effect, who decides, what happens when they are unreachable, and whether this directory has more than one OpenBox engine registered |
-| `openbox dev verify` | can this machine reach and authenticate to core? |
-| `openbox approve` | `list`, `allow`, `deny`, or `--watch --auto` for the autonomous approver |
-| `openbox managed install` | write the managed-settings files for a fleet rollout |
+| `openbox auth` | Save your platform URLs and organization key. |
+| `openbox init --provider <claude-code\|codex\|muse>` | Register that tool's agent and install its hooks. Once per tool. |
+| `openbox doctor` | Show what is in effect, where each value came from, and what is wrong. |
+| `openbox trace` | Read the local record of what `openbox` did, per session. |
+| `openbox uninstall` | Remove everything `openbox` installed, including credentials. |
+| `openbox version` | Print the version. |
+
+## Supported tools
+
+| | Claude Code | Codex | Muse Code |
+|---|---|---|---|
+| Session, prompt and tool events | yes | yes | yes |
+| Enforcement | block, approval, redact, halt | block, redact, halt (approval becomes block) | block, redact, halt (approval and halt render as a plain refusal) |
+| Model calls recorded | yes (transport lane) | token usage, plus the request and reply read from the local rollout (telemetry lane); on macOS also through the relay, once it has seen Codex | model, tokens, request and reply read from the session journal (telemetry lane); each call is also checked, with its request, before it is sent |
+| Org mandate file | managed settings | `requirements.toml` | hooks file and policy (unverified keys) |
+
+Muse Code's hook payloads and refusal answers were observed on Muse 1.4.1, and its compaction and notification hooks on 1.4.2;
+what is still unverified is listed in the
+[adapter README](internal/adapters/muse/README.md#unverified-and-what-would-settle-it).
+Details: [Provider coverage](docs/coverage.md).
 
 ## Documentation
 
-| | |
+| Doc | Read it to |
 |---|---|
-| [Getting started](docs/getting-started.md) | install → onboard → verify, with troubleshooting |
-| [Architecture](docs/architecture.md) | engine, adapters, enforcement, approvals, assurance |
-| [Data and privacy](docs/data-and-privacy.md) | exactly what is captured and sent |
-| [Upgrading to inline evaluation](docs/upgrading-to-inline-evaluation.md) | what changes for an existing install, incl. file bodies now egressing |
-| [Lineage](docs/lineage.md) | `session → commit → deploy` and how it is verified |
-| [ADRs](docs/adr/) | the decisions, and why |
-| [Event contract](contracts/dev-event/) | the normalized event schema and its wire mapping |
-| [End-to-end tests](docs/testbed/e2e.md) | `testbed/` — a mock-free suite against a real stack |
+| [Getting started](docs/getting-started.md) | install, configure, operate and troubleshoot |
+| [Data and privacy](docs/data-and-privacy.md) | see what is sent and how to turn it off |
+| [Credentials and secrets](docs/credentials-and-secrets.md) | see where keys live and what the redactor catches |
+| [Architecture](docs/architecture.md) | understand the design, the diagrams and the code layout |
+| [Lineage](docs/lineage.md) | trace a deploy back to a commit and a session |
+| [Contributing](docs/contributing.md) | build, test and send a change |
 
-## Contributing
-
-Go 1.23+, no cgo. The repo is a Go workspace of small modules
-([ADR-0011](docs/adr/ADR-0011-multi-module-layout.md)):
-
-```bash
-go build ./cli/...                  # the binary
-cd cli && go test ./...             # one module
-./testbed/run-all.sh                # the end-to-end suite (needs a local OpenBox stack)
-```
-
-Anything provider-agnostic belongs in `adapters/common/`; a new table, endpoint or
-service needs an ADR. The end-to-end suite needs an OpenBox stack it can reach —
-`testbed/00-preflight.sh` tells you whether the one you have is healthy enough to
-trust the results.
+Reference, for adapter authors and platform integrators:
+[Provider coverage](docs/coverage.md) ·
+[Event contract](docs/dev-event-contract.md) ·
+[Wire mapping](docs/mapping.md).
 
 ## License
 

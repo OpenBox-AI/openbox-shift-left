@@ -1,0 +1,718 @@
+package muse
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gofrs/flock"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/adapters/common/hookflow"
+	"github.com/openbox-ai/openbox-shift-left/internal/trace"
+)
+
+// Gap detection, not prevention. A tool call Muse ran with no gate record is
+// usually one whose hook payload was over the hook's 256 KiB cap: Muse skips
+// the hook entirely, so neither the gate nor its fail-closed successor ran.
+// Nothing can refuse such a call. What can be done is notice it: at Stop and
+// SessionEnd the session's own journal is read for tool-execution intents, and
+// each one without a gate record becomes a content-free trace finding.
+//
+// The reconciler never blocks, latches or alters delivery, and never
+// egresses: a finding is a local trace line, counted by doctor.
+
+const (
+	// passBytes bounds what one pass reads of a session's logs.
+	passBytes = 4 << 20
+
+	// Hook time budgets, each well under the handler's own ceiling (5s for
+	// Stop, 3s for SessionEnd, whose delivery window must stay intact).
+	stopReconcileBudget       = 1500 * time.Millisecond
+	sessionEndReconcileBudget = 500 * time.Millisecond
+
+	// intentGrace is how long an intent is left alone after it was journaled
+	// before a Stop counts it as ungated: Muse journals the intent, then starts
+	// the PreToolUse hook as a process, and only that hook writes the gate
+	// ledger, so a call journaled an instant ago (a parallel or background
+	// subagent call above all) has no record yet and is not a gap. SessionEnd
+	// gets no grace: no tool batch is still waiting on a hook once the session
+	// is over, and it is the last pass, so an intent it left would never be
+	// looked at again.
+	intentGrace = 2 * time.Second
+
+	reasonNoGateRecord = "no_gate_record"
+	// reasonUnjoinable marks an oversize journal line that may be a tool
+	// action but whose join fields lie past the line cap.
+	reasonUnjoinable = "oversize_unjoinable"
+
+	// evidenceWindow is how far back doctor counts findings.
+	evidenceWindow = 7 * 24 * time.Hour
+
+	// stateRetention is how long a session's cursor and gate ledger outlive
+	// its last write before a pass sweeps them.
+	stateRetention = 14 * 24 * time.Hour
+	maxSweep       = 200
+)
+
+// Outcomes of a reconcile pass, on the evidence.reconcile stage.
+const (
+	reconcileOK       = "ok"
+	reconcileDisabled = "disabled"
+	reconcileError    = "error"
+)
+
+// reconcileDir is where a session's cursor and gate ledger live, under the
+// adapter's own spool directory, so uninstall's spool sweep removes them.
+func reconcileDir(spoolDir string) string { return filepath.Join(spoolDir, "reconcile") }
+
+// stateStem names a session's files: a readable prefix plus a hash, so two ids
+// that sanitize alike never share a file.
+func stateStem(sessionID string) string {
+	var b strings.Builder
+	for _, r := range sessionID {
+		if b.Len() >= 48 {
+			break
+		}
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	sum := sha256.Sum256([]byte(sessionID))
+	return b.String() + "-" + hex.EncodeToString(sum[:4])
+}
+
+// cursorState is everything a session's passes remember.
+type cursorState struct {
+	// Dir is the session directory the logs were found in.
+	Dir   string                `json:"dir,omitempty"`
+	Files map[string]fileCursor `json:"files"`
+	// Ordinals counts, per tool name, the intents carrying no call_id that
+	// were already reconciled: the next one is that tool's next ordinal.
+	Ordinals map[string]int `json:"ordinals"`
+	// Claimed counts, per tool name, the gate records already matched exactly
+	// by an intent's tool_use_id, so the ordinal join does not count them twice.
+	Claimed map[string]int `json:"claimed"`
+	// Joins is, per log, what that log added to Ordinals and Claimed, so a log
+	// that is replaced and read afresh takes its old contribution back out.
+	Joins map[string]fileJoin `json:"joins,omitempty"`
+}
+
+// fileJoin is one log's share of the join counters.
+type fileJoin struct {
+	Ordinals map[string]int `json:"ordinals,omitempty"`
+	Claimed  map[string]int `json:"claimed,omitempty"`
+}
+
+// forgetFile takes a log's contribution out of the join counters: the log was
+// replaced and is read from the top, so its old intents are not counted twice.
+func (st *cursorState) forgetFile(key string) {
+	j := st.Joins[key]
+	for tool, n := range j.Ordinals {
+		st.Ordinals[tool] = max(0, st.Ordinals[tool]-n)
+	}
+	for tool, n := range j.Claimed {
+		st.Claimed[tool] = max(0, st.Claimed[tool]-n)
+	}
+	delete(st.Joins, key)
+}
+
+// join returns the log's share of the counters, ready to be written to.
+func (st *cursorState) join(key string) fileJoin {
+	if st.Joins == nil {
+		st.Joins = map[string]fileJoin{}
+	}
+	j := st.Joins[key]
+	if j.Ordinals == nil {
+		j.Ordinals = map[string]int{}
+	}
+	if j.Claimed == nil {
+		j.Claimed = map[string]int{}
+	}
+	st.Joins[key] = j
+	return j
+}
+
+func loadCursor(path string) (cursorState, error) {
+	st := newCursorState()
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return newCursorState(), fmt.Errorf("cursor unreadable: %w", err)
+	}
+	if st.Files == nil {
+		st.Files = map[string]fileCursor{}
+	}
+	if st.Ordinals == nil {
+		st.Ordinals = map[string]int{}
+	}
+	if st.Claimed == nil {
+		st.Claimed = map[string]int{}
+	}
+	return st, nil
+}
+
+func newCursorState() cursorState {
+	return cursorState{Files: map[string]fileCursor{}, Ordinals: map[string]int{}, Claimed: map[string]int{}}
+}
+
+func saveCursor(path string, st cursorState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	return hookflow.AtomicWriteFile(path, raw, 0o600)
+}
+
+// gateEntry is one line of the gate ledger: a tool call the gate was asked
+// about. Content-free: a name and an id.
+type gateEntry struct {
+	ToolName  string `json:"tool_name"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
+}
+
+// ledgerLock keeps two goroutines of one process from interleaving; appends
+// across processes rely on O_APPEND with one write per line.
+var ledgerLock sync.Mutex
+
+// RecordGateCall notes that the gate was asked about one tool call of a
+// session. It is the ledger a reconcile pass joins a session's own journal
+// against: written by the hook before it evaluates, so a call whose hook
+// started is on it whatever the verdict, and a call whose hook never started
+// (an oversize payload) is not. Best effort; an error is returned for the
+// caller to log and never to act on.
+func RecordGateCall(spoolDir, sessionID, toolName, toolUseID string) (err error) {
+	// A gated hook answers a call; nothing in a bookkeeping write may turn into
+	// a fault exit that denies it.
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("gate ledger: recovered: %v", p)
+		}
+	}()
+	if spoolDir == "" || !safeSessionID(sessionID) {
+		return nil
+	}
+	line, err := json.Marshal(gateEntry{ToolName: capLedgerField(toolName), ToolUseID: capLedgerField(toolUseID)})
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(reconcileDir(spoolDir), stateStem(sessionID)+".gates")
+	ledgerLock.Lock()
+	defer ledgerLock.Unlock()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if errors.Is(err, os.ErrNotExist) {
+		// Only the first call of a spool pays for the directory.
+		if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return err
+		}
+		f, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	}
+	if err != nil {
+		return err
+	}
+	_, werr := f.Write(append(line, '\n'))
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	return werr
+}
+
+// capLedgerField bounds a ledger field to what the journal reader keeps of the
+// same field (maxFieldLen): a longer value could never match one, and an
+// unbounded name must not grow a ledger line past what the reader will take.
+func capLedgerField(s string) string {
+	if len(s) <= maxFieldLen {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxFieldLen], "")
+}
+
+// gateSet is what the ledgers of a session (and its subagents) hold.
+type gateSet struct {
+	ids    map[string]bool
+	byTool map[string]int
+}
+
+func loadGates(spoolDir string, sessionIDs ...string) gateSet {
+	g := gateSet{ids: map[string]bool{}, byTool: map[string]int{}}
+	for _, sid := range sessionIDs {
+		if !safeSessionID(sid) {
+			continue
+		}
+		f, err := os.Open(filepath.Join(reconcileDir(spoolDir), stateStem(sid)+".gates"))
+		if err != nil {
+			continue
+		}
+		// A line longer than the reader's buffer is stepped over, never allowed
+		// to end the read: every later call would look ungated.
+		br := bufio.NewReaderSize(f, 64<<10)
+		overlong := false
+		for {
+			line, err := br.ReadSlice('\n')
+			if errors.Is(err, bufio.ErrBufferFull) {
+				overlong = true
+				continue
+			}
+			if overlong {
+				overlong = false // the tail of an over-long line
+			} else if len(line) > 0 {
+				var e gateEntry
+				if json.Unmarshal(line, &e) == nil {
+					g.byTool[e.ToolName]++
+					if e.ToolUseID != "" {
+						g.ids[e.ToolUseID] = true
+					}
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		f.Close()
+	}
+	return g
+}
+
+// Reconciler joins a session's journal against its gate ledger. Every path is a
+// field so a test never touches a real home.
+type Reconciler struct {
+	// LogRoot is Muse's sessions directory.
+	LogRoot string
+	// SpoolDir is the adapter's spool directory, home of the cursor and ledger.
+	SpoolDir string
+	// Now stamps the date-directory search; time.Now when nil.
+	Now func() time.Time
+	// Emit writes a trace finding; trace.Emit when nil.
+	Emit func(trace.Record)
+	// MaxBytes bounds the read of one pass; passBytes when zero.
+	MaxBytes int64
+}
+
+// Result is one pass, in counts only.
+type Result struct {
+	// NoLog is set when the session has no journal to read.
+	NoLog bool
+	// Skipped is set when another pass of the same session held the lock.
+	Skipped bool
+	// Intents is how many tool authorisations this pass reconciled.
+	Intents int
+	// Gaps is how many of them had no gate record.
+	Gaps int
+	// Errors counts what was swallowed: an unreadable file, a cursor that could
+	// not be kept.
+	Errors int
+	// Disabled is set when the journal no longer looks like the format observed
+	// on Muse 1.4.1 (see sessionlog.go), which stops the pass: the format is
+	// unverified.
+	Disabled  bool
+	BytesRead int64
+	// Oversize counts lines over the line cap that were stepped over.
+	Oversize int
+}
+
+// Run reconciles sessionID's logs up to the journal's intents older than
+// cutoff, within deadline. runID stamps the findings. It returns counts only,
+// swallows its errors and never panics.
+func (r Reconciler) Run(sessionID, runID string, cutoff, deadline time.Time) (res Result) {
+	defer func() {
+		if p := recover(); p != nil {
+			res.Errors++
+		}
+	}()
+	if !safeSessionID(sessionID) || r.SpoolDir == "" {
+		res.NoLog = true
+		return res
+	}
+	now := time.Now
+	if r.Now != nil {
+		now = r.Now
+	}
+	emit := trace.Emit
+	if r.Emit != nil {
+		emit = r.Emit
+	}
+	maxBytes := r.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = passBytes
+	}
+
+	cursorPath := filepath.Join(reconcileDir(r.SpoolDir), stateStem(sessionID)+".cursor")
+	st, err := loadCursor(cursorPath)
+	if err != nil {
+		res.Errors++
+	}
+	logs, dir := locateSessionLogs(r.LogRoot, sessionID, st.Dir, now())
+	if len(logs) == 0 {
+		res.NoLog = true
+		return res
+	}
+
+	// One pass per session at a time: two concurrent ones would each read the
+	// same cursor and lose the other's offset and ordinal updates. A pass that
+	// finds it held has nothing to add; the holder does its work.
+	if err := os.MkdirAll(reconcileDir(r.SpoolDir), 0o700); err != nil {
+		res.Errors++
+		return res
+	}
+	lock, held, err := acquireSessionLock(r.SpoolDir, sessionID)
+	switch {
+	case err != nil:
+		res.Errors++
+		return res
+	case !held:
+		res.Skipped = true
+		return res
+	}
+	defer func() { _ = lock.Unlock() }()
+	// The cursor may have moved while this pass waited to start.
+	if st2, err := loadCursor(cursorPath); err == nil {
+		st = st2
+	}
+
+	ids := []string{sessionID}
+	for _, l := range logs {
+		if l.SubagentID != "" {
+			ids = append(ids, l.SubagentID)
+		}
+	}
+	gates := loadGates(r.SpoolDir, ids...)
+
+	dirty := dir != st.Dir
+	st.Dir = dir
+	var findings []trace.Record
+	for _, l := range logs {
+		out, err := readLog(l.Path, st.Files[l.Key], cutoff, deadline, maxBytes-res.BytesRead)
+		res.BytesRead += out.BytesRead
+		res.Oversize += out.Oversize
+		if err != nil {
+			res.Errors++
+			continue
+		}
+		if out.Rotated {
+			st.forgetFile(l.Key)
+			dirty = true
+		}
+		for _, it := range out.Intents {
+			res.Intents++
+			if gapOf(it, gates, &st, l.Key) {
+				res.Gaps++
+				findings = append(findings, gapRecord(sessionID, runID, it))
+			}
+		}
+		for i := 0; i < out.Unjoinable; i++ {
+			res.Intents++
+			res.Gaps++
+			findings = append(findings, unjoinableRecord(sessionID, runID))
+		}
+		if out.Cursor != st.Files[l.Key] {
+			st.Files[l.Key] = out.Cursor
+			dirty = true
+		}
+		if out.DecodeErr != nil {
+			res.Disabled = true
+			break
+		}
+		if res.BytesRead >= maxBytes {
+			break
+		}
+	}
+	// The cursor is kept BEFORE a finding is written: a pass that dies between
+	// the two under-counts, which the next pass cannot repeat; the other order
+	// reports the same call again. A cursor that cannot be kept reports
+	// nothing this time, and the next pass finds the same intents again.
+	if dirty {
+		if err := saveCursor(cursorPath, st); err != nil {
+			res.Errors++
+			res.Intents, res.Gaps, findings = 0, 0, nil
+		}
+	}
+	for _, f := range findings {
+		emit(f)
+	}
+	if res.Intents > 0 || res.Errors > 0 || res.Disabled || res.Oversize > 0 {
+		emit(reconcileRecord(sessionID, runID, res))
+	}
+	sweepState(r.SpoolDir, now())
+	return res
+}
+
+// gapOf joins one intent. With a call_id (the hook's tool_use_id) the join is
+// exact, and Muse 1.4.1 writes one on every started record; without one it
+// is the intent's ordinal among this session's id-less intents of the same tool
+// against the gate records of that tool no exact join has claimed, so the pass
+// finds how many calls went ungated and not always which of them.
+func gapOf(it intent, gates gateSet, st *cursorState, logKey string) bool {
+	j := st.join(logKey)
+	if it.ToolUseID != "" {
+		if gates.ids[it.ToolUseID] {
+			st.Claimed[it.ToolName]++
+			j.Claimed[it.ToolName]++
+			return false
+		}
+		return true
+	}
+	k := st.Ordinals[it.ToolName]
+	st.Ordinals[it.ToolName] = k + 1
+	j.Ordinals[it.ToolName]++
+	return k >= gates.byTool[it.ToolName]-st.Claimed[it.ToolName]
+}
+
+func gapRecord(sessionID, runID string, it intent) trace.Record {
+	detail := map[string]any{
+		"provider":   provider,
+		"session_id": sessionID,
+		"run_id":     runID,
+		"tool_name":  capStr(it.ToolName),
+		"reason":     reasonNoGateRecord,
+	}
+	if it.ToolUseID != "" {
+		detail["tool_use_id"] = capStr(it.ToolUseID)
+	}
+	return trace.Record{
+		Provider:  provider,
+		SessionID: sessionID,
+		RunID:     runID,
+		Stage:     trace.StageEvidenceGap,
+		Outcome:   reasonNoGateRecord,
+		Detail:    detail,
+	}
+}
+
+// unjoinableRecord is the finding for an oversize line that cannot be joined:
+// no tool name or id is known, only that an action may have gone ungated.
+func unjoinableRecord(sessionID, runID string) trace.Record {
+	return trace.Record{
+		Provider:  provider,
+		SessionID: sessionID,
+		RunID:     runID,
+		Stage:     trace.StageEvidenceGap,
+		Outcome:   reasonUnjoinable,
+		Detail: map[string]any{
+			"provider":   provider,
+			"session_id": sessionID,
+			"run_id":     runID,
+			"reason":     reasonUnjoinable,
+		},
+	}
+}
+
+func reconcileRecord(sessionID, runID string, res Result) trace.Record {
+	outcome := reconcileOK
+	switch {
+	case res.Disabled:
+		outcome = reconcileDisabled
+	case res.Errors > 0:
+		outcome = reconcileError
+	}
+	return trace.Record{
+		Provider:  provider,
+		SessionID: sessionID,
+		RunID:     runID,
+		Stage:     trace.StageEvidenceReconcile,
+		Outcome:   outcome,
+		Detail: map[string]any{
+			"intents":  res.Intents,
+			"gaps":     res.Gaps,
+			"errors":   res.Errors,
+			"oversize": res.Oversize,
+		},
+	}
+}
+
+// beforeSessionLock runs after a pass has taken the shared sweep lock and built
+// its session lock, before it locks it. Tests use it to run the sweeper inside
+// that window.
+var beforeSessionLock = func() {}
+
+// sweepLockName is the reconcile dir's reader/writer lock between passes
+// acquiring a session lock (shared) and the sweeper removing lock files
+// (exclusive). It is never swept.
+const sweepLockName = "sweep.lock"
+
+// sweepShareBudget bounds how long a pass waits for a sweeper to finish.
+const sweepShareBudget = 200 * time.Millisecond
+
+// acquireSessionLock takes the session's lock file. The shared sweep lock is
+// held only across the acquisition, and released before the pass runs (the pass
+// sweeps at its end and would otherwise refuse itself). Opening a lock file and
+// locking it are not one step: a sweeper unlinking the file between them would
+// leave this pass holding an unlinked inode while a later pass creates and locks
+// a fresh file at the same path. held is false when the session is busy or a
+// sweeper holds the directory.
+func acquireSessionLock(spoolDir, sessionID string) (*flock.Flock, bool, error) {
+	dir := reconcileDir(spoolDir)
+	sweep := flock.New(filepath.Join(dir, sweepLockName))
+	ctx, cancel := context.WithTimeout(context.Background(), sweepShareBudget)
+	defer cancel()
+	switch ok, err := sweep.TryRLockContext(ctx, 10*time.Millisecond); {
+	case err != nil && !errors.Is(err, context.DeadlineExceeded):
+		return nil, false, err
+	case !ok:
+		return nil, false, nil
+	}
+	defer func() { _ = sweep.Unlock() }()
+
+	lock := flock.New(filepath.Join(dir, stateStem(sessionID)+".lock"))
+	beforeSessionLock()
+	held, err := lock.TryLock()
+	if err != nil || !held {
+		return nil, false, err
+	}
+	return lock, true, nil
+}
+
+// sweepState removes cursors and ledgers nothing has written for a while, a
+// bounded number per pass, so state for ended sessions does not pile up.
+func sweepState(spoolDir string, now time.Time) {
+	entries, err := os.ReadDir(reconcileDir(spoolDir))
+	if err != nil {
+		return
+	}
+	// The bound is on removals, not on entries looked at, so a run of fresh
+	// files at the front of the listing cannot keep the old ones behind them
+	// from ever being reached.
+	removed := 0
+	// Lock files go only while no pass is between opening one and locking it
+	// (see acquireSessionLock). If one is, they stay until the next sweep.
+	var sweep *flock.Flock
+	defer func() {
+		if sweep != nil {
+			_ = sweep.Unlock()
+		}
+	}()
+	lockFilesOK := func() bool {
+		if sweep == nil {
+			l := flock.New(filepath.Join(reconcileDir(spoolDir), sweepLockName))
+			if held, err := l.TryLock(); err != nil || !held {
+				return false
+			}
+			sweep = l
+		}
+		return true
+	}
+	for _, e := range entries {
+		if removed >= maxSweep {
+			return
+		}
+		info, err := e.Info()
+		if err != nil || e.IsDir() || now.Sub(info.ModTime()) < stateRetention {
+			continue
+		}
+		path := filepath.Join(reconcileDir(spoolDir), e.Name())
+		if e.Name() == sweepLockName {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".lock") {
+			if !lockFilesOK() {
+				continue
+			}
+			// A lock file's mtime is the day it was created, not the last time
+			// it was held, so a long session's lock looks old while a pass holds
+			// it. Removing a held lock would let a second pass in beside it.
+			l := flock.New(path)
+			if held, err := l.TryLock(); err != nil || !held {
+				continue
+			}
+			if os.Remove(path) == nil {
+				removed++
+			}
+			_ = l.Unlock()
+			continue
+		}
+		if os.Remove(path) == nil {
+			removed++
+		}
+	}
+}
+
+// EvidenceSummary is what doctor shows of the reconciler.
+type EvidenceSummary struct {
+	// Gaps counts evidence.gap findings inside the window.
+	Gaps int
+	// Unverified is set when the most recent pass, of any session, disabled
+	// itself.
+	Unverified bool
+}
+
+// SummarizeEvidence counts Muse's evidence.gap findings in the trace at dir
+// since the start of the window ending at now. A missing trace directory is an
+// empty summary, not an error.
+func SummarizeEvidence(traceDir string, now time.Time) (EvidenceSummary, error) {
+	var sum EvidenceSummary
+	if traceDir == "" {
+		return sum, nil
+	}
+	since := now.Add(-evidenceWindow)
+	prefilter := func(line []byte) bool { return bytes.Contains(line, []byte(`"stage":"evidence.`)) }
+	recs, _, err := trace.ReadFiltered(traceDir, prefilter, func(r trace.Record) bool {
+		return r.Provider == provider && r.TS.After(since) &&
+			(r.Stage == trace.StageEvidenceGap || r.Stage == trace.StageEvidenceReconcile)
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return sum, nil
+		}
+		return sum, err
+	}
+	// Whether the journal reads is a property of the Muse build writing it, not
+	// of one session, so the most recent pass decides (recs are time-ordered).
+	// Judging per session instead would pin "unverified" on a session that
+	// never gets another pass, long after an upgrade made every later pass clean.
+	latest := ""
+	for _, r := range recs {
+		switch r.Stage {
+		case trace.StageEvidenceGap:
+			sum.Gaps++
+		case trace.StageEvidenceReconcile:
+			latest = r.Outcome
+		}
+	}
+	sum.Unverified = latest == reconcileDisabled
+	return sum, nil
+}
+
+// reconcileCutoff is the instant before which a pass reconciles intents: the
+// hook's own instant less the grace, except on the session's last pass.
+func reconcileCutoff(hook HookName, now time.Time) time.Time {
+	if hook == HookSessionEnd {
+		return now
+	}
+	return now.Add(-intentGrace)
+}
+
+// reconcileOnHook runs one pass for a Stop or SessionEnd hook: the cutoff is
+// the hook's own instant (see reconcileCutoff), the deadline the hook's start
+// plus its budget.
+func reconcileOnHook(hook HookName, sessionID, runID string, hookStart, now time.Time, logger *log.Logger) {
+	budget := stopReconcileBudget
+	if hook == HookSessionEnd {
+		budget = sessionEndReconcileBudget
+	}
+	res := Reconciler{LogRoot: sessionLogRoot(), SpoolDir: DefaultSpoolDir()}.Run(sessionID, runID, reconcileCutoff(hook, now), hookStart.Add(budget))
+	if res.Errors > 0 || res.Disabled || res.Gaps > 0 {
+		// Counts only: a line of the journal is never logged.
+		logger.Printf("session log reconcile for %s: %d intent(s), %d ungated, %d error(s), disabled=%v",
+			sessionID, res.Intents, res.Gaps, res.Errors, res.Disabled)
+	}
+}

@@ -1,0 +1,212 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/openbox-ai/openbox-shift-left/internal/cli/telemetryemit"
+	"github.com/openbox-ai/openbox-shift-left/internal/client"
+	"github.com/openbox-ai/openbox-shift-left/internal/telemetry"
+)
+
+// deliveredEvents stands in for a lane daemon's bounded delivery pool: it
+// captures every accepted event in memory instead of a spool file, so the
+// replay fixtures below can assert on the same JSON-decoded shape a spool
+// line used to produce.
+type deliveredEvents struct {
+	mu   sync.Mutex
+	evts []client.DevEvent
+}
+
+func (d *deliveredEvents) Deliver(_ context.Context, ev client.DevEvent) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.evts = append(d.evts, ev)
+	return true
+}
+
+func (d *deliveredEvents) asMaps(t *testing.T) []map[string]any {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]map[string]any, 0, len(d.evts))
+	for _, ev := range d.evts {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatalf("marshal delivered event: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("unmarshal delivered event: %v", err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// Telemetryreplay_test.go; the recorded-traffic replay for the :otel: lane.
+// TestTelemetryCommandActuallyRecords next door is the socket control: it
+// drives the real command over a real port and is skipped on a host that
+// cannot bind.
+
+func replayCorpus(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join("..", "..", "internal", "telemetry", "testdata", "corpus", "otel-logs.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read recorded corpus fixture %s: %v", path, err)
+	}
+	return raw
+}
+
+func replayThroughChain(t *testing.T, elected bool) ([]map[string]any, int, map[string]int) {
+	t.Helper()
+	delivered := &deliveredEvents{}
+
+	em := &telemetryemit.Emitter{
+		Mapper: telemetryemit.New("did:aip:7f3c9b2e-0000-5000-a000-00000000feed",
+			telemetryemit.Policy{Elected: func() bool { return elected }}),
+		DID:     func() string { return "did:aip:7f3c9b2e-0000-5000-a000-00000000feed" },
+		Warn:    func(string, ...any) {},
+		Deliver: delivered.Deliver,
+	}
+
+	rec, err := telemetry.New(telemetry.Config{Addr: "127.0.0.1:0"}, telemetry.WithEmitter(em))
+	if err != nil {
+		t.Fatalf("telemetry.New: %v", err)
+	}
+	if err := rec.ConsumeLogsJSON(context.Background(), replayCorpus(t)); err != nil {
+		t.Fatalf("replaying the recorded export: %v", err)
+	}
+
+	emitted, drops := em.Stats()
+	return delivered.asMaps(t), emitted, drops
+}
+
+// TestTelemetryReplayMapsRecordedTrafficToTurns is the positive half.
+func TestTelemetryReplayMapsRecordedTrafficToTurns(t *testing.T) {
+	events, emitted, drops := replayThroughChain(t, true)
+
+	if len(events) == 0 {
+		t.Fatal("the recorded export produced no spooled event; the chain is broken somewhere between the collector's decode and the spool")
+	}
+	if emitted != len(events) {
+		t.Errorf("emitter counted %d emissions but %d events reached the spool", emitted, len(events))
+	}
+
+	// Two rows per api_request, not one: every activity_id must carry exactly one
+	// ActivityStarted and one ActivityCompleted, and this lane used to emit only
+	// the closing half, so every model-call row it produced was unpaired by
+	// construction.
+	const recorded = 5
+	if len(events) != recorded*2 {
+		t.Errorf("got %d rows from %d recorded api_request(s), want the pair for each", len(events), recorded)
+	}
+
+	// Fifteen records are unhandled event types, so the counter must say so.
+	if drops["unhandled-event"] == 0 {
+		t.Errorf("no unhandled-event drops were counted; a lane that drops silently cannot be told from a quiet session. counters: %v", drops)
+	}
+
+	// Per request id, so the assertion is about DISTINCT CALLS not sharing an id --
+	// which is what it always meant. The two halves of one call share it on
+	// purpose: that shared id is what makes them one timeline row.
+	halves := map[string]map[string]int{}
+	for _, ev := range events {
+		reqID, _ := ev["otel_request_id"].(string)
+		if reqID == "" {
+			t.Error("otel_request_id is empty; without the lane discriminator turnActivityIDFor returns an EMPTY activity_id")
+			continue
+		}
+		if halves[reqID] == nil {
+			halves[reqID] = map[string]int{}
+		}
+		eventType, _ := ev["event_type"].(string)
+		halves[reqID][eventType]++
+
+		if model, _ := ev["model"].(string); model == "" {
+			t.Error("no model on the turn; it is core's aggregation key")
+		}
+		span, _ := ev["span"].(map[string]any)
+		if span == nil {
+			t.Error("no span on the normalized event; the http_* keys travel on it")
+			continue
+		}
+		if got := span["semantic_type"]; got != "llm_completion" {
+			t.Errorf("span.semantic_type = %v, want llm_completion", got)
+		}
+		// The usage is known only at the close, and zero-filling the opening half
+		// would claim a turn that spent nothing.
+		tokens, _ := ev["tokens"].(map[string]any)
+		switch eventType {
+		case "TurnCompleted":
+			if tokens == nil {
+				t.Errorf("no tokens on the completed turn, which is this lane's whole payload: %v", ev)
+			}
+		case "TurnStarted":
+			if tokens != nil {
+				t.Errorf("the opening half carries tokens, claiming a spend before the turn ran: %v", tokens)
+			}
+		}
+	}
+
+	if len(halves) != recorded {
+		t.Errorf("%d distinct request id(s) from %d recorded api_request(s)", len(halves), recorded)
+	}
+	for reqID, got := range halves {
+		if got["TurnStarted"] != 1 || got["TurnCompleted"] != 1 {
+			t.Errorf("request %s produced %d Started and %d Completed, want exactly one of each",
+				reqID, got["TurnStarted"], got["TurnCompleted"])
+		}
+	}
+}
+
+// TestTelemetryReplayCarriesNoRecordedContent is the privacy half, asserted on
+// what actually reached the spool rather than on what the mapper intended.
+func TestTelemetryReplayCarriesNoRecordedContent(t *testing.T) {
+	events, _, _ := replayThroughChain(t, true)
+	if len(events) == 0 {
+		t.Fatal("no events; the absence below would be vacuous")
+	}
+	raw, err := json.Marshal(events)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	body := string(raw)
+
+	for _, key := range []string{
+		"api_request_body", "api_response_body", "assistant_response",
+		"user_prompt", "tool_result",
+	} {
+		if strings.Contains(body, key) {
+			t.Errorf("recorded content marker %q reached the spool", key)
+		}
+	}
+}
+
+// TestTelemetryReplayIsSilentWhenNotElected is the negative half, and it is
+// presence-anchored on purpose. So this asserts silence against the same
+// fixture that the positive test above proves yields five turns; the only
+// difference between the two runs is the election.
+func TestTelemetryReplayIsSilentWhenNotElected(t *testing.T) {
+	elected, _, _ := replayThroughChain(t, true)
+	if len(elected) == 0 {
+		t.Fatal("the elected run produced nothing, so the un-elected run's silence proves nothing")
+	}
+
+	events, emitted, drops := replayThroughChain(t, false)
+	if len(events) != 0 {
+		t.Errorf("an un-elected lane spooled %d event(s); two lanes emitting one turn doubles every token count downstream with no id collision and no error", len(events))
+	}
+	if emitted != 0 {
+		t.Errorf("an un-elected lane counted %d emission(s)", emitted)
+	}
+	if drops["not-elected"] == 0 {
+		t.Errorf("the un-elected run counted no not_elected drops, so its silence is indistinguishable from a chain that never ran. counters: %v", drops)
+	}
+}

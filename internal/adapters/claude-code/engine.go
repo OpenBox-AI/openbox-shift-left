@@ -1,0 +1,30 @@
+package claudecode
+
+import (
+	"io"
+	"log"
+
+	providerspi "github.com/openbox-ai/openbox-shift-left/internal/provider"
+)
+
+// Engine is this adapter's runtime half of the provider SPI.
+type Engine struct{}
+
+// RunHook handles one native hook event. It never fails a tool call (INV-3):
+// faults are recovered and logged, and the caller always exits 0.
+func (Engine) RunHook(event string, stdin io.Reader, stdout io.Writer, logger *log.Logger) {
+	RunHook(event, stdin, stdout, logger)
+}
+
+// Capabilities declares what this adapter supports.
+func (Engine) Capabilities() []providerspi.Capability { return Capabilities() }
+
+// RunRewake is the optional background approval watcher.
+func (Engine) RunRewake(stdin io.Reader, wake io.Writer, logger *log.Logger) int {
+	return RunRewake(stdin, wake, logger)
+}
+
+var (
+	_ providerspi.HookEngine = Engine{}
+	_ providerspi.Rewaker    = Engine{}
+)

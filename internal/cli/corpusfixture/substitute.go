@@ -1,0 +1,190 @@
+package corpusfixture
+
+import (
+	"encoding/json"
+	"sort"
+	"strings"
+	"unicode/utf8"
+)
+
+// SubstitutePromptText replaces every recorded free-text leaf in a model-call
+// request body with filler of the same rune length, and returns any other
+// document unchanged. The only reliable control is to never write recorded
+// prose to disk.
+func SubstitutePromptText(body string) string {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &top); err != nil {
+		return body
+	}
+	if _, ok := top["messages"]; !ok {
+		return body
+	}
+	return spliceValues(body, promptTargets)
+}
+
+// SubstituteSSEDeltas does the same for a recorded event-stream response,
+// where the model's reply arrives as deltas that the request-body rule never
+// sees.
+func SubstituteSSEDeltas(stream string) string {
+	var out strings.Builder
+	out.Grow(len(stream))
+	for i, line := range strings.Split(stream, "\n") {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		const prefix = "data: "
+		if !strings.HasPrefix(line, prefix) {
+			out.WriteString(line)
+			continue
+		}
+		out.WriteString(prefix)
+		out.WriteString(spliceValues(line[len(prefix):], deltaTargets))
+	}
+	return out.String()
+}
+
+// promptTargets the path is the sequence of object keys walked to reach the
+// value; array indices do not appear, because none of these rules depends on
+// position.
+func promptTargets(path []string) bool {
+	if len(path) == 0 {
+		return false
+	}
+	switch path[0] {
+	case "messages":
+		return inMessage(path[1:])
+	case "system":
+		return len(path) == 1 || (len(path) == 2 && path[1] == "text")
+	case "tools":
+		return path[len(path)-1] == "description"
+	}
+	return false
+}
+
+func inMessage(rest []string) bool {
+	if len(rest) == 0 {
+		return false
+	}
+	if rest[0] != "content" {
+		return false
+	}
+	tail := rest[1:]
+	if len(tail) == 0 {
+		return true // a plain string on a user or system line
+	}
+	switch tail[0] {
+	case "text", "thinking":
+		return len(tail) == 1
+	case "input", "content":
+		return true
+	}
+	return false
+}
+
+func deltaTargets(path []string) bool {
+	if len(path) != 2 {
+		return false
+	}
+	if path[0] != "delta" && path[0] != "content_block" {
+		return false
+	}
+	switch path[1] {
+	case "text", "thinking", "partial_json":
+		return true
+	}
+	return false
+}
+
+type span struct{ start, end int }
+
+func spliceValues(doc string, want func([]string) bool) string {
+	spans := collectSpans(doc, want)
+	if len(spans) == 0 {
+		return doc
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start > spans[j].start })
+	out := doc
+	for _, s := range spans {
+		tok := out[s.start:s.end]
+		filler := fillerToken(tok)
+		if filler == tok {
+			continue
+		}
+		out = out[:s.start] + filler + out[s.end:]
+	}
+	return out
+}
+
+func fillerToken(tok string) string {
+	return `"` + SyntheticProse(utf8.RuneCountInString(tok)-2) + `"`
+}
+
+func collectSpans(doc string, want func([]string) bool) []span {
+	dec := json.NewDecoder(strings.NewReader(doc))
+	dec.UseNumber()
+
+	var (
+		spans []span
+		path  []string
+		stack []frame
+	)
+	top := func() *frame {
+		if len(stack) == 0 {
+			return nil
+		}
+		return &stack[len(stack)-1]
+	}
+	for {
+		start := dec.InputOffset()
+		tok, err := dec.Token()
+		if err != nil {
+			return spans
+		}
+		end := dec.InputOffset()
+
+		if d, ok := tok.(json.Delim); ok {
+			switch d {
+			case '{':
+				stack = append(stack, frame{object: true, expectKey: true})
+			case '[':
+				stack = append(stack, frame{})
+			case '}', ']':
+				f := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				if f.pushed {
+					path = path[:len(path)-1]
+				}
+				if p := top(); p != nil && p.object {
+					p.expectKey = true
+				}
+			}
+			continue
+		}
+
+		f := top()
+		if f != nil && f.object && f.expectKey {
+			key, _ := tok.(string)
+			if f.pushed {
+				path = path[:len(path)-1]
+			}
+			path = append(path, key)
+			f.pushed = true
+			f.expectKey = false
+			continue
+		}
+		if _, ok := tok.(string); ok && want(path) {
+			if q := strings.IndexByte(doc[start:end], '"'); q >= 0 {
+				spans = append(spans, span{int(start) + q, int(end)})
+			}
+		}
+		if f != nil && f.object {
+			f.expectKey = true
+		}
+	}
+}
+
+type frame struct {
+	object    bool
+	expectKey bool
+	pushed    bool
+}
