@@ -103,7 +103,10 @@ func TestRequestRefusalsAreActionable(t *testing.T) {
 		want   []string
 	}{
 		{"forbidden", 403, `{"statusCode":403,"message":"Forbidden resource"}`, []string{"evaluate:agent_security"}},
-		{"connector required", 422, `{"status":422,"code":"connector_required","message":"no connector"}`, []string{"organization", "model connector"}},
+		{"both models missing", 422, `{"status":422,"code":"connector_required","missing":["decision","llm"]}`, []string{"organization", "decision model", "language model"}},
+		{"only the decision model missing", 422, `{"status":422,"code":"connector_required","missing":["decision"]}`, []string{"decision model"}},
+		{"only the language model missing", 422, `{"status":422,"code":"connector_required","missing":["llm"]}`, []string{"language model"}},
+		{"missing not stated", 422, `{"status":422,"code":"connector_required"}`, []string{"decision model", "language model"}},
 		{"other 422", 422, `{"code":"invalid_run","message":"run id is malformed"}`, []string{"422", "run id is malformed"}},
 		// The backend reports a validation failure as 422 with the reasons in an
 		// `error` array and only a generic title in `message`.
@@ -473,4 +476,24 @@ func decodeInto(text string, target **Report) error {
 	}
 	*target = report
 	return nil
+}
+
+func TestConnectorRequiredNamesOnlyWhatIsMissing(t *testing.T) {
+	for _, test := range []struct {
+		body    string
+		without string
+	}{
+		{`{"code":"connector_required","missing":["decision"]}`, "language model"},
+		{`{"code":"connector_required","missing":["llm"]}`, "decision model"},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(422)
+			fmt.Fprint(w, test.body)
+		}))
+		_, err := testClient(t, server, newFakeClock()).request(context.Background(), testAgent, "ev-abc")
+		server.Close()
+		if err == nil || strings.Contains(err.Error(), test.without) {
+			t.Fatalf("error %v should not mention the %s it already has", err, test.without)
+		}
+	}
 }

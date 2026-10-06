@@ -297,9 +297,10 @@ func (client *evaluationClient) do(ctx context.Context, method, endpoint string,
 // refusal turns a non-2xx answer into the sentence a developer can act on.
 func (client *evaluationClient) refusal(status int, content []byte) error {
 	var body struct {
-		Code    string `json:"code"`
-		Message any    `json:"message"`
-		Error   any    `json:"error"`
+		Code    string   `json:"code"`
+		Message any      `json:"message"`
+		Error   any      `json:"error"`
+		Missing []string `json:"missing"`
 	}
 	_ = json.Unmarshal(content, &body)
 	detail := ""
@@ -326,7 +327,7 @@ func (client *evaluationClient) refusal(status int, content []byte) error {
 	case status == http.StatusUnauthorized:
 		message = "project evaluate: the backend did not accept the control token; check OPENBOX_CONTROL_TOKEN"
 	case status == http.StatusUnprocessableEntity && body.Code == "connector_required":
-		message = "project evaluate: the organization must configure its model connector before a security evaluation can run"
+		message = "project evaluate: the organization must configure " + missingModels(body.Missing) + " before a security evaluation can run"
 	case status == http.StatusNotFound:
 		message = "project evaluate: the backend found no matching agent, session or evaluation (404)"
 	case status == http.StatusConflict:
@@ -450,4 +451,22 @@ func newBackendHTTPClient() *http.Client {
 		// A redirect would carry x-api-key to wherever it points.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+// missingModels names what the organization has not configured. A backend that
+// does not say gets both named, which is never wrong: an evaluation needs both.
+func missingModels(missing []string) string {
+	var names []string
+	for _, kind := range missing {
+		switch kind {
+		case "decision":
+			names = append(names, "its decision model")
+		case "llm":
+			names = append(names, "its language model")
+		}
+	}
+	if len(names) == 0 {
+		return "its decision model and its language model"
+	}
+	return strings.Join(names, " and ")
 }

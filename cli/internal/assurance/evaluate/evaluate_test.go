@@ -492,7 +492,7 @@ func TestRunReportsABackendRefusalWithoutLeakingTheToken(t *testing.T) {
 	fixture := newRunFixture(t, backend, "APP_ENV=security-test\n")
 	_, err := fixture.run()
 	class, message := Describe(err)
-	if err == nil || class != "evaluation_request_failure" || !strings.Contains(message, "model connector") || strings.Contains(message, testToken) {
+	if err == nil || class != "evaluation_request_failure" || !strings.Contains(message, "decision model") || strings.Contains(message, testToken) {
 		t.Fatalf("class=%s message=%s", class, message)
 	}
 	if fixture.stdout.Len() != 0 {
