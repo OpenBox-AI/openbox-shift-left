@@ -10,6 +10,7 @@ package evaluate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -105,6 +106,9 @@ func resolveConnector(input Input) (connector, error) {
 		coreURL:         firstNonEmpty(strings.TrimRight(input.CoreURL, "/"), localCoreURL),
 		backendURL:      firstNonEmpty(strings.TrimRight(input.BackendURL, "/"), localBackendURL),
 		openBoxProvider: firstNonEmpty(input.OpenBoxProvider, DefaultOpenBoxProvider),
+	}
+	if !providerPattern.MatchString(resolved.openBoxProvider) {
+		return connector{}, errors.New("project evaluate: OPENBOX_SANDBOX_PROVIDER may only contain letters, digits and . _ -, and must start with a letter or digit")
 	}
 	for name, value := range map[string]string{"Core": resolved.coreURL, "backend": resolved.backendURL} {
 		if _, err := parseBaseURL(name, value); err != nil {

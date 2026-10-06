@@ -243,7 +243,7 @@ func (client *evaluationClient) wait(ctx context.Context, agentID, evaluationID 
 			if status == "" {
 				status = "unknown"
 			}
-			return nil, fmt.Errorf("project evaluate: security evaluation %s was still %s after %s; check the dashboard", evaluationID, status, waitWindow)
+			return nil, fmt.Errorf("project evaluate: security evaluation %s was still %s after %s; check the dashboard", display(evaluationID), display(status), waitWindow)
 		}
 		if err := client.clock.Sleep(ctx, pollInterval); err != nil {
 			return nil, &classifiedError{class: contextClassification(err), err: errors.New("project evaluate: interrupted while waiting for the security evaluation")}
@@ -305,7 +305,7 @@ func (client *evaluationClient) refusal(status int, content []byte) error {
 	_ = json.Unmarshal(content, &body)
 	detail := ""
 	if text, ok := body.Message.(string); ok {
-		detail = display(text)
+		detail = display(client.scrubText(text))
 	}
 	// A validation failure carries its reasons in `error`, a list, and only a
 	// generic title in `message`; the reasons are what the developer can act on.
@@ -313,7 +313,7 @@ func (client *evaluationClient) refusal(status int, content []byte) error {
 		listed := make([]string, 0, len(reasons))
 		for _, reason := range reasons {
 			if text, ok := reason.(string); ok {
-				listed = append(listed, display(text))
+				listed = append(listed, display(client.scrubText(text)))
 			}
 		}
 		if len(listed) > 0 {
@@ -394,7 +394,7 @@ func withClass(class string, err error) error {
 }
 
 func writeSummary(out io.Writer, evaluation *Evaluation) {
-	fmt.Fprintf(out, "security evaluation %s: %s\n", display(evaluation.ID), evaluation.Status)
+	fmt.Fprintf(out, "security evaluation %s: %s\n", display(evaluation.ID), display(evaluation.Status))
 	report := evaluation.Report
 	if report == nil {
 		fmt.Fprintln(out, "result: unavailable (the backend returned no report)")

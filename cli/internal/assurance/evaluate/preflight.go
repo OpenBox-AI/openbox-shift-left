@@ -188,6 +188,9 @@ func validateImage(image dockerImage) ([]string, string, error) {
 	if !path.IsAbs(argv[0]) || path.Clean(argv[0]) != argv[0] {
 		return nil, "", errors.New("project evaluate: first resolved OCI argv element must be a clean absolute executable")
 	}
+	if !executablePattern.MatchString(argv[0]) {
+		return nil, "", errors.New("project evaluate: the executable path may only contain letters, digits and . _ + @ / -")
+	}
 	applicationRoot := path.Dir(argv[0])
 	for _, argument := range argv[1:] {
 		if looksLikeRelativeApplicationPath(argument) {

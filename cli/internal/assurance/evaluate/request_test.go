@@ -406,6 +406,43 @@ func TestRedirectsAreNotFollowedAndTheKeyGoesNowhereElse(t *testing.T) {
 	}
 }
 
+// The reflected token is cut by the 200-byte display bound; scrubbing has to
+// happen first or a token straddling the cut survives as a prefix.
+func TestTokenStraddlingTheDisplayBoundIsNotLeakedAsAPrefix(t *testing.T) {
+	echo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		padding := strings.Repeat("x", maxDisplayBytes-10)
+		fmt.Fprintf(w, `{"message":"%s %s","error":["%s %s"]}`, padding, r.Header.Get("x-api-key"), padding, r.Header.Get("x-api-key"))
+	}))
+	defer echo.Close()
+	_, err := testClient(t, echo, newFakeClock()).request(context.Background(), testAgent, "ev-abc")
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if prefix := testToken[:6]; strings.Contains(err.Error(), prefix) {
+		t.Fatalf("a prefix of the token survived truncation: %v", err)
+	}
+}
+
+func TestBackendSuppliedStatusCannotCarryTerminalEscapes(t *testing.T) {
+	var out strings.Builder
+	writeSummary(&out, &Evaluation{ID: "se-1", Status: "complete\x1b[2J\x1b]0;pwned\a"})
+	if strings.ContainsAny(out.String(), "\x1b\a") {
+		t.Fatalf("summary carries a terminal escape:\n%q", out.String())
+	}
+
+	// The same field in the poll-timeout message.
+	clock := newFakeClock()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"status":200,"data":{"id":"se-1","status":"analyzing\u001b[31m"}}`)
+	}))
+	defer server.Close()
+	_, err := testClient(t, server, clock).wait(context.Background(), testAgent, "se-1")
+	if err == nil || strings.Contains(err.Error(), "\x1b") {
+		t.Fatalf("timeout message carries a terminal escape: %q", err)
+	}
+}
+
 func TestSummaryCountsIssuesRulesAndRejections(t *testing.T) {
 	var out strings.Builder
 	evaluation := &Evaluation{ID: "se-1", Status: StatusComplete}

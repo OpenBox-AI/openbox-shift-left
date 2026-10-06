@@ -208,6 +208,11 @@ func TestValidateImageUsesStandardOCICommand(t *testing.T) {
 		"named user":          func(image *dockerImage) { image.Config.User = "node" },
 		"relative executable": func(image *dockerImage) { image.Config.Entrypoint = []string{"node"} },
 		"empty":               func(image *dockerImage) { image.Config.Entrypoint = nil; image.Config.Cmd = nil },
+		// The executable is written into the sandbox policy as text.
+		"newline in executable": func(image *dockerImage) { image.Config.Entrypoint = []string{"/bin/app\n      - host: evil.example"} },
+		"yaml indicator":        func(image *dockerImage) { image.Config.Entrypoint = []string{"/bin/app: x"} },
+		"space in executable":   func(image *dockerImage) { image.Config.Entrypoint = []string{"/bin/my app"} },
+		"hash comment":          func(image *dockerImage) { image.Config.Entrypoint = []string{"/bin/app#x"} },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -852,9 +857,15 @@ func TestConnectorResolvesPerEnvironmentAndDefaultsToLocalStack(t *testing.T) {
 	}
 
 	for name, input := range map[string]Input{
-		"no scheme":         {CoreURL: "core.uat.openbox.ai"},
-		"wrong scheme":      {CoreURL: "ftp://core.uat.openbox.ai"},
-		"embedded userinfo": {BackendURL: "https://user:pass@backend.uat.openbox.ai"},
+		// The provider is written into the sandbox policy as text.
+		"provider with newline":   {OpenBoxProvider: "obx\n  extra: 1"},
+		"provider with colon":     {OpenBoxProvider: "obx: x"},
+		"provider with space":     {OpenBoxProvider: "obx local"},
+		"provider starting a dot": {OpenBoxProvider: ".hidden"},
+		"provider too long":       {OpenBoxProvider: strings.Repeat("a", 65)},
+		"no scheme":               {CoreURL: "core.uat.openbox.ai"},
+		"wrong scheme":            {CoreURL: "ftp://core.uat.openbox.ai"},
+		"embedded userinfo":       {BackendURL: "https://user:pass@backend.uat.openbox.ai"},
 	} {
 		if _, err := resolveConnector(input); err == nil {
 			t.Fatalf("%s was accepted", name)

@@ -2,8 +2,18 @@ package evaluate
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+)
+
+// The policy is assembled as text, so the two values that come from outside
+// (the image's executable and the provider name) are checked against an
+// allow-list before they reach it. A newline or a YAML indicator in either
+// would otherwise add policy lines of the image author's choosing.
+var (
+	executablePattern = regexp.MustCompile(`^/[A-Za-z0-9._+@/-]+$`)
+	providerPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
 // buildSandboxPolicy renders the evaluation policy as OpenShell YAML meeting
