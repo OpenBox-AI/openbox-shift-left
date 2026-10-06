@@ -37,6 +37,10 @@ func TestDoctorSaysNothingAboutCodexOnAMachineThatNeverConfiguredIt(t *testing.T
 func TestDoctorReportsAnElectedCodexLaneWithNothingListening(t *testing.T) {
 	isolateHome(t)
 	nothingIsListening(t)
+	// The "no system PAC is activated" sentence is the PAC-capable OS's arm.
+	prevPAC := systemPACSupportedFn
+	t.Cleanup(func() { systemPACSupportedFn = prevPAC })
+	systemPACSupportedFn = func() bool { return true }
 	configPath := providers.CodexConfigTOMLPath()
 	if err := providers.WriteCodexOtel(configPath, "http://127.0.0.1:4318/v1/logs"); err != nil {
 		t.Fatalf("seed WriteCodexOtel: %v", err)

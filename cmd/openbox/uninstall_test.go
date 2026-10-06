@@ -160,6 +160,7 @@ func TestUninstallOnACleanMachineIsSuccess(t *testing.T) {
 	h := newLaneHarness(t)
 	nothingIsListening(t)
 	t.Setenv("HOME", h.home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(h.home, ".config"))
 	t.Setenv("CODEX_HOME", filepath.Join(h.home, ".codex"))
 	t.Setenv(devconfig.EnvSpoolDir, filepath.Join(h.home, "spool"))
 

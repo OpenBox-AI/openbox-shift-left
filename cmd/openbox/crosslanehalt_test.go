@@ -38,9 +38,17 @@ import (
 func serveOneCall(t *testing.T, p *transport.Proxy, ca *transport.CA, sessionID string) (status int, body string) {
 	t.Helper()
 	clientConn, serverConn := net.Pipe()
+	// Deferred first so it runs last: the relay records the call after the
+	// response is written, and returning before it finishes lets that write
+	// race the test's TempDir cleanup.
+	served := make(chan struct{})
+	defer func() { <-served }()
 	defer clientConn.Close()
 	defer serverConn.Close()
-	go p.ServeIntercepted(serverConn, "api.anthropic.com:443")
+	go func() {
+		defer close(served)
+		p.ServeIntercepted(serverConn, "api.anthropic.com:443")
+	}()
 
 	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatalf("SetDeadline: %v", err)

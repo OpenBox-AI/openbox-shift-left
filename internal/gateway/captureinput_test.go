@@ -37,7 +37,13 @@ func TestCaptureBodyBoundsRedactorInput(t *testing.T) {
 	got := captureBody(body)
 	elapsed := time.Since(start)
 
-	const budget = 2 * time.Second
+	// The defect cost ~11.4s uninstrumented; bounded, the scan is ~60ms. -race
+	// multiplies that by ~17x, which a 2s budget on a shared CI runner cannot
+	// absorb, so the budget scales with it and still sits far below the defect.
+	budget := 2 * time.Second
+	if raceEnabled {
+		budget = 20 * time.Second
+	}
 	if elapsed > budget {
 		t.Errorf("captureBody over a %d-byte body took %s, over the %s budget; "+
 			"the redactor input bound is not being applied",

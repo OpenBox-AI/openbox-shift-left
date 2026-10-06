@@ -216,7 +216,6 @@ func TestLaneQueueCloseAbandonsPastItsOwnDeadline(t *testing.T) {
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	defer close(release) // let the goroutine exit after the test, not leak it
 	var startedOnce sync.Once
 	em := blockingEmitterFunc(func(ctx context.Context, ev client.DevEvent) (client.Evaluation, error) {
 		startedOnce.Do(func() { close(started) })
@@ -224,6 +223,12 @@ func TestLaneQueueCloseAbandonsPastItsOwnDeadline(t *testing.T) {
 		return client.Evaluation{}, nil
 	})
 	q := NewLaneQueue(laneEngine(t), em, t.Logf)
+	// Release the drain and wait for it before laneEngine's TempDir is removed:
+	// it still writes there on its way out.
+	t.Cleanup(func() {
+		close(release)
+		q.wg.Wait()
+	})
 
 	if !q.Deliver(context.Background(), sessEv("sess-close-abandon", "e1")) {
 		t.Fatal("Deliver must accept")

@@ -120,6 +120,9 @@ func isolateHomeUnbound(t *testing.T) string {
 	t.Setenv(devconfig.EnvHome, dir)
 	t.Setenv(devconfig.EnvConfigPath, "")
 	t.Setenv("HOME", t.TempDir())
+	// os.UserConfigDir reads XDG_CONFIG_HOME on Linux, not HOME, so without
+	// this every test there shares TestMain's sentinel config dir.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 
 	sinks := t.TempDir()
 	for env, path := range map[string]string{
@@ -922,7 +925,10 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitEnv := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+dir)
+	// The commit below fires the real hook, which resolves its trace directory
+	// from XDG_CONFIG_HOME on Linux, so that is pinned along with HOME.
+	gitEnv := append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+dir,
+		"XDG_CONFIG_HOME="+filepath.Join(dir, ".config"), "OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"))
 	git := func(env []string, args ...string) string {
 		t.Helper()
 		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
@@ -944,7 +950,7 @@ func TestUnifiedBinaryGitHookStampsCommit(t *testing.T) {
 	// binary it runs resolves its trace directory from it (main.go's
 	// resolveTraceDir), leaking a file outside every test's own temp dir and
 	// tripping TestMain's hermeticity guard.
-	ic.Env = append(os.Environ(), "HOME="+dir, "OPENBOX_TRACE_DIR="+filepath.Join(dir, "trace"))
+	ic.Env = gitEnv
 	if out, err := ic.CombinedOutput(); err != nil {
 		t.Fatalf("openbox hook git install: %v\n%s", err, out)
 	}

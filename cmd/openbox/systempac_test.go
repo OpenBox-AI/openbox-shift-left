@@ -231,6 +231,12 @@ func contains(list []string, want string) bool {
 // keychain, needs no privileged call at all.
 func TestSystemPACAlreadyActiveSkipsThePrivilegedStep(t *testing.T) {
 	skipUnlessSupervised(t)
+	// The keychain-presence check is activation.CATrustPresent, which answers
+	// false off macOS by design; its parsing is covered on every OS by
+	// internal/cli/activation's own tests.
+	if runtime.GOOS != "darwin" {
+		t.Skipf("the System keychain trust check exists only on darwin, not %s", runtime.GOOS)
+	}
 	h := newLaneHarness(t)
 	caPath := h.seedCA(t)
 	pacURL := systemPACURL(transport.DefaultAddr)
